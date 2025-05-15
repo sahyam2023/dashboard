@@ -1,73 +1,104 @@
-//src/components/Sidebar.tsx
+// src/components/Sidebar.tsx
 import React from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
-import { 
-  FileText, 
-  Package, 
-  Link as LinkIcon, 
-  MoreHorizontal 
+import { NavLink } from 'react-router-dom'; // useLocation is not strictly needed here anymore unless for other logic
+import {
+  FileText,
+  Package,
+  Link as LinkIcon,
+  MoreHorizontal,
+  UploadCloud as UploadIcon, // <-- Import an icon for Upload
+  // LogIn as LogInIcon, // Keep if you want login/register here, but usually in Header
+  // UserPlus as RegisterIcon // Keep if you want login/register here
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext'; // <-- Import useAuth hook
 
 interface SidebarProps {
   collapsed: boolean;
 }
 
-interface NavItem {
+interface NavItemConfig {
   path: string;
   label: string;
-  icon: React.ReactNode;
+  icon: (isCollapsed: boolean) => React.ReactNode; // Icon can now depend on collapsed state
+  requiresAuth?: boolean; // New property to indicate if auth is needed
+  publicOnly?: boolean; // New property to show only when not authenticated
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
-  const location = useLocation();
-  
-  const navItems: NavItem[] = [
-    { 
-      path: '/documents', 
-      label: 'Documents', 
-      icon: <FileText size={collapsed ? 24 : 20} /> 
+  const { isAuthenticated } = useAuth(); // <-- Get authentication status
+
+  const navItems: NavItemConfig[] = [
+    {
+      path: '/documents',
+      label: 'Documents',
+      icon: (isCollapsed) => <FileText size={isCollapsed ? 24 : 20} />,
     },
-    { 
-      path: '/patches', 
-      label: 'Patches', 
-      icon: <Package size={collapsed ? 24 : 20} /> 
+    {
+      path: '/patches',
+      label: 'Patches',
+      icon: (isCollapsed) => <Package size={isCollapsed ? 24 : 20} />,
     },
-    { 
-      path: '/links', 
-      label: 'Links', 
-      icon: <LinkIcon size={collapsed ? 24 : 20} /> 
+    {
+      path: '/links',
+      label: 'Links',
+      icon: (isCollapsed) => <LinkIcon size={isCollapsed ? 24 : 20} />,
     },
-    { 
-      path: '/misc', 
-      label: 'Misc', 
-      icon: <MoreHorizontal size={collapsed ? 24 : 20} /> 
-    }
+    // { // NEW UPLOAD LINK CONFIG
+    //   path: '/upload',
+    //   label: 'Upload Files',
+    //   icon: (isCollapsed) => <UploadIcon size={isCollapsed ? 24 : 20} />,
+    //   requiresAuth: true, // Only show if authenticated
+    // },
+    {
+      path: '/misc',
+      label: 'Misc',
+      icon: (isCollapsed) => <MoreHorizontal size={isCollapsed ? 24 : 20} />,
+    },
+    // Example: Login/Register links in sidebar (though typically in header)
+    // {
+    //   path: '/login',
+    //   label: 'Login',
+    //   icon: (isCollapsed) => <LogInIcon size={isCollapsed ? 24 : 20} />,
+    //   publicOnly: true, // Only show if NOT authenticated
+    // },
   ];
+
+  // Filter items based on authentication status
+  const visibleNavItems = navItems.filter(item => {
+    if (item.requiresAuth && !isAuthenticated) {
+      return false; // Hide if requires auth and user is not authenticated
+    }
+    if (item.publicOnly && isAuthenticated) {
+      return false; // Hide if public only and user is authenticated
+    }
+    return true; // Otherwise, show the item
+  });
 
   return (
     <aside
       className={`fixed left-0 top-16 h-[calc(100vh-4rem)] bg-white border-r border-gray-200 transition-all duration-300 ease-in-out ${
         collapsed ? 'w-20' : 'w-64'
-      } overflow-hidden`}
+      } overflow-y-auto z-20`} // Added overflow-y-auto and z-index
     >
       <nav className="h-full flex flex-col py-4">
         <div className="space-y-1 px-3">
-          {navItems.map((item) => (
+          {visibleNavItems.map((item) => (
             <NavLink
               key={item.path}
               to={item.path}
-              className={({ isActive }) => 
-                `flex items-center px-3 py-3 text-base rounded-md transition-colors ${
-                  isActive 
-                    ? 'bg-blue-50 text-blue-700' 
-                    : 'text-gray-700 hover:bg-gray-100'
+              className={({ isActive }) =>
+                `flex items-center px-3 py-3 text-sm sm:text-base rounded-md transition-colors group ${ // Added group for potential icon hover effects
+                  isActive
+                    ? 'bg-blue-50 text-blue-700 font-medium' // Active state styling
+                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900' // Default and hover
                 }`
               }
+              title={collapsed ? item.label : undefined} // Show tooltip when collapsed
             >
-              <span className={`${collapsed ? 'mx-auto' : 'mr-3'}`}>
-                {item.icon}
+              <span className={`${collapsed ? 'mx-auto' : 'mr-3'} text-gray-500 group-hover:text-gray-700 ${ ({isActive}: {isActive:boolean}) => isActive && 'text-blue-600'}`}> {/* Icon styling */}
+                {item.icon(collapsed)}
               </span>
-              {!collapsed && <span>{item.label}</span>}
+              {!collapsed && <span className="truncate">{item.label}</span>}
             </NavLink>
           ))}
         </div>

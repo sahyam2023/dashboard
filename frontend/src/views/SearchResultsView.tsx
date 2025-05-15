@@ -1,6 +1,5 @@
-//src/views/SearchResultsView.tsx
 import React, { useState, useEffect } from 'react';
-import { useOutletContext, useSearchParams } from 'react-router-dom';
+import { useOutletContext, useSearchParams, useNavigate } from 'react-router-dom';
 import { searchData } from '../services/api';
 import LoadingState from '../components/LoadingState';
 import ErrorState from '../components/ErrorState';
@@ -12,11 +11,20 @@ interface OutletContextType {
 const SearchResultsView: React.FC = () => {
   const { searchTerm } = useOutletContext<OutletContextType>();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const query = searchParams.get('q') || searchTerm;
   
   const [results, setResults] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Sync URL with searchTerm when coming from layout search
+  useEffect(() => {
+    // Only update URL if searchTerm exists and is different from current URL param
+    if (searchTerm && searchTerm !== searchParams.get('q')) {
+      navigate(`/search?q=${encodeURIComponent(searchTerm)}`, { replace: true });
+    }
+  }, [searchTerm, searchParams, navigate]);
 
   useEffect(() => {
     if (!query) {

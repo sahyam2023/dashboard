@@ -1,13 +1,36 @@
--- schema.sql (Ensure this is up-to-date)
+-- schema.sql
 
--- Software Table
+-- Drop tables in reverse order of dependency for clean re-initialization
+DROP TABLE IF EXISTS misc_files;
+DROP TABLE IF EXISTS misc_categories;
+DROP TABLE IF EXISTS links;
+DROP TABLE IF EXISTS patches;
+DROP TABLE IF EXISTS documents;
+DROP TABLE IF EXISTS versions;
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS software;
+
+-- Table for Users
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    email TEXT UNIQUE,
+    role TEXT DEFAULT 'user' NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_users_username ON users (username);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users (role);
+
+-- Table for Software Products
 CREATE TABLE IF NOT EXISTS software (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
     description TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_software_name ON software (name);
 
--- Versions Table (Links to Software)
+-- Table for Software Versions
 CREATE TABLE IF NOT EXISTS versions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     software_id INTEGER NOT NULL,
@@ -16,45 +39,151 @@ CREATE TABLE IF NOT EXISTS versions (
     main_download_link TEXT,
     changelog TEXT,
     known_bugs TEXT,
-    FOREIGN KEY (software_id) REFERENCES software (id)
+    created_by_user_id INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_by_user_id INTEGER,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (software_id) REFERENCES software (id),
+    FOREIGN KEY (created_by_user_id) REFERENCES users (id),
+    FOREIGN KEY (updated_by_user_id) REFERENCES users (id)
 );
+CREATE INDEX IF NOT EXISTS idx_versions_software_id ON versions (software_id);
+CREATE TRIGGER IF NOT EXISTS update_versions_updated_at
+AFTER UPDATE ON versions FOR EACH ROW BEGIN
+    UPDATE versions SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+END;
 
--- Patches Table (Links to Versions)
-CREATE TABLE IF NOT EXISTS patches (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    version_id INTEGER NOT NULL,
-    patch_name TEXT NOT NULL,
-    description TEXT,
-    download_link TEXT NOT NULL,
-    release_date DATE,
-    FOREIGN KEY (version_id) REFERENCES versions (id)
-);
-
--- Documents Table (Links to Software)
+-- Table for Official Documents
 CREATE TABLE IF NOT EXISTS documents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     software_id INTEGER NOT NULL,
     doc_name TEXT NOT NULL,
     description TEXT,
-    download_link TEXT NOT NULL,
     doc_type TEXT,
-    FOREIGN KEY (software_id) REFERENCES software (id)
+    is_external_link BOOLEAN DEFAULT FALSE NOT NULL,
+    download_link TEXT NOT NULL,
+    stored_filename TEXT UNIQUE,
+    original_filename_ref TEXT,
+    file_size INTEGER,
+    file_type TEXT,
+    created_by_user_id INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_by_user_id INTEGER,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (software_id) REFERENCES software (id),
+    FOREIGN KEY (created_by_user_id) REFERENCES users (id),
+    FOREIGN KEY (updated_by_user_id) REFERENCES users (id),
+    UNIQUE (software_id, doc_name)
 );
+CREATE INDEX IF NOT EXISTS idx_documents_software_id ON documents (software_id);
+CREATE INDEX IF NOT EXISTS idx_documents_stored_filename ON documents (stored_filename);
+CREATE TRIGGER IF NOT EXISTS update_documents_updated_at
+AFTER UPDATE ON documents FOR EACH ROW BEGIN
+    UPDATE documents SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+END;
 
--- Links Table (Optionally links to Software)
+-- Table for Official Patches
+CREATE TABLE IF NOT EXISTS patches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    version_id INTEGER NOT NULL,
+    patch_name TEXT NOT NULL,
+    description TEXT,
+    release_date DATE,
+    is_external_link BOOLEAN DEFAULT FALSE NOT NULL,
+    download_link TEXT NOT NULL,
+    stored_filename TEXT UNIQUE,
+    original_filename_ref TEXT,
+    file_size INTEGER,
+    file_type TEXT,
+    created_by_user_id INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_by_user_id INTEGER,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (version_id) REFERENCES versions (id),
+    FOREIGN KEY (created_by_user_id) REFERENCES users (id),
+    FOREIGN KEY (updated_by_user_id) REFERENCES users (id),
+    UNIQUE (version_id, patch_name)
+);
+CREATE INDEX IF NOT EXISTS idx_patches_version_id ON patches (version_id);
+CREATE INDEX IF NOT EXISTS idx_patches_stored_filename ON patches (stored_filename);
+CREATE TRIGGER IF NOT EXISTS update_patches_updated_at
+AFTER UPDATE ON patches FOR EACH ROW BEGIN
+    UPDATE patches SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+END;
+
+-- Table for Links
 CREATE TABLE IF NOT EXISTS links (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    software_id INTEGER, -- Can be NULL for general links
     title TEXT NOT NULL,
     description TEXT,
-    url TEXT NOT NULL UNIQUE,
-    category TEXT,
-    FOREIGN KEY (software_id) REFERENCES software (id)
+    software_id INTEGER NOT NULL,
+    version_id INTEGER,
+    is_external_link BOOLEAN DEFAULT FALSE NOT NULL,
+    url TEXT NOT NULL,
+    stored_filename TEXT UNIQUE,
+    original_filename_ref TEXT,
+    file_size INTEGER,
+    file_type TEXT,
+    created_by_user_id INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_by_user_id INTEGER,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (software_id) REFERENCES software (id),
+    FOREIGN KEY (version_id) REFERENCES versions (id),
+    FOREIGN KEY (created_by_user_id) REFERENCES users (id),
+    FOREIGN KEY (updated_by_user_id) REFERENCES users (id)
 );
-
--- Indexing
-CREATE INDEX IF NOT EXISTS idx_versions_software_id ON versions (software_id);
-CREATE INDEX IF NOT EXISTS idx_patches_version_id ON patches (version_id);
-CREATE INDEX IF NOT EXISTS idx_documents_software_id ON documents (software_id);
 CREATE INDEX IF NOT EXISTS idx_links_software_id ON links (software_id);
-CREATE INDEX IF NOT EXISTS idx_links_category ON links (category);
+CREATE INDEX IF NOT EXISTS idx_links_version_id ON links (version_id);
+CREATE INDEX IF NOT EXISTS idx_links_stored_filename ON links (stored_filename);
+CREATE TRIGGER IF NOT EXISTS update_links_updated_at
+AFTER UPDATE ON links FOR EACH ROW BEGIN
+    UPDATE links SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+END;
+
+-- Table for Misc Categories
+CREATE TABLE IF NOT EXISTS misc_categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    created_by_user_id INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_by_user_id INTEGER,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by_user_id) REFERENCES users (id),
+    FOREIGN KEY (updated_by_user_id) REFERENCES users (id)
+);
+CREATE TRIGGER IF NOT EXISTS update_misc_categories_updated_at
+AFTER UPDATE ON misc_categories FOR EACH ROW BEGIN
+    UPDATE misc_categories SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+END;
+
+-- Table for Misc Files
+CREATE TABLE IF NOT EXISTS misc_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    misc_category_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    user_provided_title TEXT,
+    user_provided_description TEXT,
+    original_filename TEXT NOT NULL,
+    stored_filename TEXT NOT NULL UNIQUE,
+    file_path TEXT NOT NULL,
+    file_type TEXT,
+    file_size INTEGER,
+    created_by_user_id INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_by_user_id INTEGER,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (misc_category_id) REFERENCES misc_categories (id),
+    FOREIGN KEY (user_id) REFERENCES users (id),
+    FOREIGN KEY (created_by_user_id) REFERENCES users (id),
+    FOREIGN KEY (updated_by_user_id) REFERENCES users (id),
+    UNIQUE (misc_category_id, user_provided_title),
+    UNIQUE (misc_category_id, original_filename)
+);
+CREATE INDEX IF NOT EXISTS idx_misc_files_category_id ON misc_files (misc_category_id);
+CREATE INDEX IF NOT EXISTS idx_misc_files_user_id ON misc_files (user_id);
+CREATE TRIGGER IF NOT EXISTS update_misc_files_updated_at
+AFTER UPDATE ON misc_files FOR EACH ROW BEGIN
+    UPDATE misc_files SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+END;

@@ -1,11 +1,15 @@
 // src/services/api.ts
 import {
-  Document as DocumentType, // Aliased Document to avoid conflict
+  Document as DocumentType,
   Link, Patch, Software,
   AuthRequest, AuthResponse, RegisterRequest, RegisterResponse,
-  AddDocumentPayload, AddPatchPayload, AddLinkPayload,
-  MiscCategory, AddCategoryPayload, MiscFile
-} from '../types'; // Ensure path is correct
+  AddDocumentPayload, // Stays as is for documents
+  // NEW Payloads for Patches and Links with typed version string
+  AddPatchPayloadWithVersionString, EditPatchPayload,
+  AddLinkPayloadWithVersionString, EditLinkPayload,
+  MiscCategory, AddCategoryPayload, MiscFile,
+  EditCategoryPayload // Added these from my previous snippet for completeness
+} from '../types';
 
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
@@ -225,24 +229,30 @@ export async function uploadAdminDocumentFile(formData: FormData): Promise<Docum
 
 // --- Admin Patch Functions ---
 
-export async function addAdminPatchWithUrl(payload: AddPatchPayload): Promise<Patch> {
+export async function addAdminPatchWithUrl(payload: AddPatchPayloadWithVersionString): Promise<Patch> {
   try {
+    // The backend route /api/admin/patches/add_with_url now expects
+    // software_id and typed_version_string in the payload.
+    // is_external_link is true by definition of this endpoint.
+    const backendPayload = { ...payload, is_external_link: true };
     const response = await fetch(`${API_BASE_URL}/api/admin/patches/add_with_url`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify({...payload, is_external_link: true }), // Ensure flag is set
+      body: JSON.stringify(backendPayload),
     });
     return handleApiError(response, 'Failed to add patch with URL');
   } catch (error) { console.error('Error adding admin patch with URL:', error); throw error; }
 }
 
 export async function uploadAdminPatchFile(formData: FormData): Promise<Patch> {
-  // FormData should contain 'file' and metadata fields:
-  // 'version_id', 'patch_name', 'description', 'release_date'
+  // FormData should contain:
+  // 'file', 'software_id', 'typed_version_string', 'patch_name',
+  // 'description' (optional), 'release_date' (optional)
+  // The backend /api/admin/patches/upload_file now expects these form fields.
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/patches/upload_file`, {
       method: 'POST',
-      headers: { ...getAuthHeader() }, // Content-Type handled by browser for FormData
+      headers: { ...getAuthHeader() },
       body: formData,
     });
     return handleApiError(response, 'Failed to upload patch file');
@@ -251,19 +261,20 @@ export async function uploadAdminPatchFile(formData: FormData): Promise<Patch> {
 
 // --- Admin Link Functions ---
 
-export async function addAdminLinkWithUrl(payload: AddLinkPayload): Promise<Link> {
+export async function addAdminLinkWithUrl(payload: AddLinkPayloadWithVersionString): Promise<Link> {
   try {
+    // Backend expects software_id, optional typed_version_string
+    const backendPayload = { ...payload, is_external_link: true };
     const response = await fetch(`${API_BASE_URL}/api/admin/links/add_with_url`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify({...payload, is_external_link: true }),
+      body: JSON.stringify(backendPayload),
     });
     return handleApiError(response, 'Failed to add link with URL');
   } catch (error) { console.error('Error adding admin link with URL:', error); throw error; }
 }
-
 export async function uploadAdminLinkFile(formData: FormData): Promise<Link> {
-  // FormData: 'file', 'software_id', 'version_id' (optional), 'title', 'description'
+  // FormData: 'file', 'software_id', 'typed_version_string' (optional), 'title', 'description' (optional)
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/links/upload_file`, {
       method: 'POST',
@@ -344,11 +355,10 @@ export async function editAdminDocumentWithUrl(documentId: number, payload: Part
 }
 
 export async function editAdminDocumentFile(documentId: number, formData: FormData): Promise<DocumentType> {
-  // formData should contain metadata and optionally a new 'file'
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/documents/${documentId}/edit_file`, {
       method: 'PUT',
-      headers: { ...getAuthHeader() }, // Content-Type set by browser for FormData
+      headers: { ...getAuthHeader() },
       body: formData,
     });
     return handleApiError(response, 'Failed to update document with file');
@@ -361,25 +371,34 @@ export async function deleteAdminDocument(documentId: number): Promise<{ msg: st
       method: 'DELETE',
       headers: { ...getAuthHeader() },
     });
-    return handleApiError(response, 'Failed to delete document'); // handleApiError will parse JSON msg
+    return handleApiError(response, 'Failed to delete document');
   } catch (error) { console.error('Error deleting document:', error); throw error; }
 }
 
 
+
 // --- Admin Patch Edit/Delete Functions ---
 
-export async function editAdminPatchWithUrl(patchId: number, payload: Partial<AddPatchPayload>): Promise<Patch> {
+export async function editAdminPatchWithUrl(patchId: number, payload: EditPatchPayload): Promise<Patch> {
   try {
+    // The backend route /api/admin/patches/<id>/edit_url now expects
+    // an optional software_id and optional typed_version_string in the payload.
+    // is_external_link will be set to true by the backend for this endpoint.
+    const backendPayload = { ...payload, is_external_link: true }; // Ensure this flag if backend relies on it
     const response = await fetch(`${API_BASE_URL}/api/admin/patches/${patchId}/edit_url`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(backendPayload),
     });
     return handleApiError(response, 'Failed to update patch with URL');
   } catch (error) { console.error('Error updating patch with URL:', error); throw error; }
 }
 
 export async function editAdminPatchFile(patchId: number, formData: FormData): Promise<Patch> {
+  // FormData can contain:
+  // 'file' (optional for replacement), 'software_id' (optional), 'typed_version_string' (optional),
+  // 'patch_name' (optional), etc.
+  // The backend /api/admin/patches/<id>/edit_file now expects these.
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/patches/${patchId}/edit_file`, {
       method: 'PUT',
@@ -402,12 +421,13 @@ export async function deleteAdminPatch(patchId: number): Promise<{ msg: string }
 
 // --- Admin Link Edit/Delete Functions ---
 
-export async function editAdminLinkWithUrl(linkId: number, payload: Partial<AddLinkPayload>): Promise<Link> {
+export async function editAdminLinkWithUrl(linkId: number, payload: EditLinkPayload): Promise<Link> {
   try {
+    const backendPayload = { ...payload, is_external_link: true };
     const response = await fetch(`${API_BASE_URL}/api/admin/links/${linkId}/edit_url`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(backendPayload),
     });
     return handleApiError(response, 'Failed to update link with URL');
   } catch (error) { console.error('Error updating link with URL:', error); throw error; }
@@ -437,10 +457,7 @@ export async function deleteAdminLink(linkId: number): Promise<{ msg: string }> 
 // --- Admin Misc Category Edit/Delete Functions ---
 
 // Assuming EditCategoryPayload is similar to AddCategoryPayload or just { name?: string; description?: string }
-export interface EditCategoryPayload {
-  name?: string;
-  description?: string;
-}
+
 export async function editAdminMiscCategory(categoryId: number, payload: EditCategoryPayload): Promise<MiscCategory> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/misc_categories/${categoryId}/edit`, {
@@ -478,7 +495,6 @@ export interface EditMiscFilePayload { // For metadata-only updates via JSON
 
 // For editing misc file (metadata and/or replacing file via FormData)
 export async function editAdminMiscFile(fileId: number, formData: FormData): Promise<MiscFile> {
-  // FormData can contain: 'file' (optional new), 'misc_category_id', 'user_provided_title', 'user_provided_description'
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/misc_files/${fileId}/edit`, {
       method: 'PUT',
@@ -498,4 +514,3 @@ export async function deleteAdminMiscFile(fileId: number): Promise<{ msg: string
     return handleApiError(response, 'Failed to delete misc file');
   } catch (error) { console.error('Error deleting misc file:', error); throw error; }
 }
-

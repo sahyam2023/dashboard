@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+```// filepath: c:\Users\i2v\Documents\GitHub\dashboard\.gitignore
+__pycache__/
+*.pyc
+*.pyo
+*.pyd

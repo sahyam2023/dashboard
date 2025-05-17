@@ -31,8 +31,21 @@ for folder in [DOC_UPLOAD_FOLDER, PATCH_UPLOAD_FOLDER, LINK_UPLOAD_FOLDER, MISC_
     if not os.path.exists(folder):
         os.makedirs(folder, exist_ok=True) # exist_ok=True is helpful
 
-ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'mp4', 'mov', 'zip', 'exe', 'msi', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'}
-
+ALLOWED_EXTENSIONS = {
+    'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 
+    'mp4', 'mov', 'avi', 'wmv', # Video
+    'mp3', 'wav', # Audio
+    'zip', 'rar', '7z', 'tar', 'gz', # Archives
+    'exe', 'msi', 'dmg', # Installers/Executables
+    'dll', # Dynamic Link Libraries
+    'doc', 'docx', 'odt', # Documents
+    'xls', 'xlsx', 'csv', 'ods', # Spreadsheets
+    'ppt', 'pptx', 'odp', # Presentations
+    'iso', # Disc Images
+    'log', 'json', 'xml', 'yaml', 'yml', 'ini', 'cfg', # Config/Data files
+    'py', 'js', 'java', 'c', 'cpp', 'h', 'cs', 'html', 'css', # Code files
+    # Add any other specific extensions you anticipate
+}
 app = Flask(__name__, instance_relative_config=True) # instance_relative_config=True is good practice
 
 # CORS Configuration (Restrict origins in production)
@@ -246,131 +259,155 @@ def _delete_file_if_exists(file_path):
     return False # File didn't exist or path was None
 
 # Helper function for handling file uploads and DB insertion (DRY principle)
+# app.py
+
 def _admin_handle_file_upload_and_db_insert(
     table_name, upload_folder_config_key, server_path_prefix,
     metadata_fields, required_form_fields, sql_insert_query, sql_params_tuple,
-    resolved_fks: dict = None  # Optional dictionary for pre-resolved FKs
+    resolved_fks: dict = None
 ):
     current_user_id = int(get_jwt_identity())
     if resolved_fks is None:
         resolved_fks = {}
 
-    if 'file' not in request.files: 
-        return jsonify(msg="No file part"), 400
-    file = request.files['file']
-    if file.filename == '': 
-        return jsonify(msg="No selected file"), 400
+    if 'file' not in request.files:
+        app.logger.warning(f"_admin_helper: 'file' not in request.files for table {table_name}")
+        return jsonify(msg="No file part in request"), 400
+    
+    uploaded_file_obj = request.files['file']
 
-    # Collect form data
+    if uploaded_file_obj.filename == '':
+        app.logger.warning(f"_admin_helper: No file selected (filename is empty) for table {table_name}")
+        return jsonify(msg="No file selected"), 400
+
     form_data = {}
     for field in metadata_fields:
         form_data[field] = request.form.get(field)
     
-    # Merge resolved foreign keys into form_data
     for fk_name, fk_value in resolved_fks.items():
         form_data[fk_name] = fk_value
 
-    # Validate required fields (which might now include resolved FKs)
     for req_field in required_form_fields:
-        # Special handling for doc_name that can default to filename
-        if req_field == 'doc_name_or_file' and not form_data.get(metadata_fields[1]) and not file.filename:
-            return jsonify(msg=f"Missing required field: {metadata_fields[1]} (or provide a file with a name)"), 400
-        # General check for missing required fields (handles both form fields and resolved FKs)
-        elif req_field not in form_data or form_data.get(req_field) is None or (isinstance(form_data.get(req_field), str) and form_data.get(req_field).strip() == ""):
-            if req_field in resolved_fks:
-                return jsonify(msg=f"Missing required pre-resolved field: {req_field}"), 400
-            else:
-                return jsonify(msg=f"Missing required metadata: {req_field}"), 400
+        if req_field == 'file':
+            if not uploaded_file_obj or not uploaded_file_obj.filename:
+                app.logger.warning(f"_admin_helper: Validation failed for 'file' requirement for table {table_name}.")
+                return jsonify(msg="Missing required file upload"), 400
+        elif req_field not in form_data or form_data.get(req_field) is None or \
+             (isinstance(form_data.get(req_field), str) and str(form_data.get(req_field)).strip() == ""):
+            app.logger.warning(f"_admin_helper: Missing required metadata field '{req_field}' for table {table_name}. Value: {form_data.get(req_field)}")
+            return jsonify(msg=f"Missing required metadata: {req_field}"), 400
 
-    # Convert string IDs to integers if they're from the form (not from resolved_fks)
-    id_fields = ['software_id', 'version_id', 'misc_category_id']
-    for id_field in id_fields:
-        if id_field in form_data and id_field not in resolved_fks and form_data[id_field]:
-            try:
-                form_data[id_field] = int(form_data[id_field])
-            except ValueError:
-                return jsonify(msg=f"Invalid {id_field} format"), 400
-
-    if file and allowed_file(file.filename):
-        original_filename = secure_filename(file.filename if file.filename is not None else "unnamed_file")
+    if uploaded_file_obj and allowed_file(uploaded_file_obj.filename):
+        original_filename = secure_filename(uploaded_file_obj.filename)
         ext = original_filename.rsplit('.', 1)[1].lower() if '.' in original_filename else ''
         stored_filename = f"{uuid.uuid4().hex}{'.' + ext if ext else ''}"
         file_save_path = os.path.join(app.config[upload_folder_config_key], stored_filename)
         download_link_or_path = f"{server_path_prefix}/{stored_filename}"
 
         try:
-            file.save(file_save_path)
+            uploaded_file_obj.save(file_save_path)
             file_size = os.path.getsize(file_save_path)
 
-            # Construct SQL parameters
             final_sql_params = []
-            for param_name in sql_params_tuple:
-                if param_name == 'download_link_or_url': 
-                    final_sql_params.append(download_link_or_path)
-                elif param_name == 'is_external_link': 
-                    final_sql_params.append(False)
-                elif param_name == 'stored_filename': 
-                    final_sql_params.append(stored_filename)
-                elif param_name == 'original_filename_ref': 
+            for param_name_in_tuple in sql_params_tuple:
+                if param_name_in_tuple == 'download_link_or_url': final_sql_params.append(download_link_or_path)
+                elif param_name_in_tuple == 'is_external_link': final_sql_params.append(False)
+                elif param_name_in_tuple == 'stored_filename': final_sql_params.append(stored_filename)
+                elif param_name_in_tuple == 'original_filename_ref' or param_name_in_tuple == 'original_filename': 
                     final_sql_params.append(original_filename)
-                elif param_name == 'file_size': 
-                    final_sql_params.append(file_size)
-                elif param_name == 'file_type': 
-                    final_sql_params.append(file.mimetype)
-                elif param_name == 'created_by_user_id': 
+                elif param_name_in_tuple == 'file_size': final_sql_params.append(file_size)
+                elif param_name_in_tuple == 'file_type': final_sql_params.append(uploaded_file_obj.mimetype)
+                elif param_name_in_tuple == 'created_by_user_id': final_sql_params.append(current_user_id)
+                elif param_name_in_tuple == 'updated_by_user_id': final_sql_params.append(current_user_id)
+                elif param_name_in_tuple == 'user_id' and table_name == 'misc_files': # For misc_files.user_id
                     final_sql_params.append(current_user_id)
-                elif param_name == 'updated_by_user_id': 
-                    final_sql_params.append(current_user_id)
-                elif param_name == 'user_id':  # for misc_files
-                    final_sql_params.append(current_user_id)
-                elif param_name in form_data:  # Handles both form fields and resolved_fks
-                    final_sql_params.append(form_data[param_name])
+                elif param_name_in_tuple in form_data:
+                    final_sql_params.append(form_data[param_name_in_tuple])
                 else:
-                    app.logger.warning(f"Parameter '{param_name}' not found for table '{table_name}'. Appending None.")
+                    app.logger.warning(f"_admin_helper: SQL param '{param_name_in_tuple}' not found in form_data for table '{table_name}'. Appending None.")
                     final_sql_params.append(None)
 
             db = get_db()
             cursor = db.execute(sql_insert_query, tuple(final_sql_params))
             db.commit()
             new_id = cursor.lastrowid
-            
-            # Fetch back the item with appropriate joins based on table_name
+            app.logger.info(f"_admin_helper: Successfully inserted into {table_name}, new ID: {new_id}")
+
+            # --- CORRECTED FETCH-BACK SECTION ---
+            fetch_back_query = ""
             if table_name == 'patches':
-                new_item_cursor = db.execute("""
+                 fetch_back_query = """
                     SELECT p.*, s.name as software_name, v.version_number
                     FROM patches p
                     JOIN versions v ON p.version_id = v.id
                     JOIN software s ON v.software_id = s.id
-                    WHERE p.id = ?""", (new_id,))
+                    WHERE p.id = ?"""
             elif table_name == 'links':
-                new_item_cursor = db.execute("""
+                 fetch_back_query = """
                     SELECT l.*, s.name as software_name, v.version_number as version_name
                     FROM links l
                     JOIN software s ON l.software_id = s.id
                     LEFT JOIN versions v ON l.version_id = v.id
-                    WHERE l.id = ?""", (new_id,))
-            else:  # Default query for other tables
-                new_item_cursor = db.execute(f"SELECT * FROM {table_name} WHERE id = ?", (new_id,))
+                    WHERE l.id = ?"""
+            elif table_name == 'misc_files': # **** THIS WAS MISSING/REPLACED ****
+                 fetch_back_query = """
+                    SELECT mf.*, mc.name as category_name
+                    FROM misc_files mf
+                    JOIN misc_categories mc ON mf.misc_category_id = mc.id
+                    WHERE mf.id = ?"""
+            elif table_name == 'documents': # **** THIS WAS MISSING/REPLACED ****
+                 fetch_back_query = """
+                    SELECT d.*, s.name as software_name
+                    FROM documents d
+                    JOIN software s ON d.software_id = s.id
+                    WHERE d.id = ?"""
+            else:
+                # This default is a fallback, but ideally all tables handled by this helper
+                # should have specific fetch-back queries if they need joins.
+                app.logger.warning(f"_admin_helper: Using default fetch-back query for table {table_name}. No joins performed.")
+                fetch_back_query = f"SELECT * FROM {table_name} WHERE id = ?"
 
-            new_item = dict(new_item_cursor.fetchone()) if new_item_cursor.rowcount > 0 else None
-
-            if new_item:
-                return jsonify(new_item), 201
-            app.logger.error(f"Failed to retrieve newly uploaded item from {table_name}, ID: {new_id}")
-            return jsonify(msg=f"Item uploaded but metadata retrieval failed for {table_name}"), 500
+            app.logger.debug(f"_admin_helper: Attempting to fetch back from {table_name} with ID {new_id} using query: {fetch_back_query}")
+            new_item_cursor = None
+            new_item_row = None
+            try:
+                new_item_cursor = db.execute(fetch_back_query, (new_id,))
+                new_item_row = new_item_cursor.fetchone()
+            except Exception as e_fetch:
+                app.logger.error(f"_admin_helper: EXCEPTION during fetch back for {table_name} ID {new_id}: {e_fetch}")
+                return jsonify(msg=f"Item uploaded but DB error during metadata retrieval for {table_name}: {e_fetch}"), 500
+            
+            if new_item_row:
+                app.logger.info(f"_admin_helper: Successfully fetched back item from {table_name} ID {new_id}.")
+                try:
+                    new_item = dict(new_item_row)
+                    app.logger.debug(f"_admin_helper: Converted fetched row to dict: {new_item}")
+                    return jsonify(new_item), 201
+                except Exception as e_dict:
+                    app.logger.error(f"_admin_helper: EXCEPTION converting sqlite3.Row to dict for {table_name} ID {new_id}: {e_dict}. Row data: {new_item_row}")
+                    return jsonify(msg=f"Item uploaded, metadata fetched but failed to process for {table_name}."), 500
+            else:
+                app.logger.error(f"_admin_helper: Failed to retrieve (fetchone() was None) newly uploaded item from {table_name}, ID: {new_id} after using specific query.")
+                # Try a simpler query without the JOIN for diagnosis
+                simple_check_cursor = db.execute(f"SELECT * FROM {table_name} WHERE id = ?", (new_id,))
+                simple_row = simple_check_cursor.fetchone()
+                if simple_row:
+                    app.logger.warning(f"_admin_helper: Simple fetch for {table_name} ID {new_id} FOUND a row. Problem might be with the JOIN or data for JOIN in the specific fetch-back query. Simple row: {dict(simple_row)}")
+                else:
+                    app.logger.error(f"_admin_helper: Simple fetch for {table_name} ID {new_id} also FAILED to find the row. This is very unexpected after successful insert.")
+                return jsonify(msg=f"Item uploaded but metadata retrieval failed for {table_name}"), 500
 
         except sqlite3.IntegrityError as e:
-            if os.path.exists(file_save_path):
-                os.remove(file_save_path)
+            if os.path.exists(file_save_path): os.remove(file_save_path)
             app.logger.error(f"Admin upload for {table_name} DB IntegrityError: {e}")
             return jsonify(msg=f"Database error: {e}"), 409
         except Exception as e:
-            if os.path.exists(file_save_path):
-                os.remove(file_save_path)
+            if os.path.exists(file_save_path): os.remove(file_save_path)
             app.logger.error(f"Admin upload for {table_name} Exception: {e}")
             return jsonify(msg=f"Server error during file upload: {e}"), 500
-    
-    return jsonify(msg="File type not allowed or invalid file"), 400
+    else: # This else corresponds to "if uploaded_file_obj and allowed_file(...)"
+        app.logger.warning(f"_admin_helper: File type not allowed or file object invalid for {uploaded_file_obj.filename if uploaded_file_obj else 'N/A'} for table {table_name}")
+        return jsonify(msg="File type not allowed or invalid file object."), 400
 
 def get_or_create_version_id(db: sqlite3.Connection, software_id: int, version_string: str, user_id: int) -> int | None:
     """
@@ -557,22 +594,41 @@ def admin_add_patch_with_url():
     if not data:
         return jsonify(msg="Missing JSON data"), 400
 
-    software_id_str = data.get('software_id')
-    typed_version_string = data.get('typed_version_string')
+    software_id_str = data.get('software_id') # Needed if typed_version_string is used
+    provided_version_id_str = data.get('version_id') # From dropdown
+    typed_version_string = data.get('typed_version_string') # From typed input
 
-    if not software_id_str or not typed_version_string:
-        return jsonify(msg="software_id and typed_version_string are required in payload"), 400
-    try:
-        software_id = int(software_id_str)
-    except ValueError:
-        return jsonify(msg="Invalid software_id format"), 400
+    final_version_id = None
 
-    version_id = get_or_create_version_id(db, software_id, typed_version_string, current_user_id)
-    if version_id is None:
-        return jsonify(msg=f"Failed to find or create version '{typed_version_string}' for software ID {software_id}."), 500
+    if provided_version_id_str and provided_version_id_str.strip():
+        try:
+            final_version_id = int(provided_version_id_str)
+            # Optional: Verify this version_id belongs to software_id if software_id is also sent
+            # and is required even when version_id is directly provided.
+            # if software_id_str:
+            #     temp_sw_id = int(software_id_str)
+            #     ver_check = db.execute("SELECT id FROM versions WHERE id = ? AND software_id = ?", (final_version_id, temp_sw_id)).fetchone()
+            #     if not ver_check:
+            #         return jsonify(msg="Provided version_id does not match the provided software_id."), 400
+        except ValueError:
+            return jsonify(msg="Invalid format for provided version_id."), 400
+    elif typed_version_string and typed_version_string.strip():
+        if not software_id_str: # software_id is required to create/find a version by string
+            return jsonify(msg="software_id is required when using typed_version_string."), 400
+        try:
+            software_id = int(software_id_str)
+        except ValueError:
+            return jsonify(msg="Invalid software_id format for typed_version_string."), 400
+        
+        final_version_id = get_or_create_version_id(db, software_id, typed_version_string, current_user_id)
+        if final_version_id is None:
+            return jsonify(msg=f"Failed to find or create version '{typed_version_string}' for software ID {software_id}."), 500
+    else: # Neither version_id nor typed_version_string provided for a patch
+        return jsonify(msg="Either version_id (from selection) or typed_version_string (for new/find) is required for a patch."), 400
 
-    data['version_id'] = version_id
-    data.pop('software_id', None) 
+    # Update data payload for the helper
+    data['version_id'] = final_version_id # This is now the resolved ID
+    data.pop('software_id', None) # Clean up, helper doesn't need these if version_id is set
     data.pop('typed_version_string', None)
 
     return _admin_add_item_with_external_link(
@@ -581,11 +637,10 @@ def admin_add_patch_with_url():
         required_fields=['version_id', 'patch_name', 'download_link'],
         sql_insert_query="""INSERT INTO patches (version_id, patch_name, download_link, description, release_date,
                                              is_external_link, created_by_user_id, updated_by_user_id)
-                              VALUES (?, ?, ?, ?, ?, TRUE, ?, ?)""", # 7 placeholders '?'
-        sql_params_tuple=( # This tuple should now have 7 items to match the 7 '?'
+                              VALUES (?, ?, ?, ?, ?, TRUE, ?, ?)""",
+        sql_params_tuple=(
             'version_id', 'patch_name', 'download_link', 'description', 'release_date',
-            # 'is_external_link', <--- REMOVE THIS from the tuple
-            'created_by_user_id', 'updated_by_user_id'
+            'created_by_user_id', 'updated_by_user_id' # is_external_link removed as it's hardcoded
         )
     )
 @app.route('/api/admin/patches/upload_file', methods=['POST'])
@@ -595,86 +650,48 @@ def admin_upload_patch_file():
     current_user_id = int(get_jwt_identity())
     db = get_db()
 
-    # For FormData, fields are in request.form
     software_id_str = request.form.get('software_id')
+    provided_version_id_str = request.form.get('version_id')
     typed_version_string = request.form.get('typed_version_string')
 
-    if not software_id_str or not typed_version_string:
-        return jsonify(msg="software_id and typed_version_string form fields are required"), 400
-    try:
-        software_id = int(software_id_str)
-    except ValueError:
-        return jsonify(msg="Invalid software_id format"), 400
+    final_version_id = None
 
-    version_id = get_or_create_version_id(db, software_id, typed_version_string, current_user_id)
-    if version_id is None:
-        return jsonify(msg=f"Failed to find or create version '{typed_version_string}' for software ID {software_id}."), 500 # Or 400
-
-    # The _admin_handle_file_upload_and_db_insert helper reads from request.form for metadata.
-    # We need to ensure 'version_id' is available to it.
-    # One way: modify request.form (use with caution) or adapt the helper.
-    # For now, let's assume the helper `_admin_handle_file_upload_and_db_insert`
-    # will get `version_id` from its `metadata_fields` list.
-    # The frontend must send 'version_id' (resolved) or we adjust the helper.
-
-    # Simpler: Pass version_id explicitly to a modified helper if possible, or prepare form data.
-    # The current `_admin_handle_file_upload_and_db_insert` builds `form_data` from `metadata_fields`.
-    # We need to ensure `version_id` is in `metadata_fields` and its value is set.
-    # The original `metadata_fields` for patches was:
-    # ['version_id', 'patch_name', 'description', 'release_date']
-
-    # Since the helper pulls `version_id` from `request.form`, and we can't easily modify `request.form` here,
-    # the frontend should ideally send `version_id` directly after resolving it, OR
-    # we'd need a more significant refactor of `_admin_handle_file_upload_and_db_insert`.
-
-    # Let's assume for this pass that `_admin_handle_file_upload_and_db_insert` needs `version_id` to be in `request.form`.
-    # This means the frontend would have to do the "get_or_create_version_id" via an API call, which is not ideal.
-    
-    # Option: Modify the helper to accept an `additional_sql_params` dict.
-    # For now, let's make a small change to the helper's logic for extracting params.
-    # I'll make a note to adjust the helper. For this call, let's manually construct the params
-    # to be inserted, bypassing some of the helper's internal param construction for `version_id`.
-    # This is getting complex, shows the limits of overly generic helpers without easy overrides.
-
-    # Let's simplify by focusing on the parameters for the SQL query directly.
-    # The helper `_admin_handle_file_upload_and_db_insert` needs the `sql_params_tuple`
-    # to align with the values it extracts or is given.
-    # We want `version_id` to be the resolved one.
-
-    # A cleaner approach for the route handler itself:
-    # 1. Extract file and all other form data.
-    # 2. Resolve version_id.
-    # 3. Call a more specific DB insertion logic here, or a modified helper.
-
-    # Given the existing helper, the easiest path WITHOUT modifying the helper *too much*
-    # is to ensure that the `version_id` it tries to get from `request.form.get('version_id')`
-    # is actually the one we resolved. This is hard without modifying `request.form`.
-
-    # Let's assume a slight modification to _admin_handle_file_upload_and_db_insert.
-    # It will now prioritize an explicitly passed `resolved_fks` dictionary.
-
-    # For `_admin_handle_file_upload_and_db_insert`, it expects `version_id` in `metadata_fields`.
-    # The frontend now sends `software_id` and `typed_version_string`.
-    # We will adjust metadata_fields for the helper.
+    if provided_version_id_str and provided_version_id_str.strip():
+        try:
+            final_version_id = int(provided_version_id_str)
+            # Optional: verify against software_id if needed
+        except ValueError:
+            return jsonify(msg="Invalid format for provided version_id."), 400
+    elif typed_version_string and typed_version_string.strip():
+        if not software_id_str:
+            return jsonify(msg="software_id is required when using typed_version_string."), 400
+        try:
+            software_id = int(software_id_str)
+        except ValueError:
+            return jsonify(msg="Invalid software_id format for typed_version_string."), 400
+        
+        final_version_id = get_or_create_version_id(db, software_id, typed_version_string, current_user_id)
+        if final_version_id is None:
+            return jsonify(msg=f"Failed to find or create version '{typed_version_string}' for software ID {software_id}."), 500
+    else:
+        return jsonify(msg="Either version_id or typed_version_string is required for a patch."), 400
     
     return _admin_handle_file_upload_and_db_insert(
         table_name='patches',
         upload_folder_config_key='PATCH_UPLOAD_FOLDER',
         server_path_prefix='/official_uploads/patches',
-        metadata_fields=['patch_name', 'description', 'release_date'], # version_id will be injected
-        required_form_fields=['patch_name'], # version_id handled separately
+        metadata_fields=['patch_name', 'description', 'release_date'], # software_id, typed_version_string, version_id are handled
+        required_form_fields=['patch_name'], # version_id handled by resolved_fks
         sql_insert_query="""INSERT INTO patches (version_id, patch_name, download_link, description, release_date,
                                              is_external_link, stored_filename, original_filename_ref, file_size, file_type,
                                              created_by_user_id, updated_by_user_id)
                               VALUES (?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)""",
-        sql_params_tuple=( # Order must match VALUES clause
-            'version_id', # This will be the first param
-            'patch_name', 'download_link_or_url', 'description', 'release_date',
+        sql_params_tuple=(
+            'version_id', 'patch_name', 'download_link_or_url', 'description', 'release_date',
             'is_external_link', 'stored_filename', 'original_filename_ref', 'file_size', 'file_type',
             'created_by_user_id', 'updated_by_user_id'
         ),
-        # NEW: Pass resolved foreign keys to the helper
-        resolved_fks={'version_id': version_id}
+        resolved_fks={'version_id': final_version_id} # Pass the resolved version_id
     )
 
 
@@ -870,6 +887,8 @@ def admin_delete_document(document_id):
         return jsonify(msg=f"Database error while deleting document: {e}"), 500
 
 
+# app.py
+
 @app.route('/api/admin/links/upload_file', methods=['POST'])
 @jwt_required()
 @admin_required
@@ -878,7 +897,8 @@ def admin_upload_link_file():
     db = get_db()
 
     software_id_str = request.form.get('software_id')
-    typed_version_string = request.form.get('typed_version_string')
+    provided_version_id_str = request.form.get('version_id') # From dropdown selection by frontend
+    typed_version_string = request.form.get('typed_version_string') # From typed input by frontend
 
     if not software_id_str:
         return jsonify(msg="software_id form field is required"), 400
@@ -887,80 +907,104 @@ def admin_upload_link_file():
     except ValueError:
         return jsonify(msg="Invalid software_id format"), 400
 
-    version_id = None
-    if typed_version_string and typed_version_string.strip():
-        version_id = get_or_create_version_id(db, software_id, typed_version_string, current_user_id)
-        if version_id is None:
-            return jsonify(msg=f"Failed to process version '{typed_version_string}' for software ID {software_id}."), 500
+    final_version_id_for_db = None
+    if provided_version_id_str and provided_version_id_str.strip():
+        try:
+            final_version_id_for_db = int(provided_version_id_str)
+            # Optional: verify version_id belongs to software_id
+        except ValueError:
+            return jsonify(msg="Invalid format for provided version_id."), 400
+    elif typed_version_string and typed_version_string.strip():
+        final_version_id_for_db = get_or_create_version_id(db, software_id, typed_version_string, current_user_id)
+        if final_version_id_for_db is None:
+            return jsonify(msg=f"Failed to find or create version '{typed_version_string}' for software ID {software_id}."), 500
+    else:
+        # Since version is MANDATORY for links
+        return jsonify(msg="A version (either selected ID or typed string) is mandatory for links."), 400
             
-    # For links, metadata_fields already included software_id and version_id.
-    # We are now resolving version_id before calling the helper.
-    # `software_id` is still needed from the form for the helper.
     return _admin_handle_file_upload_and_db_insert(
         table_name='links',
         upload_folder_config_key='LINK_UPLOAD_FOLDER',
         server_path_prefix='/official_uploads/links',
-        metadata_fields=['software_id', 'title', 'description'], # version_id handled by resolved_fks
-        required_form_fields=['software_id', 'title'],
+        metadata_fields=['software_id', 'title', 'description'], 
+        required_form_fields=['software_id', 'version_id', 'title'], # version_id is checked from resolved_fks
         sql_insert_query="""INSERT INTO links (software_id, version_id, title, url, description,
                                            is_external_link, stored_filename, original_filename_ref, file_size, file_type,
                                            created_by_user_id, updated_by_user_id)
-                              VALUES (?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)""",
-        sql_params_tuple=(
+                              VALUES (?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)""", # 11 '?'
+        sql_params_tuple=( # Should be 11 items
             'software_id', 'version_id', 'title', 'download_link_or_url', 'description',
-            'is_external_link', 'stored_filename', 'original_filename_ref', 'file_size', 'file_type',
+            # 'is_external_link', <--- REMOVE THIS
+            'stored_filename', 'original_filename_ref', 'file_size', 'file_type',
             'created_by_user_id', 'updated_by_user_id'
         ),
-        resolved_fks={'version_id': version_id} # Pass resolved version_id (can be None)
+        resolved_fks={'version_id': final_version_id_for_db}
     )
 
 @app.route('/api/admin/patches/<int:patch_id>/edit_url', methods=['PUT'])
 @jwt_required()
 @admin_required
-def admin_edit_patch_url(patch_id):
+def admin_edit_patch_url(patch_id_from_url): # Renamed to avoid conflict with variable 'patch_id'
     current_user_id = int(get_jwt_identity())
     db = get_db()
-    patch = db.execute("SELECT * FROM patches WHERE id = ?", (patch_id,)).fetchone()
+    patch = db.execute("SELECT * FROM patches WHERE id = ?", (patch_id_from_url,)).fetchone()
     if not patch: return jsonify(msg="Patch not found"), 404
 
     data = request.get_json()
     if not data: return jsonify(msg="Missing JSON data"), 400
 
-    # Frontend sends software_id (of the product) and typed_version_string
-    software_id_str = data.get('software_id')
-    typed_version_string = data.get('typed_version_string')
+    software_id_str = data.get('software_id') # Used if version string is changing
+    provided_version_id_str = data.get('version_id') # If user picks existing version
+    typed_version_string = data.get('typed_version_string') # If user types/changes version string
 
+    # Determine the version_id to update with
+    final_version_id = patch['version_id'] # Default to existing version_id
+    if provided_version_id_str and provided_version_id_str.strip():
+        try:
+            final_version_id = int(provided_version_id_str)
+        except ValueError: return jsonify(msg="Invalid format for provided version_id."), 400
+    elif typed_version_string and typed_version_string.strip(): # If a new/different version string is typed
+        if not software_id_str: # Need software_id to make sense of the typed version string
+            # If software_id isn't sent, but we need it to process typed_version_string,
+            # we might need to fetch the software_id of the patch's current version.
+            # This assumes software_id is always sent by frontend if typed_version_string is active.
+            current_version_details = db.execute("SELECT software_id FROM versions WHERE id = ?", (patch['version_id'],)).fetchone()
+            if not current_version_details:
+                 return jsonify(msg="Cannot determine software for the current patch version."), 500
+            software_id_for_version_logic = current_version_details['software_id']
+        else:
+            try:
+                software_id_for_version_logic = int(software_id_str)
+            except ValueError: return jsonify(msg="Invalid software_id format."), 400
+
+        resolved_id = get_or_create_version_id(db, software_id_for_version_logic, typed_version_string, current_user_id)
+        if resolved_id is None:
+            return jsonify(msg=f"Failed to process version '{typed_version_string}'."), 500
+        final_version_id = resolved_id
+
+    # Get other fields for update
     patch_name = data.get('patch_name', patch['patch_name'])
     description = data.get('description', patch['description'])
     release_date = data.get('release_date', patch['release_date'])
-    download_link = data.get('download_link', patch['download_link']) # External URL
+    download_link = data.get('download_link', patch['download_link'])
 
-    if not software_id_str or not typed_version_string or not patch_name or not download_link:
-        return jsonify(msg="Software ID, version string, patch name, and download link are required"), 400
-    try:
-        software_id = int(software_id_str)
-    except ValueError: return jsonify(msg="Invalid software_id format"), 400
+    # Basic validation for required fields during edit
+    if not patch_name or not download_link: # software_id/version handled above
+        return jsonify(msg="Patch name and download link are required for edit."), 400
 
-    new_version_id = get_or_create_version_id(db, software_id, typed_version_string, current_user_id)
-    if new_version_id is None:
-        return jsonify(msg=f"Failed to process version '{typed_version_string}' for software ID {software_id}."), 500
-
-    if not patch['is_external_link'] and patch['stored_filename']: # Was file, becoming URL
-        old_file_path = os.path.join(app.config['PATCH_UPLOAD_FOLDER'], patch['stored_filename'])
-        _delete_file_if_exists(old_file_path)
+    if not patch['is_external_link'] and patch['stored_filename']:
+        _delete_file_if_exists(os.path.join(app.config['PATCH_UPLOAD_FOLDER'], patch['stored_filename']))
 
     try:
         db.execute("""
-            UPDATE patches
-            SET version_id = ?, patch_name = ?, description = ?, release_date = ?,
-                download_link = ?, is_external_link = TRUE, stored_filename = NULL,
-                original_filename_ref = NULL, file_size = NULL, file_type = NULL,
-                updated_by_user_id = ?
-            WHERE id = ?
-        """, (new_version_id, patch_name, description, release_date, download_link,
-              current_user_id, patch_id))
+            UPDATE patches SET version_id = ?, patch_name = ?, description = ?, release_date = ?,
+            download_link = ?, is_external_link = TRUE, stored_filename = NULL,
+            original_filename_ref = NULL, file_size = NULL, file_type = NULL,
+            updated_by_user_id = ? WHERE id = ?""",
+            (final_version_id, patch_name, description, release_date, download_link,
+             current_user_id, patch_id_from_url))
         db.commit()
-        updated_item = db.execute("SELECT p.*, s.name as software_name, v.version_number FROM patches p JOIN versions v ON p.version_id = v.id JOIN software s ON v.software_id = s.id WHERE p.id = ?", (patch_id,)).fetchone()
+        updated_item = db.execute("SELECT p.*, s.name as software_name, v.version_number FROM patches p JOIN versions v ON p.version_id = v.id JOIN software s ON v.software_id = s.id WHERE p.id = ?", (patch_id_from_url,)).fetchone()
         return jsonify(dict(updated_item)), 200
     except sqlite3.IntegrityError as e: db.rollback(); return jsonify(msg=f"DB error: {e}"), 409
     except Exception as e: db.rollback(); return jsonify(msg=f"Server error: {e}"), 500
@@ -977,22 +1021,46 @@ def admin_edit_patch_file(patch_id):
 
     new_physical_file = request.files.get('file')
     software_id_str = request.form.get('software_id')
+    provided_version_id_str = request.form.get('version_id')
     typed_version_string = request.form.get('typed_version_string')
     patch_name = request.form.get('patch_name', patch['patch_name'])
     description = request.form.get('description', patch['description'])
     release_date = request.form.get('release_date', patch['release_date'])
 
-    if not software_id_str or not typed_version_string or not patch_name:
-        return jsonify(msg="Software ID, version string, and patch name are required"), 400
-    try:
-        software_id = int(software_id_str)
-    except ValueError: return jsonify(msg="Invalid software_id format"), 400
+    # Determine final version ID using the improved logic from second file
+    final_version_id = patch['version_id']  # Default to current version
+    if provided_version_id_str and provided_version_id_str.strip():
+        try:
+            final_version_id = int(provided_version_id_str)
+        except ValueError:
+            return jsonify(msg="Invalid format for provided version_id"), 400
+    elif typed_version_string and typed_version_string.strip():
+        # Determine software_id for get_or_create_version_id
+        software_id_for_version_logic = None
+        if software_id_str:
+            try:
+                software_id_for_version_logic = int(software_id_str)
+            except ValueError:
+                return jsonify(msg="Invalid software_id format"), 400
+        else:
+            # Fallback to current patch's version's software_id if not provided
+            current_version_details = db.execute(
+                "SELECT software_id FROM versions WHERE id = ?", 
+                (patch['version_id'],)
+            ).fetchone()
+            if not current_version_details:
+                return jsonify(msg="Cannot determine software for current patch version"), 500
+            software_id_for_version_logic = current_version_details['software_id']
 
-    new_version_id = get_or_create_version_id(db, software_id, typed_version_string, current_user_id)
-    if new_version_id is None:
-        return jsonify(msg=f"Failed to process version '{typed_version_string}' for software ID {software_id}."), 500
+        resolved_id = get_or_create_version_id(db, software_id_for_version_logic, typed_version_string, current_user_id)
+        if resolved_id is None:
+            return jsonify(msg=f"Failed to process version '{typed_version_string}'"), 500
+        final_version_id = resolved_id
 
-    # File handling logic (largely same as document edit_file)
+    if not patch_name:
+        return jsonify(msg="Patch name is required"), 400
+
+    # File handling logic
     new_stored_filename = patch['stored_filename']
     new_original_filename = patch['original_filename_ref']
     new_file_size = patch['file_size']
@@ -1001,7 +1069,8 @@ def admin_edit_patch_file(patch_id):
     file_save_path = None
 
     if new_physical_file and new_physical_file.filename != '':
-        if not allowed_file(new_physical_file.filename): return jsonify(msg="File type not allowed"), 400
+        if not allowed_file(new_physical_file.filename):
+            return jsonify(msg="File type not allowed"), 400
         if not patch['is_external_link'] and patch['stored_filename']:
             _delete_file_if_exists(os.path.join(app.config['PATCH_UPLOAD_FOLDER'], patch['stored_filename']))
         
@@ -1015,8 +1084,9 @@ def admin_edit_patch_file(patch_id):
             new_file_type = new_physical_file.mimetype
             new_original_filename = original_filename
             new_download_link = f"/official_uploads/patches/{new_stored_filename}"
-        except Exception as e: return jsonify(msg=f"Error saving new file: {e}"), 500
-    elif patch['is_external_link'] and not new_physical_file: # Was URL, now file, but no file provided
+        except Exception as e:
+            return jsonify(msg=f"Error saving new file: {e}"), 500
+    elif patch['is_external_link'] and not new_physical_file:
         return jsonify(msg="To change from URL to File, a file must be uploaded."), 400
 
     try:
@@ -1025,19 +1095,28 @@ def admin_edit_patch_file(patch_id):
             download_link = ?, is_external_link = FALSE, stored_filename = ?,
             original_filename_ref = ?, file_size = ?, file_type = ?, updated_by_user_id = ?
             WHERE id = ?""",
-            (new_version_id, patch_name, description, release_date, new_download_link,
+            (final_version_id, patch_name, description, release_date, new_download_link,
              new_stored_filename, new_original_filename, new_file_size, new_file_type,
              current_user_id, patch_id))
         db.commit()
-        updated_item = db.execute("SELECT p.*, s.name as software_name, v.version_number FROM patches p JOIN versions v ON p.version_id = v.id JOIN software s ON v.software_id = s.id WHERE p.id = ?", (patch_id,)).fetchone()
+        updated_item = db.execute(
+            """SELECT p.*, s.name as software_name, v.version_number 
+               FROM patches p 
+               JOIN versions v ON p.version_id = v.id 
+               JOIN software s ON v.software_id = s.id 
+               WHERE p.id = ?""", 
+            (patch_id,)
+        ).fetchone()
         return jsonify(dict(updated_item)), 200
     except sqlite3.IntegrityError as e:
         db.rollback()
-        if file_save_path and os.path.exists(file_save_path): _delete_file_if_exists(file_save_path)
+        if file_save_path and os.path.exists(file_save_path):
+            _delete_file_if_exists(file_save_path)
         return jsonify(msg=f"DB error: {e}"), 409
     except Exception as e:
         db.rollback()
-        if file_save_path and os.path.exists(file_save_path): _delete_file_if_exists(file_save_path)
+        if file_save_path and os.path.exists(file_save_path):
+            _delete_file_if_exists(file_save_path)
         return jsonify(msg=f"Server error: {e}"), 500
 
 
@@ -1090,36 +1169,69 @@ def admin_add_misc_category():
         return jsonify(msg="Server error adding misc category."), 500
 
 
-@app.route('/api/admin/links/<int:link_id>/edit_url', methods=['PUT'])
+@app.route('/api/admin/links/<int:link_id_from_url>/edit_url', methods=['PUT']) # Renamed link_id
 @jwt_required()
 @admin_required
-def admin_edit_link_url(link_id):
+def admin_edit_link_url(link_id_from_url):
     current_user_id = int(get_jwt_identity())
     db = get_db()
-    link_item = db.execute("SELECT * FROM links WHERE id = ?", (link_id,)).fetchone()
+    link_item = db.execute("SELECT * FROM links WHERE id = ?", (link_id_from_url,)).fetchone()
     if not link_item: return jsonify(msg="Link not found"), 404
 
     data = request.get_json()
     if not data: return jsonify(msg="Missing JSON data"), 400
 
-    software_id_str = data.get('software_id')
-    typed_version_string = data.get('typed_version_string') # Optional for links
+    # software_id for the link itself (can it change? Assume yes for now)
+    software_id_str = data.get('software_id', str(link_item['software_id']))
+    provided_version_id_str = data.get('version_id')
+    typed_version_string = data.get('typed_version_string')
 
     title = data.get('title', link_item['title'])
     description = data.get('description', link_item['description'])
     url = data.get('url', link_item['url'])
 
-    if not software_id_str or not title or not url:
-        return jsonify(msg="Software ID, title, and URL are required"), 400
+    if not software_id_str or not title or not url: # Basic required fields for a link
+        return jsonify(msg="Software ID, title, and URL are required for edit."), 400
     try:
-        software_id = int(software_id_str)
-    except ValueError: return jsonify(msg="Invalid software_id format"), 400
+        software_id_for_link = int(software_id_str) # This is the software_id for the link table
+    except ValueError: return jsonify(msg="Invalid software_id format for link."), 400
 
-    new_version_id = None
-    if typed_version_string and typed_version_string.strip():
-        new_version_id = get_or_create_version_id(db, software_id, typed_version_string, current_user_id)
-        if new_version_id is None and typed_version_string.strip(): # Error only if string was provided but failed
-             return jsonify(msg=f"Failed to process version '{typed_version_string}' for software ID {software_id}."), 500
+    # Determine the version_id to update with. It's mandatory.
+    final_version_id_for_db = None
+    if provided_version_id_str and provided_version_id_str.strip():
+        try:
+            final_version_id_for_db = int(provided_version_id_str)
+            # You might want to verify that this new version_id actually belongs to software_id_for_link
+            # if not db.execute("SELECT id FROM versions WHERE id = ? AND software_id = ?", (final_version_id_for_db, software_id_for_link)).fetchone():
+            #    return jsonify(msg="Selected version does not belong to the link's specified software product."), 400
+        except ValueError: return jsonify(msg="Invalid format for provided version_id."), 400
+    elif typed_version_string and typed_version_string.strip():
+        # Use software_id_for_link to find/create the version
+        resolved_id = get_or_create_version_id(db, software_id_for_link, typed_version_string, current_user_id)
+        if resolved_id is None:
+            return jsonify(msg=f"Failed to process version '{typed_version_string}' for software ID {software_id_for_link}."), 500
+        final_version_id_for_db = resolved_id
+    else:
+        # If neither is provided, but version is mandatory, this is an error during edit.
+        # However, if only other fields are changing, we should use the existing version_id.
+        # This block means user actively cleared version selection without providing a new typed one.
+        # If this is not allowed, the frontend should prevent it.
+        # If we must have a version, and they didn't provide one, use existing.
+        # But if they *could* have provided one and didn't, it might be an attempt to remove it.
+        # Given version is MANDATORY, if they don't provide a new one, we retain the old.
+        # If the frontend *always* sends one (either selected, or typed, or the original if unchanged), this else might not be hit.
+        # For safety, if version is mandatory, ensure final_version_id_for_db is set.
+        if not link_item['version_id']: # Should not happen if version is truly mandatory from the start
+            return jsonify(msg="Existing link is missing a mandatory version. Data inconsistency."), 500
+        final_version_id_for_db = link_item['version_id'] # Fallback to current if no new one specified
+        # A better check: if (software_id_str OR typed_version_string OR provided_version_id_str) suggests intent to change version
+        # If intent to change, but none validly resolved, that's an error.
+        # If no intent to change version (those fields are absent/empty), then using existing is fine.
+        # The frontend logic is key here: does it always send some form of version data if version field is touched?
+
+    if final_version_id_for_db is None: # Double check after all logic
+        return jsonify(msg="A valid version association is mandatory for this link."), 400
+
 
     if not link_item['is_external_link'] and link_item['stored_filename']:
         _delete_file_if_exists(os.path.join(app.config['LINK_UPLOAD_FOLDER'], link_item['stored_filename']))
@@ -1130,42 +1242,56 @@ def admin_edit_link_url(link_id):
             is_external_link = TRUE, stored_filename = NULL, original_filename_ref = NULL,
             file_size = NULL, file_type = NULL, updated_by_user_id = ?
             WHERE id = ?""",
-            (software_id, new_version_id, title, description, url, current_user_id, link_id))
+            (software_id_for_link, final_version_id_for_db, title, description, url, current_user_id, link_id_from_url))
         db.commit()
-        updated_item = db.execute("SELECT l.*, s.name as software_name, v.version_number as version_name FROM links l JOIN software s ON l.software_id = s.id LEFT JOIN versions v ON l.version_id = v.id WHERE l.id = ?", (link_id,)).fetchone()
+        updated_item = db.execute("SELECT l.*, s.name as software_name, v.version_number as version_name FROM links l JOIN software s ON l.software_id = s.id JOIN versions v ON l.version_id = v.id WHERE l.id = ?", (link_id_from_url,)).fetchone()
         return jsonify(dict(updated_item) if updated_item else None), 200
     except sqlite3.IntegrityError as e: db.rollback(); return jsonify(msg=f"DB error: {e}"), 409
     except Exception as e: db.rollback(); return jsonify(msg=f"Server error: {e}"), 500
 
 
-@app.route('/api/admin/links/<int:link_id>/edit_file', methods=['PUT'])
+@app.route('/api/admin/links/<int:link_id_from_url>/edit_file', methods=['PUT']) # Renamed link_id
 @jwt_required()
 @admin_required
-def admin_edit_link_file(link_id):
+def admin_edit_link_file(link_id_from_url):
     current_user_id = int(get_jwt_identity())
     db = get_db()
-    link_item = db.execute("SELECT * FROM links WHERE id = ?", (link_id,)).fetchone()
+    link_item = db.execute("SELECT * FROM links WHERE id = ?", (link_id_from_url,)).fetchone()
     if not link_item: return jsonify(msg="Link not found"), 404
 
     new_physical_file = request.files.get('file')
-    software_id_str = request.form.get('software_id')
-    typed_version_string = request.form.get('typed_version_string') # Optional
+    software_id_str = request.form.get('software_id', str(link_item['software_id']))
+    provided_version_id_str = request.form.get('version_id')
+    typed_version_string = request.form.get('typed_version_string')
+
     title = request.form.get('title', link_item['title'])
     description = request.form.get('description', link_item['description'])
 
     if not software_id_str or not title:
-        return jsonify(msg="Software ID and title are required"), 400
+        return jsonify(msg="Software ID and title are required for edit."), 400
     try:
-        software_id = int(software_id_str)
-    except ValueError: return jsonify(msg="Invalid software_id format"), 400
+        software_id_for_link = int(software_id_str)
+    except ValueError: return jsonify(msg="Invalid software_id format for link."), 400
 
-    new_version_id = None
-    if typed_version_string and typed_version_string.strip():
-        new_version_id = get_or_create_version_id(db, software_id, typed_version_string, current_user_id)
-        if new_version_id is None and typed_version_string.strip():
-            return jsonify(msg=f"Failed to process version '{typed_version_string}' for software ID {software_id}."), 500
+    final_version_id_for_db = None # Placeholder
+    if provided_version_id_str and provided_version_id_str.strip():
+        try:
+            final_version_id_for_db = int(provided_version_id_str)
+        except ValueError: return jsonify(msg="Invalid format for provided version_id."), 400
+    elif typed_version_string and typed_version_string.strip():
+        resolved_id = get_or_create_version_id(db, software_id_for_link, typed_version_string, current_user_id)
+        if resolved_id is None:
+            return jsonify(msg=f"Failed to process version '{typed_version_string}' for software ID {software_id_for_link}."), 500
+        final_version_id_for_db = resolved_id
+    else: # Fallback to existing if version is mandatory and no new one is specified
+        final_version_id_for_db = link_item['version_id']
+
+
+    if final_version_id_for_db is None: # If after all logic, version_id is still None, and it's mandatory
+        return jsonify(msg="A valid version association is mandatory for this link."), 400
             
-    # File handling
+    # ... (File handling logic from your previous admin_edit_link_file) ...
+    # ... (Make sure to use software_id_for_link and final_version_id_for_db in the UPDATE) ...
     new_stored_filename = link_item['stored_filename']
     new_original_filename = link_item['original_filename_ref']
     new_file_size = link_item['file_size']
@@ -1174,6 +1300,7 @@ def admin_edit_link_file(link_id):
     file_save_path = None
 
     if new_physical_file and new_physical_file.filename != '':
+        # ... (file saving and old file deletion logic as before) ...
         if not allowed_file(new_physical_file.filename): return jsonify(msg="File type not allowed"), 400
         if not link_item['is_external_link'] and link_item['stored_filename']:
             _delete_file_if_exists(os.path.join(app.config['LINK_UPLOAD_FOLDER'], link_item['stored_filename']))
@@ -1189,8 +1316,9 @@ def admin_edit_link_file(link_id):
             new_original_filename = original_filename
             new_url = f"/official_uploads/links/{new_stored_filename}"
         except Exception as e: return jsonify(msg=f"Error saving new file: {e}"), 500
-    elif link_item['is_external_link'] and not new_physical_file :
+    elif link_item['is_external_link'] and not new_physical_file : # Switching from URL to File, new file is mandatory
         return jsonify(msg="To change from URL to File, a file must be uploaded."), 400
+    # If it's already a file link and no new file is provided, metadata only update is fine.
 
     try:
         db.execute("""
@@ -1198,10 +1326,11 @@ def admin_edit_link_file(link_id):
             is_external_link = FALSE, stored_filename = ?, original_filename_ref = ?,
             file_size = ?, file_type = ?, updated_by_user_id = ?
             WHERE id = ?""",
-            (software_id, new_version_id, title, description, new_url, new_stored_filename,
-             new_original_filename, new_file_size, new_file_type, current_user_id, link_id))
+            (software_id_for_link, final_version_id_for_db, title, description, new_url, new_stored_filename,
+             new_original_filename, new_file_size, new_file_type, current_user_id, link_id_from_url))
         db.commit()
-        updated_item = db.execute("SELECT l.*, s.name as software_name, v.version_number as version_name FROM links l JOIN software s ON l.software_id = s.id LEFT JOIN versions v ON l.version_id = v.id WHERE l.id = ?", (link_id,)).fetchone()
+        # Fetch back with JOINs
+        updated_item = db.execute("SELECT l.*, s.name as software_name, v.version_number as version_name FROM links l JOIN software s ON l.software_id = s.id JOIN versions v ON l.version_id = v.id WHERE l.id = ?", (link_id_from_url,)).fetchone()
         return jsonify(dict(updated_item) if updated_item else None), 200
     except sqlite3.IntegrityError as e:
         db.rollback()
@@ -1425,7 +1554,7 @@ def admin_upload_misc_file():
                                         created_by_user_id, updated_by_user_id)
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""" # 11 params
     sql_params_order = ('misc_category_id', 'user_id', 'user_provided_title', 'user_provided_description',
-                        'original_filename_ref', 'stored_filename', 'download_link_or_url', 'file_type', 'file_size',
+                        'original_filename', 'stored_filename', 'download_link_or_url', 'file_type', 'file_size',
                         'created_by_user_id', 'updated_by_user_id')
 
     # Note: 'user_provided_title' and 'user_provided_description' come from request.form
@@ -1454,6 +1583,7 @@ def admin_add_link_with_url():
     if not data: return jsonify(msg="Missing JSON data"), 400
 
     software_id_str = data.get('software_id')
+    provided_version_id_str = data.get('version_id')
     typed_version_string = data.get('typed_version_string')
 
     if not software_id_str:
@@ -1463,28 +1593,40 @@ def admin_add_link_with_url():
     except ValueError:
         return jsonify(msg="Invalid software_id format"), 400
 
-    version_id = None
-    if typed_version_string and typed_version_string.strip():
-        version_id = get_or_create_version_id(db, software_id, typed_version_string, current_user_id)
-        if version_id is None:
-            return jsonify(msg=f"Failed to process version '{typed_version_string}' for software ID {software_id}."), 500
-
-    data['version_id'] = version_id
+    final_version_id_for_db = None
+    if provided_version_id_str and provided_version_id_str.strip():
+        try:
+            final_version_id_for_db = int(provided_version_id_str)
+            # Optional: Verify version belongs to software
+            # if not db.execute("SELECT id FROM versions WHERE id = ? AND software_id = ?", (final_version_id_for_db, software_id)).fetchone():
+            #     return jsonify(msg="Selected version does not belong to the specified software."), 400
+        except ValueError:
+            return jsonify(msg="Invalid format for provided version_id."), 400
+    elif typed_version_string and typed_version_string.strip():
+        final_version_id_for_db = get_or_create_version_id(db, software_id, typed_version_string, current_user_id)
+        if final_version_id_for_db is None:
+            return jsonify(msg=f"Failed to find or create version '{typed_version_string}' for software ID {software_id}."), 500
+    else:
+        # If version is mandatory, this is an error
+        return jsonify(msg="A version (either selected ID or typed string) is mandatory for links."), 400
+    
+    data['version_id'] = final_version_id_for_db
     data.pop('typed_version_string', None)
+    # software_id is still needed for the links table directly.
 
     return _admin_add_item_with_external_link(
         table_name='links',
         data=data,
-        required_fields=['software_id', 'title', 'url'],
+        required_fields=['software_id', 'version_id', 'title', 'url'], # version_id now effectively required
         sql_insert_query="""INSERT INTO links (software_id, version_id, title, url, description,
                                            is_external_link, created_by_user_id, updated_by_user_id)
-                              VALUES (?, ?, ?, ?, ?, TRUE, ?, ?)""", # 7 '?'
-        sql_params_tuple=( # Should be 7 items
+                              VALUES (?, ?, ?, ?, ?, TRUE, ?, ?)""",
+        sql_params_tuple=(
             'software_id', 'version_id', 'title', 'url', 'description',
-            # 'is_external_link', <--- REMOVE THIS
-            'created_by_user_id', 'updated_by_user_id'
+            'created_by_user_id', 'updated_by_user_id' # is_external_link removed from tuple (hardcoded)
         )
     )
+
 # --- File Serving Endpoints ---
 @app.route('/official_uploads/docs/<path:filename>')
 def serve_official_doc_file(filename):

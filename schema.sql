@@ -117,7 +117,7 @@ CREATE TABLE IF NOT EXISTS links (
     title TEXT NOT NULL,
     description TEXT,
     software_id INTEGER NOT NULL,
-    version_id INTEGER,
+    version_id INTEGER NOT NULL,
     is_external_link BOOLEAN DEFAULT FALSE NOT NULL,
     url TEXT NOT NULL,
     stored_filename TEXT UNIQUE,

@@ -1,15 +1,25 @@
 // src/views/LinksView.tsx
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { fetchLinks, fetchSoftware, fetchVersionsForSoftware } from '../services/api'; // Added fetchVersionsForSoftware
-import { Link as LinkType, Software, AddLinkPayload } from '../types'; // Renamed Link to LinkType
+import {
+  fetchLinks,
+  fetchSoftware,
+  // fetchVersionsForSoftware, // No longer needed directly in this view if AdminLinkEntryForm handles it
+  deleteAdminLink // Import delete function
+} from '../services/api';
+import {
+  Link as LinkType,
+  Software
+  // AddLinkPayloadFlexible, EditLinkPayloadFlexible are used by AdminLinkEntryForm
+} from '../types';
 import FilterTabs from '../components/FilterTabs';
-import LinkCard from '../components/LinkCard'; // Assuming LinkCard is updated for the new LinkType
+import LinkCard from '../components/LinkCard';
 import LoadingState from '../components/LoadingState';
 import ErrorState from '../components/ErrorState';
-import { useAuth } from '../context/AuthContext'; // For admin check
-import AdminLinkEntryForm from '../components/admin/AdminLinkEntryForm'; // Import the admin form
-import { PlusCircle } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import AdminLinkEntryForm from '../components/admin/AdminLinkEntryForm'; // Ensure this is the updated form
+import ConfirmationModal from '../components/shared/ConfirmationModal'; // For delete confirmation
+import { PlusCircle, Edit3, Trash2 } from 'lucide-react'; // Icons for buttons
 
 interface OutletContextType {
   searchTerm: string;
@@ -20,24 +30,27 @@ const LinksView: React.FC = () => {
   const { isAuthenticated, role } = useAuth();
 
   const [links, setLinks] = useState<LinkType[]>([]);
-  const [softwareList, setSoftwareList] = useState<Software[]>([]); // Renamed
+  const [softwareList, setSoftwareList] = useState<Software[]>([]);
   const [selectedSoftwareId, setSelectedSoftwareId] = useState<number | null>(null);
-  // Optional: Add state for selectedVersionId if you want to filter links by version too
-  // const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
+  
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const [isLoading, setIsLoading] = useState(true); // For loading links
-  const [error, setError] = useState<string | null>(null); // For errors fetching links
+  // State for managing the Add/Edit form visibility and data
+  const [showAddOrEditForm, setShowAddOrEditForm] = useState(false);
+  const [editingLink, setEditingLink] = useState<LinkType | null>(null);
 
-  const [showAddLinkForm, setShowAddLinkForm] = useState(false);
+  // State for delete confirmation
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [linkToDelete, setLinkToDelete] = useState<LinkType | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const loadLinks = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
-      // Pass undefined if null, and potentially selectedVersionId if you add that filter
       const linksData = await fetchLinks(
         selectedSoftwareId === null ? undefined : selectedSoftwareId
-        // selectedVersionId === null ? undefined : selectedVersionId // If filtering by version
       );
       setLinks(linksData);
     } catch (err: any) {
@@ -46,7 +59,7 @@ const LinksView: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [selectedSoftwareId]); // Add selectedVersionId if you implement version filtering
+  }, [selectedSoftwareId]);
 
   useEffect(() => {
     const loadSoftwareForFilters = async () => {
@@ -55,6 +68,7 @@ const LinksView: React.FC = () => {
         setSoftwareList(softwareData);
       } catch (err) {
         console.error("Failed to load software for filters", err);
+        // Optionally set an error state for software loading if critical
       }
     };
     loadSoftwareForFilters();
@@ -62,21 +76,59 @@ const LinksView: React.FC = () => {
 
   useEffect(() => {
     loadLinks();
-  }, [loadLinks]);
+  }, [loadLinks]); // selectedSoftwareId is a dependency of loadLinks
 
   const handleFilterChange = (softwareId: number | null) => {
     setSelectedSoftwareId(softwareId);
-    // If you add version filtering, reset version when software changes
-    // setSelectedVersionId(null);
   };
 
-  // const handleVersionFilterChange = (versionId: number | null) => {
-  //   setSelectedVersionId(versionId);
-  // };
-
-  const handleLinkAdded = (newLink: LinkType) => {
-    setShowAddLinkForm(false);
+  const handleOperationSuccess = () => { // Called after successful Add or Update
+    setShowAddOrEditForm(false);
+    setEditingLink(null);
     loadLinks(); // Refresh the list
+  };
+  
+  const openAddForm = () => {
+    setEditingLink(null); // Ensure not in edit mode
+    setShowAddOrEditForm(true);
+  };
+
+  const openEditForm = (link: LinkType) => {
+    setEditingLink(link);
+    setShowAddOrEditForm(true);
+  };
+
+  const closeAdminForm = () => {
+    setEditingLink(null);
+    setShowAddOrEditForm(false);
+  };
+
+  const openDeleteConfirm = (link: LinkType) => {
+    setLinkToDelete(link);
+    setShowDeleteConfirm(true);
+  };
+
+  const closeDeleteConfirm = () => {
+    setLinkToDelete(null);
+    setShowDeleteConfirm(false);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!linkToDelete) return;
+    setIsDeleting(true);
+    setError(null); // Clear previous general errors
+    try {
+      await deleteAdminLink(linkToDelete.id);
+      closeDeleteConfirm();
+      loadLinks(); // Refresh list after delete
+    } catch (err: any) {
+      // Set error specific to delete operation if needed, or use general error state
+      setError(err.response?.data?.msg || err.message || "Failed to delete link.");
+      console.error("Delete error:", err);
+      closeDeleteConfirm(); // Close modal even on error
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const filteredLinks = useMemo(() => {
@@ -86,19 +138,18 @@ const LinksView: React.FC = () => {
     const lowerSearchTerm = searchTerm.toLowerCase();
     return links.filter(link =>
       link.title.toLowerCase().includes(lowerSearchTerm) ||
-      (link.description || '').toLowerCase().includes(lowerSearchTerm) || // Handle null description
-      (link.software_name || '').toLowerCase().includes(lowerSearchTerm) || // Handle undefined software_name
-      (link.version_name || '').toLowerCase().includes(lowerSearchTerm)    // Handle version_name if you add it
+      (link.description || '').toLowerCase().includes(lowerSearchTerm) ||
+      (link.software_name || '').toLowerCase().includes(lowerSearchTerm) ||
+      (link.version_number || '').toLowerCase().includes(lowerSearchTerm) // Link version_number is now mandatory string
     );
   }, [links, searchTerm]);
 
-  // If LinkCard expects specific props, ensure 'link' object from 'filteredLinks' matches
-  // Your Link type now has is_external_link, stored_filename etc. LinkCard might need adjustment.
-
-  const handleRetryFetchLinks = () => {
+  const handleRetryFetch = () => {
       loadLinks();
       if(softwareList.length === 0) {
-        const loadSoftwareForFilters = async () => { /* ... */ };
+        const loadSoftwareForFilters = async () => {
+             try { const sw = await fetchSoftware(); setSoftwareList(sw); } catch (e) { console.error(e); }
+        };
         loadSoftwareForFilters();
       }
   }
@@ -112,49 +163,94 @@ const LinksView: React.FC = () => {
         </div>
         {isAuthenticated && role === 'admin' && (
           <button
-            onClick={() => setShowAddLinkForm(prev => !prev)}
+             onClick={showAddOrEditForm && !editingLink ? closeAdminForm : openAddForm} // Toggle Add form or open it
             className="mt-4 sm:mt-0 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
           >
             <PlusCircle size={18} className="mr-2" />
-            {showAddLinkForm ? 'Cancel Add Link' : 'Add New Link'}
+            {showAddOrEditForm && !editingLink ? 'Cancel Add Link' : 'Add New Link'}
           </button>
         )}
       </div>
 
-      {showAddLinkForm && isAuthenticated && role === 'admin' && (
-        <div className="mb-6 pb-6 border-b border-gray-200">
-          <AdminLinkEntryForm onLinkAdded={handleLinkAdded} />
+      {/* Admin Form for Adding or Editing a Link */}
+      {showAddOrEditForm && isAuthenticated && role === 'admin' && (
+        <div className="my-6 p-4 bg-gray-50 rounded-lg shadow">
+          <AdminLinkEntryForm
+            linkToEdit={editingLink} // Pass null for "Add" mode, or the link object for "Edit"
+            onLinkAdded={handleOperationSuccess}
+            onLinkUpdated={handleOperationSuccess}
+            onCancelEdit={closeAdminForm}
+          />
         </div>
       )}
 
-      {softwareList.length > 0 && !error && (
+      {/* Filters */}
+      {softwareList.length > 0 && (!error || links.length > 0) && ( // Show filters if data or no critical error
         <FilterTabs
           software={softwareList}
           selectedSoftwareId={selectedSoftwareId}
           onSelectFilter={handleFilterChange}
         />
-        // TODO: Optionally add a second FilterTabs or dropdown for versions if a software is selected
       )}
 
+      {/* Links Display */}
       {isLoading ? (
         <LoadingState />
-      ) : error ? (
-        <ErrorState message={error} onRetry={handleRetryFetchLinks} />
+      ) : error && links.length === 0 ? ( // Show full error state only if no data could be loaded
+        <ErrorState message={error} onRetry={handleRetryFetch} />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+        <>
+          {error && <div className="p-3 my-2 bg-red-100 text-red-700 rounded text-sm">{error}</div>} {/* Inline error */}
           {filteredLinks.length > 0 ? (
-            filteredLinks.map((link) => (
-              <LinkCard key={link.id} link={link} />
-            ))
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+              {filteredLinks.map((link) => (
+                <div key={link.id} className="relative group bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow duration-200">
+                  <LinkCard link={link} />
+                  {isAuthenticated && role === 'admin' && (
+                    <div className="absolute top-2 right-2 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white p-1 rounded-md shadow-lg border border-gray-100 z-10">
+                      <button
+                        onClick={() => openEditForm(link)}
+                        className="p-1.5 text-blue-600 hover:text-blue-800 rounded-full hover:bg-blue-50"
+                        title="Edit Link"
+                      >
+                        <Edit3 size={16} />
+                      </button>
+                      <button
+                        onClick={() => openDeleteConfirm(link)}
+                        className="p-1.5 text-red-600 hover:text-red-800 rounded-full hover:bg-red-50"
+                        title="Delete Link"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           ) : (
-            <div className="col-span-full text-center py-12">
+             <div className="col-span-full text-center py-12 bg-white rounded-lg shadow-sm border">
               <p className="text-gray-500">
-                No links found {selectedSoftwareId ? `for ${softwareList.find(s=>s.id === selectedSoftwareId)?.name || 'the selected software'}` : ''}.
-                {searchTerm && " matching your search."}
+                No links found{selectedSoftwareId ? ` for ${softwareList.find(s=>s.id === selectedSoftwareId)?.name || 'selected software'}` : ''}
+                {searchTerm && ` matching "${searchTerm}"`}.
+                {isAuthenticated && role === 'admin' && !showAddOrEditForm && " You can add one."}
               </p>
             </div>
           )}
-        </div>
+        </>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && linkToDelete && (
+        <ConfirmationModal
+          isOpen={showDeleteConfirm}
+          title="Delete Link"
+          message={`Are you sure you want to delete the link "${linkToDelete.title}"? This action cannot be undone.`}
+          onConfirm={handleDeleteConfirm}
+          onCancel={closeDeleteConfirm}
+          isConfirming={isDeleting}
+          confirmButtonText="Delete"
+          confirmButtonVariant="danger"
+        />
       )}
     </div>
   );

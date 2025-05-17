@@ -1,14 +1,17 @@
 // src/services/api.ts
 import {
   Document as DocumentType,
-  Link, Patch, Software,
+  Link, Patch, Software, SoftwareVersion, // SoftwareVersion for version dropdowns
   AuthRequest, AuthResponse, RegisterRequest, RegisterResponse,
   AddDocumentPayload, // Stays as is for documents
-  // NEW Payloads for Patches and Links with typed version string
-  AddPatchPayloadWithVersionString, EditPatchPayload,
-  AddLinkPayloadWithVersionString, EditLinkPayload,
-  MiscCategory, AddCategoryPayload, MiscFile,
-  EditCategoryPayload // Added these from my previous snippet for completeness
+
+  // Corrected Payloads for Patches and Links with flexible version handling
+  AddPatchPayloadFlexible, EditPatchPayloadFlexible,
+  AddLinkPayloadFlexible, EditLinkPayloadFlexible,
+
+  MiscCategory, AddCategoryPayload, EditCategoryPayload, // EditCategoryPayload is used
+  MiscFile
+  // EditMiscFilePayload is not used if all misc file edits are via FormData
 } from '../types';
 
 const API_BASE_URL = 'http://127.0.0.1:5000';
@@ -125,7 +128,7 @@ export async function searchData(query: string): Promise<any[]> {
   }
 }
 
-export async function fetchVersionsForSoftware(softwareId: number): Promise<{ id: number; version_number: string }[]> {
+export async function fetchVersionsForSoftware(softwareId: number): Promise<SoftwareVersion[]> { // Updated return type
   try {
     const response = await fetch(`${API_BASE_URL}/api/versions_for_software?software_id=${softwareId}`);
     return handleApiError(response, 'Failed to fetch versions for software');
@@ -229,11 +232,8 @@ export async function uploadAdminDocumentFile(formData: FormData): Promise<Docum
 
 // --- Admin Patch Functions ---
 
-export async function addAdminPatchWithUrl(payload: AddPatchPayloadWithVersionString): Promise<Patch> {
+export async function addAdminPatchWithUrl(payload: AddPatchPayloadFlexible): Promise<Patch> {
   try {
-    // The backend route /api/admin/patches/add_with_url now expects
-    // software_id and typed_version_string in the payload.
-    // is_external_link is true by definition of this endpoint.
     const backendPayload = { ...payload, is_external_link: true };
     const response = await fetch(`${API_BASE_URL}/api/admin/patches/add_with_url`, {
       method: 'POST',
@@ -245,15 +245,11 @@ export async function addAdminPatchWithUrl(payload: AddPatchPayloadWithVersionSt
 }
 
 export async function uploadAdminPatchFile(formData: FormData): Promise<Patch> {
-  // FormData should contain:
-  // 'file', 'software_id', 'typed_version_string', 'patch_name',
-  // 'description' (optional), 'release_date' (optional)
-  // The backend /api/admin/patches/upload_file now expects these form fields.
+  // FormData from AdminPatchEntryForm will contain:
+  // 'file', 'software_id', ( 'version_id' OR 'typed_version_string' ), 'patch_name', etc.
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/patches/upload_file`, {
-      method: 'POST',
-      headers: { ...getAuthHeader() },
-      body: formData,
+      method: 'POST', headers: { ...getAuthHeader() }, body: formData,
     });
     return handleApiError(response, 'Failed to upload patch file');
   } catch (error) { console.error('Error uploading admin patch file:', error); throw error; }
@@ -261,9 +257,8 @@ export async function uploadAdminPatchFile(formData: FormData): Promise<Patch> {
 
 // --- Admin Link Functions ---
 
-export async function addAdminLinkWithUrl(payload: AddLinkPayloadWithVersionString): Promise<Link> {
+export async function addAdminLinkWithUrl(payload: AddLinkPayloadFlexible): Promise<Link> {
   try {
-    // Backend expects software_id, optional typed_version_string
     const backendPayload = { ...payload, is_external_link: true };
     const response = await fetch(`${API_BASE_URL}/api/admin/links/add_with_url`, {
       method: 'POST',
@@ -274,12 +269,11 @@ export async function addAdminLinkWithUrl(payload: AddLinkPayloadWithVersionStri
   } catch (error) { console.error('Error adding admin link with URL:', error); throw error; }
 }
 export async function uploadAdminLinkFile(formData: FormData): Promise<Link> {
-  // FormData: 'file', 'software_id', 'typed_version_string' (optional), 'title', 'description' (optional)
+  // FormData from AdminLinkEntryForm will contain:
+  // 'file', 'software_id', ( 'version_id' OR 'typed_version_string' ), 'title', etc.
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/links/upload_file`, {
-      method: 'POST',
-      headers: { ...getAuthHeader() },
-      body: formData,
+      method: 'POST', headers: { ...getAuthHeader() }, body: formData,
     });
     return handleApiError(response, 'Failed to upload link file');
   } catch (error) { console.error('Error uploading admin link file:', error); throw error; }
@@ -379,31 +373,24 @@ export async function deleteAdminDocument(documentId: number): Promise<{ msg: st
 
 // --- Admin Patch Edit/Delete Functions ---
 
-export async function editAdminPatchWithUrl(patchId: number, payload: EditPatchPayload): Promise<Patch> {
+export async function editAdminPatchWithUrl(patchId: number, payload: EditPatchPayloadFlexible): Promise<Patch> {
   try {
-    // The backend route /api/admin/patches/<id>/edit_url now expects
-    // an optional software_id and optional typed_version_string in the payload.
-    // is_external_link will be set to true by the backend for this endpoint.
-    const backendPayload = { ...payload, is_external_link: true }; // Ensure this flag if backend relies on it
+    const backendPayload = { ...payload, is_external_link: true };
     const response = await fetch(`${API_BASE_URL}/api/admin/patches/${patchId}/edit_url`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify(backendPayload),
+      body: JSON.stringify(backendPayload), // Send only changed fields if payload is constructed that way
     });
     return handleApiError(response, 'Failed to update patch with URL');
   } catch (error) { console.error('Error updating patch with URL:', error); throw error; }
 }
 
+
 export async function editAdminPatchFile(patchId: number, formData: FormData): Promise<Patch> {
-  // FormData can contain:
-  // 'file' (optional for replacement), 'software_id' (optional), 'typed_version_string' (optional),
-  // 'patch_name' (optional), etc.
-  // The backend /api/admin/patches/<id>/edit_file now expects these.
+  // FormData from AdminPatchEntryForm for edit will contain relevant fields
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/patches/${patchId}/edit_file`, {
-      method: 'PUT',
-      headers: { ...getAuthHeader() },
-      body: formData,
+      method: 'PUT', headers: { ...getAuthHeader() }, body: formData,
     });
     return handleApiError(response, 'Failed to update patch with file');
   } catch (error) { console.error('Error updating patch with file:', error); throw error; }
@@ -421,7 +408,7 @@ export async function deleteAdminPatch(patchId: number): Promise<{ msg: string }
 
 // --- Admin Link Edit/Delete Functions ---
 
-export async function editAdminLinkWithUrl(linkId: number, payload: EditLinkPayload): Promise<Link> {
+export async function editAdminLinkWithUrl(linkId: number, payload: EditLinkPayloadFlexible): Promise<Link> {
   try {
     const backendPayload = { ...payload, is_external_link: true };
     const response = await fetch(`${API_BASE_URL}/api/admin/links/${linkId}/edit_url`, {
@@ -436,9 +423,7 @@ export async function editAdminLinkWithUrl(linkId: number, payload: EditLinkPayl
 export async function editAdminLinkFile(linkId: number, formData: FormData): Promise<Link> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/links/${linkId}/edit_file`, {
-      method: 'PUT',
-      headers: { ...getAuthHeader() },
-      body: formData,
+      method: 'PUT', headers: { ...getAuthHeader() }, body: formData,
     });
     return handleApiError(response, 'Failed to update link with file');
   } catch (error) { console.error('Error updating link with file:', error); throw error; }

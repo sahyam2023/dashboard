@@ -51,6 +51,15 @@ const DataTable = <T extends Record<string, any>>({
     );
   }
 
+  // Add this check for undefined data
+  if (!data && !isLoading) {
+    return (
+      <div className="bg-white rounded-lg shadow-sm p-6 text-center">
+        <p className="text-gray-500">No data available (data is undefined)</p> 
+      </div>
+    );
+  }
+
   if (data.length === 0 && !isLoading) {
     return (
       <div className="bg-white rounded-lg shadow-sm p-6 text-center">

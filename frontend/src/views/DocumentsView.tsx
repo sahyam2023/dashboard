@@ -65,6 +65,7 @@ const DocumentsView: React.FC = () => {
       setCurrentPage(response.page); // Ensure current page is updated from backend
       setItemsPerPage(response.per_page); // Ensure items per page is updated from backend
     } catch (err: any) {
+      setDocuments([]); // Add this line
       setError(err.message || 'Failed to fetch documents. Please try again later.');
     } finally {
       setIsLoading(false);

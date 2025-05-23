@@ -40,6 +40,7 @@ const SuperAdminDashboard: React.FC = () => {
         setCurrentPage(response.page); // Update current page from backend response
         setItemsPerPage(response.per_page); // Update items per page from backend
       } catch (err: any) {
+        setUsers([]); // Add this line
         setError(err.message || 'Failed to fetch users.');
         setFeedback({ type: 'error', message: err.message || 'Failed to fetch users.' });
       } finally {

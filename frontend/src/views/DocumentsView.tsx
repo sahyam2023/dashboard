@@ -201,7 +201,7 @@ const DocumentsView: React.FC = () => {
     },
     { key: 'created_at', header: 'Created At', sortable: true, render: (doc) => doc.created_at ? new Date(doc.created_at).toLocaleDateString() : '-' },
     { key: 'updated_at', header: 'Updated At', sortable: true, render: (doc) => doc.updated_at ? new Date(doc.updated_at).toLocaleDateString() : '-' },
-    ...(isAuthenticated && role === 'admin' ? [{
+    ...(isAuthenticated && (role === 'admin' || role === 'super_admin') ? [{
       key: 'actions' as keyof DocumentType | 'actions', // Type assertion for actions
       header: 'Actions',
       render: (document: DocumentType) => (
@@ -238,7 +238,7 @@ const DocumentsView: React.FC = () => {
           <h2 className="text-2xl font-bold text-gray-800">Documents</h2>
           <p className="text-gray-600 mt-1">Browse and download documentation</p>
         </div>
-        {isAuthenticated && role === 'admin' && !editingDocument && (
+        {isAuthenticated && (role === 'admin' || role === 'super_admin') && !editingDocument && (
           <button
             onClick={() => { setShowAddDocumentForm(prev => !prev); setEditingDocument(null); setFeedbackMessage(null); }}
             className="mt-4 sm:mt-0 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"

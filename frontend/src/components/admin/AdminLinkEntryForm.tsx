@@ -118,7 +118,7 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
   // useState for selectedSoftwareId, selectedVersionId, typedVersionString, inputMode, externalUrl, selectedFile are removed.
 
   useEffect(() => {
-    if (isAuthenticated && role === 'admin') {
+    if (isAuthenticated && (role === 'admin' || role === 'super_admin')) {
       setIsFetchingSoftwareOrVersions(true);
       fetchSoftware()
         .then(setSoftwareList)

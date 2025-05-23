@@ -78,7 +78,7 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
 
   // Fetch categories for the dropdown
   useEffect(() => {
-    if (isAuthenticated && role === 'admin') {
+    if (isAuthenticated && (role === 'admin' || role === 'super_admin')) {
       setIsFetchingCategories(true);
       fetchMiscCategories()
         .then(setMiscCategories)

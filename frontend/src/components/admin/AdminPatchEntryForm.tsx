@@ -120,7 +120,7 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
 
   // Fetch software list for the product dropdown
   useEffect(() => {
-    if (isAuthenticated && role === 'admin') {
+    if (isAuthenticated && (role === 'admin' || role === 'super_admin')) {
       setIsFetchingSoftwareOrVersions(true);
       fetchSoftware()
         .then(setSoftwareList)

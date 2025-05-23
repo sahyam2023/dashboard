@@ -97,7 +97,7 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
   const watchedSelectedFile = watch('selectedFile');
 
   useEffect(() => {
-    if (isAuthenticated && role === 'admin') {
+    if (isAuthenticated && (role === 'admin' || role === 'super_admin')) {
       setIsFetchingSoftware(true);
       fetchSoftware()
         .then(setSoftwareList)

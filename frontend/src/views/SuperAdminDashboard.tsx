@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { listUsers, updateUserRole, deactivateUser, deleteUser, User, UpdateUserRolePayload } from '../services/api'; 
-// activateUser will be added to api.ts later
+import { listUsers, updateUserRole, deactivateUser, activateUser, deleteUser, User, UpdateUserRolePayload } from '../services/api'; 
 
 const SuperAdminDashboard: React.FC = () => {
   const auth = useAuth();
@@ -16,10 +15,10 @@ const SuperAdminDashboard: React.FC = () => {
   const [selectedRole, setSelectedRole] = useState<'user' | 'admin' | 'super_admin'>('user');
 
   useEffect(() => {
-    if (auth.isAuthenticated && auth.userRole === 'super_admin') {
+    if (auth.isAuthenticated && auth.role === 'super_admin') {
       fetchUsers();
     }
-  }, [auth.isAuthenticated, auth.userRole]);
+  }, [auth.isAuthenticated, auth.role]);
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -40,7 +39,7 @@ const SuperAdminDashboard: React.FC = () => {
     return <Navigate to="/login" replace />;
   }
 
-  if (auth.userRole !== 'super_admin') {
+  if (auth.role !== 'super_admin') {
     return (
       <div className="container mx-auto p-4">
         <h1 className="text-2xl font-bold text-red-600">Unauthorized</h1>
@@ -149,7 +148,8 @@ const SuperAdminDashboard: React.FC = () => {
                         value={selectedRole}
                         onChange={(e) => setSelectedRole(e.target.value as 'user' | 'admin' | 'super_admin')}
                         className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
-                        disabled={auth.currentUser?.id === user.id && users.filter(u => u.role === 'super_admin').length <= 1 && selectedRole !== 'super_admin'}
+                        // Use auth.username for comparison
+                        disabled={auth.username === user.username && users.filter(u => u.role === 'super_admin').length <= 1 && selectedRole !== 'super_admin'}
                       >
                         <option value="user">User</option>
                         <option value="admin">Admin</option>
@@ -171,16 +171,17 @@ const SuperAdminDashboard: React.FC = () => {
                   ) : (
                     <div className="flex items-center space-x-2">
                       <span>{user.role}</span>
-                      {auth.currentUser?.id !== user.id && ( // Prevent super admin from easily changing own role here
+                      {/* Use auth.username for comparison */}
+                      {auth.username !== user.username && ( 
                          <button 
                             onClick={() => handleRoleChangeInitiate(user)}
                             className="text-blue-600 hover:text-blue-800 text-xs"
-                            disabled={auth.currentUser?.id === user.id} // Cannot change own role this way
+                            // disabled={auth.username === user.username} // This logic seems correct for preventing edit button for self
                           >
                            Edit
                           </button>
                       )}
-                       {auth.currentUser?.id === user.id && user.role === 'super_admin' && users.filter(u => u.role === 'super_admin').length <= 1 && (
+                       {auth.username === user.username && user.role === 'super_admin' && users.filter(u => u.role === 'super_admin').length <= 1 && (
                         <span className="text-xs text-gray-400 italic">(Cannot change role - only Super Admin)</span>
                       )}
                     </div>
@@ -198,7 +199,8 @@ const SuperAdminDashboard: React.FC = () => {
                     <button
                       onClick={() => handleDeactivate(user.id, user.username)}
                       className="text-yellow-600 hover:text-yellow-900 disabled:text-gray-400"
-                      disabled={auth.currentUser?.id === user.id && users.filter(u => u.role === 'super_admin' && u.is_active).length <= 1}
+                      // Use auth.username for comparison
+                      disabled={auth.username === user.username && users.filter(u => u.role === 'super_admin' && u.is_active).length <= 1}
                     >
                       Deactivate
                     </button>
@@ -213,7 +215,8 @@ const SuperAdminDashboard: React.FC = () => {
                   <button
                     onClick={() => handleDelete(user.id, user.username)}
                     className="text-red-600 hover:text-red-900 disabled:text-gray-400"
-                    disabled={auth.currentUser?.id === user.id} // Cannot delete self
+                    // Use auth.username for comparison
+                    disabled={auth.username === user.username} // Cannot delete self
                   >
                     Delete
                   </button>

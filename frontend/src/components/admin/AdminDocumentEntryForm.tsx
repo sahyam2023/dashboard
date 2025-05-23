@@ -228,7 +228,7 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
 
   const documentTypes = ["Guide", "Manual", "API Reference", "Datasheet", "Whitepaper", "Specification", "Other"];
 
-  if (!isAuthenticated || role !== 'admin') return null;
+  if (!isAuthenticated || !['admin', 'super_admin'].includes(role)) return null;
 
   return (
     <form onSubmit={handleSubmit(onSubmit, onFormError)} className="space-y-6 bg-white p-6 rounded-lg shadow-md border border-gray-200">

@@ -115,7 +115,7 @@ const AdminMiscCategoryForm: React.FC<AdminMiscCategoryFormProps> = ({
   };
 
 
-  if (!isAuthenticated || role !== 'admin') {
+  if (!isAuthenticated || !['admin', 'super_admin'].includes(role)) {
     return <p>You are not authorized to manage categories.</p>;
   }
 

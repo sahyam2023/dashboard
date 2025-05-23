@@ -1,10 +1,10 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import AdminVersionsTable from './AdminVersionsTable';
 import AdminVersionForm from './AdminVersionForm';
 import { AdminSoftwareVersion, Software } from '../../../services/api'; // Adjust path as needed
 import { deleteAdminVersion, fetchSoftware } from '../../../services/api'; // Adjust path as needed
-import ConfirmationModal from '../../ConfirmationModal'; // Adjust path as needed
-import Modal from '../../Modal'; // Generic Modal for the form
+import ConfirmationModal from '../../shared/ConfirmationModal'; // Adjust path as needed
+import Modal from '../../shared/Modal'; // Generic Modal for the form
 
 const AdminVersionsPage: React.FC = () => {
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
@@ -153,7 +153,7 @@ const AdminVersionsPage: React.FC = () => {
           onConfirm={confirmDelete}
           onCancel={cancelDelete}
           confirmButtonText="Delete"
-          confirmButtonColor="red"
+          confirmButtonVariant="danger" // Changed from confirmButtonColor
         />
       )}
     </div>

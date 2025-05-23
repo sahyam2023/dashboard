@@ -121,7 +121,7 @@ def admin_required(fn):
         current_user_id_str = get_jwt_identity()
         try:
             user = find_user_by_id(int(current_user_id_str))
-            if not user or user['role'] != 'admin':
+            if not user or user['role'] not in ['admin', 'super_admin']: # Modified line
                 return jsonify(msg="Administration rights required."), 403
         except ValueError:
              return jsonify(msg="Invalid user identity in token."), 400

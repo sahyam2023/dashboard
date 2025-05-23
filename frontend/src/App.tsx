@@ -12,6 +12,8 @@ import RegisterPage from './views/RegisterPage';
 
 // Optional: You might create this later for better route protection
 // import ProtectedRoute from './components/ProtectedRoute';
+import UserProfilePage from './views/UserProfilePage'; // Import UserProfilePage
+import SuperAdminDashboard from './views/SuperAdminDashboard'; // Import SuperAdminDashboard
 
 function App() {
   return (
@@ -29,6 +31,8 @@ function App() {
           <Route path="links" element={<LinksView />} />
           <Route path="misc" element={<MiscView />} />
           <Route path="search" element={<SearchResultsView />} />
+          <Route path="profile" element={<UserProfilePage />} />
+          <Route path="superadmin" element={<SuperAdminDashboard />} /> {/* Add SuperAdminDashboard route */}
           
           {/* NEW: Route for the Upload Page */}
           {/* For now, UploadPage handles its own auth check display.

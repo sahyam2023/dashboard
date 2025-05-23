@@ -83,10 +83,10 @@ def close_db(exception):
         db.close()
 
 def find_user_by_id(user_id):
-    return get_db().execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    return get_db().execute("SELECT id, username, password_hash, email, role, is_active, created_at FROM users WHERE id = ?", (user_id,)).fetchone()
 
 def find_user_by_username(username):
-    return get_db().execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+    return get_db().execute("SELECT id, username, password_hash, email, role, is_active, created_at FROM users WHERE username = ?", (username,)).fetchone()
 
 def find_user_by_email(email):
     if not email or not email.strip(): return None
@@ -127,6 +127,162 @@ def admin_required(fn):
         return fn(*args, **kwargs)
     return wrapper
 
+# --- Super Admin Authorization Decorator ---
+def super_admin_required(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        verify_jwt_in_request()
+        current_user_id_str = get_jwt_identity()
+        try:
+            user = find_user_by_id(int(current_user_id_str))
+            if not user or user['role'] != 'super_admin':
+                return jsonify(msg="Super administration rights required."), 403
+        except ValueError:
+             return jsonify(msg="Invalid user identity in token."), 400
+        return fn(*args, **kwargs)
+    return wrapper
+
+# --- Super Admin User Management Endpoints ---
+@app.route('/api/superadmin/users', methods=['GET'])
+@jwt_required()
+@super_admin_required
+def list_users():
+    db = get_db()
+    users_cursor = db.execute("SELECT id, username, email, role, is_active FROM users ORDER BY username")
+    users_list = [dict(row) for row in users_cursor.fetchall()]
+    return jsonify(users_list), 200
+
+@app.route('/api/superadmin/users/<int:user_id>/role', methods=['PUT'])
+@jwt_required()
+@super_admin_required
+def change_user_role(user_id):
+    db = get_db()
+    target_user = find_user_by_id(user_id)
+    if not target_user:
+        return jsonify(msg="User not found."), 404
+
+    data = request.get_json()
+    if not data or 'new_role' not in data:
+        return jsonify(msg="Missing new_role in request data."), 400
+    
+    new_role = data['new_role']
+    valid_roles = ['user', 'admin', 'super_admin']
+    if new_role not in valid_roles:
+        return jsonify(msg=f"Invalid role. Must be one of: {', '.join(valid_roles)}."), 400
+
+    current_super_admin_id_str = get_jwt_identity()
+    current_super_admin_id = int(current_super_admin_id_str)
+
+    if user_id == current_super_admin_id and new_role != 'super_admin':
+        # Self-demotion check
+        super_admin_count_cursor = db.execute("SELECT COUNT(*) as count FROM users WHERE role = 'super_admin'")
+        super_admin_count = super_admin_count_cursor.fetchone()['count']
+        if super_admin_count <= 1:
+            return jsonify(msg="Cannot demote the only super admin."), 400
+    
+    try:
+        db.execute("UPDATE users SET role = ? WHERE id = ?", (new_role, user_id))
+        db.commit()
+        updated_user = find_user_by_id(user_id) # Re-fetch to get the latest data
+        return jsonify(id=updated_user['id'], username=updated_user['username'], email=updated_user['email'], role=updated_user['role'], is_active=updated_user['is_active']), 200
+    except Exception as e:
+        app.logger.error(f"Error changing role for user {user_id}: {e}")
+        db.rollback()
+        return jsonify(msg="Failed to change user role due to a server error."), 500
+
+@app.route('/api/superadmin/users/<int:user_id>/deactivate', methods=['PUT'])
+@jwt_required()
+@super_admin_required
+def deactivate_user(user_id):
+    db = get_db()
+    target_user = find_user_by_id(user_id)
+    if not target_user:
+        return jsonify(msg="User not found."), 404
+
+    current_super_admin_id_str = get_jwt_identity()
+    current_super_admin_id = int(current_super_admin_id_str)
+
+    if user_id == current_super_admin_id:
+        # Self-deactivation check
+        active_super_admin_count_cursor = db.execute("SELECT COUNT(*) as count FROM users WHERE role = 'super_admin' AND is_active = TRUE")
+        active_super_admin_count = active_super_admin_count_cursor.fetchone()['count']
+        if active_super_admin_count <= 1:
+            return jsonify(msg="Cannot deactivate the only active super admin."), 400
+    
+    try:
+        db.execute("UPDATE users SET is_active = FALSE WHERE id = ?", (user_id,))
+        db.commit()
+        updated_user = find_user_by_id(user_id)
+        return jsonify(id=updated_user['id'], username=updated_user['username'], email=updated_user['email'], role=updated_user['role'], is_active=updated_user['is_active']), 200
+    except Exception as e:
+        app.logger.error(f"Error deactivating user {user_id}: {e}")
+        db.rollback()
+        return jsonify(msg="Failed to deactivate user due to a server error."), 500
+
+@app.route('/api/superadmin/users/<int:user_id>/activate', methods=['PUT'])
+@jwt_required()
+@super_admin_required
+def activate_user(user_id):
+    db = get_db()
+    target_user = find_user_by_id(user_id)
+    if not target_user:
+        return jsonify(msg="User not found."), 404
+
+    # No self-activation check needed as activating oneself has no negative consequence
+    # unlike deactivating or demoting the last super admin.
+
+    try:
+        db.execute("UPDATE users SET is_active = TRUE WHERE id = ?", (user_id,)) # Use TRUE for boolean
+        db.commit()
+        updated_user = find_user_by_id(user_id)
+        app.logger.info(f"Super admin {get_jwt_identity()} activated user {user_id}.")
+        return jsonify(id=updated_user['id'], username=updated_user['username'], email=updated_user['email'], role=updated_user['role'], is_active=updated_user['is_active']), 200
+    except Exception as e:
+        app.logger.error(f"Error activating user {user_id}: {e}")
+        db.rollback()
+        return jsonify(msg="Failed to activate user due to a server error."), 500
+
+@app.route('/api/superadmin/users/<int:user_id>/delete', methods=['DELETE'])
+@jwt_required()
+@super_admin_required
+def delete_user(user_id):
+    db = get_db()
+    target_user = find_user_by_id(user_id)
+    if not target_user:
+        return jsonify(msg="User not found."), 404
+
+    current_super_admin_id_str = get_jwt_identity()
+    current_super_admin_id = int(current_super_admin_id_str)
+
+    if user_id == current_super_admin_id:
+        # Self-deletion check (ensure there's another active super admin)
+        # This logic is similar to deactivation but ensures if this is the *only* super admin
+        # (active or not), they cannot delete themselves if they are the last one.
+        # More strictly, if they are the last *active* one.
+        active_super_admin_count_cursor = db.execute("SELECT COUNT(*) as count FROM users WHERE role = 'super_admin' AND is_active = TRUE")
+        active_super_admin_count = active_super_admin_count_cursor.fetchone()['count']
+        if active_super_admin_count <= 1 and target_user['is_active']: # If target is active and is the last active SA
+             return jsonify(msg="Cannot delete the only active super admin."), 400
+        # If the target is inactive, and is a super admin, allow deletion even if last SA.
+
+    try:
+        # Attempt direct deletion.
+        # Note: Foreign key constraints might prevent this if the user is referenced elsewhere.
+        # The schema uses ON DELETE for some FKs, but created_by_user_id typically won't have ON DELETE CASCADE.
+        # This will raise sqlite3.IntegrityError if FK constraints are violated.
+        db.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        db.commit()
+        app.logger.info(f"Super admin {current_super_admin_id} deleted user {user_id}.")
+        return jsonify(msg="User deleted successfully."), 200
+    except sqlite3.IntegrityError as e:
+        db.rollback()
+        app.logger.error(f"Error deleting user {user_id} due to foreign key constraint: {e}")
+        return jsonify(msg=f"Cannot delete user: This user is referenced by other records in the database. (Error: {e})"), 409 # 409 Conflict
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"Error deleting user {user_id}: {e}")
+        return jsonify(msg="Failed to delete user due to a server error."), 500
+
 # --- Authentication Endpoints ---
 @app.route('/api/auth/register', methods=['POST'])
 def register():
@@ -151,9 +307,92 @@ def login():
     if not username or not password: return jsonify(msg="Missing username or password"), 400
     user = find_user_by_username(username)
     if user and bcrypt.check_password_hash(user['password_hash'], password):
+        if not user['is_active']:
+            return jsonify(msg="Account deactivated."), 403
         access_token = create_access_token(identity=str(user['id'])) # Ensure identity is string
         return jsonify(access_token=access_token, username=user['username'], role=user['role']), 200
     return jsonify(msg="Bad username or password"), 401
+
+# --- User Profile Management Endpoints ---
+@app.route('/api/user/profile/change-password', methods=['POST'])
+@jwt_required()
+def change_password():
+    current_user_id_str = get_jwt_identity()
+    try:
+        current_user_id = int(current_user_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid user identity in token."), 400
+
+    user = find_user_by_id(current_user_id)
+    if not user:
+        return jsonify(msg="User not found."), 404
+
+    data = request.get_json()
+    if not data:
+        return jsonify(msg="Missing JSON data"), 400
+
+    current_password = data.get('current_password')
+    new_password = data.get('new_password')
+
+    if not current_password or not new_password:
+        return jsonify(msg="Missing current_password or new_password"), 400
+
+    if not bcrypt.check_password_hash(user['password_hash'], current_password):
+        return jsonify(msg="Incorrect current password."), 401
+
+    hashed_new_password = bcrypt.generate_password_hash(new_password).decode('utf-8')
+    
+    try:
+        db = get_db()
+        db.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hashed_new_password, current_user_id))
+        db.commit()
+        return jsonify(msg="Password updated successfully."), 200
+    except Exception as e:
+        app.logger.error(f"Error updating password for user {current_user_id}: {e}")
+        return jsonify(msg="Failed to update password due to a server error."), 500
+
+@app.route('/api/user/profile/update-email', methods=['POST'])
+@jwt_required()
+def update_email():
+    current_user_id_str = get_jwt_identity()
+    try:
+        current_user_id = int(current_user_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid user identity in token."), 400
+
+    user = find_user_by_id(current_user_id)
+    if not user:
+        return jsonify(msg="User not found."), 404
+
+    data = request.get_json()
+    if not data:
+        return jsonify(msg="Missing JSON data"), 400
+
+    new_email = data.get('new_email')
+    password = data.get('password')
+
+    if not new_email or not password:
+        return jsonify(msg="Missing new_email or password"), 400
+    
+    new_email = new_email.strip()
+    if not new_email: # Check if email is empty after stripping
+        return jsonify(msg="New email cannot be empty."), 400
+
+    if not bcrypt.check_password_hash(user['password_hash'], password):
+        return jsonify(msg="Incorrect password."), 401
+
+    existing_user_with_email = find_user_by_email(new_email)
+    if existing_user_with_email and existing_user_with_email['id'] != current_user_id:
+        return jsonify(msg="Email already in use."), 409
+    
+    try:
+        db = get_db()
+        db.execute("UPDATE users SET email = ? WHERE id = ?", (new_email, current_user_id))
+        db.commit()
+        return jsonify(msg="Email updated successfully."), 200
+    except Exception as e:
+        app.logger.error(f"Error updating email for user {current_user_id}: {e}")
+        return jsonify(msg="Failed to update email due to a server error."), 500
 
 # --- Public GET Endpoints (Read-only data for dashboard) ---
 @app.route('/api/software', methods=['GET'])

@@ -13,7 +13,7 @@ interface HeaderProps {
 const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch }) => {
   const [searchValue, setSearchValue] = useState('');
   const [isFocused, setIsFocused] = useState(false);
-  const { isAuthenticated, username, logout } = useAuth(); // <-- Get auth state and functions
+  const { isAuthenticated, username, userRole, logout } = useAuth(); // <-- Get auth state, role and functions
   const navigate = useNavigate(); // <-- Hook for navigation
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -92,11 +92,33 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
         <div className="flex items-center space-x-3 sm:space-x-4">
           {isAuthenticated ? (
             <>
-              {/* Optional: Display Username */}
-              <span className="hidden sm:flex items-center text-sm font-medium text-gray-700">
+              {/* User Profile Link */}
+              <Link
+                to="/profile"
+                className="hidden sm:flex items-center text-sm font-medium text-gray-700 hover:text-blue-600"
+                title="User Profile"
+              >
                 <User size={16} className="mr-1.5 text-gray-500" />
                 {username}
-              </span>
+              </Link>
+              {/* Mobile User Profile Icon Link */}
+              <Link
+                to="/profile"
+                className="sm:hidden p-2 rounded-md text-gray-500 hover:text-blue-600 hover:bg-blue-50"
+                aria-label="User Profile"
+              >
+                <User size={20} />
+              </Link>
+              {/* Super Admin Link */}
+              {userRole === 'super_admin' && (
+                <Link
+                  to="/superadmin"
+                  className="px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 hidden sm:inline-flex items-center"
+                  title="Super Admin Dashboard"
+                >
+                  Super Admin
+                </Link>
+              )}
               {/* Logout Button */}
               <button
                 onClick={handleLogout}

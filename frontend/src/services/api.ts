@@ -12,7 +12,34 @@ import {
   MiscCategory, AddCategoryPayload, EditCategoryPayload, // EditCategoryPayload is used
   MiscFile
   // EditMiscFilePayload is not used if all misc file edits are via FormData
-} from '../types';
+  // User, ChangePasswordPayload, UpdateEmailPayload, UpdateUserRolePayload will be defined below
+} from '../types'; // Assuming '../types' will eventually export these
+
+// --- Added Type Definitions ---
+// If types.ts is not available, define them here for now.
+// It's better to have these in a dedicated types.ts file.
+export interface User {
+  id: number;
+  username: string;
+  email: string | null;
+  role: 'user' | 'admin' | 'super_admin';
+  is_active: boolean;
+}
+
+export interface ChangePasswordPayload {
+  current_password: string;
+  new_password: string;
+}
+
+export interface UpdateEmailPayload {
+  new_email: string;
+  password: string;
+}
+
+export interface UpdateUserRolePayload {
+  new_role: 'user' | 'admin' | 'super_admin';
+}
+// --- End of Added Type Definitions ---
 
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
@@ -498,4 +525,104 @@ export async function deleteAdminMiscFile(fileId: number): Promise<{ msg: string
     });
     return handleApiError(response, 'Failed to delete misc file');
   } catch (error) { console.error('Error deleting misc file:', error); throw error; }
+}
+
+// --- User Profile Management Functions ---
+
+export async function changePassword(payload: ChangePasswordPayload): Promise<{ msg: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/user/profile/change-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify(payload),
+    });
+    return handleApiError(response, 'Failed to change password');
+  } catch (error) {
+    console.error('Error changing password:', error);
+    throw error;
+  }
+}
+
+export async function updateEmail(payload: UpdateEmailPayload): Promise<{ msg: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/user/profile/update-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify(payload),
+    });
+    return handleApiError(response, 'Failed to update email');
+  } catch (error) {
+    console.error('Error updating email:', error);
+    throw error;
+  }
+}
+
+// --- Super Admin User Management Functions ---
+
+export async function listUsers(): Promise<User[]> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/superadmin/users`, {
+      method: 'GET',
+      headers: { ...getAuthHeader() },
+    });
+    return handleApiError(response, 'Failed to list users');
+  } catch (error) {
+    console.error('Error listing users:', error);
+    throw error;
+  }
+}
+
+export async function updateUserRole(userId: number, payload: UpdateUserRolePayload): Promise<User> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/superadmin/users/${userId}/role`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify(payload),
+    });
+    return handleApiError(response, 'Failed to update user role');
+  } catch (error) {
+    console.error('Error updating user role:', error);
+    throw error;
+  }
+}
+
+export async function deactivateUser(userId: number): Promise<{ msg: string } | User> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/superadmin/users/${userId}/deactivate`, {
+      method: 'PUT',
+      headers: { ...getAuthHeader() }, // No body needed for deactivate
+    });
+    return handleApiError(response, 'Failed to deactivate user');
+  } catch (error) {
+    console.error('Error deactivating user:', error);
+    throw error;
+  }
+}
+
+export async function activateUser(userId: number): Promise<{ msg: string } | User> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/superadmin/users/${userId}/activate`, {
+      method: 'PUT',
+      headers: { ...getAuthHeader() }, // No body needed for activate
+    });
+    // Assuming the backend for activateUser will return a similar response structure to deactivateUser
+    // or the updated user object.
+    return handleApiError(response, 'Failed to activate user');
+  } catch (error) {
+    console.error('Error activating user:', error);
+    throw error;
+  }
+}
+
+export async function deleteUser(userId: number): Promise<{ msg: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/superadmin/users/${userId}/delete`, {
+      method: 'DELETE',
+      headers: { ...getAuthHeader() },
+    });
+    return handleApiError(response, 'Failed to delete user');
+  } catch (error) {
+    console.error('Error deleting user:', error);
+    throw error;
+  }
 }

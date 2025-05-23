@@ -176,7 +176,7 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
     toast.error("Please correct the errors highlighted in the form.");
   };
   
-  if (!isAuthenticated || role !== 'admin') {
+  if (!isAuthenticated || !['admin', 'super_admin'].includes(role)) {
       return null;
   }
 

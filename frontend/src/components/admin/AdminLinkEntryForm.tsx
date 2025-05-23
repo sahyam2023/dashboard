@@ -320,7 +320,7 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
   };
 
 
-  if (!isAuthenticated || role !== 'admin') return null;
+  if (!isAuthenticated || !['admin', 'super_admin'].includes(role)) return null;
 
   return (
     // Use RHF handleSubmit, pass onSubmit and optional onFormError

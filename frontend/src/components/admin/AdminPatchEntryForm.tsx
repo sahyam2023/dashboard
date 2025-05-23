@@ -302,7 +302,7 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
     toast.error("Please correct the errors highlighted in the form.");
   };
 
-  if (!isAuthenticated || role !== 'admin') return null;
+  if (!isAuthenticated || !['admin', 'super_admin'].includes(role)) return null;
   // console.log("Current softwareList:", softwareList); // Removed console.log
 
   return (

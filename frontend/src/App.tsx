@@ -14,8 +14,12 @@ import RegisterPage from './views/RegisterPage';
 // import ProtectedRoute from './components/ProtectedRoute';
 import UserProfilePage from './views/UserProfilePage'; // Import UserProfilePage
 import SuperAdminDashboard from './views/SuperAdminDashboard'; // Import SuperAdminDashboard
+import AdminVersionsPage from './components/admin/versions/AdminVersionsPage'; // Import AdminVersionsPage
+import { useAuth } from './context/AuthContext'; // Import useAuth
 
 function App() {
+  const auth = useAuth(); // Get auth context
+
   return (
     <BrowserRouter>
       <Routes>
@@ -32,7 +36,28 @@ function App() {
           <Route path="misc" element={<MiscView />} />
           <Route path="search" element={<SearchResultsView />} />
           <Route path="profile" element={<UserProfilePage />} />
-          <Route path="superadmin" element={<SuperAdminDashboard />} /> {/* Add SuperAdminDashboard route */}
+          
+          {/* Admin and Super Admin Routes */}
+          <Route 
+            path="superadmin" 
+            element={
+              auth.isAuthenticated && auth.role === 'super_admin' ? (
+                <SuperAdminDashboard />
+              ) : (
+                <Navigate to="/login" replace /> 
+              )
+            } 
+          />
+          <Route 
+            path="/admin/versions" 
+            element={
+              auth.isAuthenticated && (auth.role === 'admin' || auth.role === 'super_admin') ? (
+                <AdminVersionsPage />
+              ) : (
+                <Navigate to="/login" replace />
+              )
+            }
+          />
           
           {/* NEW: Route for the Upload Page */}
           {/* For now, UploadPage handles its own auth check display.

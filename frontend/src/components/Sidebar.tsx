@@ -7,6 +7,7 @@ import {
   Link as LinkIcon,
   MoreHorizontal,
   UploadCloud as UploadIcon, // <-- Import an icon for Upload
+  Settings as SettingsIcon, // Icon for "Manage Versions"
   // LogIn as LogInIcon, // Keep if you want login/register here, but usually in Header
   // UserPlus as RegisterIcon // Keep if you want login/register here
 } from 'lucide-react';
@@ -20,12 +21,13 @@ interface NavItemConfig {
   path: string;
   label: string;
   icon: (isCollapsed: boolean) => React.ReactNode; // Icon can now depend on collapsed state
-  requiresAuth?: boolean; // New property to indicate if auth is needed
-  publicOnly?: boolean; // New property to show only when not authenticated
+  requiresAuth?: boolean; 
+  publicOnly?: boolean; 
+  roles?: Array<'admin' | 'super_admin' | 'user'>; // Specify roles that can see this link
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
-  const { isAuthenticated } = useAuth(); // <-- Get authentication status
+  const { isAuthenticated, role } = useAuth(); // <-- Get authentication status and role
 
   const navItems: NavItemConfig[] = [
     {
@@ -54,6 +56,14 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       label: 'Misc',
       icon: (isCollapsed) => <MoreHorizontal size={isCollapsed ? 24 : 20} />,
     },
+    // Admin-specific links
+    {
+      path: '/admin/versions',
+      label: 'Manage Versions',
+      icon: (isCollapsed) => <SettingsIcon size={isCollapsed ? 24 : 20} />,
+      requiresAuth: true,
+      roles: ['admin', 'super_admin'], // Only for admin and super_admin
+    },
     // Example: Login/Register links in sidebar (though typically in header)
     // {
     //   path: '/login',
@@ -63,13 +73,18 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
     // },
   ];
 
-  // Filter items based on authentication status
+  // Filter items based on authentication status and role
   const visibleNavItems = navItems.filter(item => {
+    if (item.publicOnly && isAuthenticated) {
+      return false; // Hide if public only and user is authenticated
+    }
     if (item.requiresAuth && !isAuthenticated) {
       return false; // Hide if requires auth and user is not authenticated
     }
-    if (item.publicOnly && isAuthenticated) {
-      return false; // Hide if public only and user is authenticated
+    if (item.roles && (!isAuthenticated || (role && !item.roles.includes(role)))) {
+      // Hide if item has role requirements, and user is not authenticated,
+      // or user's role is not in the allowed roles for the item.
+      return false;
     }
     return true; // Otherwise, show the item
   });

@@ -95,8 +95,8 @@ const MiscView: React.FC = () => {
       setTotalMiscFiles(response.total_misc_files);
       setCurrentPage(response.page);
       setItemsPerPage(response.per_page);
-    } catch (err: any)
-      setMiscFiles([]); // Add this line
+    } catch (err: any) { // Added opening brace
+      setMiscFiles([]); 
       setErrorFiles(err.message || 'Failed to fetch miscellaneous files.');
       console.error("Error fetching misc files:", err);
     } finally {

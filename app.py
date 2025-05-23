@@ -2,6 +2,7 @@
 import os
 import uuid
 import sqlite3
+import math # Added for math.ceil
 from functools import wraps
 from flask import Flask, request, g, jsonify, send_from_directory
 from flask_cors import CORS
@@ -148,9 +149,64 @@ def super_admin_required(fn):
 @super_admin_required
 def list_users():
     db = get_db()
-    users_cursor = db.execute("SELECT id, username, email, role, is_active FROM users ORDER BY username")
-    users_list = [dict(row) for row in users_cursor.fetchall()]
-    return jsonify(users_list), 200
+
+    # Get and validate query parameters
+    page = request.args.get('page', default=1, type=int)
+    per_page = request.args.get('per_page', default=10, type=int)
+    sort_by = request.args.get('sort_by', default='username', type=str)
+    sort_order = request.args.get('sort_order', default='asc', type=str).lower()
+
+    if page <= 0:
+        page = 1
+    if per_page <= 0:
+        per_page = 10
+    
+    allowed_sort_by = ['id', 'username', 'email', 'role', 'is_active', 'created_at']
+    if sort_by not in allowed_sort_by:
+        sort_by = 'username' # Default or return 400
+        # return jsonify(msg=f"Invalid sort_by parameter. Allowed values: {', '.join(allowed_sort_by)}"), 400
+        
+    if sort_order not in ['asc', 'desc']:
+        sort_order = 'asc' # Default or return 400
+        # return jsonify(msg="Invalid sort_order parameter. Allowed values: 'asc', 'desc'."), 400
+
+    # Database Query for Total Count
+    try:
+        total_users_cursor = db.execute("SELECT COUNT(*) as count FROM users")
+        total_users = total_users_cursor.fetchone()['count']
+    except Exception as e:
+        app.logger.error(f"Error fetching total user count: {e}")
+        return jsonify(msg="Error fetching user count."), 500
+
+    # Calculate Pagination Details
+    total_pages = math.ceil(total_users / per_page) if total_users > 0 else 1
+    offset = (page - 1) * per_page
+
+    # Ensure page is not out of bounds
+    if page > total_pages and total_users > 0 : # if total_users is 0, page will be 1, total_pages will be 1
+        page = total_pages
+        offset = (page - 1) * per_page
+
+
+    # Database Query for Paginated Users
+    # Ensure sort_by is safe before injecting into the query string
+    # The allowlist check above makes it safe.
+    query_string = f"SELECT id, username, email, role, is_active, created_at FROM users ORDER BY {sort_by} {sort_order.upper()} LIMIT ? OFFSET ?"
+    
+    try:
+        users_cursor = db.execute(query_string, (per_page, offset))
+        users_list = [dict(row) for row in users_cursor.fetchall()]
+    except Exception as e:
+        app.logger.error(f"Error fetching paginated users: {e}")
+        return jsonify(msg="Error fetching users."), 500
+
+    return jsonify({
+        "users": users_list,
+        "page": page,
+        "per_page": per_page,
+        "total_users": total_users,
+        "total_pages": total_pages
+    }), 200
 
 @app.route('/api/superadmin/users/<int:user_id>/role', methods=['PUT'])
 @jwt_required()
@@ -411,59 +467,272 @@ def get_versions_for_software_api():
 
 @app.route('/api/documents', methods=['GET'])
 def get_all_documents_api():
-    # Add filtering by software_id
+    db = get_db()
+
+    # Get and validate query parameters for pagination and sorting
+    page = request.args.get('page', default=1, type=int)
+    per_page = request.args.get('per_page', default=10, type=int)
+    sort_by_param = request.args.get('sort_by', default='doc_name', type=str)
+    sort_order = request.args.get('sort_order', default='asc', type=str).lower()
+
+    # Get existing filter parameters
     software_id_filter = request.args.get('software_id', type=int)
-    query = "SELECT d.*, s.name as software_name FROM documents d JOIN software s ON d.software_id = s.id"
+
+    if page <= 0:
+        page = 1
+    if per_page <= 0:
+        per_page = 10
+    
+    # Mapping for sort_by parameter to actual DB columns including table alias
+    allowed_sort_by_map = {
+        'id': 'd.id',
+        'doc_name': 'd.doc_name',
+        'software_name': 's.name', # s.name is aliased as software_name in SELECT
+        'doc_type': 'd.doc_type',
+        'created_at': 'd.created_at',
+        'updated_at': 'd.updated_at'
+    }
+    
+    sort_by_column = allowed_sort_by_map.get(sort_by_param, 'd.doc_name') # Default to d.doc_name
+
+    if sort_order not in ['asc', 'desc']:
+        sort_order = 'asc'
+
+    # Construct Base Query and Parameters for Filtering
+    base_query_select = "SELECT d.id, d.software_id, d.doc_name, d.description, d.doc_type, d.is_external_link, d.download_link, d.stored_filename, d.original_filename_ref, d.file_size, d.file_type, d.created_by_user_id, d.created_at, d.updated_by_user_id, d.updated_at, s.name as software_name"
+    base_query_from = "FROM documents d JOIN software s ON d.software_id = s.id"
+    
+    filter_conditions = []
     params = []
+
     if software_id_filter:
-        query += " WHERE d.software_id = ?"
+        filter_conditions.append("d.software_id = ?")
         params.append(software_id_filter)
-    query += " ORDER BY s.name, d.doc_name"
-    documents = get_db().execute(query, params).fetchall()
-    return jsonify([dict(row) for row in documents])
+    
+    where_clause = ""
+    if filter_conditions:
+        where_clause = " WHERE " + " AND ".join(filter_conditions)
+
+    # Database Query for Total Count
+    count_query = f"SELECT COUNT(d.id) as count {base_query_from}{where_clause}"
+    try:
+        total_documents_cursor = db.execute(count_query, tuple(params)) # Use tuple for params
+        total_documents = total_documents_cursor.fetchone()['count']
+    except Exception as e:
+        app.logger.error(f"Error fetching total document count: {e}")
+        return jsonify(msg="Error fetching document count."), 500
+
+    # Calculate Pagination Details
+    total_pages = math.ceil(total_documents / per_page) if total_documents > 0 else 1
+    offset = (page - 1) * per_page
+
+    if page > total_pages and total_documents > 0:
+        page = total_pages
+        offset = (page - 1) * per_page
+    
+    # Database Query for Paginated Documents
+    final_query = f"{base_query_select} {base_query_from}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
+    
+    # Add pagination params to the list of SQL parameters
+    paginated_params = list(params) # Create a copy
+    paginated_params.extend([per_page, offset])
+    
+    try:
+        documents_cursor = db.execute(final_query, tuple(paginated_params)) # Use tuple for params
+        documents_list = [dict(row) for row in documents_cursor.fetchall()]
+    except Exception as e:
+        app.logger.error(f"Error fetching paginated documents: {e}")
+        return jsonify(msg="Error fetching documents."), 500
+
+    return jsonify({
+        "documents": documents_list,
+        "page": page,
+        "per_page": per_page,
+        "total_documents": total_documents,
+        "total_pages": total_pages
+    }), 200
 
 @app.route('/api/patches', methods=['GET'])
 def get_all_patches_api():
-    software_id_filter = request.args.get('software_id', type=int) # For filtering by parent software
-    query = """
-        SELECT p.*, 
-               s.name as software_name, 
-               s.id as software_id,  
-               v.version_number,
-               v.id as version_id    
-        FROM patches p
-        JOIN versions v ON p.version_id = v.id
-        JOIN software s ON v.software_id = s.id
-    """
+    db = get_db()
+
+    # Get and validate query parameters for pagination and sorting
+    page = request.args.get('page', default=1, type=int)
+    per_page = request.args.get('per_page', default=10, type=int)
+    sort_by_param = request.args.get('sort_by', default='patch_name', type=str) # Default to patch_name
+    sort_order = request.args.get('sort_order', default='asc', type=str).lower()
+
+    # Get existing filter parameters
+    software_id_filter = request.args.get('software_id', type=int)
+
+    if page <= 0:
+        page = 1
+    if per_page <= 0:
+        per_page = 10
+    
+    # Mapping for sort_by parameter to actual DB columns including table alias
+    allowed_sort_by_map = {
+        'id': 'p.id',
+        'patch_name': 'p.patch_name',
+        'software_name': 's.name',
+        'version_number': 'v.version_number',
+        'release_date': 'p.release_date',
+        'created_at': 'p.created_at',
+        'updated_at': 'p.updated_at'
+    }
+    
+    sort_by_column = allowed_sort_by_map.get(sort_by_param, 'p.patch_name') # Default to p.patch_name
+
+    if sort_order not in ['asc', 'desc']:
+        sort_order = 'asc'
+
+    # Construct Base Query and Parameters for Filtering
+    base_query_select = "SELECT p.id, p.version_id, p.patch_name, p.description, p.release_date, p.is_external_link, p.download_link, p.stored_filename, p.original_filename_ref, p.file_size, p.file_type, p.created_by_user_id, p.created_at, p.updated_by_user_id, p.updated_at, s.name as software_name, s.id as software_id, v.version_number"
+    base_query_from = "FROM patches p JOIN versions v ON p.version_id = v.id JOIN software s ON v.software_id = s.id"
+    
+    filter_conditions = []
     params = []
+
     if software_id_filter:
-        query += " WHERE s.id = ?"
+        filter_conditions.append("s.id = ?") # Filter by software_id from the software table
         params.append(software_id_filter)
-    query += " ORDER BY s.name, v.release_date DESC, v.version_number DESC, p.patch_name"
-    patches = get_db().execute(query, params).fetchall()
-    return jsonify([dict(row) for row in patches])
+    
+    where_clause = ""
+    if filter_conditions:
+        where_clause = " WHERE " + " AND ".join(filter_conditions)
+
+    # Database Query for Total Count
+    count_query = f"SELECT COUNT(p.id) as count {base_query_from}{where_clause}"
+    try:
+        total_patches_cursor = db.execute(count_query, tuple(params))
+        total_patches = total_patches_cursor.fetchone()['count']
+    except Exception as e:
+        app.logger.error(f"Error fetching total patch count: {e}")
+        return jsonify(msg="Error fetching patch count."), 500
+
+    # Calculate Pagination Details
+    total_pages = math.ceil(total_patches / per_page) if total_patches > 0 else 1
+    offset = (page - 1) * per_page
+
+    if page > total_pages and total_patches > 0:
+        page = total_pages
+        offset = (page - 1) * per_page
+    
+    # Database Query for Paginated Patches
+    # Default sort order for patches as per original implementation if no sort_by is specified by user
+    # The original was: ORDER BY s.name, v.release_date DESC, v.version_number DESC, p.patch_name
+    # We will use the user-specified sort_by and sort_order. If not specified, it defaults to p.patch_name asc.
+    final_query = f"{base_query_select} {base_query_from}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
+    
+    paginated_params = list(params)
+    paginated_params.extend([per_page, offset])
+    
+    try:
+        patches_cursor = db.execute(final_query, tuple(paginated_params))
+        patches_list = [dict(row) for row in patches_cursor.fetchall()]
+    except Exception as e:
+        app.logger.error(f"Error fetching paginated patches: {e}")
+        return jsonify(msg="Error fetching patches."), 500
+
+    return jsonify({
+        "patches": patches_list,
+        "page": page,
+        "per_page": per_page,
+        "total_patches": total_patches,
+        "total_pages": total_pages
+    }), 200
 
 @app.route('/api/links', methods=['GET'])
 def get_all_links_api():
+    db = get_db()
+
+    # Get and validate query parameters for pagination and sorting
+    page = request.args.get('page', default=1, type=int)
+    per_page = request.args.get('per_page', default=10, type=int)
+    sort_by_param = request.args.get('sort_by', default='title', type=str) 
+    sort_order = request.args.get('sort_order', default='asc', type=str).lower()
+
+    # Get existing filter parameters
     software_id_filter = request.args.get('software_id', type=int)
     version_id_filter = request.args.get('version_id', type=int)
-    query = """
-        SELECT l.*, s.name as software_name, v.version_number as version_name
-        FROM links l
-        JOIN software s ON l.software_id = s.id
-        LEFT JOIN versions v ON l.version_id = v.id
-        WHERE 1=1
-    """ # Using LEFT JOIN for version as it's optional
+
+    if page <= 0:
+        page = 1
+    if per_page <= 0:
+        per_page = 10
+    
+    # Mapping for sort_by parameter to actual DB columns including table alias
+    allowed_sort_by_map = {
+        'id': 'l.id',
+        'title': 'l.title',
+        'software_name': 's.name',
+        'version_name': 'v.version_number', # Note: version_name in JSON, version_number in DB for v table
+        'created_at': 'l.created_at',
+        'updated_at': 'l.updated_at'
+    }
+    
+    sort_by_column = allowed_sort_by_map.get(sort_by_param, 'l.title') # Default to l.title
+
+    if sort_order not in ['asc', 'desc']:
+        sort_order = 'asc'
+
+    # Construct Base Query and Parameters for Filtering
+    base_query_select = "SELECT l.id, l.title, l.description, l.software_id, l.version_id, l.is_external_link, l.url, l.stored_filename, l.original_filename_ref, l.file_size, l.file_type, l.created_by_user_id, l.created_at, l.updated_by_user_id, l.updated_at, s.name as software_name, v.version_number as version_name"
+    base_query_from = "FROM links l JOIN software s ON l.software_id = s.id LEFT JOIN versions v ON l.version_id = v.id"
+    
+    filter_conditions = []
     params = []
+
     if software_id_filter:
-        query += " AND l.software_id = ?"
+        filter_conditions.append("l.software_id = ?")
         params.append(software_id_filter)
     if version_id_filter:
-        query += " AND l.version_id = ?"
+        filter_conditions.append("l.version_id = ?")
         params.append(version_id_filter)
-    query += " ORDER BY s.name, v.version_number, l.title"
-    links = get_db().execute(query, params).fetchall()
-    return jsonify([dict(row) for row in links])
+    
+    where_clause = ""
+    if filter_conditions:
+        where_clause = " WHERE " + " AND ".join(filter_conditions)
+
+    # Database Query for Total Count
+    count_query = f"SELECT COUNT(l.id) as count {base_query_from}{where_clause}"
+    try:
+        total_links_cursor = db.execute(count_query, tuple(params))
+        total_links = total_links_cursor.fetchone()['count']
+    except Exception as e:
+        app.logger.error(f"Error fetching total link count: {e}")
+        return jsonify(msg="Error fetching link count."), 500
+
+    # Calculate Pagination Details
+    total_pages = math.ceil(total_links / per_page) if total_links > 0 else 1
+    offset = (page - 1) * per_page
+
+    if page > total_pages and total_links > 0:
+        page = total_pages
+        offset = (page - 1) * per_page
+    
+    # Database Query for Paginated Links
+    # Original sort: ORDER BY s.name, v.version_number, l.title
+    # Now using user-defined sort or default l.title
+    final_query = f"{base_query_select} {base_query_from}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
+    
+    paginated_params = list(params)
+    paginated_params.extend([per_page, offset])
+    
+    try:
+        links_cursor = db.execute(final_query, tuple(paginated_params))
+        links_list = [dict(row) for row in links_cursor.fetchall()]
+    except Exception as e:
+        app.logger.error(f"Error fetching paginated links: {e}")
+        return jsonify(msg="Error fetching links."), 500
+
+    return jsonify({
+        "links": links_list,
+        "page": page,
+        "per_page": per_page,
+        "total_links": total_links,
+        "total_pages": total_pages
+    }), 200
 
 @app.route('/api/misc_categories', methods=['GET'])
 def get_all_misc_categories_api():
@@ -472,19 +741,92 @@ def get_all_misc_categories_api():
 
 @app.route('/api/misc_files', methods=['GET'])
 def get_all_misc_files_api():
+    db = get_db()
+
+    # Get and validate query parameters for pagination and sorting
+    page = request.args.get('page', default=1, type=int)
+    per_page = request.args.get('per_page', default=10, type=int)
+    sort_by_param = request.args.get('sort_by', default='user_provided_title', type=str) 
+    sort_order = request.args.get('sort_order', default='asc', type=str).lower()
+
+    # Get existing filter parameters
     category_id_filter = request.args.get('category_id', type=int)
-    query = """
-        SELECT mf.*, mc.name as category_name
-        FROM misc_files mf
-        JOIN misc_categories mc ON mf.misc_category_id = mc.id
-    """
+
+    if page <= 0:
+        page = 1
+    if per_page <= 0:
+        per_page = 10
+    
+    # Mapping for sort_by parameter to actual DB columns including table alias
+    allowed_sort_by_map = {
+        'id': 'mf.id',
+        'user_provided_title': 'mf.user_provided_title',
+        'original_filename': 'mf.original_filename',
+        'category_name': 'mc.name', # mc.name is aliased as category_name in SELECT
+        'created_at': 'mf.created_at',
+        'file_size': 'mf.file_size',
+        'updated_at': 'mf.updated_at' 
+    }
+    
+    sort_by_column = allowed_sort_by_map.get(sort_by_param, 'mf.user_provided_title') # Default
+
+    if sort_order not in ['asc', 'desc']:
+        sort_order = 'asc'
+
+    # Construct Base Query and Parameters for Filtering
+    base_query_select = "SELECT mf.id, mf.misc_category_id, mf.user_id, mf.user_provided_title, mf.user_provided_description, mf.original_filename, mf.stored_filename, mf.file_path, mf.file_type, mf.file_size, mf.created_by_user_id, mf.created_at, mf.updated_by_user_id, mf.updated_at, mc.name as category_name"
+    base_query_from = "FROM misc_files mf JOIN misc_categories mc ON mf.misc_category_id = mc.id"
+    
+    filter_conditions = []
     params = []
+
     if category_id_filter:
-        query += " WHERE mf.misc_category_id = ?"
+        filter_conditions.append("mf.misc_category_id = ?")
         params.append(category_id_filter)
-    query += " ORDER BY mc.name, mf.user_provided_title, mf.original_filename"
-    files = get_db().execute(query, params).fetchall()
-    return jsonify([dict(row) for row in files])
+    
+    where_clause = ""
+    if filter_conditions:
+        where_clause = " WHERE " + " AND ".join(filter_conditions)
+
+    # Database Query for Total Count
+    count_query = f"SELECT COUNT(mf.id) as count {base_query_from}{where_clause}"
+    try:
+        total_misc_files_cursor = db.execute(count_query, tuple(params))
+        total_misc_files = total_misc_files_cursor.fetchone()['count']
+    except Exception as e:
+        app.logger.error(f"Error fetching total misc_files count: {e}")
+        return jsonify(msg="Error fetching misc_files count."), 500
+
+    # Calculate Pagination Details
+    total_pages = math.ceil(total_misc_files / per_page) if total_misc_files > 0 else 1
+    offset = (page - 1) * per_page
+
+    if page > total_pages and total_misc_files > 0:
+        page = total_pages
+        offset = (page - 1) * per_page
+    
+    # Database Query for Paginated Misc Files
+    # Original sort: ORDER BY mc.name, mf.user_provided_title, mf.original_filename
+    # Now using user-defined sort or default mf.user_provided_title
+    final_query = f"{base_query_select} {base_query_from}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
+    
+    paginated_params = list(params)
+    paginated_params.extend([per_page, offset])
+    
+    try:
+        misc_files_cursor = db.execute(final_query, tuple(paginated_params))
+        misc_files_list = [dict(row) for row in misc_files_cursor.fetchall()]
+    except Exception as e:
+        app.logger.error(f"Error fetching paginated misc_files: {e}")
+        return jsonify(msg="Error fetching misc_files."), 500
+
+    return jsonify({
+        "misc_files": misc_files_list,
+        "page": page,
+        "per_page": per_page,
+        "total_misc_files": total_misc_files,
+        "total_pages": total_pages
+    }), 200
 
 # --- Admin Content Management Endpoints (POST for adding new content) ---
 

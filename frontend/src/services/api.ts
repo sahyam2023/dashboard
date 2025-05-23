@@ -12,19 +12,60 @@ import {
   MiscCategory, AddCategoryPayload, EditCategoryPayload, // EditCategoryPayload is used
   MiscFile
   // EditMiscFilePayload is not used if all misc file edits are via FormData
-  // User, ChangePasswordPayload, UpdateEmailPayload, UpdateUserRolePayload will be defined below
+  // User, ChangePasswordPayload, UpdateEmailPayload, UpdateUserRolePayload,
+  // DocumentType, Link, Patch, Software, SoftwareVersion, MiscCategory, MiscFile
+  // should ideally be imported from a central types.ts file.
 } from '../types'; // Assuming '../types' will eventually export these
 
-// --- Added Type Definitions ---
-// If types.ts is not available, define them here for now.
-// It's better to have these in a dedicated types.ts file.
-export interface User {
+// --- Type Definitions (Ensure these are consistent with your backend and UI needs) ---
+// Base entity types (assuming these are defined in '../types' or need to be defined here)
+// For brevity, I'm showing User, DocumentType, Patch, Link, MiscFile as they are directly used in paginated responses.
+// Ensure Software, SoftwareVersion, AuthRequest, AuthResponse, etc., are also properly defined/imported.
+
+export interface User { // Already defined, ensure it's comprehensive
   id: number;
   username: string;
   email: string | null;
   role: 'user' | 'admin' | 'super_admin';
   is_active: boolean;
+  created_at?: string; // Optional, if needed by UI from paginated response
 }
+
+export interface DocumentType { // Placeholder, ensure this matches your actual DocumentType
+  id: number;
+  doc_name: string;
+  software_name?: string;
+  // ... other fields
+  [key: string]: any; // Allow other fields if not fully defined here
+}
+
+export interface Patch { // Placeholder
+  id: number;
+  patch_name: string;
+  software_name?: string;
+  version_number?: string;
+  // ... other fields
+  [key: string]: any;
+}
+
+export interface Link { // Placeholder
+  id: number;
+  title: string;
+  software_name?: string;
+  version_name?: string;
+  // ... other fields
+  [key: string]: any;
+}
+
+export interface MiscFile { // Placeholder
+  id: number;
+  user_provided_title: string;
+  original_filename: string;
+  category_name?: string;
+  // ... other fields
+  [key: string]: any;
+}
+
 
 export interface ChangePasswordPayload {
   current_password: string;
@@ -39,7 +80,55 @@ export interface UpdateEmailPayload {
 export interface UpdateUserRolePayload {
   new_role: 'user' | 'admin' | 'super_admin';
 }
-// --- End of Added Type Definitions ---
+
+// --- Paginated Response Type Definitions ---
+export interface PaginationParams {
+  page?: number;
+  perPage?: number;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface PaginatedUsersResponse {
+  users: User[];
+  page: number;
+  per_page: number;
+  total_users: number;
+  total_pages: number;
+}
+
+export interface PaginatedDocumentsResponse {
+  documents: DocumentType[];
+  page: number;
+  per_page: number;
+  total_documents: number;
+  total_pages: number;
+}
+
+export interface PaginatedPatchesResponse {
+  patches: Patch[];
+  page: number;
+  per_page: number;
+  total_patches: number;
+  total_pages: number;
+}
+
+export interface PaginatedLinksResponse {
+  links: Link[];
+  page: number;
+  per_page: number;
+  total_links: number;
+  total_pages: number;
+}
+
+export interface PaginatedMiscFilesResponse {
+  misc_files: MiscFile[];
+  page: number;
+  per_page: number;
+  total_misc_files: number;
+  total_pages: number;
+}
+// --- End of Type Definitions ---
 
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
@@ -86,19 +175,25 @@ export async function fetchSoftware(): Promise<Software[]> {
   }
 }
 
-export async function fetchLinks(softwareId?: number, versionId?: number): Promise<Link[]> {
+export async function fetchLinks(
+  softwareId?: number, 
+  versionId?: number,
+  page?: number,
+  perPage?: number,
+  sortBy?: string,
+  sortOrder?: 'asc' | 'desc'
+): Promise<PaginatedLinksResponse> {
   try {
-    let url = `${API_BASE_URL}/api/links`;
     const params = new URLSearchParams();
-    if (softwareId) {
-      params.append('software_id', softwareId.toString());
-    }
-    if (versionId) {
-      params.append('version_id', versionId.toString());
-    }
-    if (params.toString()) {
-      url += `?${params.toString()}`;
-    }
+    if (softwareId) params.append('software_id', softwareId.toString());
+    if (versionId) params.append('version_id', versionId.toString());
+    if (page) params.append('page', page.toString());
+    if (perPage) params.append('per_page', perPage.toString());
+    if (sortBy) params.append('sort_by', sortBy);
+    if (sortOrder) params.append('sort_order', sortOrder);
+    
+    const queryString = params.toString();
+    const url = `${API_BASE_URL}/api/links${queryString ? `?${queryString}` : ''}`;
     
     const response = await fetch(url);
     return handleApiError(response, 'Failed to fetch links');
@@ -108,34 +203,52 @@ export async function fetchLinks(softwareId?: number, versionId?: number): Promi
   }
 }
 
-export async function fetchDocuments(softwareId?: number): Promise<DocumentType[]> {
+export async function fetchDocuments(
+  softwareId?: number,
+  page?: number,
+  perPage?: number,
+  sortBy?: string,
+  sortOrder?: 'asc' | 'desc'
+): Promise<PaginatedDocumentsResponse> {
   try {
-    const url = softwareId 
-      ? `${API_BASE_URL}/api/documents?software_id=${softwareId}` 
-      : `${API_BASE_URL}/api/documents`;
-    
+    const params = new URLSearchParams();
+    if (softwareId) params.append('software_id', softwareId.toString());
+    if (page) params.append('page', page.toString());
+    if (perPage) params.append('per_page', perPage.toString());
+    if (sortBy) params.append('sort_by', sortBy);
+    if (sortOrder) params.append('sort_order', sortOrder);
+
+    const queryString = params.toString();
+    const url = `${API_BASE_URL}/api/documents${queryString ? `?${queryString}` : ''}`;
+        
     const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch documents: ${response.status}`);
-    }
-    return await response.json();
+    return handleApiError(response, 'Failed to fetch documents');
   } catch (error) {
     console.error('Error fetching documents:', error);
     throw error;
   }
 }
 
-export async function fetchPatches(softwareId?: number): Promise<Patch[]> {
+export async function fetchPatches(
+  softwareId?: number,
+  page?: number,
+  perPage?: number,
+  sortBy?: string,
+  sortOrder?: 'asc' | 'desc'
+): Promise<PaginatedPatchesResponse> {
   try {
-    const url = softwareId 
-      ? `${API_BASE_URL}/api/patches?software_id=${softwareId}` 
-      : `${API_BASE_URL}/api/patches`;
-    
+    const params = new URLSearchParams();
+    if (softwareId) params.append('software_id', softwareId.toString());
+    if (page) params.append('page', page.toString());
+    if (perPage) params.append('per_page', perPage.toString());
+    if (sortBy) params.append('sort_by', sortBy);
+    if (sortOrder) params.append('sort_order', sortOrder);
+
+    const queryString = params.toString();
+    const url = `${API_BASE_URL}/api/patches${queryString ? `?${queryString}` : ''}`;
+        
     const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch patches: ${response.status}`);
-    }
-    return await response.json();
+    return handleApiError(response, 'Failed to fetch patches');
   } catch (error) {
     console.error('Error fetching patches:', error);
     throw error;
@@ -349,12 +462,24 @@ export async function uploadAdminMiscFile(formData: FormData): Promise<MiscFile>
   }
 }
 
-export async function fetchMiscFiles(categoryId?: number): Promise<MiscFile[]> {
+export async function fetchMiscFiles(
+  categoryId?: number,
+  page?: number,
+  perPage?: number,
+  sortBy?: string,
+  sortOrder?: 'asc' | 'desc'
+): Promise<PaginatedMiscFilesResponse> {
   try {
-    let url = `${API_BASE_URL}/api/misc_files`;
-    if (categoryId) {
-      url += `?category_id=${categoryId}`;
-    }
+    const params = new URLSearchParams();
+    if (categoryId) params.append('category_id', categoryId.toString());
+    if (page) params.append('page', page.toString());
+    if (perPage) params.append('per_page', perPage.toString());
+    if (sortBy) params.append('sort_by', sortBy);
+    if (sortOrder) params.append('sort_order', sortOrder);
+
+    const queryString = params.toString();
+    const url = `${API_BASE_URL}/api/misc_files${queryString ? `?${queryString}` : ''}`;
+        
     const response = await fetch(url);
     return handleApiError(response, 'Failed to fetch misc files');
   } catch (error) {
@@ -559,9 +684,23 @@ export async function updateEmail(payload: UpdateEmailPayload): Promise<{ msg: s
 
 // --- Super Admin User Management Functions ---
 
-export async function listUsers(): Promise<User[]> {
+export async function listUsers(
+  page?: number,
+  perPage?: number,
+  sortBy?: string,
+  sortOrder?: 'asc' | 'desc'
+): Promise<PaginatedUsersResponse> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/superadmin/users`, {
+    const params = new URLSearchParams();
+    if (page) params.append('page', page.toString());
+    if (perPage) params.append('per_page', perPage.toString());
+    if (sortBy) params.append('sort_by', sortBy);
+    if (sortOrder) params.append('sort_order', sortOrder);
+
+    const queryString = params.toString();
+    const url = `${API_BASE_URL}/api/superadmin/users${queryString ? `?${queryString}` : ''}`;
+    
+    const response = await fetch(url, {
       method: 'GET',
       headers: { ...getAuthHeader() },
     });

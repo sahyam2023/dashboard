@@ -1,17 +1,16 @@
-// src/views/DocumentsView.tsx
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { ExternalLink, PlusCircle, Edit3, Trash2 } from 'lucide-react'; // Added Edit3, Trash2
-import { fetchDocuments, fetchSoftware, deleteAdminDocument } from '../services/api'; // Added deleteAdminDocument
-import { Document as DocumentType, Software } from '../types';
-import DataTable from '../components/DataTable';
+import { ExternalLink, PlusCircle, Edit3, Trash2 } from 'lucide-react';
+import { fetchDocuments, fetchSoftware, deleteAdminDocument, PaginatedDocumentsResponse } from '../services/api'; // Import PaginatedDocumentsResponse
+import { Document as DocumentType, Software } from '../types'; // Ensure DocumentType matches the API response structure
+import DataTable, { ColumnDef } from '../components/DataTable'; // Import DataTable and ColumnDef
 import FilterTabs from '../components/FilterTabs';
-import LoadingState from '../components/LoadingState';
+import LoadingState from '../components/LoadingState'; // Can be replaced by DataTable's isLoading
 import ErrorState from '../components/ErrorState';
 import { useAuth } from '../context/AuthContext';
 import AdminDocumentEntryForm from '../components/admin/AdminDocumentEntryForm';
-// Simple Confirmation Modal (you might want a more styled one later)
 import ConfirmationModal from '../components/shared/ConfirmationModal';
+
 interface OutletContextType {
   searchTerm: string;
 }
@@ -20,33 +19,57 @@ const DocumentsView: React.FC = () => {
   const { searchTerm } = useOutletContext<OutletContextType>();
   const { isAuthenticated, role } = useAuth();
 
+  // Data and Table State
   const [documents, setDocuments] = useState<DocumentType[]>([]);
   const [softwareList, setSoftwareList] = useState<Software[]>([]);
-  const [selectedSoftwareId, setSelectedSoftwareId] = useState<number | null>(null);
+  const [selectedSoftwareId, setSelectedSoftwareId] = useState<number | null>(null); // Filter state
+  
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [itemsPerPage, setItemsPerPage] = useState<number>(10);
+  const [totalPages, setTotalPages] = useState<number>(0);
+  const [totalDocuments, setTotalDocuments] = useState<number>(0);
+
+  // Sorting State
+  const [sortBy, setSortBy] = useState<string>('doc_name'); // Default sort column
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+
+  // Loading and Error State
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // UI State for Forms and Modals
   const [showAddDocumentForm, setShowAddDocumentForm] = useState(false);
-  const [editingDocument, setEditingDocument] = useState<DocumentType | null>(null); // For editing
-
-  // For Delete Confirmation
+  const [editingDocument, setEditingDocument] = useState<DocumentType | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [documentToDelete, setDocumentToDelete] = useState<DocumentType | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
 
 
   const loadDocuments = useCallback(async () => {
     setIsLoading(true);
     setError(null);
+    // setFeedbackMessage(null); // Clear previous feedback
     try {
-      const docsData = await fetchDocuments(selectedSoftwareId === null ? undefined : selectedSoftwareId);
-      setDocuments(docsData);
+      const response: PaginatedDocumentsResponse = await fetchDocuments(
+        selectedSoftwareId === null ? undefined : selectedSoftwareId,
+        currentPage,
+        itemsPerPage,
+        sortBy,
+        sortOrder
+      );
+      setDocuments(response.documents);
+      setTotalPages(response.total_pages);
+      setTotalDocuments(response.total_documents);
+      setCurrentPage(response.page); // Ensure current page is updated from backend
+      setItemsPerPage(response.per_page); // Ensure items per page is updated from backend
     } catch (err: any) {
       setError(err.message || 'Failed to fetch documents. Please try again later.');
     } finally {
       setIsLoading(false);
     }
-  }, [selectedSoftwareId]);
+  }, [selectedSoftwareId, currentPage, itemsPerPage, sortBy, sortOrder]);
 
   useEffect(() => {
     const loadSoftwareForFilters = async () => {
@@ -55,6 +78,7 @@ const DocumentsView: React.FC = () => {
         setSoftwareList(softwareData);
       } catch (err) {
         console.error("Failed to load software for filters", err);
+        // Optionally set an error state for software list loading
       }
     };
     loadSoftwareForFilters();
@@ -66,25 +90,39 @@ const DocumentsView: React.FC = () => {
 
   const handleFilterChange = (softwareId: number | null) => {
     setSelectedSoftwareId(softwareId);
+    setCurrentPage(1); // Reset to first page when filter changes
+  };
+
+  const handlePageChange = (newPage: number) => {
+    setCurrentPage(newPage);
+  };
+
+  const handleSort = (columnKey: string) => {
+    if (sortBy === columnKey) {
+      setSortOrder(prevOrder => (prevOrder === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(columnKey);
+      setSortOrder('asc');
+    }
+    setCurrentPage(1); // Reset to first page on sort change
   };
 
   const handleDocumentAdded = (newDocument: DocumentType) => {
     setShowAddDocumentForm(false);
-    // Optimistic update or simply reload
-    // setDocuments(prevDocs => [newDocument, ...prevDocs.filter(d => d.id !== newDocument.id)]);
-    loadDocuments();
+    setFeedbackMessage(`Document "${newDocument.doc_name}" added successfully.`);
+    loadDocuments(); // Refresh list
   };
 
   const handleDocumentUpdated = (updatedDocument: DocumentType) => {
-    setEditingDocument(null); // Close the form
-    // Optimistic update or simply reload
-    // setDocuments(prevDocs => prevDocs.map(d => d.id === updatedDocument.id ? updatedDocument : d));
-    loadDocuments();
+    setEditingDocument(null);
+    setFeedbackMessage(`Document "${updatedDocument.doc_name}" updated successfully.`);
+    loadDocuments(); // Refresh list
   };
 
   const openEditForm = (doc: DocumentType) => {
-    setShowAddDocumentForm(false); // Close add form if open
+    setShowAddDocumentForm(false);
     setEditingDocument(doc);
+    setFeedbackMessage(null);
   };
 
   const closeEditForm = () => {
@@ -94,6 +132,7 @@ const DocumentsView: React.FC = () => {
   const openDeleteConfirm = (doc: DocumentType) => {
     setDocumentToDelete(doc);
     setShowDeleteConfirm(true);
+    setFeedbackMessage(null);
   };
 
   const closeDeleteConfirm = () => {
@@ -104,24 +143,27 @@ const DocumentsView: React.FC = () => {
   const handleDeleteConfirm = async () => {
     if (!documentToDelete) return;
     setIsDeleting(true);
-    setError(null); // Clear previous errors
+    setError(null);
     try {
       await deleteAdminDocument(documentToDelete.id);
+      setFeedbackMessage(`Document "${documentToDelete.doc_name}" deleted successfully.`);
       closeDeleteConfirm();
-      loadDocuments(); // Refresh list
-      // Optionally show a success message
+      // If on the last page and it becomes empty, go to previous page
+      if (documents.length === 1 && currentPage > 1) {
+        setCurrentPage(currentPage - 1); // This will trigger a re-fetch via useEffect
+      } else {
+        loadDocuments(); // Otherwise, just re-fetch
+      }
     } catch (err: any) {
       setError(err.message || "Failed to delete document.");
-      console.error("Delete error:", err);
-      // Keep modal open on error or close it? For now, let's close.
       closeDeleteConfirm();
     } finally {
       setIsDeleting(false);
     }
   };
 
-
-  const filteredDocuments = useMemo(() => {
+  const filteredDocumentsBySearch = useMemo(() => {
+    // Client-side search on the currently fetched page of documents
     if (!searchTerm) return documents;
     const lowerSearchTerm = searchTerm.toLowerCase();
     return documents.filter(doc =>
@@ -131,10 +173,10 @@ const DocumentsView: React.FC = () => {
     );
   }, [documents, searchTerm]);
 
-  const columns = [
-    { key: 'doc_name', header: 'Name' },
-    { key: 'doc_type', header: 'Type' },
-    { key: 'software_name', header: 'Software' },
+  const columns: ColumnDef<DocumentType>[] = [
+    { key: 'doc_name', header: 'Name', sortable: true },
+    { key: 'doc_type', header: 'Type', sortable: true },
+    { key: 'software_name', header: 'Software', sortable: true },
     { key: 'description', header: 'Description', render: (doc: DocumentType) => (
       <span className="text-sm text-gray-600 block max-w-xs truncate" title={doc.description || ''}>
         {doc.description || '-'}
@@ -145,59 +187,36 @@ const DocumentsView: React.FC = () => {
       header: 'Download',
       render: (document: DocumentType) => (
         <a
-          href={document.download_link} // This is the external URL or /official_uploads/docs/...
+          href={document.download_link}
           target={document.is_external_link || !document.download_link?.startsWith('/') ? "_blank" : "_self"}
           rel="noopener noreferrer"
           className="flex items-center text-blue-600 hover:text-blue-800"
+          onClick={(e) => e.stopPropagation()}
         >
           Download
           <ExternalLink size={14} className="ml-1" />
         </a>
       )
     },
-    // NEW: Actions column for admin
+    { key: 'created_at', header: 'Created At', sortable: true, render: (doc) => doc.created_at ? new Date(doc.created_at).toLocaleDateString() : '-' },
+    { key: 'updated_at', header: 'Updated At', sortable: true, render: (doc) => doc.updated_at ? new Date(doc.updated_at).toLocaleDateString() : '-' },
     ...(isAuthenticated && role === 'admin' ? [{
-      key: 'actions',
+      key: 'actions' as keyof DocumentType | 'actions', // Type assertion for actions
       header: 'Actions',
       render: (document: DocumentType) => (
         <div className="flex space-x-2">
-          <button
-            onClick={() => openEditForm(document)}
-            className="p-1 text-blue-600 hover:text-blue-800"
-            title="Edit Document"
-          >
-            <Edit3 size={16} />
-          </button>
-          <button
-            onClick={() => openDeleteConfirm(document)}
-            className="p-1 text-red-600 hover:text-red-800"
-            title="Delete Document"
-          >
-            <Trash2 size={16} />
-          </button>
+          <button onClick={(e) => { e.stopPropagation(); openEditForm(document);}} className="p-1 text-blue-600 hover:text-blue-800" title="Edit Document"><Edit3 size={16} /></button>
+          <button onClick={(e) => { e.stopPropagation(); openDeleteConfirm(document);}} className="p-1 text-red-600 hover:text-red-800" title="Delete Document"><Trash2 size={16} /></button>
         </div>
       ),
     }] : [])
   ];
-
-  const handleRetryFetchDocuments = () => {
-      loadDocuments();
-      if(softwareList.length === 0) {
-        const loadSoftwareForFilters = async () => { /* ... */ };
-        loadSoftwareForFilters();
-      }
-  }
-
-  // If editing a document, show the form. Otherwise, show the "Add New" button or the add form.
+  
   const renderAdminFormArea = () => {
     if (editingDocument) {
       return (
         <div className="my-6 p-4 bg-gray-50 rounded-lg shadow">
-          <AdminDocumentEntryForm
-            documentToEdit={editingDocument}
-            onDocumentUpdated={handleDocumentUpdated}
-            onCancelEdit={closeEditForm}
-          />
+          <AdminDocumentEntryForm documentToEdit={editingDocument} onDocumentUpdated={handleDocumentUpdated} onCancelEdit={closeEditForm} />
         </div>
       );
     }
@@ -211,7 +230,6 @@ const DocumentsView: React.FC = () => {
     return null;
   };
 
-
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-start sm:items-center mb-6 flex-col sm:flex-row">
@@ -219,9 +237,9 @@ const DocumentsView: React.FC = () => {
           <h2 className="text-2xl font-bold text-gray-800">Documents</h2>
           <p className="text-gray-600 mt-1">Browse and download documentation</p>
         </div>
-        {isAuthenticated && role === 'admin' && !editingDocument && ( // Hide "Add New" if editing
+        {isAuthenticated && role === 'admin' && !editingDocument && (
           <button
-            onClick={() => { setShowAddDocumentForm(prev => !prev); setEditingDocument(null); }} // Ensure editingDoc is null
+            onClick={() => { setShowAddDocumentForm(prev => !prev); setEditingDocument(null); setFeedbackMessage(null); }}
             className="mt-4 sm:mt-0 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
           >
             <PlusCircle size={18} className="mr-2" />
@@ -230,10 +248,10 @@ const DocumentsView: React.FC = () => {
         )}
       </div>
 
-      {/* Render either the edit form or the add form (if toggled) */}
+      {feedbackMessage && <div className="p-3 my-2 bg-green-100 text-green-700 rounded text-sm">{feedbackMessage}</div>}
       {renderAdminFormArea()}
 
-      {softwareList.length > 0 && (!error || documents.length > 0) && (
+      {softwareList.length > 0 && (
         <FilterTabs
           software={softwareList}
           selectedSoftwareId={selectedSoftwareId}
@@ -241,22 +259,28 @@ const DocumentsView: React.FC = () => {
         />
       )}
 
-      {isLoading ? (
-        <LoadingState />
-      ) : error && documents.length === 0 ? ( // Only show full error state if no documents loaded at all
-        <ErrorState message={error} onRetry={handleRetryFetchDocuments} />
+      {error && documents.length === 0 && !isLoading ? (
+        <ErrorState message={error} onRetry={loadDocuments} />
       ) : (
         <>
-        {error && <div className="p-3 my-2 bg-red-100 text-red-700 rounded text-sm">{error}</div>} {/* Inline error if some data is still shown */}
-        <DataTable
-          data={filteredDocuments}
-          columns={columns}
-          isLoading={isLoading} // Pass isLoading to DataTable for its internal skeleton
-        />
+          {/* Show inline error if some data is present but an update failed (e.g., after an action) */}
+          {error && documents.length > 0 && <div className="p-3 my-2 bg-red-100 text-red-700 rounded text-sm">{error}</div>}
+          <DataTable
+            columns={columns}
+            data={filteredDocumentsBySearch} // Pass client-side searched data
+            isLoading={isLoading}
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageChange={handlePageChange}
+            itemsPerPage={itemsPerPage}
+            totalItems={totalDocuments}
+            sortColumn={sortBy}
+            sortOrder={sortOrder}
+            onSort={handleSort}
+          />
         </>
       )}
 
-      {/* Delete Confirmation Modal */}
       {showDeleteConfirm && documentToDelete && (
         <ConfirmationModal
           isOpen={showDeleteConfirm}

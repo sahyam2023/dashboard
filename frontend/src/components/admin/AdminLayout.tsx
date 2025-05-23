@@ -6,6 +6,7 @@ const AdminLayout: React.FC = () => {
   const location = useLocation();
 
   const navItems = [
+    { path: '/admin/dashboard', label: 'Dashboard', icon: <FiShield className="mr-2" /> }, // Changed path and label
     { path: '/admin/versions', label: 'Versions Management', icon: <FiGitCommit className="mr-2" /> },
     { path: '/admin/audit-logs', label: 'Audit Logs', icon: <FiActivity className="mr-2" /> },
     // Add more admin links here as needed

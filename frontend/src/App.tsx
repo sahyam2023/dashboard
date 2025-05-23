@@ -15,7 +15,7 @@ import RegisterPage from './views/RegisterPage';
 import UserProfilePage from './views/UserProfilePage'; // Import UserProfilePage
 import SuperAdminDashboard from './views/SuperAdminDashboard'; // Import SuperAdminDashboard
 import AdminLayout from './components/admin/AdminLayout'; // Import AdminLayout
-import AdminVersionsPage from './components/admin/versions/AdminVersionsPage'; // Import AdminVersionsPage
+import AdminDashboardPage from './views/AdminDashboardPage'; // Was AdminVersionsPage
 import AuditLogViewer from './components/admin/AuditLogViewer'; // Import AuditLogViewer
 import { useAuth } from './context/AuthContext'; // Import useAuth
 
@@ -54,10 +54,10 @@ function App() {
           {/* Admin Routes with AdminLayout */}
           <Route path="/admin" element={<AdminLayout />}>
             <Route 
-              path="versions" 
+              path="dashboard" // Changed from "versions"
               element={
                 auth.isAuthenticated && (auth.role === 'admin' || auth.role === 'super_admin') ? (
-                  <AdminVersionsPage />
+                  <AdminDashboardPage /> // Changed from AdminVersionsPage
                 ) : (
                   <Navigate to="/login" replace />
                 )

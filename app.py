@@ -3175,10 +3175,11 @@ if __name__ == '__main__':
 @jwt_required()
 @admin_required
 def get_audit_logs():
-    db = get_db()
+    try:
+        db = get_db()
 
-    # Pagination parameters
-    page = request.args.get('page', default=1, type=int)
+        # Pagination parameters
+        page = request.args.get('page', default=1, type=int)
     per_page = request.args.get('per_page', default=10, type=int)
 
     # Sorting parameters
@@ -3280,3 +3281,6 @@ def get_audit_logs():
         "total_logs": total_logs,
         "total_pages": total_pages
     }), 200
+    except Exception as e:
+        app.logger.error(f"Unexpected error in get_audit_logs: {e}")
+        return jsonify(msg="An unexpected error occurred while fetching audit logs."), 500

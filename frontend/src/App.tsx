@@ -14,7 +14,9 @@ import RegisterPage from './views/RegisterPage';
 // import ProtectedRoute from './components/ProtectedRoute';
 import UserProfilePage from './views/UserProfilePage'; // Import UserProfilePage
 import SuperAdminDashboard from './views/SuperAdminDashboard'; // Import SuperAdminDashboard
+import AdminLayout from './components/admin/AdminLayout'; // Import AdminLayout
 import AdminVersionsPage from './components/admin/versions/AdminVersionsPage'; // Import AdminVersionsPage
+import AuditLogViewer from './components/admin/AuditLogViewer'; // Import AuditLogViewer
 import { useAuth } from './context/AuthContext'; // Import useAuth
 
 function App() {
@@ -48,16 +50,30 @@ function App() {
               )
             } 
           />
-          <Route 
-            path="/admin/versions" 
-            element={
-              auth.isAuthenticated && (auth.role === 'admin' || auth.role === 'super_admin') ? (
-                <AdminVersionsPage />
-              ) : (
-                <Navigate to="/login" replace />
-              )
-            }
-          />
+
+          {/* Admin Routes with AdminLayout */}
+          <Route path="/admin" element={<AdminLayout />}>
+            <Route 
+              path="versions" 
+              element={
+                auth.isAuthenticated && (auth.role === 'admin' || auth.role === 'super_admin') ? (
+                  <AdminVersionsPage />
+                ) : (
+                  <Navigate to="/login" replace />
+                )
+              }
+            />
+            <Route 
+              path="audit-logs" 
+              element={
+                auth.isAuthenticated && (auth.role === 'admin' || auth.role === 'super_admin') ? (
+                  <AuditLogViewer />
+                ) : (
+                  <Navigate to="/login" replace />
+                )
+              }
+            />
+          </Route>
           
           {/* NEW: Route for the Upload Page */}
           {/* For now, UploadPage handles its own auth check display.

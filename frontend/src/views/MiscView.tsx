@@ -67,6 +67,7 @@ const MiscView: React.FC = () => {
       const data = await fetchMiscCategories();
       setCategories(data);
     } catch (err: any) {
+      setCategories([]); // Add this line
       setErrorCategories(err.message || 'Failed to load misc categories.');
       console.error("Error loading misc categories:", err);
     } finally {
@@ -94,7 +95,8 @@ const MiscView: React.FC = () => {
       setTotalMiscFiles(response.total_misc_files);
       setCurrentPage(response.page);
       setItemsPerPage(response.per_page);
-    } catch (err: any) {
+    } catch (err: any)
+      setMiscFiles([]); // Add this line
       setErrorFiles(err.message || 'Failed to fetch miscellaneous files.');
       console.error("Error fetching misc files:", err);
     } finally {
@@ -232,7 +234,7 @@ const MiscView: React.FC = () => {
         </a>
       )
     },
-    ...(isAuthenticated && role === 'admin' ? [{
+    ...(isAuthenticated && (role === 'admin' || role === 'super_admin') ? [{
       key: 'actions' as keyof MiscFile | 'actions',
       header: 'Actions',
       render: (file: MiscFile) => (
@@ -252,7 +254,7 @@ const MiscView: React.FC = () => {
           <h2 className="text-2xl font-bold text-gray-800">Miscellaneous Files</h2>
           <p className="text-gray-600 mt-1">Browse and download categorized miscellaneous files.</p>
         </div>
-         {isAuthenticated && role === 'admin' && (
+         {isAuthenticated && (role === 'admin' || role === 'super_admin') && (
             <div className="flex space-x-3 mt-4 sm:mt-0">
                  <button
                     onClick={() => {setShowCategoryForm(prev => !prev); setEditingCategory(null); setShowGeneralUploadForm(false); setFeedbackMessage(null);}}
@@ -274,12 +276,12 @@ const MiscView: React.FC = () => {
 
       {feedbackMessage && <div className="p-3 my-2 bg-green-100 text-green-700 rounded text-sm">{feedbackMessage}</div>}
 
-      {showCategoryForm && isAuthenticated && role === 'admin' && (
+      {showCategoryForm && isAuthenticated && (role === 'admin' || role === 'super_admin') && (
         <div className="my-4 p-4 bg-gray-50 rounded-lg shadow">
           <AdminMiscCategoryForm categoryToEdit={editingCategory} onSuccess={() => handleCategoryOperationSuccess(editingCategory ? "Category updated." : "Category added.")} onCancel={handleCloseCategoryForm} />
         </div>
       )}
-      {showGeneralUploadForm && isAuthenticated && role === 'admin' && (
+      {showGeneralUploadForm && isAuthenticated && (role === 'admin' || role === 'super_admin') && (
         <div className="my-4 p-4 bg-gray-50 rounded-lg shadow">
           <AdminUploadToMiscForm onUploadSuccess={handleMiscFileUploadSuccess} />
         </div>

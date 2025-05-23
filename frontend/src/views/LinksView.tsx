@@ -80,6 +80,7 @@ const LinksView: React.FC = () => {
       setCurrentPage(response.page);
       setItemsPerPage(response.per_page);
     } catch (err: any) {
+      setLinks([]); // Add this line
       setError(err.message || 'Failed to fetch links.');
       console.error("Error fetching links:", err);
     } finally {
@@ -247,7 +248,7 @@ const LinksView: React.FC = () => {
       ) 
     },
     { key: 'created_at', header: 'Created At', sortable: true, render: (link) => link.created_at ? new Date(link.created_at).toLocaleDateString() : '-' },
-    ...(isAuthenticated && role === 'admin' ? [{
+    ...(isAuthenticated && (role === 'admin' || role === 'super_admin') ? [{
       key: 'actions' as keyof LinkType | 'actions',
       header: 'Actions',
       render: (link: LinkType) => (
@@ -266,7 +267,7 @@ const LinksView: React.FC = () => {
           <h2 className="text-2xl font-bold text-gray-800">Links</h2>
           <p className="text-gray-600 mt-1">Useful links and resources</p>
         </div>
-        {isAuthenticated && role === 'admin' && (
+        {isAuthenticated && (role === 'admin' || role === 'super_admin') && (
           <button
              onClick={showAddOrEditForm && !editingLink ? closeAdminForm : openAddForm}
             className="mt-4 sm:mt-0 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
@@ -279,7 +280,7 @@ const LinksView: React.FC = () => {
 
       {feedbackMessage && <div className="p-3 my-2 bg-green-100 text-green-700 rounded text-sm">{feedbackMessage}</div>}
 
-      {showAddOrEditForm && isAuthenticated && role === 'admin' && (
+      {showAddOrEditForm && isAuthenticated && (role === 'admin' || role === 'super_admin') && (
         <div className="my-6 p-4 bg-gray-50 rounded-lg shadow">
           <AdminLinkEntryForm
             linkToEdit={editingLink}

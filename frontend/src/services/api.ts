@@ -128,6 +128,41 @@ export interface PaginatedMiscFilesResponse {
   total_misc_files: number;
   total_pages: number;
 }
+
+// --- Admin Software Version Type Definitions ---
+export interface AdminSoftwareVersion {
+  id: number;
+  software_id: number;
+  software_name: string; // From JOIN in backend
+  version_number: string;
+  release_date?: string | null; // Format 'YYYY-MM-DD'
+  main_download_link?: string | null;
+  changelog?: string | null;
+  known_bugs?: string | null;
+  created_by_user_id: number;
+  created_at: string; // ISO date string
+  updated_by_user_id?: number | null;
+  updated_at?: string | null; // ISO date string
+}
+
+export interface PaginatedAdminVersionsResponse {
+  versions: AdminSoftwareVersion[];
+  page: number;
+  per_page: number;
+  total_versions: number;
+  total_pages: number;
+}
+
+export interface AddAdminVersionPayload {
+  software_id: number;
+  version_number: string;
+  release_date?: string | null;
+  main_download_link?: string | null;
+  changelog?: string | null;
+  known_bugs?: string | null;
+}
+
+export type EditAdminVersionPayload = Partial<AddAdminVersionPayload>;
 // --- End of Type Definitions ---
 
 const API_BASE_URL = 'http://127.0.0.1:5000';
@@ -171,6 +206,87 @@ export async function fetchSoftware(): Promise<Software[]> {
     return await response.json();
   } catch (error) {
     console.error('Error fetching software:', error);
+    throw error;
+  }
+}
+
+// --- Admin Software Version Management Functions ---
+
+export async function addAdminVersion(payload: AddAdminVersionPayload): Promise<AdminSoftwareVersion> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/admin/versions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify(payload),
+    });
+    return handleApiError(response, 'Failed to add software version');
+  } catch (error) {
+    console.error('Error adding software version:', error);
+    throw error;
+  }
+}
+
+export async function fetchAdminVersions(
+  params: PaginationParams & { softwareId?: number }
+): Promise<PaginatedAdminVersionsResponse> {
+  try {
+    const queryParams = new URLSearchParams();
+    if (params.page) queryParams.append('page', params.page.toString());
+    if (params.perPage) queryParams.append('per_page', params.perPage.toString());
+    if (params.sortBy) queryParams.append('sort_by', params.sortBy);
+    if (params.sortOrder) queryParams.append('sort_order', params.sortOrder);
+    if (params.softwareId) queryParams.append('software_id', params.softwareId.toString());
+
+    const queryString = queryParams.toString();
+    const url = `${API_BASE_URL}/api/admin/versions${queryString ? `?${queryString}` : ''}`;
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { ...getAuthHeader() },
+    });
+    return handleApiError(response, 'Failed to fetch admin software versions');
+  } catch (error) {
+    console.error('Error fetching admin software versions:', error);
+    throw error;
+  }
+}
+
+export async function fetchAdminVersionById(versionId: number): Promise<AdminSoftwareVersion> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/admin/versions/${versionId}`, {
+      method: 'GET',
+      headers: { ...getAuthHeader() },
+    });
+    return handleApiError(response, 'Failed to fetch software version by ID');
+  } catch (error) {
+    console.error('Error fetching software version by ID:', error);
+    throw error;
+  }
+}
+
+export async function updateAdminVersion(versionId: number, payload: EditAdminVersionPayload): Promise<AdminSoftwareVersion> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/admin/versions/${versionId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify(payload),
+    });
+    return handleApiError(response, 'Failed to update software version');
+  } catch (error) {
+    console.error('Error updating software version:', error);
+    throw error;
+  }
+}
+
+export async function deleteAdminVersion(versionId: number): Promise<{ msg: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/admin/versions/${versionId}`, {
+      method: 'DELETE',
+      headers: { ...getAuthHeader() },
+    });
+    return handleApiError(response, 'Failed to delete software version');
+  } catch (error) {
+    console.error('Error deleting software version:', error);
     throw error;
   }
 }

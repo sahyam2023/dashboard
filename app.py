@@ -2296,6 +2296,290 @@ def admin_add_link_with_url():
         )
     )
 
+# --- Software Version Management Endpoints (Admin) ---
+@app.route('/api/admin/versions', methods=['POST'])
+@jwt_required()
+@admin_required
+def admin_create_version():
+    current_user_id = int(get_jwt_identity())
+    db = get_db()
+    data = request.get_json()
+
+    if not data:
+        return jsonify(msg="Missing JSON data"), 400
+
+    software_id = data.get('software_id')
+    version_number = data.get('version_number')
+
+    if not software_id or not isinstance(software_id, int):
+        return jsonify(msg="software_id (integer) is required."), 400
+    if not version_number or not isinstance(version_number, str) or not version_number.strip():
+        return jsonify(msg="version_number (string) is required."), 400
+    
+    version_number = version_number.strip()
+
+    # Optional fields
+    release_date = data.get('release_date') # Should be 'YYYY-MM-DD' or None
+    main_download_link = data.get('main_download_link')
+    changelog = data.get('changelog')
+    known_bugs = data.get('known_bugs')
+
+    # Validate release_date format if provided (basic check)
+    if release_date:
+        try:
+            datetime.strptime(release_date, '%Y-%m-%d')
+        except ValueError:
+            return jsonify(msg="Invalid release_date format. Expected YYYY-MM-DD."), 400
+
+    try:
+        cursor = db.execute("""
+            INSERT INTO versions (software_id, version_number, release_date, main_download_link, changelog, known_bugs, created_by_user_id, updated_by_user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (software_id, version_number, release_date, main_download_link, changelog, known_bugs, current_user_id, current_user_id))
+        db.commit()
+        new_version_id = cursor.lastrowid
+
+        # Fetch the newly created version with software_name
+        new_version_row = db.execute("""
+            SELECT v.*, s.name as software_name
+            FROM versions v
+            JOIN software s ON v.software_id = s.id
+            WHERE v.id = ?
+        """, (new_version_id,)).fetchone()
+
+        if not new_version_row:
+            # This should ideally not happen if insert was successful
+            app.logger.error(f"Failed to fetch newly created version ID {new_version_id}")
+            return jsonify(msg="Version created but failed to retrieve."), 500
+
+        return jsonify(dict(new_version_row)), 201
+
+    except sqlite3.IntegrityError as e:
+        db.rollback()
+        if "FOREIGN KEY constraint failed" in str(e):
+            # Check if software_id exists
+            software_exists = db.execute("SELECT 1 FROM software WHERE id = ?", (software_id,)).fetchone()
+            if not software_exists:
+                return jsonify(msg=f"Error: Software with ID {software_id} does not exist."), 400
+        elif "UNIQUE constraint failed: versions.software_id, versions.version_number" in str(e): # Assuming this constraint exists
+            return jsonify(msg=f"Error: Version '{version_number}' already exists for software ID {software_id}."), 409
+        app.logger.error(f"Admin create version DB IntegrityError: {e} for software_id={software_id}, version='{version_number}'")
+        return jsonify(msg=f"Database integrity error: {e}"), 409
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"Admin create version Exception: {e}")
+        return jsonify(msg="Server error creating version."), 500
+
+@app.route('/api/admin/versions', methods=['GET'])
+@jwt_required()
+@admin_required
+def admin_list_versions():
+    db = get_db()
+
+    # Get and validate query parameters
+    page = request.args.get('page', default=1, type=int)
+    per_page = request.args.get('per_page', default=10, type=int)
+    sort_by_param = request.args.get('sort_by', default='version_number', type=str)
+    sort_order = request.args.get('sort_order', default='asc', type=str).lower()
+    software_id_filter = request.args.get('software_id', type=int)
+
+    if page <= 0: page = 1
+    if per_page <= 0: per_page = 10
+    
+    allowed_sort_by_map = {
+        'id': 'v.id',
+        'software_name': 's.name',
+        'version_number': 'v.version_number',
+        'release_date': 'v.release_date',
+        'created_at': 'v.created_at',
+        'updated_at': 'v.updated_at'
+    }
+    sort_by_column = allowed_sort_by_map.get(sort_by_param, 'v.version_number')
+
+    if sort_order not in ['asc', 'desc']:
+        sort_order = 'asc'
+
+    # Construct Base Query and Parameters for Filtering
+    base_query_select = "SELECT v.id, v.software_id, v.version_number, v.release_date, v.main_download_link, v.changelog, v.known_bugs, v.created_by_user_id, v.created_at, v.updated_by_user_id, v.updated_at, s.name as software_name"
+    base_query_from = "FROM versions v JOIN software s ON v.software_id = s.id"
+    
+    filter_conditions = []
+    params = []
+
+    if software_id_filter:
+        filter_conditions.append("v.software_id = ?")
+        params.append(software_id_filter)
+    
+    where_clause = ""
+    if filter_conditions:
+        where_clause = " WHERE " + " AND ".join(filter_conditions)
+
+    # Database Query for Total Count
+    count_query = f"SELECT COUNT(v.id) as count {base_query_from}{where_clause}"
+    try:
+        total_versions_cursor = db.execute(count_query, tuple(params))
+        total_versions = total_versions_cursor.fetchone()['count']
+    except Exception as e:
+        app.logger.error(f"Error fetching total version count: {e}")
+        return jsonify(msg="Error fetching version count."), 500
+
+    total_pages = math.ceil(total_versions / per_page) if total_versions > 0 else 1
+    offset = (page - 1) * per_page
+
+    if page > total_pages and total_versions > 0:
+        page = total_pages
+        offset = (page - 1) * per_page
+    
+    final_query = f"{base_query_select} {base_query_from}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
+    
+    paginated_params = list(params)
+    paginated_params.extend([per_page, offset])
+    
+    try:
+        versions_cursor = db.execute(final_query, tuple(paginated_params))
+        versions_list = [dict(row) for row in versions_cursor.fetchall()]
+    except Exception as e:
+        app.logger.error(f"Error fetching paginated versions: {e}")
+        return jsonify(msg="Error fetching versions."), 500
+
+    return jsonify({
+        "versions": versions_list,
+        "page": page,
+        "per_page": per_page,
+        "total_versions": total_versions,
+        "total_pages": total_pages
+    }), 200
+
+@app.route('/api/admin/versions/<int:version_id>', methods=['GET'])
+@jwt_required()
+@admin_required
+def admin_get_version_by_id(version_id):
+    db = get_db()
+    version_row = db.execute("""
+        SELECT v.*, s.name as software_name
+        FROM versions v
+        JOIN software s ON v.software_id = s.id
+        WHERE v.id = ?
+    """, (version_id,)).fetchone()
+
+    if not version_row:
+        return jsonify(msg=f"Version with ID {version_id} not found."), 404
+    
+    return jsonify(dict(version_row)), 200
+
+@app.route('/api/admin/versions/<int:version_id>', methods=['PUT'])
+@jwt_required()
+@admin_required
+def admin_update_version(version_id):
+    current_user_id = int(get_jwt_identity())
+    db = get_db()
+
+    # Fetch existing version
+    existing_version = db.execute("SELECT * FROM versions WHERE id = ?", (version_id,)).fetchone()
+    if not existing_version:
+        return jsonify(msg=f"Version with ID {version_id} not found."), 404
+
+    data = request.get_json()
+    if not data:
+        return jsonify(msg="Missing JSON data for update"), 400
+
+    # Prepare fields for update, defaulting to existing values if not provided
+    software_id = data.get('software_id', existing_version['software_id'])
+    version_number = data.get('version_number', existing_version['version_number'])
+    release_date = data.get('release_date', existing_version['release_date'])
+    main_download_link = data.get('main_download_link', existing_version['main_download_link'])
+    changelog = data.get('changelog', existing_version['changelog'])
+    known_bugs = data.get('known_bugs', existing_version['known_bugs'])
+
+    if not isinstance(software_id, int):
+        return jsonify(msg="software_id must be an integer."), 400
+    if not isinstance(version_number, str) or not version_number.strip():
+        return jsonify(msg="version_number must be a non-empty string."), 400
+    version_number = version_number.strip()
+    
+    if release_date and not isinstance(release_date, str): # Allow None
+         return jsonify(msg="release_date must be a string in YYYY-MM-DD format or null."), 400
+    if release_date:
+        try:
+            datetime.strptime(release_date, '%Y-%m-%d')
+        except ValueError:
+            return jsonify(msg="Invalid release_date format. Expected YYYY-MM-DD."), 400
+    
+    # Nullable fields can be explicitly set to null or empty string by client
+    # If client sends empty string for a nullable text field, store it as such or convert to NULL based on preference.
+    # Here, we store as provided (empty string or null from JSON).
+
+    try:
+        db.execute("""
+            UPDATE versions
+            SET software_id = ?, version_number = ?, release_date = ?, 
+                main_download_link = ?, changelog = ?, known_bugs = ?,
+                updated_by_user_id = ?
+            WHERE id = ?
+        """, (software_id, version_number, release_date, main_download_link, changelog, known_bugs,
+              current_user_id, version_id))
+        db.commit()
+
+        # Fetch the updated version with software_name
+        updated_version_row = db.execute("""
+            SELECT v.*, s.name as software_name
+            FROM versions v
+            JOIN software s ON v.software_id = s.id
+            WHERE v.id = ?
+        """, (version_id,)).fetchone()
+
+        if not updated_version_row: # Should not happen if update was successful on existing ID
+            app.logger.error(f"Failed to fetch updated version ID {version_id} after PUT.")
+            return jsonify(msg="Version updated but failed to retrieve."), 500
+            
+        return jsonify(dict(updated_version_row)), 200
+
+    except sqlite3.IntegrityError as e:
+        db.rollback()
+        if "FOREIGN KEY constraint failed" in str(e):
+            software_exists = db.execute("SELECT 1 FROM software WHERE id = ?", (software_id,)).fetchone()
+            if not software_exists:
+                return jsonify(msg=f"Error: Software with ID {software_id} does not exist."), 400
+        elif "UNIQUE constraint failed: versions.software_id, versions.version_number" in str(e):
+             return jsonify(msg=f"Error: Version '{version_number}' already exists for software ID {software_id}."), 409
+        app.logger.error(f"Admin update version DB IntegrityError: {e}")
+        return jsonify(msg=f"Database integrity error: {e}"), 409
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"Admin update version Exception: {e}")
+        return jsonify(msg="Server error updating version."), 500
+
+@app.route('/api/admin/versions/<int:version_id>', methods=['DELETE'])
+@jwt_required()
+@admin_required
+def admin_delete_version(version_id):
+    db = get_db()
+
+    # Check if version exists
+    version_exists = db.execute("SELECT id FROM versions WHERE id = ?", (version_id,)).fetchone()
+    if not version_exists:
+        return jsonify(msg=f"Version with ID {version_id} not found."), 404
+
+    # Check for references in patches table
+    patches_ref = db.execute("SELECT COUNT(*) as count FROM patches WHERE version_id = ?", (version_id,)).fetchone()
+    if patches_ref and patches_ref['count'] > 0:
+        return jsonify(msg=f"Cannot delete version: It is referenced by {patches_ref['count']} existing patch(es)."), 409
+
+    # Check for references in links table
+    links_ref = db.execute("SELECT COUNT(*) as count FROM links WHERE version_id = ?", (version_id,)).fetchone()
+    if links_ref and links_ref['count'] > 0:
+        return jsonify(msg=f"Cannot delete version: It is referenced by {links_ref['count']} existing link(s)."), 409
+    
+    try:
+        db.execute("DELETE FROM versions WHERE id = ?", (version_id,))
+        db.commit()
+        app.logger.info(f"Admin user {get_jwt_identity()} deleted version ID {version_id}")
+        return jsonify(msg="Version deleted successfully."), 200
+    except sqlite3.Error as e: # Catch any SQLite error during delete, though FKs are checked above
+        db.rollback()
+        app.logger.error(f"Error deleting version ID {version_id}: {e}")
+        return jsonify(msg=f"Database error while deleting version: {e}"), 500
+
 # --- File Serving Endpoints ---
 @app.route('/official_uploads/docs/<path:filename>')
 def serve_official_doc_file(filename):

@@ -1,14 +1,30 @@
 // src/components/admin/AdminMiscCategoryForm.tsx
 import React, { useState, useEffect } from 'react';
-import { MiscCategory, AddCategoryPayload, EditCategoryPayload } from '../../types'; // Make sure EditCategoryPayload is defined in types/index.ts
+import { useForm, SubmitHandler, FieldErrors } from 'react-hook-form';
+import * as yup from 'yup';
+import { yupResolver } from '@hookform/resolvers/yup';
+import { toast } from 'react-toastify';
+import { MiscCategory, AddCategoryPayload, EditCategoryPayload } from '../../types';
 import { addAdminMiscCategory, editAdminMiscCategory } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 
 interface AdminMiscCategoryFormProps {
   categoryToEdit?: MiscCategory | null;
-  onSuccess: (category: MiscCategory) => void; // Combined callback for add/update success
-  onCancel?: () => void; // Optional: To explicitly handle cancel action (e.g., hide form)
+  onSuccess: (category: MiscCategory) => void;
+  onCancel?: () => void;
 }
+
+// Form data interface
+interface MiscCategoryFormData {
+  name: string;
+  description?: string;
+}
+
+// Yup validation schema
+const categoryValidationSchema = yup.object().shape({
+  name: yup.string().required("Category name is required.").max(100, "Category name cannot exceed 100 characters."),
+  description: yup.string().optional().max(500, "Description cannot exceed 500 characters.").nullable(), // Allow null for optional fields
+});
 
 const AdminMiscCategoryForm: React.FC<AdminMiscCategoryFormProps> = ({
   categoryToEdit,
@@ -16,126 +32,127 @@ const AdminMiscCategoryForm: React.FC<AdminMiscCategoryFormProps> = ({
   onCancel,
 }) => {
   const isEditMode = !!categoryToEdit;
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const { register, handleSubmit, formState: { errors }, reset, setValue } = useForm<MiscCategoryFormData>({
+    resolver: yupResolver(categoryValidationSchema),
+    defaultValues: {
+      name: '',
+      description: '',
+    }
+  });
 
-  const { isAuthenticated, role } = useAuth(); // For role check, though form might only be shown to admins
+  const [isLoading, setIsLoading] = useState(false);
+  // Removed error and successMessage state
+
+  const { isAuthenticated, role } = useAuth();
 
   useEffect(() => {
     if (isEditMode && categoryToEdit) {
-      setName(categoryToEdit.name);
-      setDescription(categoryToEdit.description || '');
+      reset({
+        name: categoryToEdit.name,
+        description: categoryToEdit.description || '',
+      });
     } else {
-      // Reset for "Add New" mode
-      setName('');
-      setDescription('');
+      reset({
+        name: '',
+        description: '',
+      });
     }
-    setError(null); // Clear errors when mode or item changes
-    setSuccessMessage(null); // Clear success message
-  }, [categoryToEdit, isEditMode]);
+    // Clear toasts or other global messages if necessary when form reinitializes
+  }, [categoryToEdit, isEditMode, reset]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim()) {
-      setError("Category name is required.");
-      return;
-    }
+  const onSubmit: SubmitHandler<MiscCategoryFormData> = async (data) => {
     setIsLoading(true);
-    setError(null);
-    setSuccessMessage(null);
 
     try {
       let resultCategory: MiscCategory;
       if (isEditMode && categoryToEdit) {
         const payload: EditCategoryPayload = {};
         let changed = false;
-        if (name.trim() !== categoryToEdit.name) {
-          payload.name = name.trim();
+        if (data.name.trim() !== categoryToEdit.name) {
+          payload.name = data.name.trim();
           changed = true;
         }
-        if ((description.trim() || null) !== (categoryToEdit.description || null) ) { // Handle empty string vs null
-          payload.description = description.trim() || undefined; // Send undefined if empty to potentially clear it
-          changed = true;
+        // Ensure description is handled correctly: undefined if empty, otherwise trimmed value
+        const currentDescription = categoryToEdit.description || "";
+        const newDescription = data.description?.trim() || "";
+        if (newDescription !== currentDescription) {
+            payload.description = newDescription || undefined; // Send undefined if empty
+            changed = true;
         }
-
+        
         if (!changed) {
-            setSuccessMessage("No changes detected.");
-            setIsLoading(false);
-            if (onSuccess) onSuccess(categoryToEdit); // Still call onSuccess to trigger view updates like closing form
-            return;
+          toast.info("No changes detected.");
+          setIsLoading(false);
+          if (onSuccess) onSuccess(categoryToEdit);
+          return;
         }
         resultCategory = await editAdminMiscCategory(categoryToEdit.id, payload);
       } else {
         const payload: AddCategoryPayload = {
-          name: name.trim(),
-          description: description.trim() || undefined,
+          name: data.name.trim(),
+          description: data.description?.trim() || undefined,
         };
         resultCategory = await addAdminMiscCategory(payload);
       }
-      setSuccessMessage(`Category "${resultCategory.name}" ${isEditMode ? 'updated' : 'added'} successfully!`);
+      toast.success(`Category "${resultCategory.name}" ${isEditMode ? 'updated' : 'added'} successfully!`);
       
-      if (!isEditMode) { // Clear form only on successful add
-        setName('');
-        setDescription('');
+      if (!isEditMode) {
+        reset({ name: '', description: '' }); // Reset form on successful add
       }
-      // Call the external onSuccess callback (e.g., to close form in MiscView and refresh list)
       if (onSuccess) onSuccess(resultCategory); 
 
-      // Optionally clear success message after a delay
-      // setTimeout(() => setSuccessMessage(null), 3000);
-
     } catch (err: any) {
-      setError(err.response?.data?.msg || err.message || `Failed to ${isEditMode ? 'update' : 'add'} category.`);
+      const message = err.response?.data?.msg || err.message || `Failed to ${isEditMode ? 'update' : 'add'} category.`;
+      toast.error(message);
     } finally {
       setIsLoading(false);
     }
   };
+  
+  const onFormError = (formErrors: FieldErrors<MiscCategoryFormData>) => {
+    console.error("Form validation errors:", formErrors);
+    toast.error("Please correct the errors in the form.");
+  };
 
-  // This component should only be rendered if the user is an admin,
-  // typically controlled by the parent component (MiscView.tsx)
+
   if (!isAuthenticated || role !== 'admin') {
-    return <p>You are not authorized to manage categories.</p>; // Or null
+    return <p>You are not authorized to manage categories.</p>;
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 p-4 border border-gray-200 rounded-lg bg-white shadow-sm">
+    <form onSubmit={handleSubmit(onSubmit, onFormError)} className="space-y-4 p-4 border border-gray-200 rounded-lg bg-white shadow-sm">
       <h4 className="text-lg font-medium text-gray-800">
         {isEditMode ? 'Edit Miscellaneous Category' : 'Add New Miscellaneous Category'}
       </h4>
       
-      {error && <div className="p-3 my-2 bg-red-100 border border-red-300 text-red-700 rounded-md text-sm">{error}</div>}
-      {successMessage && <div className="p-3 my-2 bg-green-100 border border-green-300 text-green-700 rounded-md text-sm">{successMessage}</div>}
+      {/* Removed old error/success message divs */}
       
       <div>
-        <label htmlFor="miscCategoryName" className="block text-sm font-medium text-gray-700">
+        <label htmlFor="name" className="block text-sm font-medium text-gray-700">
           Name*
         </label>
         <input
           type="text"
-          id="miscCategoryName"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          required
+          id="name"
+          {...register("name")}
           disabled={isLoading}
-          className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+          className={`mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${errors.name ? 'border-red-500' : ''}`}
         />
+        {errors.name && <p className="mt-1 text-sm text-red-600">{errors.name.message}</p>}
       </div>
       
       <div>
-        <label htmlFor="miscCategoryDescription" className="block text-sm font-medium text-gray-700">
+        <label htmlFor="description" className="block text-sm font-medium text-gray-700">
           Description
         </label>
         <textarea
-          id="miscCategoryDescription"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
+          id="description"
+          {...register("description")}
           rows={3}
           disabled={isLoading}
-          className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+          className={`mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${errors.description ? 'border-red-500' : ''}`}
         />
+        {errors.description && <p className="mt-1 text-sm text-red-600">{errors.description.message}</p>}
       </div>
       
       <div className="flex items-center space-x-3 pt-2">
@@ -146,7 +163,7 @@ const AdminMiscCategoryForm: React.FC<AdminMiscCategoryFormProps> = ({
         >
           {isLoading ? (isEditMode ? 'Updating...' : 'Adding...') : (isEditMode ? 'Save Changes' : 'Add Category')}
         </button>
-        {onCancel && ( // Render cancel button only if onCancel prop is provided
+        {onCancel && (
           <button
             type="button"
             onClick={onCancel}

@@ -1,22 +1,63 @@
 // src/components/admin/AdminDocumentEntryForm.tsx
 import React, { useState, useEffect, useRef } from 'react';
-import { Software, Document as DocumentType, AddDocumentPayload } from '../../types';
+import { useForm, Controller, SubmitHandler, FieldErrors } from 'react-hook-form';
+import * as yup from 'yup';
+import { yupResolver } from '@hookform/resolvers/yup';
+import { toast } from 'react-toastify';
+import { Software, Document as DocumentType, AddDocumentPayload, EditDocumentPayload } from '../../types'; // Added EditDocumentPayload
 import {
   fetchSoftware,
   addAdminDocumentWithUrl, uploadAdminDocumentFile,
-  editAdminDocumentWithUrl, editAdminDocumentFile // NEW: Import edit functions
+  editAdminDocumentWithUrl, editAdminDocumentFile
 } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
-import { UploadCloud, Link as LinkIconLucide, File as FileIconLucide, X } from 'lucide-react'; // Corrected Link import
+import { UploadCloud, Link as LinkIconLucide, FileText as FileIconLucide, X } from 'lucide-react'; // File to FileText
 
 interface AdminDocumentEntryFormProps {
-  documentToEdit?: DocumentType | null; // NEW: Prop for editing
+  documentToEdit?: DocumentType | null;
   onDocumentAdded?: (newDocument: DocumentType) => void;
-  onDocumentUpdated?: (updatedDocument: DocumentType) => void; // NEW: Callback for update
-  onCancelEdit?: () => void; // NEW: Callback to cancel editing
+  onDocumentUpdated?: (updatedDocument: DocumentType) => void;
+  onCancelEdit?: () => void;
 }
 
 type InputMode = 'url' | 'upload';
+
+// Define the form data interface
+interface DocumentFormData {
+  selectedSoftwareId: string;
+  docName: string;
+  docType?: string;
+  description?: string;
+  inputMode: InputMode;
+  externalUrl?: string;
+  selectedFile?: File | null | undefined; // File, null (cleared), or undefined (initial)
+}
+
+// Yup validation schema
+const documentValidationSchema = yup.object().shape({
+  selectedSoftwareId: yup.string().required("Software selection is required."),
+  docName: yup.string().required("Document Name is required.").max(255, "Document Name cannot exceed 255 characters."),
+  docType: yup.string().optional(),
+  inputMode: yup.string().oneOf(['url', 'upload']).required("Input mode must be selected."),
+  externalUrl: yup.string().when('inputMode', {
+    is: 'url',
+    then: schema => schema.required("External Download URL is required.").url("Please enter a valid URL (e.g., http://example.com)."),
+    otherwise: schema => schema.optional().nullable(),
+  }),
+  selectedFile: yup.mixed()
+    .when(['inputMode', '$isEditMode', '$documentToEditIsExternal'], { // Pass context via $ prefix
+      is: (inputMode: string, isEditMode: boolean, documentToEditIsExternal: boolean) => {
+        if (inputMode !== 'upload') return false; // Only apply if mode is 'upload'
+        if (!isEditMode) return true; // Required for new uploads
+        if (isEditMode && documentToEditIsExternal) return true; // Required if switching from URL to upload in edit mode
+        return false; // Not required if editing an existing uploaded file and not changing it
+      },
+      then: schema => schema.required("Please select a file to upload.").test('filePresent', "File is required.", value => !!value),
+      otherwise: schema => schema.nullable(),
+    }),
+  description: yup.string().optional().max(1000, "Description cannot exceed 1000 characters."),
+});
+
 
 const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
   documentToEdit,
@@ -26,164 +67,163 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
 }) => {
   const isEditMode = !!documentToEdit;
 
-  const [softwareList, setSoftwareList] = useState<Software[]>([]);
-  const [selectedSoftwareId, setSelectedSoftwareId] = useState<string>('');
-  const [docName, setDocName] = useState('');
-  const [docType, setDocType] = useState('');
-  const [description, setDescription] = useState('');
+  const { register, handleSubmit, control, formState: { errors }, watch, setValue, reset } = useForm<DocumentFormData>({
+    resolver: yupResolver(documentValidationSchema),
+    context: { // Pass context to yup schema
+      isEditMode: isEditMode,
+      documentToEditIsExternal: documentToEdit?.is_external_link || false,
+    },
+    defaultValues: {
+      selectedSoftwareId: '',
+      docName: '',
+      docType: '',
+      description: '',
+      inputMode: 'url',
+      externalUrl: '',
+      selectedFile: null,
+    }
+  });
 
-  const [inputMode, setInputMode] = useState<InputMode>('url');
-  const [externalUrl, setExternalUrl] = useState('');
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [softwareList, setSoftwareList] = useState<Software[]>([]);
   const [existingFileName, setExistingFileName] = useState<string | null>(null); // For display in edit mode
 
-  const [isLoading, setIsLoading] = useState(false);
-  const [isFetchingSoftware, setIsFetchingSoftware] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false); // For API calls
+  const [isFetchingSoftware, setIsFetchingSoftware] = useState(false); // For dropdown loading
+  // Error and success messages will be handled by toast
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { isAuthenticated, role } = useAuth();
+  const watchedInputMode = watch('inputMode');
+  const watchedSelectedFile = watch('selectedFile');
 
   useEffect(() => {
     if (isAuthenticated && role === 'admin') {
       setIsFetchingSoftware(true);
       fetchSoftware()
         .then(setSoftwareList)
-        .catch(() => setError('Failed to load software list.'))
+        .catch(() => toast.error('Failed to load software list.'))
         .finally(() => setIsFetchingSoftware(false));
     }
   }, [isAuthenticated, role]);
 
-  // NEW: Populate form if documentToEdit is provided
   useEffect(() => {
     if (isEditMode && documentToEdit) {
-      setSelectedSoftwareId(documentToEdit.software_id?.toString() || ''); // software_id might be on the base Document type from backend now
-      setDocName(documentToEdit.doc_name);
-      setDocType(documentToEdit.doc_type || '');
-      setDescription(documentToEdit.description || '');
+      const defaultValues: Partial<DocumentFormData> = {
+        selectedSoftwareId: documentToEdit.software_id?.toString() || '',
+        docName: documentToEdit.doc_name,
+        docType: documentToEdit.doc_type || '',
+        description: documentToEdit.description || '',
+        inputMode: documentToEdit.is_external_link ? 'url' : 'upload',
+        externalUrl: documentToEdit.is_external_link ? documentToEdit.download_link : '',
+      };
+      reset(defaultValues);
 
-      if (documentToEdit.is_external_link) {
-        setInputMode('url');
-        setExternalUrl(documentToEdit.download_link); // download_link is the external URL here
-        setSelectedFile(null);
-        setExistingFileName(null);
-      } else {
-        setInputMode('upload');
-        setExternalUrl('');
-        // Don't pre-fill selectedFile for security/UX reasons. User must re-select if changing.
-        // Instead, display the name of the existing file.
-        // The actual file path (documentToEdit.download_link) points to the server path.
-        // We need original_filename_ref if available for display, or derive from download_link.
+      if (!documentToEdit.is_external_link) {
         const parts = documentToEdit.download_link.split('/');
-        setExistingFileName(parts[parts.length-1]); // Simplistic way to get filename
-                                                  // A proper original_filename_ref from backend is better for display
+        setExistingFileName(documentToEdit.original_filename_ref || parts[parts.length - 1]);
+      } else {
+        setExistingFileName(null);
       }
+      setValue('selectedFile', null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+
     } else {
-      // Reset form for "Add" mode or if documentToEdit becomes null
-      resetFormFields();
+      resetFormDefaults();
     }
-  }, [documentToEdit, isEditMode]);
+  }, [documentToEdit, isEditMode, reset, setValue]);
 
 
-  const resetFormFields = (keepSoftware: boolean = false) => {
-    if (!keepSoftware) setSelectedSoftwareId('');
-    setDocName('');
-    setDocType('');
-    setDescription('');
-    setExternalUrl('');
-    setSelectedFile(null);
+  const resetFormDefaults = (keepSoftware: boolean = false) => {
+    const currentSoftwareId = keepSoftware ? watch('selectedSoftwareId') : '';
+    reset({
+      selectedSoftwareId: currentSoftwareId,
+      docName: '',
+      docType: '',
+      description: '',
+      inputMode: 'url',
+      externalUrl: '',
+      selectedFile: null,
+    });
     setExistingFileName(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
-    setError(null);
-    // setSuccessMessage(null); // Keep success message until next action
   };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files[0]) {
-      setSelectedFile(event.target.files[0]);
-      setExistingFileName(null); // Clear existing file name display when new file is chosen
-      setError(null); setSuccessMessage(null);
+      setValue('selectedFile', event.target.files[0], { shouldValidate: true, shouldDirty: true });
+      setExistingFileName(null); 
+    } else {
+      setValue('selectedFile', null, { shouldValidate: true, shouldDirty: true });
     }
   };
 
   const clearFileSelection = () => {
-    setSelectedFile(null);
+    setValue('selectedFile', null, { shouldValidate: true, shouldDirty: true });
     if (fileInputRef.current) fileInputRef.current.value = "";
-    // If in edit mode and there was an existing file, re-display its name
     if (isEditMode && documentToEdit && !documentToEdit.is_external_link) {
-        const parts = documentToEdit.download_link.split('/');
-        setExistingFileName(parts[parts.length-1]);
+      const parts = documentToEdit.download_link.split('/');
+      setExistingFileName(documentToEdit.original_filename_ref || parts[parts.length - 1]);
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedSoftwareId) { setError("Software selection is required."); return; }
-    if (!docName.trim()) { setError("Document Name is required."); return; }
-    if (inputMode === 'url' && !externalUrl.trim()) { setError("External URL is required."); return; }
-    // In edit mode, a file is not strictly required if only metadata is changing for an existing uploaded file
-    if (inputMode === 'upload' && !selectedFile && !isEditMode) { // File required for new upload
-      setError("Please select a file to upload."); return;
-    }
-     if (inputMode === 'upload' && !selectedFile && isEditMode && !documentToEdit?.download_link) {
-      // If was external, now switching to upload in edit mode, file is required
-      setError("Please select a file to upload when changing to file-based document."); return;
-    }
-
-
-    setError(null); setSuccessMessage(null); setIsLoading(true);
+  const onSubmit: SubmitHandler<DocumentFormData> = async (data) => {
+    setIsLoading(true);
 
     try {
       let resultDocument: DocumentType;
+      const commonPayload = {
+        software_id: parseInt(data.selectedSoftwareId),
+        doc_name: data.docName.trim(),
+        description: data.description?.trim() || undefined,
+        doc_type: data.docType?.trim() || undefined,
+      };
 
-      if (inputMode === 'url') {
-        const payload: Partial<AddDocumentPayload> = { // Partial for edit
-          software_id: parseInt(selectedSoftwareId),
-          doc_name: docName.trim(),
-          download_link: externalUrl.trim(),
-          description: description.trim() || undefined,
-          doc_type: docType.trim() || undefined,
-          // is_external_link will be set by backend for edit_url
+      if (data.inputMode === 'url') {
+        const payload = {
+          ...commonPayload,
+          download_link: data.externalUrl!.trim(), // Validated by yup
         };
         if (isEditMode && documentToEdit) {
-          resultDocument = await editAdminDocumentWithUrl(documentToEdit.id, payload);
+          resultDocument = await editAdminDocumentWithUrl(documentToEdit.id, payload as EditDocumentPayload);
         } else {
-          resultDocument = await addAdminDocumentWithUrl(payload as AddDocumentPayload); // Cast for add
+          resultDocument = await addAdminDocumentWithUrl(payload as AddDocumentPayload);
         }
       } else { // inputMode === 'upload'
         const formData = new FormData();
-        formData.append('software_id', selectedSoftwareId);
-        formData.append('doc_name', docName.trim()); // Backend will default to filename if this is empty and it's an add
-        if (docType.trim()) formData.append('doc_type', docType.trim());
-        if (description.trim()) formData.append('description', description.trim());
+        formData.append('software_id', data.selectedSoftwareId);
+        formData.append('doc_name', data.docName.trim());
+        if (data.docType?.trim()) formData.append('doc_type', data.docType.trim());
+        if (data.description?.trim()) formData.append('description', data.description.trim());
         
-        if (selectedFile) { // Only append file if a new one is selected
-          formData.append('file', selectedFile);
+        if (data.selectedFile) {
+          formData.append('file', data.selectedFile);
         }
-        // If editing and no new file selected, backend PUT /edit_file will keep the old file if only metadata changes.
 
         if (isEditMode && documentToEdit) {
           resultDocument = await editAdminDocumentFile(documentToEdit.id, formData);
         } else {
-          if (!selectedFile) { // Should have been caught above, but double check
-             setError("A file is required for new document uploads."); setIsLoading(false); return;
-          }
+          // selectedFile is validated by yup to be present for new uploads
           resultDocument = await uploadAdminDocumentFile(formData);
         }
       }
 
-      setSuccessMessage(`Document "${resultDocument.doc_name}" ${isEditMode ? 'updated' : 'added'} successfully!`);
-      if (!isEditMode) resetFormFields(true); // Keep software selected for multiple adds
+      toast.success(`Document "${resultDocument.doc_name}" ${isEditMode ? 'updated' : 'added'} successfully!`);
+      if (!isEditMode) resetFormDefaults(true);
       
       if (isEditMode && onDocumentUpdated) onDocumentUpdated(resultDocument);
       if (!isEditMode && onDocumentAdded) onDocumentAdded(resultDocument);
 
     } catch (err: any) {
-      setError(err.message || `Failed to ${isEditMode ? 'update' : 'add'} document.`);
+      const message = err.response?.data?.msg || err.message || `Failed to ${isEditMode ? 'update' : 'add'} document.`;
+      toast.error(message);
     } finally {
       setIsLoading(false);
     }
+  };
+  
+  const onFormError = (formErrors: FieldErrors<DocumentFormData>) => {
+    console.error("Form validation errors:", formErrors);
+    toast.error("Please correct the errors highlighted in the form.");
   };
 
   const documentTypes = ["Guide", "Manual", "API Reference", "Datasheet", "Whitepaper", "Specification", "Other"];
@@ -191,7 +231,7 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
   if (!isAuthenticated || role !== 'admin') return null;
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 bg-white p-6 rounded-lg shadow-md border border-gray-200">
+    <form onSubmit={handleSubmit(onSubmit, onFormError)} className="space-y-6 bg-white p-6 rounded-lg shadow-md border border-gray-200">
       <div className="flex justify-between items-center">
         <h3 className="text-xl font-semibold text-gray-800">
           {isEditMode ? 'Edit Document' : 'Add New Document'}
@@ -202,87 +242,102 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
           </button>
         )}
       </div>
-      {error && <div className="p-3 my-2 bg-red-100 text-red-700 rounded">{error}</div>}
-      {successMessage && <div className="p-3 my-2 bg-green-100 text-green-700 rounded">{successMessage}</div>}
+      {/* Global error/success messages removed, using toast now */}
 
-      {/* Software Selection */}
       <div>
-        <label htmlFor="docSoftware" className="block text-sm font-medium text-gray-700">Software*</label>
+        <label htmlFor="selectedSoftwareId" className="block text-sm font-medium text-gray-700">Software*</label>
         {isFetchingSoftware ? <p className="text-sm text-gray-500">Loading software...</p> : (
-          <select id="docSoftware" value={selectedSoftwareId} 
-                  onChange={(e) => setSelectedSoftwareId(e.target.value)} required disabled={isLoading}
-                  className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
+          <select 
+            id="selectedSoftwareId" 
+            {...register("selectedSoftwareId")} 
+            disabled={isLoading || isFetchingSoftware}
+            className={`mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md ${errors.selectedSoftwareId ? 'border-red-500' : ''}`}
+          >
             <option value="" disabled>Select Software</option>
             {softwareList.map(sw => <option key={sw.id} value={sw.id.toString()}>{sw.name}</option>)}
           </select>
         )}
+        {errors.selectedSoftwareId && <p className="mt-1 text-sm text-red-600">{errors.selectedSoftwareId.message}</p>}
       </div>
 
-      {/* Document Name */}
       <div>
         <label htmlFor="docName" className="block text-sm font-medium text-gray-700">Document Name*</label>
-        <input type="text" id="docName" value={docName} onChange={(e) => setDocName(e.target.value)} required disabled={isLoading}
-               className="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500"/>
+        <input 
+            type="text" 
+            id="docName" 
+            {...register("docName")} 
+            disabled={isLoading}
+            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.docName ? 'border-red-500' : ''}`}
+        />
+        {errors.docName && <p className="mt-1 text-sm text-red-600">{errors.docName.message}</p>}
       </div>
 
-      {/* Input Mode Toggle */}
       <div className="my-4">
         <span className="block text-sm font-medium text-gray-700 mb-2">Document Source:</span>
         <div className="flex items-center space-x-4">
           <label className="flex items-center space-x-2 cursor-pointer">
-            <input type="radio" name="inputMode" value="url" checked={inputMode === 'url'}
-                   onChange={() => setInputMode('url')} className="form-radio h-4 w-4 text-blue-600" disabled={isLoading}/>
+            <input type="radio" {...register("inputMode")} value="url" className="form-radio h-4 w-4 text-blue-600" disabled={isLoading}/>
             <span className="flex items-center"><LinkIconLucide size={16} className="mr-1 text-gray-600"/>Provide External Link</span>
           </label>
           <label className="flex items-center space-x-2 cursor-pointer">
-            <input type="radio" name="inputMode" value="upload" checked={inputMode === 'upload'}
-                   onChange={() => setInputMode('upload')} className="form-radio h-4 w-4 text-blue-600" disabled={isLoading}/>
+            <input type="radio" {...register("inputMode")} value="upload" className="form-radio h-4 w-4 text-blue-600" disabled={isLoading}/>
             <span className="flex items-center"><UploadCloud size={16} className="mr-1 text-gray-600"/>Upload File</span>
           </label>
         </div>
+        {errors.inputMode && <p className="mt-1 text-sm text-red-600">{errors.inputMode.message}</p>}
       </div>
 
-      {/* Conditional Inputs based on Mode */}
-      {inputMode === 'url' && (
+      {watchedInputMode === 'url' && (
         <div>
           <label htmlFor="externalUrl" className="block text-sm font-medium text-gray-700">External Download URL*</label>
-          <input type="url" id="externalUrl" value={externalUrl} onChange={(e) => setExternalUrl(e.target.value)}
-                 placeholder="https://example.com/document.pdf" required={inputMode === 'url'} disabled={isLoading}
-                 className="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500"/>
+          <input 
+            type="url" 
+            id="externalUrl" 
+            {...register("externalUrl")}
+            placeholder="https://example.com/document.pdf" 
+            disabled={isLoading}
+            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.externalUrl ? 'border-red-500' : ''}`}
+          />
+          {errors.externalUrl && <p className="mt-1 text-sm text-red-600">{errors.externalUrl.message}</p>}
         </div>
       )}
 
-      {inputMode === 'upload' && (
+      {watchedInputMode === 'upload' && (
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            {isEditMode && existingFileName ? 'Replace File (Optional)' : 'Select File to Upload*'}
+            {isEditMode && existingFileName && !watchedSelectedFile ? 'Replace File (Optional)' : 'Select File to Upload*'}
           </label>
           <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md hover:border-blue-500 transition-colors">
             <div className="space-y-1 text-center">
                 <FileIconLucide className="mx-auto h-12 w-12 text-gray-400" />
                 <div className="flex text-sm text-gray-600">
-                <label htmlFor="doc-file-upload" className="relative cursor-pointer bg-white rounded-md font-medium text-blue-600 hover:text-blue-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-blue-500">
-                    <span>{selectedFile ? 'Change file' : 'Upload a file'}</span>
-                    <input id="doc-file-upload" name="file" type="file" className="sr-only"
-                        onChange={handleFileChange} ref={fileInputRef} 
-                        required={inputMode === 'upload' && !isEditMode && !existingFileName} // Required for add, or if changing from URL to file
-                        disabled={isLoading} />
+                <label htmlFor="doc-file-upload-input" className="relative cursor-pointer bg-white rounded-md font-medium text-blue-600 hover:text-blue-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-blue-500">
+                    <span>{watchedSelectedFile ? 'Change file' : 'Upload a file'}</span>
+                    <input 
+                        id="doc-file-upload-input" 
+                        name="doc-file-input" // Name for the input element
+                        type="file" 
+                        className="sr-only"
+                        onChange={handleFileChange} 
+                        ref={fileInputRef} 
+                        disabled={isLoading} 
+                    />
                 </label>
                 <p className="pl-1">or drag and drop</p>
                 </div>
                 <p className="text-xs text-gray-500">PDF, DOCX, PNG, JPG, ZIP etc.</p>
             </div>
           </div>
-          {(selectedFile || existingFileName) && (
+          {(watchedSelectedFile || existingFileName) && (
             <div className="mt-3 flex items-center justify-between p-2 bg-gray-50 border border-gray-200 rounded-md">
                 <div className='flex items-center space-x-2 overflow-hidden'>
                     <FileIconLucide size={18} className="text-gray-500 flex-shrink-0" />
                     <span className="text-sm text-gray-700 truncate">
-                      {selectedFile ? selectedFile.name : existingFileName}
+                      {watchedSelectedFile ? (watchedSelectedFile as File).name : existingFileName}
                     </span>
-                    {isEditMode && existingFileName && !selectedFile && <span className="text-xs text-gray-500 ml-2">(current)</span>}
+                    {isEditMode && existingFileName && !watchedSelectedFile && <span className="text-xs text-gray-500 ml-2">(current)</span>}
                 </div>
-                {selectedFile && (
+                {watchedSelectedFile && (
                   <button type="button" onClick={clearFileSelection} disabled={isLoading}
                           className="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-200">
                       <X size={16} />
@@ -290,34 +345,51 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
                 )}
             </div>
           )}
+          {errors.selectedFile && <p className="mt-1 text-sm text-red-600">{errors.selectedFile.message}</p>}
         </div>
       )}
 
-      {/* Document Type */}
       <div>
         <label htmlFor="docType" className="block text-sm font-medium text-gray-700">Document Type</label>
-        <select id="docType" value={docType} onChange={(e) => setDocType(e.target.value)} disabled={isLoading}
-                className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
+        <select 
+            id="docType" 
+            {...register("docType")} 
+            disabled={isLoading}
+            className={`mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md ${errors.docType ? 'border-red-500' : ''}`}
+        >
           <option value="">Select Type (Optional)</option>
           {documentTypes.map(type => <option key={type} value={type}>{type}</option>)}
         </select>
+        {errors.docType && <p className="mt-1 text-sm text-red-600">{errors.docType.message}</p>}
       </div>
 
-      {/* Description */}
       <div>
-        <label htmlFor="docDescription" className="block text-sm font-medium text-gray-700">Description</label>
-        <textarea id="docDescription" rows={3} value={description} onChange={(e) => setDescription(e.target.value)}
-                  disabled={isLoading} className="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500"/>
+        <label htmlFor="description" className="block text-sm font-medium text-gray-700">Description</label>
+        <textarea 
+            id="description" 
+            rows={3} 
+            {...register("description")}
+            disabled={isLoading} 
+            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.description ? 'border-red-500' : ''}`}
+        />
+        {errors.description && <p className="mt-1 text-sm text-red-600">{errors.description.message}</p>}
       </div>
 
       <div className="flex space-x-3">
-        <button type="submit" disabled={isLoading}
-                className="flex-1 inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50">
+        <button 
+            type="submit" 
+            disabled={isLoading || isFetchingSoftware}
+            className="flex-1 inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+        >
           {isLoading ? (isEditMode ? 'Updating...' : 'Adding...') : (isEditMode ? 'Update Document' : 'Add Document')}
         </button>
         {isEditMode && onCancelEdit && (
-            <button type="button" onClick={onCancelEdit} disabled={isLoading}
-                    className="flex-1 inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+            <button 
+                type="button" 
+                onClick={onCancelEdit} 
+                disabled={isLoading}
+                className="flex-1 inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+            >
                 Cancel
             </button>
         )}

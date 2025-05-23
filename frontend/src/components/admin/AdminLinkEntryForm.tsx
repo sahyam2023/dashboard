@@ -1,19 +1,23 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useForm, Controller, SubmitHandler, FieldErrors } from 'react-hook-form';
+import * as yup from 'yup';
+import { yupResolver } from '@hookform/resolvers/yup';
+import { toast } from 'react-toastify';
 import {
   Software,
   Link as LinkType,
-  SoftwareVersion, // For version dropdown
-  AddLinkPayloadFlexible, // Use the flexible payload
-  EditLinkPayloadFlexible  // Use the flexible payload
-} from '../../types'; // Ensure these are correct in types/index.ts
+  SoftwareVersion,
+  AddLinkPayloadFlexible,
+  EditLinkPayloadFlexible
+} from '../../types';
 import {
   fetchSoftware,
-  fetchVersionsForSoftware, // Needed for the dropdown
+  fetchVersionsForSoftware,
   addAdminLinkWithUrl, uploadAdminLinkFile,
   editAdminLinkWithUrl, editAdminLinkFile
-} from '../../services/api'; // API functions use flexible payloads
+} from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
-import { UploadCloud, Link as LinkIconLucide, FileText as FileIconLucide, X } from 'lucide-react'; // Changed File to FileText
+import { UploadCloud, Link as LinkIconLucide, FileText as FileIconLucide, X } from 'lucide-react';
 
 interface AdminLinkEntryFormProps {
   linkToEdit?: LinkType | null;
@@ -23,7 +27,45 @@ interface AdminLinkEntryFormProps {
 }
 
 type InputMode = 'url' | 'upload';
-const CREATE_NEW_VERSION_SENTINEL = "CREATE_NEW_VERSION_SENTINEL_VALUE"; // Unique value
+const CREATE_NEW_VERSION_SENTINEL = "CREATE_NEW_VERSION_SENTINEL_VALUE";
+
+// Define the form data interface
+interface LinkFormData {
+  selectedSoftwareId: string;
+  title: string;
+  selectedVersionId: string;
+  typedVersionString?: string;
+  inputMode: InputMode;
+  externalUrl?: string;
+  selectedFile?: File | null | undefined; // Can be File, null (cleared), or undefined (initial)
+  description?: string;
+}
+
+// Create a Yup validation schema
+const validationSchema = yup.object().shape({
+  selectedSoftwareId: yup.string().required('Software Product must be selected.'),
+  title: yup.string().required('Link Title is required.').max(255, 'Title cannot exceed 255 characters.'),
+  selectedVersionId: yup.string().required('Version must be selected or a new one entered.'),
+  typedVersionString: yup.string().when('selectedVersionId', {
+    is: CREATE_NEW_VERSION_SENTINEL,
+    then: schema => schema.required('New Version String is required when "Enter New Version" is selected.').min(1, 'New Version String cannot be empty.'),
+    otherwise: schema => schema.optional(),
+  }),
+  inputMode: yup.string().oneOf(['url', 'upload']).required('Input mode must be selected.'),
+  externalUrl: yup.string().when('inputMode', {
+    is: 'url',
+    then: schema => schema.required('External URL is required for URL mode.').url('Please enter a valid URL (e.g., http://example.com).'),
+    otherwise: schema => schema.optional().nullable(),
+  }),
+  selectedFile: yup.mixed().when(['inputMode', 'isEditMode', 'existingFileName'], {
+    is: (inputMode: string, isEditMode: boolean, existingFileName: string | null | undefined) => 
+      inputMode === 'upload' && (!isEditMode || !existingFileName),
+    then: schema => schema.required('A file is required for new link uploads.').test('filePresent', 'A file is required for new link uploads.', value => !!value),
+    otherwise: schema => schema.nullable(),
+  }),
+  description: yup.string().optional().max(1000, 'Description cannot exceed 1000 characters.'),
+});
+
 
 const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
   linkToEdit,
@@ -33,190 +75,191 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
 }) => {
   const isEditMode = !!linkToEdit;
 
-  const [softwareList, setSoftwareList] = useState<Software[]>([]);
-  const [selectedSoftwareId, setSelectedSoftwareId] = useState<string>('');
+  const { register, handleSubmit, control, formState: { errors }, watch, setValue, reset } = useForm<LinkFormData>({
+    resolver: yupResolver(validationSchema),
+    context: { isEditMode, existingFileName: linkToEdit?.original_filename_ref || (linkToEdit && !linkToEdit.is_external_link ? linkToEdit.url.split('/').pop() : null) }, // Pass context to yup
+    defaultValues: { // Initialize with sensible defaults
+      selectedSoftwareId: '',
+      title: '',
+      selectedVersionId: '',
+      typedVersionString: '',
+      inputMode: 'url',
+      externalUrl: '',
+      selectedFile: null,
+      description: '',
+    }
+  });
 
+  const [softwareList, setSoftwareList] = useState<Software[]>([]);
   // --- Version Handling States (Version is MANDATORY for Links now) ---
   const [versionsList, setVersionsList] = useState<SoftwareVersion[]>([]);
-  const [selectedVersionId, setSelectedVersionId] = useState<string>(''); // From dropdown
-  const [showTypeVersionInput, setShowTypeVersionInput] = useState(false);
-  const [typedVersionString, setTypedVersionString] = useState<string>('');
+  // showTypeVersionInput will be derived from watched selectedVersionId
   // --- End Version Handling States ---
-
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [inputMode, setInputMode] = useState<InputMode>('url');
-  const [externalUrl, setExternalUrl] = useState('');
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  
+  // existingFileName needs to be tracked for validation logic if not using context correctly or if it changes
   const [existingFileName, setExistingFileName] = useState<string | null>(null);
 
-  const [isLoading, setIsLoading] = useState(false);
-  const [isFetchingSoftwareOrVersions, setIsFetchingSoftwareOrVersions] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  const [isLoading, setIsLoading] = useState(false); // For API calls
+  const [isFetchingSoftwareOrVersions, setIsFetchingSoftwareOrVersions] = useState(false); // For dropdown loading
+  // Error and success messages will be handled by toast
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { isAuthenticated, role } = useAuth();
+  const watchedSoftwareId = watch('selectedSoftwareId'); // RHF watch
+  const watchedSelectedVersionId = watch('selectedVersionId'); // RHF watch
+  const watchedInputMode = watch('inputMode'); // RHF watch
+  const watchedSelectedFile = watch('selectedFile'); // RHF watch
+  // This state is now derived directly in JSX or from watchedSelectedVersionId
+  const showTypeVersionInput = watchedSelectedVersionId === CREATE_NEW_VERSION_SENTINEL; 
+
+  // Old state variables for individual fields are removed (title, description, etc.)
+  // Old error and successMessage states are removed
+  // useState for selectedSoftwareId, selectedVersionId, typedVersionString, inputMode, externalUrl, selectedFile are removed.
 
   useEffect(() => {
     if (isAuthenticated && role === 'admin') {
       setIsFetchingSoftwareOrVersions(true);
       fetchSoftware()
         .then(setSoftwareList)
-        .catch(() => setError('Failed to load software list.'))
+        .catch(() => toast.error('Failed to load software list.')) // Use toast
         .finally(() => setIsFetchingSoftwareOrVersions(false));
     }
   }, [isAuthenticated, role]);
 
   useEffect(() => {
-    if (selectedSoftwareId) {
+    // Uses watchedSoftwareId from RHF
+    if (watchedSoftwareId) { 
       setIsFetchingSoftwareOrVersions(true);
       setVersionsList([]);
-      setSelectedVersionId('');
-      setTypedVersionString('');
-      setShowTypeVersionInput(false);
-      fetchVersionsForSoftware(parseInt(selectedSoftwareId))
+      setValue('selectedVersionId', ''); // RHF setValue
+      setValue('typedVersionString', ''); // RHF setValue
+      // setShowTypeVersionInput(false); // Derived state
+      fetchVersionsForSoftware(parseInt(watchedSoftwareId))
         .then(setVersionsList)
-        .catch(() => setError('Failed to load versions for selected software.'))
+        .catch(() => toast.error('Failed to load versions for selected software.')) // Use toast
         .finally(() => setIsFetchingSoftwareOrVersions(false));
     } else {
       setVersionsList([]);
-      setSelectedVersionId('');
-      setTypedVersionString('');
-      setShowTypeVersionInput(false);
+      setValue('selectedVersionId', ''); // RHF setValue
+      setValue('typedVersionString', ''); // RHF setValue
+      // setShowTypeVersionInput(false); // Derived state
     }
-  }, [selectedSoftwareId]);
+  }, [watchedSoftwareId, setValue]); // Add setValue to dependencies
 
   useEffect(() => {
     if (isEditMode && linkToEdit) {
-      setSelectedSoftwareId(linkToEdit.software_id.toString());
-      setTitle(linkToEdit.title);
-      setDescription(linkToEdit.description || '');
-
-      // Pre-fill version (mandatory for links)
-      if (linkToEdit.version_id && selectedSoftwareId === linkToEdit.software_id.toString() && versionsList.length > 0) {
+      // Use RHF reset or setValue to prefill
+      const defaultValues: Partial<LinkFormData> = {
+        selectedSoftwareId: linkToEdit.software_id.toString(),
+        title: linkToEdit.title,
+        description: linkToEdit.description || '',
+        inputMode: linkToEdit.is_external_link ? 'url' : 'upload',
+        externalUrl: linkToEdit.is_external_link ? linkToEdit.url : '',
+        // selectedFile remains null/undefined initially for edit mode
+      };
+      
+      // Pre-fill version logic using RHF values
+      // This logic depends on versionsList being populated for the selectedSoftwareId
+      // It's important that watchedSoftwareId is already set for this to work correctly,
+      // or this part of the logic needs to run when versionsList is updated.
+      if (linkToEdit.version_id && linkToEdit.software_id.toString() === watchedSoftwareId && versionsList.length > 0) {
         const existingVersionInList = versionsList.find(v => v.id === linkToEdit.version_id);
         if (existingVersionInList) {
-          setSelectedVersionId(linkToEdit.version_id.toString());
-          setTypedVersionString(linkToEdit.version_number); // version_number is now non-null for Link type
-          setShowTypeVersionInput(false);
+          defaultValues.selectedVersionId = linkToEdit.version_id.toString();
+          defaultValues.typedVersionString = linkToEdit.version_number; 
         } else {
-          setSelectedVersionId(CREATE_NEW_VERSION_SENTINEL);
-          setTypedVersionString(linkToEdit.version_number);
-          setShowTypeVersionInput(true);
+          defaultValues.selectedVersionId = CREATE_NEW_VERSION_SENTINEL;
+          defaultValues.typedVersionString = linkToEdit.version_number;
         }
-      } else if (linkToEdit.version_number) { // Fallback if versionsList not ready
-          setTypedVersionString(linkToEdit.version_number);
-          if (!versionsList.find(v => v.id === linkToEdit.version_id)) {
-              setSelectedVersionId(CREATE_NEW_VERSION_SENTINEL);
-              setShowTypeVersionInput(true);
-          }
+      } else if (linkToEdit.version_number) { // Fallback if versionsList not ready or software ID mismatch
+          defaultValues.selectedVersionId = CREATE_NEW_VERSION_SENTINEL;
+          defaultValues.typedVersionString = linkToEdit.version_number;
       }
 
+      reset(defaultValues); // RHF reset with all values
 
-      if (linkToEdit.is_external_link) {
-        setInputMode('url');
-        setExternalUrl(linkToEdit.url);
-        setExistingFileName(null);
-      } else {
-        setInputMode('upload');
-        setExternalUrl('');
+      if (!linkToEdit.is_external_link) {
         setExistingFileName(linkToEdit.original_filename_ref || linkToEdit.url.split('/').pop() || 'unknown_file');
+      } else {
+        setExistingFileName(null);
       }
-      setSelectedFile(null);
+      setValue('selectedFile', null); // Clear file input field
+      if (fileInputRef.current) fileInputRef.current.value = "";
+
     } else if (!isEditMode) {
-      resetFormFields(!!selectedSoftwareId);
-  }
-}, [isEditMode, linkToEdit, versionsList, selectedSoftwareId]);
-
-
-  const resetFormFields = (keepSoftware: boolean = false) => {
-    if (!keepSoftware) {
-      setSelectedSoftwareId('');
-    } else {
-        if (!isEditMode) {
-            setSelectedVersionId('');
-            setShowTypeVersionInput(false);
-            setTypedVersionString('');
-        }
+      resetFormDefaults(!!watchedSoftwareId); // Use new reset function
     }
-    setTitle('');
-    setDescription('');
-    setInputMode('url');
-    setExternalUrl('');
-    setSelectedFile(null);
+  // Add versionsList and watchedSoftwareId to dependency array to re-run pre-fill if they change
+  }, [isEditMode, linkToEdit, reset, setValue, versionsList, watchedSoftwareId]);
+
+
+  const resetFormDefaults = (keepSoftware: boolean = false) => {
+    const currentSoftwareId = keepSoftware ? watch('selectedSoftwareId') : '';
+    // RHF reset
+    reset({
+        selectedSoftwareId: currentSoftwareId,
+        title: '',
+        selectedVersionId: '',
+        typedVersionString: '',
+        inputMode: 'url',
+        externalUrl: '',
+        selectedFile: null,
+        description: '',
+    });
     setExistingFileName(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
-    setError(null);
+    // Old setError(null) removed
   };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files[0]) {
-      setSelectedFile(event.target.files[0]);
-      setError(null); setSuccessMessage(null);
+      setValue('selectedFile', event.target.files[0], { shouldValidate: true, shouldDirty: true }); // RHF setValue
+      // Old setError(null); setSuccessMessage(null) removed
+    } else {
+      setValue('selectedFile', null, { shouldValidate: true, shouldDirty: true }); // RHF setValue
     }
   };
 
   const clearFileSelection = () => {
-    setSelectedFile(null);
+    setValue('selectedFile', null, { shouldValidate: true, shouldDirty: true }); // RHF setValue
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
   
-  const handleVersionSelectionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const value = e.target.value;
-    setSelectedVersionId(value);
-    if (value === CREATE_NEW_VERSION_SENTINEL) {
-      setShowTypeVersionInput(true);
-      setTypedVersionString('');
-    } else {
-      setShowTypeVersionInput(false);
-      const selectedFromList = versionsList.find(v => v.id.toString() === value);
-      setTypedVersionString(selectedFromList ? selectedFromList.version_number : '');
-    }
-  };
-  
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedSoftwareId) { setError("Software Product must be selected."); return; }
-    if (!title.trim()) { setError("Link Title is required."); return; }
+  // handleVersionSelectionChange is no longer needed, RHF handles select changes via register or Controller
+
+  // RHF Submit Handler
+  const onSubmit: SubmitHandler<LinkFormData> = async (data) => {
+    // Old e.preventDefault() is not needed
+    // Old manual validation checks are removed
+    setIsLoading(true);
+    // Old setError(null); setSuccessMessage(null) removed
 
     let finalVersionId: number | undefined = undefined;
     let finalTypedVersionString: string | undefined = undefined;
 
-    if (showTypeVersionInput && typedVersionString.trim()) {
-      finalTypedVersionString = typedVersionString.trim();
-    } else if (selectedVersionId && selectedVersionId !== CREATE_NEW_VERSION_SENTINEL && selectedVersionId !== "") {
-      finalVersionId = parseInt(selectedVersionId);
-    } else {
-      // Version is MANDATORY for links now
-      setError("A version (either selected or newly typed) is required for a link."); return;
+    // Logic using validated `data` from RHF
+    if (data.selectedVersionId === CREATE_NEW_VERSION_SENTINEL && data.typedVersionString) {
+      finalTypedVersionString = data.typedVersionString.trim();
+    } else if (data.selectedVersionId && data.selectedVersionId !== CREATE_NEW_VERSION_SENTINEL) {
+      finalVersionId = parseInt(data.selectedVersionId);
     }
-    if (selectedVersionId === CREATE_NEW_VERSION_SENTINEL && !typedVersionString.trim()){
-        setError("Please enter the new version string when 'Enter New Version' is selected."); return;
-    }
-
-    if (inputMode === 'url' && !externalUrl.trim()) { setError("External URL is required for URL mode."); return; }
-    if (inputMode === 'upload' && !selectedFile && !isEditMode) { setError("Please select a file for new link."); return; }
-    if (inputMode === 'upload' && !selectedFile && isEditMode && linkToEdit?.is_external_link) {
-        setError("Please select a file if changing from URL to Upload mode."); return;
-    }
-
-    setError(null); setSuccessMessage(null); setIsLoading(true);
+    // Yup schema handles other validation cases (e.g. missing typedVersionString when sentinel selected)
 
     const basePayload: Partial<AddLinkPayloadFlexible | EditLinkPayloadFlexible> = {
-      software_id: parseInt(selectedSoftwareId),
-      title: title.trim(),
-      description: description.trim() || undefined,
+      software_id: parseInt(data.selectedSoftwareId), // From RHF data
+      title: data.title.trim(), // From RHF data
+      description: data.description?.trim() || undefined, // From RHF data
     };
     if (finalVersionId) basePayload.version_id = finalVersionId;
     if (finalTypedVersionString) basePayload.typed_version_string = finalTypedVersionString;
 
     try {
       let resultLink: LinkType;
-      if (inputMode === 'url') {
+      if (data.inputMode === 'url') { // From RHF data
         const payloadForUrl = { 
             ...basePayload, 
-            url: externalUrl.trim(), 
+            url: data.externalUrl!.trim(), // From RHF data, ! asserts it's present due to yup validation
             is_external_link: true 
         } as AddLinkPayloadFlexible | EditLinkPayloadFlexible;
 
@@ -225,69 +268,98 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
         } else {
           resultLink = await addAdminLinkWithUrl(payloadForUrl as AddLinkPayloadFlexible);
         }
-      } else { // inputMode === 'upload'
-        const formData = new FormData();
-        formData.append('software_id', selectedSoftwareId);
-        if (finalVersionId) formData.append('version_id', finalVersionId.toString());
-        if (finalTypedVersionString) formData.append('typed_version_string', finalTypedVersionString);
+      } else { // data.inputMode === 'upload'
+        const formDataPayload = new FormData(); // Renamed from 'formData' to avoid conflict
+        formDataPayload.append('software_id', data.selectedSoftwareId); // From RHF data
+        if (finalVersionId) formDataPayload.append('version_id', finalVersionId.toString());
+        if (finalTypedVersionString) formDataPayload.append('typed_version_string', finalTypedVersionString);
         
-        formData.append('title', title.trim());
-        if (description.trim()) formData.append('description', description.trim());
-        if (selectedFile) formData.append('file', selectedFile);
+        formDataPayload.append('title', data.title.trim()); // From RHF data
+        if (data.description?.trim()) formDataPayload.append('description', data.description.trim()); // From RHF data
+        
+        // data.selectedFile comes from RHF, yup ensures it's present if required
+        if (data.selectedFile) {
+             formDataPayload.append('file', data.selectedFile);
+        }
+        // No need to check !selectedFile for new uploads, yup handles it.
 
         if (isEditMode && linkToEdit) {
-          resultLink = await editAdminLinkFile(linkToEdit.id, formData);
+          resultLink = await editAdminLinkFile(linkToEdit.id, formDataPayload);
         } else {
-          if (!selectedFile) { setError("A file is required for new link uploads."); setIsLoading(false); return; }
-          resultLink = await uploadAdminLinkFile(formData);
+          // No !selectedFile check needed here, yup ensures it for new uploads
+          resultLink = await uploadAdminLinkFile(formDataPayload);
         }
       }
-      setSuccessMessage(`Link "${resultLink.title}" ${isEditMode ? 'updated' : 'added'} successfully!`);
+      toast.success(`Link "${resultLink.title}" ${isEditMode ? 'updated' : 'added'} successfully!`); // Use toast
+      
       if (!isEditMode) {
-          resetFormFields(true);
-          setSelectedVersionId('');
-          setShowTypeVersionInput(false);
-          setTypedVersionString('');
+          resetFormDefaults(true); // Keep software selected
+          // Explicitly reset version fields because they might not be covered by default reset if software is kept
+          setValue('selectedVersionId', '');
+          setValue('typedVersionString', '');
       }
+      // Old setSelectedVersionId, setShowTypeVersionInput, setTypedVersionString removed
 
       if (isEditMode && onLinkUpdated) onLinkUpdated(resultLink);
       if (!isEditMode && onLinkAdded) onLinkAdded(resultLink);
 
-    } catch (err: any) { setError(err.response?.data?.msg || err.message || `Failed to ${isEditMode ? 'update' : 'add'} link.`); }
+    } catch (err: any) { 
+      const message = err.response?.data?.msg || err.message || `Failed to ${isEditMode ? 'update' : 'add'} link.`;
+      toast.error(message); // Use toast
+    }
     finally { setIsLoading(false); }
   };
+  
+  // Optional error handler for handleSubmit, useful for global form error toasts if needed
+  const onFormError = (formErrors: FieldErrors<LinkFormData>) => {
+    console.error("Form validation errors:", formErrors);
+    // Example: Find the first error message and toast it, or a generic message
+    // const firstErrorMessage = Object.values(formErrors).map(e => e?.message).find(m => !!m);
+    // if (firstErrorMessage) toast.error(firstErrorMessage); else 
+    toast.error("Please correct the errors highlighted in the form.");
+  };
+
 
   if (!isAuthenticated || role !== 'admin') return null;
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 bg-white p-6 rounded-lg shadow-md border border-gray-200">
-      <div className="flex justify-between items-center"> <h3 className="text-xl font-semibold text-gray-800"> {isEditMode ? 'Edit Link' : 'Add New Link'} </h3> {isEditMode && onCancelEdit && ( <button type="button" onClick={onCancelEdit} className="text-sm text-gray-600 hover:text-gray-800"> Cancel </button> )} </div> {error && <div className="p-3 my-2 bg-red-100 text-red-700 rounded">{error}</div>} {successMessage && <div className="p-3 my-2 bg-green-100 text-green-700 rounded">{successMessage}</div>}
+    // Use RHF handleSubmit, pass onSubmit and optional onFormError
+    <form onSubmit={handleSubmit(onSubmit, onFormError)} className="space-y-6 bg-white p-6 rounded-lg shadow-md border border-gray-200">
+      <div className="flex justify-between items-center"> 
+        <h3 className="text-xl font-semibold text-gray-800"> {isEditMode ? 'Edit Link' : 'Add New Link'} </h3> 
+        {isEditMode && onCancelEdit && ( 
+            <button type="button" onClick={onCancelEdit} className="text-sm text-gray-600 hover:text-gray-800"> Cancel </button> 
+        )} 
+      </div> 
+      {/* Old global error/success message divs removed */}
 
       <div>
-        <label htmlFor="linkSoftware" className="block text-sm font-medium text-gray-700">Software Product*</label>
+        <label htmlFor="selectedSoftwareId" className="block text-sm font-medium text-gray-700">Software Product*</label>
         {isFetchingSoftwareOrVersions && !softwareList.length ? <p className="text-sm text-gray-500">Loading software...</p> : (
-          <select id="linkSoftware" value={selectedSoftwareId}
-                  onChange={(e) => setSelectedSoftwareId(e.target.value)} required
-                  disabled={isLoading || (isFetchingSoftwareOrVersions && !softwareList.length)}
-                  className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
+          <select 
+            id="selectedSoftwareId" 
+            {...register("selectedSoftwareId")} // RHF register
+            disabled={isLoading || (isFetchingSoftwareOrVersions && !softwareList.length)}
+            className={`mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md ${errors.selectedSoftwareId ? 'border-red-500' : ''}`}
+          >
             <option value="" disabled>Select Software Product</option>
             {softwareList.map(sw => <option key={sw.id} value={sw.id.toString()}>{sw.name}</option>)}
           </select>
         )}
+        {errors.selectedSoftwareId && <p className="mt-1 text-sm text-red-600">{errors.selectedSoftwareId.message}</p>}
       </div>
 
       <div>
-        <label htmlFor="linkVersionSelect" className="block text-sm font-medium text-gray-700">Version*</label>
+        <label htmlFor="selectedVersionId" className="block text-sm font-medium text-gray-700">Version*</label>
         <div className="mt-1">
           <select
-            id="linkVersionSelect"
-            value={selectedVersionId}
-            onChange={handleVersionSelectionChange}
-            disabled={isLoading || isFetchingSoftwareOrVersions || !selectedSoftwareId}
-            className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+            id="selectedVersionId"
+            {...register("selectedVersionId")} // RHF register
+            disabled={isLoading || isFetchingSoftwareOrVersions || !watchedSoftwareId} // Use watched value
+            className={`block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md ${errors.selectedVersionId ? 'border-red-500' : ''}`}
           >
-            <option value="" disabled={versionsList.length > 0 && selectedSoftwareId !== ''}>
-              {isFetchingSoftwareOrVersions && selectedSoftwareId ? 'Loading versions...' : 'Select Existing Version'}
+            <option value="" disabled={versionsList.length > 0 && !!watchedSoftwareId}>
+              {isFetchingSoftwareOrVersions && watchedSoftwareId ? 'Loading versions...' : 'Select Existing Version'}
             </option>
             {versionsList.map(v => (
               <option key={v.id} value={v.id.toString()}>{v.version_number}</option>
@@ -295,31 +367,157 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
             <option value={CREATE_NEW_VERSION_SENTINEL}>Enter New Version String...</option>
           </select>
         </div>
-        {showTypeVersionInput && (
+        {/* Use showTypeVersionInput (derived from watchedSelectedVersionId) */}
+        {showTypeVersionInput && ( 
           <div className="mt-2">
-            <label htmlFor="linkTypedVersion" className="block text-xs font-medium text-gray-600">
-              {selectedVersionId === CREATE_NEW_VERSION_SENTINEL ? "New Version String*:" : "Version String (review/edit):"}
+            <label htmlFor="typedVersionString" className="block text-xs font-medium text-gray-600">
+              {/* Label simplified as typedVersionString is only for new versions */}
+              New Version String*:
             </label>
             <input
               type="text"
-              id="linkTypedVersion"
-              value={typedVersionString}
-              onChange={(e) => setTypedVersionString(e.target.value)}
+              id="typedVersionString"
+              {...register("typedVersionString")} // RHF register
               placeholder="e.g., 1.2.4-final"
-              className="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500"
-              required={showTypeVersionInput && selectedVersionId === CREATE_NEW_VERSION_SENTINEL}
+              className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.typedVersionString ? 'border-red-500' : ''}`}
+              // `required` attribute removed, yup handles it
             />
             <p className="mt-1 text-xs text-gray-500">This version will be created for the selected software if it doesn't exist.</p>
           </div>
         )}
+        {/* Display errors for version fields */}
+        {errors.selectedVersionId && !showTypeVersionInput && <p className="mt-1 text-sm text-red-600">{errors.selectedVersionId.message}</p>}
+        {errors.typedVersionString && showTypeVersionInput && <p className="mt-1 text-sm text-red-600">{errors.typedVersionString.message}</p>}
       </div>
       
-      <div><label htmlFor="linkTitle" className="block text-sm font-medium text-gray-700">Link Title*</label><input type="text" id="linkTitle" value={title} onChange={(e) => setTitle(e.target.value)} required disabled={isLoading} className="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500"/></div>
-      <div className="my-4"><span className="block text-sm font-medium text-gray-700 mb-2">Link Source:</span><div className="flex items-center space-x-4"><label className="flex items-center space-x-2 cursor-pointer"><input type="radio" name="linkInputMode" value="url" checked={inputMode === 'url'} onChange={() => setInputMode('url')} className="form-radio h-4 w-4 text-blue-600" disabled={isLoading}/><span className="flex items-center"><LinkIconLucide size={16} className="mr-1 text-gray-600"/>Provide External URL</span></label><label className="flex items-center space-x-2 cursor-pointer"><input type="radio" name="linkInputMode" value="upload" checked={inputMode === 'upload'} onChange={() => setInputMode('upload')} className="form-radio h-4 w-4 text-blue-600" disabled={isLoading}/><span className="flex items-center"><UploadCloud size={16} className="mr-1 text-gray-600"/>Upload File for this Link</span></label></div></div>
-      {inputMode === 'url' && (<div><label htmlFor="linkExternalUrl" className="block text-sm font-medium text-gray-700">Link URL*</label><input type="url" id="linkExternalUrl" value={externalUrl} onChange={(e) => setExternalUrl(e.target.value)} placeholder="https://example.com/resource" required={inputMode === 'url'} disabled={isLoading} className="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500"/></div>)}
-      {inputMode === 'upload' && (<div><label className="block text-sm font-medium text-gray-700 mb-1">{isEditMode && existingFileName && !selectedFile ? 'Replace File (Optional)' : 'Select File to Upload*'}</label><div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md hover:border-blue-500 transition-colors"><div className="space-y-1 text-center"><FileIconLucide className="mx-auto h-12 w-12 text-gray-400" /><div className="flex text-sm text-gray-600"><label htmlFor="link-file-upload" className="relative cursor-pointer bg-white rounded-md font-medium text-blue-600 hover:text-blue-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-blue-500"><span>{selectedFile ? 'Change file' : 'Upload a file'}</span><input id="link-file-upload" name="file" type="file" className="sr-only" onChange={handleFileChange} ref={fileInputRef} required={inputMode === 'upload' && (!isEditMode || (isEditMode && linkToEdit?.is_external_link && !selectedFile))} disabled={isLoading} /></label><p className="pl-1">or drag and drop</p></div><p className="text-xs text-gray-500">Any file type relevant for links.</p></div></div>{(selectedFile || (isEditMode && existingFileName)) && (<div className="mt-3 flex items-center justify-between p-2 bg-gray-50 border border-gray-200 rounded-md"><div className='flex items-center space-x-2 overflow-hidden'><FileIconLucide size={18} className="text-gray-500 flex-shrink-0" /><span className="text-sm text-gray-700 truncate">{selectedFile ? selectedFile.name : existingFileName}</span>{isEditMode && existingFileName && !selectedFile && <span className="text-xs text-gray-500 ml-2">(current)</span>}</div>{selectedFile && (<button type="button" onClick={clearFileSelection} disabled={isLoading} className="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-200"><X size={16} /></button>)}</div>)}</div>)}
-      <div><label htmlFor="linkDescription" className="block text-sm font-medium text-gray-700">Description</label><textarea id="linkDescription" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} disabled={isLoading} className="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500"/></div>
-      <div className="flex space-x-3"><button type="submit" disabled={isLoading} className="flex-1 inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50">{isLoading ? (isEditMode ? 'Updating...' : 'Adding...') : (isEditMode ? 'Update Link' : 'Add Link')}</button>{isEditMode && onCancelEdit && (<button type="button" onClick={onCancelEdit} disabled={isLoading} className="flex-1 inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">Cancel</button>)}</div>
+      <div>
+        <label htmlFor="title" className="block text-sm font-medium text-gray-700">Link Title*</label>
+        <input 
+            type="text" 
+            id="title" 
+            {...register("title")} // RHF register
+            disabled={isLoading} 
+            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.title ? 'border-red-500' : ''}`}
+        />
+        {errors.title && <p className="mt-1 text-sm text-red-600">{errors.title.message}</p>}
+      </div>
+
+      <div className="my-4">
+        <span className="block text-sm font-medium text-gray-700 mb-2">Link Source:</span>
+        <div className="flex items-center space-x-4">
+            <label className="flex items-center space-x-2 cursor-pointer">
+                {/* RHF register for radio */}
+                <input type="radio" {...register("inputMode")} value="url" className="form-radio h-4 w-4 text-blue-600" disabled={isLoading}/>
+                <span className="flex items-center"><LinkIconLucide size={16} className="mr-1 text-gray-600"/>Provide External URL</span>
+            </label>
+            <label className="flex items-center space-x-2 cursor-pointer">
+                <input type="radio" {...register("inputMode")} value="upload" className="form-radio h-4 w-4 text-blue-600" disabled={isLoading}/>
+                <span className="flex items-center"><UploadCloud size={16} className="mr-1 text-gray-600"/>Upload File for this Link</span>
+            </label>
+        </div>
+        {errors.inputMode && <p className="mt-1 text-sm text-red-600">{errors.inputMode.message}</p>}
+      </div>
+
+      {/* Use watchedInputMode from RHF */}
+      {watchedInputMode === 'url' && (
+        <div>
+            <label htmlFor="externalUrl" className="block text-sm font-medium text-gray-700">Link URL*</label>
+            <input 
+                type="url" 
+                id="externalUrl" 
+                {...register("externalUrl")} // RHF register
+                placeholder="https://example.com/resource" 
+                disabled={isLoading} 
+                className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.externalUrl ? 'border-red-500' : ''}`}
+            />
+            {errors.externalUrl && <p className="mt-1 text-sm text-red-600">{errors.externalUrl.message}</p>}
+        </div>
+      )}
+
+      {watchedInputMode === 'upload' && (
+        <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+                {/* Use watchedSelectedFile from RHF */}
+                {isEditMode && existingFileName && !watchedSelectedFile ? 'Replace File (Optional)' : 'Select File to Upload*'}
+            </label>
+            <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md hover:border-blue-500 transition-colors">
+                <div className="space-y-1 text-center">
+                    <FileIconLucide className="mx-auto h-12 w-12 text-gray-400" />
+                    <div className="flex text-sm text-gray-600">
+                        <label htmlFor="link-file-upload-input" className="relative cursor-pointer bg-white rounded-md font-medium text-blue-600 hover:text-blue-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-blue-500">
+                            <span>{watchedSelectedFile ? 'Change file' : 'Upload a file'}</span>
+                             {/* File input itself. RHF doesn't directly register file inputs in the same way.
+                                 onChange is handled by handleFileChange which uses setValue.
+                                 The 'name' attribute here is for the input element itself, not necessarily for RHF registration.
+                             */}
+                            <input 
+                                id="link-file-upload-input" 
+                                name="file-input-element" // Clarified name
+                                type="file" 
+                                className="sr-only" 
+                                onChange={handleFileChange} 
+                                ref={fileInputRef} 
+                                // `required` attribute removed, yup handles it
+                                disabled={isLoading} 
+                            />
+                        </label>
+                        <p className="pl-1">or drag and drop</p>
+                    </div>
+                    <p className="text-xs text-gray-500">Any file type relevant for links.</p>
+                </div>
+            </div>
+            {(watchedSelectedFile || (isEditMode && existingFileName)) && (
+                <div className="mt-3 flex items-center justify-between p-2 bg-gray-50 border border-gray-200 rounded-md">
+                    <div className='flex items-center space-x-2 overflow-hidden'>
+                        <FileIconLucide size={18} className="text-gray-500 flex-shrink-0" />
+                        <span className="text-sm text-gray-700 truncate">
+                            {/* Display name of watchedSelectedFile or existingFileName */}
+                            {watchedSelectedFile ? (watchedSelectedFile as File).name : existingFileName}
+                        </span>
+                        {isEditMode && existingFileName && !watchedSelectedFile && <span className="text-xs text-gray-500 ml-2">(current)</span>}
+                    </div>
+                    {watchedSelectedFile && (
+                        <button type="button" onClick={clearFileSelection} disabled={isLoading} className="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-200">
+                            <X size={16} />
+                        </button>
+                    )}
+                </div>
+            )}
+            {/* Display error for selectedFile (name used in LinkFormData and yup schema) */}
+            {errors.selectedFile && <p className="mt-1 text-sm text-red-600">{errors.selectedFile.message}</p>}
+        </div>
+    )}
+      <div>
+        <label htmlFor="description" className="block text-sm font-medium text-gray-700">Description</label>
+        <textarea 
+            id="description" 
+            rows={3} 
+            {...register("description")} // RHF register
+            disabled={isLoading} 
+            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.description ? 'border-red-500' : ''}`}
+        />
+        {errors.description && <p className="mt-1 text-sm text-red-600">{errors.description.message}</p>}
+      </div>
+
+      <div className="flex space-x-3">
+        <button 
+            type="submit" 
+            disabled={isLoading || isFetchingSoftwareOrVersions}  // Also disable if fetching dropdown data
+            className="flex-1 inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+        >
+            {isLoading ? (isEditMode ? 'Updating...' : 'Adding...') : (isEditMode ? 'Update Link' : 'Add Link')}
+        </button>
+        {isEditMode && onCancelEdit && (
+            <button 
+                type="button" 
+                onClick={onCancelEdit} 
+                disabled={isLoading} 
+                className="flex-1 inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+            >
+                Cancel
+            </button>
+        )}
+      </div>
     </form>
   );
 };

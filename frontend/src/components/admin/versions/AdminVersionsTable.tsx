@@ -32,7 +32,7 @@ const AdminVersionsTable: React.FC<AdminVersionsTableProps> = ({ onEdit, onDelet
         sortBy,
         sortOrder,
       };
-      if (softwareIdFilter) {
+      if (softwareIdFilter !== undefined && softwareIdFilter !== null) { // Ensure softwareIdFilter is checked properly
         params.softwareId = softwareIdFilter;
       }
       const response = await fetchAdminVersions(params);
@@ -65,9 +65,12 @@ const AdminVersionsTable: React.FC<AdminVersionsTableProps> = ({ onEdit, onDelet
     }
     setCurrentPage(1); // Reset to first page on sort change
   };
-  
+
   const formatNullableDate = (dateStr: string | null | undefined) => {
-    return dateStr ? new Date(dateStr).toLocaleDateString() : 'N/A';
+    if (!dateStr) return 'N/A';
+    // Check if dateStr is a valid date string before creating a Date object
+    const date = new Date(dateStr);
+    return !isNaN(date.getTime()) ? date.toLocaleDateString() : 'Invalid Date';
   };
 
   const truncateText = (text: string | null | undefined, maxLength: number = 50) => {
@@ -76,28 +79,31 @@ const AdminVersionsTable: React.FC<AdminVersionsTableProps> = ({ onEdit, onDelet
     return text.substring(0, maxLength) + '...';
   };
 
+  // Define columns with the required 'key' property
   const columns = [
-    { header: 'Software', accessor: 'software_name', sortable: true },
-    { header: 'Version', accessor: 'version_number', sortable: true },
-    { header: 'Release Date', accessor: 'release_date', sortable: true, render: (item: AdminSoftwareVersion) => formatNullableDate(item.release_date) },
-    { 
-      header: 'Download Link', 
-      accessor: 'main_download_link', 
+    { key: 'software_name', header: 'Software', accessor: 'software_name', sortable: true },
+    { key: 'version_number', header: 'Version', accessor: 'version_number', sortable: true },
+    { key: 'release_date', header: 'Release Date', accessor: 'release_date', sortable: true, render: (item: AdminSoftwareVersion) => formatNullableDate(item.release_date) },
+    {
+      key: 'main_download_link',
+      header: 'Download Link',
+      accessor: 'main_download_link',
       sortable: false, // Or true if backend supports sorting by it
-      render: (item: AdminSoftwareVersion) => 
+      render: (item: AdminSoftwareVersion) =>
         item.main_download_link ? (
           <a href={item.main_download_link} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-700 underline">
             Link
           </a>
-        ) : 'N/A' 
+        ) : 'N/A'
     },
-    { header: 'Changelog', accessor: 'changelog', sortable: false, render: (item: AdminSoftwareVersion) => truncateText(item.changelog) },
-    { header: 'Known Bugs', accessor: 'known_bugs', sortable: false, render: (item: AdminSoftwareVersion) => truncateText(item.known_bugs) },
-    { header: 'Created At', accessor: 'created_at', sortable: true, render: (item: AdminSoftwareVersion) => formatNullableDate(item.created_at) },
-    { header: 'Updated At', accessor: 'updated_at', sortable: true, render: (item: AdminSoftwareVersion) => formatNullableDate(item.updated_at) },
+    { key: 'changelog', header: 'Changelog', accessor: 'changelog', sortable: false, render: (item: AdminSoftwareVersion) => truncateText(item.changelog) },
+    { key: 'known_bugs', header: 'Known Bugs', accessor: 'known_bugs', sortable: false, render: (item: AdminSoftwareVersion) => truncateText(item.known_bugs) },
+    { key: 'created_at', header: 'Created At', accessor: 'created_at', sortable: true, render: (item: AdminSoftwareVersion) => formatNullableDate(item.created_at) },
+    { key: 'updated_at', header: 'Updated At', accessor: 'updated_at', sortable: true, render: (item: AdminSoftwareVersion) => formatNullableDate(item.updated_at) },
     {
+      key: 'actions', // Unique key for the actions column
       header: 'Actions',
-      accessor: 'actions',
+      accessor: 'actions', // This accessor might just be an identifier; actual data isn't typically pulled via 'item.actions'
       render: (item: AdminSoftwareVersion) => (
         <div className="flex space-x-2">
           <button
@@ -135,16 +141,14 @@ const AdminVersionsTable: React.FC<AdminVersionsTableProps> = ({ onEdit, onDelet
           totalItems,
           itemsPerPage,
           onPageChange: handlePageChange,
-          onItemsPerPageChange: (num) => {
+          onItemsPerPageChange: (num: number) => { // Fixed: num explicitly typed as number
             setItemsPerPage(num);
             setCurrentPage(1); // Reset to first page
           },
         }}
-        sorting={{
-          sortBy,
-          sortOrder,
-          onSortChange: handleSortChange,
-        }}
+        sortColumn={sortBy}
+        sortOrder={sortOrder}
+        onSort={handleSortChange}
       />
     </div>
   );

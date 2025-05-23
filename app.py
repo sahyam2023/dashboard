@@ -1735,11 +1735,66 @@ def serve_misc_file(filename):
 # --- Search API (Keep as is, or enhance later) ---
 @app.route('/api/search', methods=['GET'])
 def search_api():
-    # ... (your existing search logic)
-    query = request.args.get('q', '')
-    if not query: return jsonify({"error": "Search query parameter 'q' is required."}), 400
+    query_term = request.args.get('q', '').strip()
+
+    if not query_term:
+        return jsonify({"error": "Search query parameter 'q' is required and cannot be empty."}), 400
+
+    db = get_db()
     results = []
-    # TODO: Implement actual search across relevant tables
+    
+    # Prepare the search term for LIKE queries
+    like_query_term = f"%{query_term.lower()}%"
+
+    # Documents
+    sql_documents = """
+        SELECT id, doc_name AS name, description, 'document' AS type
+        FROM documents
+        WHERE LOWER(doc_name) LIKE ? OR LOWER(description) LIKE ?
+    """
+    results.extend([dict(row) for row in db.execute(sql_documents, (like_query_term, like_query_term)).fetchall()])
+
+    # Patches
+    sql_patches = """
+        SELECT id, patch_name AS name, description, 'patch' AS type
+        FROM patches
+        WHERE LOWER(patch_name) LIKE ? OR LOWER(description) LIKE ?
+    """
+    results.extend([dict(row) for row in db.execute(sql_patches, (like_query_term, like_query_term)).fetchall()])
+
+    # Links
+    sql_links = """
+        SELECT id, title AS name, description, url, 'link' AS type
+        FROM links
+        WHERE LOWER(title) LIKE ? OR LOWER(description) LIKE ? OR LOWER(url) LIKE ?
+    """
+    results.extend([dict(row) for row in db.execute(sql_links, (like_query_term, like_query_term, like_query_term)).fetchall()])
+
+    # Misc Files
+    sql_misc_files = """
+        SELECT id, user_provided_title AS name, original_filename, user_provided_description AS description, 'misc_file' AS type
+        FROM misc_files
+        WHERE LOWER(user_provided_title) LIKE ? OR LOWER(user_provided_description) LIKE ? OR LOWER(original_filename) LIKE ?
+    """
+    results.extend([dict(row) for row in db.execute(sql_misc_files, (like_query_term, like_query_term, like_query_term)).fetchall()])
+
+    # Software
+    sql_software = """
+        SELECT id, name, description, 'software' AS type
+        FROM software
+        WHERE LOWER(name) LIKE ? OR LOWER(description) LIKE ?
+    """
+    results.extend([dict(row) for row in db.execute(sql_software, (like_query_term, like_query_term)).fetchall()])
+
+    # Versions
+    sql_versions = """
+        SELECT v.id, v.version_number AS name, v.changelog, v.known_bugs, v.software_id, s.name AS software_name, 'version' AS type
+        FROM versions v
+        JOIN software s ON v.software_id = s.id
+        WHERE LOWER(v.version_number) LIKE ? OR LOWER(v.changelog) LIKE ? OR LOWER(v.known_bugs) LIKE ?
+    """
+    results.extend([dict(row) for row in db.execute(sql_versions, (like_query_term, like_query_term, like_query_term)).fetchall()])
+
     return jsonify(results)
 
 # --- CLI Command ---

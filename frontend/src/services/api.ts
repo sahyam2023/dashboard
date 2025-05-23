@@ -16,6 +16,7 @@ import {
   // DocumentType, Link, Patch, Software, SoftwareVersion, MiscCategory, MiscFile
   // should ideally be imported from a central types.ts file.
 } from '../types'; // Assuming '../types' will eventually export these
+export type { Software } from '../types'; // Re-exporting Software type
 
 // --- Type Definitions (Ensure these are consistent with your backend and UI needs) ---
 // Base entity types (assuming these are defined in '../types' or need to be defined here)

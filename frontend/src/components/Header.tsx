@@ -13,7 +13,7 @@ interface HeaderProps {
 const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch }) => {
   const [searchValue, setSearchValue] = useState('');
   const [isFocused, setIsFocused] = useState(false);
-  const { isAuthenticated, username, userRole, logout } = useAuth(); // <-- Get auth state, role and functions
+  const { isAuthenticated, username, role, logout } = useAuth(); // <-- Corrected: userRole to role
   const navigate = useNavigate(); // <-- Hook for navigation
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -110,7 +110,7 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
                 <User size={20} />
               </Link>
               {/* Super Admin Link */}
-              {userRole === 'super_admin' && (
+              {role === 'super_admin' && ( // <-- Corrected: userRole to role
                 <Link
                   to="/superadmin"
                   className="px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 hidden sm:inline-flex items-center"

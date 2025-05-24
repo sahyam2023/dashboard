@@ -3180,10 +3180,10 @@ def get_audit_logs():
 
         # Pagination parameters
         page = request.args.get('page', default=1, type=int)
-    per_page = request.args.get('per_page', default=10, type=int)
+        per_page = request.args.get('per_page', default=10, type=int)
 
-    # Sorting parameters
-    sort_by = request.args.get('sort_by', default='timestamp', type=str)
+        # Sorting parameters
+        sort_by = request.args.get('sort_by', default='timestamp', type=str)
     sort_order = request.args.get('sort_order', default='desc', type=str).lower()
 
     # Filtering parameters
@@ -3262,25 +3262,25 @@ def get_audit_logs():
         page = total_pages
         offset = (page - 1) * per_page
     
-    # Add sorting and pagination to the main query
-    # It's crucial that sort_by is from the allowlist to prevent SQL injection
-    base_query += f" ORDER BY {sort_by} {sort_order.upper()} LIMIT ? OFFSET ?"
-    query_params.extend([per_page, offset])
+        # Add sorting and pagination to the main query
+        # It's crucial that sort_by is from the allowlist to prevent SQL injection
+        base_query += f" ORDER BY {sort_by} {sort_order.upper()} LIMIT ? OFFSET ?"
+        query_params.extend([per_page, offset])
 
-    try:
-        logs_cursor = db.execute(base_query, tuple(query_params))
-        logs_list = [dict(row) for row in logs_cursor.fetchall()]
-    except sqlite3.Error as e:
-        app.logger.error(f"Error fetching audit logs: {e}")
-        return jsonify(msg=f"Error fetching audit logs: {e}"), 500
+        try:
+            logs_cursor = db.execute(base_query, tuple(query_params))
+            logs_list = [dict(row) for row in logs_cursor.fetchall()]
+        except sqlite3.Error as e:
+            app.logger.error(f"Error fetching audit logs: {e}")
+            return jsonify(msg=f"Error fetching audit logs: {e}"), 500
 
-    return jsonify({
-        "logs": logs_list,
-        "page": page,
-        "per_page": per_page,
-        "total_logs": total_logs,
-        "total_pages": total_pages
-    }), 200
+        return jsonify({
+            "logs": logs_list,
+            "page": page,
+            "per_page": per_page,
+            "total_logs": total_logs,
+            "total_pages": total_pages
+        }), 200
     except Exception as e:
         app.logger.error(f"Unexpected error in get_audit_logs: {e}")
         return jsonify(msg="An unexpected error occurred while fetching audit logs."), 500

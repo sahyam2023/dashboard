@@ -75,69 +75,79 @@ const LinksView: React.FC = () => {
   const [favoritedItems, setFavoritedItems] = useState<Map<number, { favoriteId: number | undefined }>>(new Map());
 
   const loadLinks = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const response: PaginatedLinksResponse = await fetchLinks(
-        activeSoftwareId || undefined,
-        activeVersionId || undefined,
-        currentPage,
-        itemsPerPage,
-        sortBy,
-        sortOrder,
-        linkTypeFilter || undefined,
-        createdFromFilter || undefined,
-        createdToFilter || undefined
-      );
-      setLinks(response.links);
-      setTotalPages(response.total_pages);
-      setTotalLinks(response.total_links);
-      setCurrentPage(response.page);
-      setItemsPerPage(response.per_page);
-    } catch (err: any) {
-      setLinks([]); // Add this line
-      setError(err.message || 'Failed to fetch links.');
-      console.error("Error fetching links:", err);
-    } finally {
-      setIsLoading(false);
+  setIsLoading(true);
+  setError(null);
+  // setFeedbackMessage(null); // Optional: Clear previous feedback if needed
+
+  try {
+    const response: PaginatedLinksResponse = await fetchLinks(
+      activeSoftwareId || undefined,
+      activeVersionId || undefined,
+      currentPage,
+      itemsPerPage,
+      sortBy,
+      sortOrder,
+      linkTypeFilter || undefined,
+      createdFromFilter || undefined,
+      createdToFilter || undefined
+    );
+
+    setLinks(response.links);
+    setTotalPages(response.total_pages);
+    setTotalLinks(response.total_links);
+    setCurrentPage(response.page);
+    setItemsPerPage(response.per_page);
+
+    // Initialize favoritedItems directly from fetched links (SUCCESS PATH)
+    const newFavoritedItems = new Map<number, { favoriteId: number | undefined }>();
+    if (isAuthenticated && response.links && response.links.length > 0) {
+      for (const link of response.links) {
+        if (link.favorite_id) {
+          newFavoritedItems.set(link.id, { favoriteId: link.favorite_id });
+        } else {
+          newFavoritedItems.set(link.id, { favoriteId: undefined });
+        }
+      }
     }
-  }, [activeSoftwareId, activeVersionId, currentPage, itemsPerPage, sortBy, sortOrder, linkTypeFilter, createdFromFilter, createdToFilter]);
+    setFavoritedItems(newFavoritedItems);
+
+  } catch (err: any) { // This is the SINGLE, CORRECT catch block
+    console.error("Failed to load links:", err);
+    setLinks([]);
+    setError(err.message || 'Failed to fetch links. Please try again later.');
+
+    // Reset pagination and other related states
+    setTotalPages(0);
+    setTotalLinks(0);
+    // setCurrentPage(1); // Optionally reset to page 1
+    // setItemsPerPage(10); // Optionally reset per_page
+
+    // Clear favoritedItems as the link list is now empty or inconsistent
+    setFavoritedItems(new Map());
+  } finally {
+    setIsLoading(false);
+  }
+}, [
+  activeSoftwareId,
+  activeVersionId,
+  currentPage,
+  itemsPerPage,
+  sortBy,
+  sortOrder,
+  linkTypeFilter,
+  createdFromFilter,
+  createdToFilter,
+  isAuthenticated
+]);
 
   useEffect(() => {
     if (!isAuthenticated) {
-      setFavoritedItems(new Map()); // Clear favorites on logout
+      setFavoritedItems(new Map()); 
     }
+    // loadLinks will be called by the main useEffect watching `loadLinks` itself.
   }, [isAuthenticated]);
 
-  // Fetch favorite statuses when links load or user auth changes
-  useEffect(() => {
-    if (!isAuthenticated || links.length === 0) return;
-    
-    const fetchStatuses = async () => {
-      const currentFavoritedItems = new Map<number, { favoriteId: number | undefined }>();
-      for (const link of links) {
-        if (!favoritedItems.has(link.id)) { 
-          try {
-            const status = await getFavoriteStatusApi(link.id, 'link' as FavoriteItemType); 
-            if (status.is_favorite && typeof status.favorite_id === 'number') {
-              currentFavoritedItems.set(link.id, { favoriteId: status.favorite_id });
-            } else {
-              currentFavoritedItems.set(link.id, { favoriteId: undefined });
-            }
-          } catch (error) {
-            console.warn(`Failed to fetch favorite status for link ${link.id}:`, error);
-            currentFavoritedItems.set(link.id, { favoriteId: undefined }); 
-          }
-        } else {
-          currentFavoritedItems.set(link.id, favoritedItems.get(link.id)!);
-        }
-      }
-      setFavoritedItems(currentFavoritedItems);
-    };
-    
-    fetchStatuses();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [links, isAuthenticated]); // favoritedItems is intentionally omitted
+  // REMOVED N+1 useEffect for getFavoriteStatusApi calls
 
   // Handler for applying advanced filters
   const handleApplyAdvancedFilters = () => {

@@ -757,13 +757,30 @@ def get_all_documents_api():
         sort_order = 'asc'
 
     # Construct Base Query and Parameters for Filtering
-    # Added u.username as uploaded_by_username to SELECT
-    # Added JOIN users u ON d.created_by_user_id = u.id to FROM
-    base_query_select = "SELECT d.id, d.software_id, d.doc_name, d.description, d.doc_type, d.is_external_link, d.download_link, d.stored_filename, d.original_filename_ref, d.file_size, d.file_type, d.created_by_user_id, u.username as uploaded_by_username, d.created_at, d.updated_by_user_id, upd_u.username as updated_by_username, d.updated_at, s.name as software_name"
+    base_query_select_fields = "d.id, d.software_id, d.doc_name, d.description, d.doc_type, d.is_external_link, d.download_link, d.stored_filename, d.original_filename_ref, d.file_size, d.file_type, d.created_by_user_id, u.username as uploaded_by_username, d.created_at, d.updated_by_user_id, upd_u.username as updated_by_username, d.updated_at, s.name as software_name"
     base_query_from = "FROM documents d JOIN software s ON d.software_id = s.id LEFT JOIN users u ON d.created_by_user_id = u.id LEFT JOIN users upd_u ON d.updated_by_user_id = upd_u.id"
     
+    params = [] # Parameters for the WHERE clause
+    user_id_param_for_join = [] # Parameter for the JOIN clause (user_id for favorites)
+
+    # Attempt to get user_id for favorites
+    user_id = None
+    try:
+        verify_jwt_in_request(optional=True)
+        current_user_identity = get_jwt_identity()
+        if current_user_identity:
+            user_id = int(current_user_identity)
+    except Exception as e:
+        app.logger.error(f"Error getting user_id in get_all_documents_api: {e}")
+
+    if user_id:
+        base_query_select = f"SELECT {base_query_select_fields}, uf.id AS favorite_id"
+        base_query_from += " LEFT JOIN user_favorites uf ON d.id = uf.item_id AND uf.item_type = 'document' AND uf.user_id = ?"
+        user_id_param_for_join.append(user_id)
+    else:
+        base_query_select = f"SELECT {base_query_select_fields}, NULL AS favorite_id" # Ensure favorite_id column exists even if null
+
     filter_conditions = []
-    params = []
 
     if software_id_filter:
         filter_conditions.append("d.software_id = ?")
@@ -794,9 +811,11 @@ def get_all_documents_api():
         where_clause = " WHERE " + " AND ".join(filter_conditions)
 
     # Database Query for Total Count
-    count_query = f"SELECT COUNT(d.id) as count {base_query_from}{where_clause}"
+    # For count_query, we don't need the favorite_id or the join to user_favorites, nor user_id_param_for_join
+    count_query_from_without_fav_join = "FROM documents d JOIN software s ON d.software_id = s.id LEFT JOIN users u ON d.created_by_user_id = u.id LEFT JOIN users upd_u ON d.updated_by_user_id = upd_u.id"
+    count_query = f"SELECT COUNT(d.id) as count {count_query_from_without_fav_join}{where_clause}"
     try:
-        total_documents_cursor = db.execute(count_query, tuple(params)) # Use tuple for params
+        total_documents_cursor = db.execute(count_query, tuple(params)) 
         total_documents = total_documents_cursor.fetchone()['count']
     except Exception as e:
         app.logger.error(f"Error fetching total document count: {e}")
@@ -811,17 +830,15 @@ def get_all_documents_api():
         offset = (page - 1) * per_page
     
     # Database Query for Paginated Documents
+    # Combine params for WHERE clause and the user_id for JOIN clause
+    final_params = tuple(params + user_id_param_for_join + [per_page, offset])
     final_query = f"{base_query_select} {base_query_from}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
     
-    # Add pagination params to the list of SQL parameters
-    paginated_params = list(params) # Create a copy
-    paginated_params.extend([per_page, offset])
-    
     try:
-        documents_cursor = db.execute(final_query, tuple(paginated_params)) # Use tuple for params
+        documents_cursor = db.execute(final_query, final_params)
         documents_list = [dict(row) for row in documents_cursor.fetchall()]
     except Exception as e:
-        app.logger.error(f"Error fetching paginated documents: {e}")
+        app.logger.error(f"Error fetching paginated documents: {e} with query {final_query} and params {final_params}")
         return jsonify(msg="Error fetching documents."), 500
 
     return jsonify({
@@ -875,12 +892,29 @@ def get_all_patches_api():
         sort_order = 'asc'
 
     # Construct Base Query and Parameters for Filtering
-    # Added u.username as uploaded_by_username, upd_u.username as updated_by_username, and p.patch_by_developer
-    base_query_select = "SELECT p.id, p.version_id, p.patch_name, p.description, p.release_date, p.is_external_link, p.download_link, p.stored_filename, p.original_filename_ref, p.file_size, p.file_type, p.patch_by_developer, p.created_by_user_id, u.username as uploaded_by_username, p.created_at, p.updated_by_user_id, upd_u.username as updated_by_username, p.updated_at, s.name as software_name, s.id as software_id, v.version_number"
+    base_query_select_fields = "p.id, p.version_id, p.patch_name, p.description, p.release_date, p.is_external_link, p.download_link, p.stored_filename, p.original_filename_ref, p.file_size, p.file_type, p.patch_by_developer, p.created_by_user_id, u.username as uploaded_by_username, p.created_at, p.updated_by_user_id, upd_u.username as updated_by_username, p.updated_at, s.name as software_name, s.id as software_id, v.version_number"
     base_query_from = "FROM patches p JOIN versions v ON p.version_id = v.id JOIN software s ON v.software_id = s.id LEFT JOIN users u ON p.created_by_user_id = u.id LEFT JOIN users upd_u ON p.updated_by_user_id = upd_u.id"
     
+    params = [] 
+    user_id_param_for_join = []
+
+    user_id = None
+    try:
+        verify_jwt_in_request(optional=True)
+        current_user_identity = get_jwt_identity()
+        if current_user_identity:
+            user_id = int(current_user_identity)
+    except Exception as e:
+        app.logger.error(f"Error getting user_id in get_all_patches_api: {e}")
+
+    if user_id:
+        base_query_select = f"SELECT {base_query_select_fields}, uf.id AS favorite_id"
+        base_query_from += " LEFT JOIN user_favorites uf ON p.id = uf.item_id AND uf.item_type = 'patch' AND uf.user_id = ?"
+        user_id_param_for_join.append(user_id)
+    else:
+        base_query_select = f"SELECT {base_query_select_fields}, NULL AS favorite_id"
+
     filter_conditions = []
-    params = []
 
     if software_id_filter:
         filter_conditions.append("s.id = ?") # Filter by software_id from the software table
@@ -901,7 +935,8 @@ def get_all_patches_api():
         where_clause = " WHERE " + " AND ".join(filter_conditions)
 
     # Database Query for Total Count
-    count_query = f"SELECT COUNT(p.id) as count {base_query_from}{where_clause}"
+    count_query_from_without_fav_join = "FROM patches p JOIN versions v ON p.version_id = v.id JOIN software s ON v.software_id = s.id LEFT JOIN users u ON p.created_by_user_id = u.id LEFT JOIN users upd_u ON p.updated_by_user_id = upd_u.id"
+    count_query = f"SELECT COUNT(p.id) as count {count_query_from_without_fav_join}{where_clause}"
     try:
         total_patches_cursor = db.execute(count_query, tuple(params))
         total_patches = total_patches_cursor.fetchone()['count']
@@ -917,20 +952,14 @@ def get_all_patches_api():
         page = total_pages
         offset = (page - 1) * per_page
     
-    # Database Query for Paginated Patches
-    # Default sort order for patches as per original implementation if no sort_by is specified by user
-    # The original was: ORDER BY s.name, v.release_date DESC, v.version_number DESC, p.patch_name
-    # We will use the user-specified sort_by and sort_order. If not specified, it defaults to p.patch_name asc.
+    final_params = tuple(params + user_id_param_for_join + [per_page, offset])
     final_query = f"{base_query_select} {base_query_from}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
     
-    paginated_params = list(params)
-    paginated_params.extend([per_page, offset])
-    
     try:
-        patches_cursor = db.execute(final_query, tuple(paginated_params))
+        patches_cursor = db.execute(final_query, final_params)
         patches_list = [dict(row) for row in patches_cursor.fetchall()]
     except Exception as e:
-        app.logger.error(f"Error fetching paginated patches: {e}")
+        app.logger.error(f"Error fetching paginated patches: {e} with query {final_query} and params {final_params}")
         return jsonify(msg="Error fetching patches."), 500
 
     return jsonify({
@@ -983,12 +1012,29 @@ def get_all_links_api():
         sort_order = 'asc'
 
     # Construct Base Query and Parameters for Filtering
-    # Added u.username as uploaded_by_username and upd_u.username as updated_by_username
-    base_query_select = "SELECT l.id, l.title, l.description, l.software_id, l.version_id, l.is_external_link, l.url, l.stored_filename, l.original_filename_ref, l.file_size, l.file_type, l.created_by_user_id, u.username as uploaded_by_username, l.created_at, l.updated_by_user_id, upd_u.username as updated_by_username, l.updated_at, s.name as software_name, v.version_number as version_name"
+    base_query_select_fields = "l.id, l.title, l.description, l.software_id, l.version_id, l.is_external_link, l.url, l.stored_filename, l.original_filename_ref, l.file_size, l.file_type, l.created_by_user_id, u.username as uploaded_by_username, l.created_at, l.updated_by_user_id, upd_u.username as updated_by_username, l.updated_at, s.name as software_name, v.version_number as version_name"
     base_query_from = "FROM links l JOIN software s ON l.software_id = s.id LEFT JOIN versions v ON l.version_id = v.id LEFT JOIN users u ON l.created_by_user_id = u.id LEFT JOIN users upd_u ON l.updated_by_user_id = upd_u.id"
     
-    filter_conditions = []
     params = []
+    user_id_param_for_join = []
+
+    user_id = None
+    try:
+        verify_jwt_in_request(optional=True)
+        current_user_identity = get_jwt_identity()
+        if current_user_identity:
+            user_id = int(current_user_identity)
+    except Exception as e:
+        app.logger.error(f"Error getting user_id in get_all_links_api: {e}")
+
+    if user_id:
+        base_query_select = f"SELECT {base_query_select_fields}, uf.id AS favorite_id"
+        base_query_from += " LEFT JOIN user_favorites uf ON l.id = uf.item_id AND uf.item_type = 'link' AND uf.user_id = ?"
+        user_id_param_for_join.append(user_id)
+    else:
+        base_query_select = f"SELECT {base_query_select_fields}, NULL AS favorite_id"
+        
+    filter_conditions = []
 
     if software_id_filter:
         filter_conditions.append("l.software_id = ?")
@@ -1016,7 +1062,8 @@ def get_all_links_api():
         where_clause = " WHERE " + " AND ".join(filter_conditions)
 
     # Database Query for Total Count
-    count_query = f"SELECT COUNT(l.id) as count {base_query_from}{where_clause}"
+    count_query_from_without_fav_join = "FROM links l JOIN software s ON l.software_id = s.id LEFT JOIN versions v ON l.version_id = v.id LEFT JOIN users u ON l.created_by_user_id = u.id LEFT JOIN users upd_u ON l.updated_by_user_id = upd_u.id"
+    count_query = f"SELECT COUNT(l.id) as count {count_query_from_without_fav_join}{where_clause}"
     try:
         total_links_cursor = db.execute(count_query, tuple(params))
         total_links = total_links_cursor.fetchone()['count']
@@ -1032,19 +1079,14 @@ def get_all_links_api():
         page = total_pages
         offset = (page - 1) * per_page
     
-    # Database Query for Paginated Links
-    # Original sort: ORDER BY s.name, v.version_number, l.title
-    # Now using user-defined sort or default l.title
+    final_params = tuple(params + user_id_param_for_join + [per_page, offset])
     final_query = f"{base_query_select} {base_query_from}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
     
-    paginated_params = list(params)
-    paginated_params.extend([per_page, offset])
-    
     try:
-        links_cursor = db.execute(final_query, tuple(paginated_params))
+        links_cursor = db.execute(final_query, final_params)
         links_list = [dict(row) for row in links_cursor.fetchall()]
     except Exception as e:
-        app.logger.error(f"Error fetching paginated links: {e}")
+        app.logger.error(f"Error fetching paginated links: {e} with query {final_query} and params {final_params}")
         return jsonify(msg="Error fetching links."), 500
 
     return jsonify({
@@ -1097,12 +1139,29 @@ def get_all_misc_files_api():
         sort_order = 'asc'
 
     # Construct Base Query and Parameters for Filtering
-    # Added u.username as uploaded_by_username and upd_u.username as updated_by_username
-    base_query_select = "SELECT mf.id, mf.misc_category_id, mf.user_id, mf.user_provided_title, mf.user_provided_description, mf.original_filename, mf.stored_filename, mf.file_path, mf.file_type, mf.file_size, mf.created_by_user_id, u.username as uploaded_by_username, mf.created_at, mf.updated_by_user_id, upd_u.username as updated_by_username, mf.updated_at, mc.name as category_name"
+    base_query_select_fields = "mf.id, mf.misc_category_id, mf.user_id, mf.user_provided_title, mf.user_provided_description, mf.original_filename, mf.stored_filename, mf.file_path, mf.file_type, mf.file_size, mf.created_by_user_id, u.username as uploaded_by_username, mf.created_at, mf.updated_by_user_id, upd_u.username as updated_by_username, mf.updated_at, mc.name as category_name"
     base_query_from = "FROM misc_files mf JOIN misc_categories mc ON mf.misc_category_id = mc.id LEFT JOIN users u ON mf.created_by_user_id = u.id LEFT JOIN users upd_u ON mf.updated_by_user_id = upd_u.id"
     
-    filter_conditions = []
     params = []
+    user_id_param_for_join = []
+
+    user_id = None
+    try:
+        verify_jwt_in_request(optional=True)
+        current_user_identity = get_jwt_identity()
+        if current_user_identity:
+            user_id = int(current_user_identity)
+    except Exception as e:
+        app.logger.error(f"Error getting user_id in get_all_misc_files_api: {e}")
+
+    if user_id:
+        base_query_select = f"SELECT {base_query_select_fields}, uf.id AS favorite_id"
+        base_query_from += " LEFT JOIN user_favorites uf ON mf.id = uf.item_id AND uf.item_type = 'misc_file' AND uf.user_id = ?"
+        user_id_param_for_join.append(user_id)
+    else:
+        base_query_select = f"SELECT {base_query_select_fields}, NULL AS favorite_id"
+
+    filter_conditions = []
 
     if category_id_filter:
         filter_conditions.append("mf.misc_category_id = ?")
@@ -1113,7 +1172,8 @@ def get_all_misc_files_api():
         where_clause = " WHERE " + " AND ".join(filter_conditions)
 
     # Database Query for Total Count
-    count_query = f"SELECT COUNT(mf.id) as count {base_query_from}{where_clause}"
+    count_query_from_without_fav_join = "FROM misc_files mf JOIN misc_categories mc ON mf.misc_category_id = mc.id LEFT JOIN users u ON mf.created_by_user_id = u.id LEFT JOIN users upd_u ON mf.updated_by_user_id = upd_u.id"
+    count_query = f"SELECT COUNT(mf.id) as count {count_query_from_without_fav_join}{where_clause}"
     try:
         total_misc_files_cursor = db.execute(count_query, tuple(params))
         total_misc_files = total_misc_files_cursor.fetchone()['count']
@@ -1129,19 +1189,14 @@ def get_all_misc_files_api():
         page = total_pages
         offset = (page - 1) * per_page
     
-    # Database Query for Paginated Misc Files
-    # Original sort: ORDER BY mc.name, mf.user_provided_title, mf.original_filename
-    # Now using user-defined sort or default mf.user_provided_title
+    final_params = tuple(params + user_id_param_for_join + [per_page, offset])
     final_query = f"{base_query_select} {base_query_from}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
     
-    paginated_params = list(params)
-    paginated_params.extend([per_page, offset])
-    
     try:
-        misc_files_cursor = db.execute(final_query, tuple(paginated_params))
+        misc_files_cursor = db.execute(final_query, final_params)
         misc_files_list = [dict(row) for row in misc_files_cursor.fetchall()]
     except Exception as e:
-        app.logger.error(f"Error fetching paginated misc_files: {e}")
+        app.logger.error(f"Error fetching paginated misc_files: {e} with query {final_query} and params {final_params}")
         return jsonify(msg="Error fetching misc_files."), 500
 
     return jsonify({

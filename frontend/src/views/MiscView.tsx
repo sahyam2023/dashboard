@@ -85,29 +85,62 @@ const MiscView: React.FC = () => {
   }, [loadMiscCategories]);
 
   const loadMiscFiles = useCallback(async () => {
-    setIsLoadingFiles(true);
-    setErrorFiles(null);
-    try {
-      const response: PaginatedMiscFilesResponse = await fetchMiscFiles(
-        activeCategoryId || undefined,
-        currentPage,
-        itemsPerPage,
-        sortBy,
-        sortOrder
-      );
-      setMiscFiles(response.misc_files);
-      setTotalPages(response.total_pages);
-      setTotalMiscFiles(response.total_misc_files);
-      setCurrentPage(response.page);
-      setItemsPerPage(response.per_page);
-    } catch (err: any) { // Added opening brace
-      setMiscFiles([]); 
-      setErrorFiles(err.message || 'Failed to fetch miscellaneous files.');
-      console.error("Error fetching misc files:", err);
-    } finally {
-      setIsLoadingFiles(false);
+  setIsLoadingFiles(true);
+  setErrorFiles(null);
+  // setFeedbackMessage(null); // Optional: Clear previous feedback if needed
+
+  try {
+    const response: PaginatedMiscFilesResponse = await fetchMiscFiles(
+      activeCategoryId || undefined,
+      currentPage,
+      itemsPerPage,
+      sortBy,
+      sortOrder
+    );
+
+    setMiscFiles(response.misc_files);
+    setTotalPages(response.total_pages);
+    setTotalMiscFiles(response.total_misc_files);
+    setCurrentPage(response.page);
+    setItemsPerPage(response.per_page);
+
+    // Initialize favoritedItems directly from fetched misc files (SUCCESS PATH)
+    const newFavoritedItems = new Map<number, { favoriteId: number | undefined }>();
+    if (isAuthenticated && response.misc_files && response.misc_files.length > 0) {
+      for (const file of response.misc_files) {
+        if (file.favorite_id) {
+          newFavoritedItems.set(file.id, { favoriteId: file.favorite_id });
+        } else {
+          newFavoritedItems.set(file.id, { favoriteId: undefined });
+        }
+      }
     }
-  }, [activeCategoryId, currentPage, itemsPerPage, sortBy, sortOrder]);
+    setFavoritedItems(newFavoritedItems);
+
+  } catch (err: any) { // This is the SINGLE, CORRECT catch block
+    console.error("Failed to load miscellaneous files:", err);
+    setMiscFiles([]);
+    setErrorFiles(err.message || 'Failed to fetch miscellaneous files. Please try again later.');
+
+    // Reset pagination and other related states
+    setTotalPages(0);
+    setTotalMiscFiles(0);
+    // setCurrentPage(1); // Optionally reset to page 1
+    // setItemsPerPage(10); // Optionally reset per_page
+
+    // Clear favoritedItems as the file list is now empty or inconsistent
+    setFavoritedItems(new Map());
+  } finally {
+    setIsLoadingFiles(false);
+  }
+}, [
+  activeCategoryId,
+  currentPage,
+  itemsPerPage,
+  sortBy,
+  sortOrder,
+  isAuthenticated
+]); // Added isAuthenticated
 
   useEffect(() => {
     loadMiscFiles();
@@ -115,39 +148,12 @@ const MiscView: React.FC = () => {
 
   useEffect(() => {
     if (!isAuthenticated) {
-      setFavoritedItems(new Map()); // Clear favorites on logout
+      setFavoritedItems(new Map()); 
     }
+    // loadMiscFiles will be called by the main useEffect watching `loadMiscFiles` itself.
   }, [isAuthenticated]);
 
-  // Fetch favorite statuses when misc files load or user auth changes
-  useEffect(() => {
-    if (!isAuthenticated || miscFiles.length === 0) return;
-    
-    const fetchStatuses = async () => {
-      const currentFavoritedItems = new Map<number, { favoriteId: number | undefined }>();
-      for (const file of miscFiles) {
-        if (!favoritedItems.has(file.id)) { 
-          try {
-            const status = await getFavoriteStatusApi(file.id, 'misc_file' as FavoriteItemType); 
-            if (status.is_favorite && typeof status.favorite_id === 'number') {
-              currentFavoritedItems.set(file.id, { favoriteId: status.favorite_id });
-            } else {
-              currentFavoritedItems.set(file.id, { favoriteId: undefined });
-            }
-          } catch (error) {
-            console.warn(`Failed to fetch favorite status for misc file ${file.id}:`, error);
-            currentFavoritedItems.set(file.id, { favoriteId: undefined }); 
-          }
-        } else {
-          currentFavoritedItems.set(file.id, favoritedItems.get(file.id)!);
-        }
-      }
-      setFavoritedItems(currentFavoritedItems);
-    };
-    
-    fetchStatuses();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [miscFiles, isAuthenticated]); // favoritedItems is intentionally omitted
+  // REMOVED N+1 useEffect for getFavoriteStatusApi calls
 
   const handleCategoryFilterChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     const categoryId = event.target.value ? parseInt(event.target.value, 10) : null;

@@ -13,10 +13,11 @@ import {
 import { useAuth } from '../context/AuthContext';
 import LoadingState from '../components/LoadingState';
 import ErrorState from '../components/ErrorState';
+
 const FavoritesView: React.FC = () => {
-  const { isAuthenticated, isAuthLoading } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth(); // Use isLoading directly
   const [favorites, setFavorites] = useState<DetailedFavoriteItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingData, setIsLoadingData] = useState(true); 
   const [error, setError] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
 
@@ -68,40 +69,52 @@ const FavoritesView: React.FC = () => {
 
 
   const loadFavorites = useCallback(async () => {
-    if (!isAuthenticated) {
-      setIsLoading(false);
-      setError("Please log in to view your favorites.");
-      setFavorites([]);
-      return;
-    }
-    setIsLoading(true);
-    setError(null);
-    setFeedbackMessage(null);
+  if (!isAuthenticated) {
+    setIsLoadingData(false); // Correct: use local state setter
+    setError("Please log in to view your favorites.");
+    setFavorites([]);
+    setFavoritedItems(new Map()); // Clear favorites if not authenticated
+    setTotalPages(0);
+    setTotalFavorites(0);
+    return;
+  }
 
-    try {
-      const response: PaginatedFavoritesResponse = await getUserFavoritesApi(currentPage, itemsPerPage);
-      setFavorites(response.favorites);
-      setTotalPages(response.total_pages);
-      setTotalFavorites(response.total_favorites);
-      // Update favoritedItems map based on the fetched favorites
-      const newFavoritedItems = new Map<string, { favoriteId: number | undefined }>();
-      response.favorites.forEach(fav => {
-        newFavoritedItems.set(`${fav.item_type}-${fav.item_id}`, { favoriteId: fav.favorite_id });
-      });
-      setFavoritedItems(newFavoritedItems);
-    } catch (err: any) {
-      setError(err.message || 'Failed to fetch favorites.');
-      setFavorites([]);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [isAuthenticated, currentPage, itemsPerPage]);
+  setIsLoadingData(true); // Correct: use local state setter
+  setError(null);
+  setFeedbackMessage(null);
+
+  try {
+    const response: PaginatedFavoritesResponse = await getUserFavoritesApi(currentPage, itemsPerPage);
+    setFavorites(response.favorites);
+    setTotalPages(response.total_pages);
+    setTotalFavorites(response.total_favorites);
+    // setCurrentPage(response.page); // If API provides these, update them
+    // setItemsPerPage(response.per_page); 
+
+    const newFavoritedItems = new Map<string, { favoriteId: number | undefined }>();
+    response.favorites.forEach(fav => {
+      newFavoritedItems.set(`${fav.item_type}-${fav.item_id}`, { favoriteId: fav.favorite_id });
+    });
+    setFavoritedItems(newFavoritedItems);
+
+  } catch (err: any) {
+    console.error("Failed to load favorites:", err);
+    setError(err.message || 'Failed to fetch favorites.');
+    setFavorites([]);
+    setFavoritedItems(new Map()); // Clear favorites on error
+    setTotalPages(0);
+    setTotalFavorites(0);
+  } finally {
+    setIsLoadingData(false); // Correct: use local state setter
+  }
+// Add `setIsLoadingData` to dependencies if your linter complains, though it's stable from useState
+}, [isAuthenticated, currentPage, itemsPerPage /*, setIsLoadingData */ ]);
 
   useEffect(() => {
-    if (!isAuthLoading) { // Only load favorites once auth status is confirmed
+    if (!isLoading) { // Use isLoading from context
         loadFavorites();
     }
-  }, [loadFavorites, isAuthLoading]);
+  }, [loadFavorites, isLoading]); // Dependency is now isLoading
 
   const handleFavoriteToggle = async (item: DetailedFavoriteItem) => {
     if (!isAuthenticated) {
@@ -163,7 +176,7 @@ const FavoritesView: React.FC = () => {
     }
   };
 
-  if (isAuthLoading || isLoading) {
+  if (isLoading || isLoadingData) { // Use isLoading from context and local isLoadingData
     return <LoadingState message="Loading favorites..." />;
   }
 

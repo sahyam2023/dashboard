@@ -65,75 +65,84 @@ const DocumentsView: React.FC = () => {
   // Favorite State
   const [favoritedItems, setFavoritedItems] = useState<Map<number, { favoriteId: number | undefined }>>(new Map());
 
-  const loadDocuments = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    // setFeedbackMessage(null); // Clear previous feedback
-    try {
-      const response: PaginatedDocumentsResponse = await fetchDocuments(
-        selectedSoftwareId === null ? undefined : selectedSoftwareId,
-        currentPage,
-        itemsPerPage,
-        sortBy,
-        sortOrder,
-        docTypeFilter || undefined,
-        createdFromFilter || undefined,
-        createdToFilter || undefined,
-        updatedFromFilter || undefined,
-        updatedToFilter || undefined
-      );
-      setDocuments(response.documents);
-      setTotalPages(response.total_pages);
-      setTotalDocuments(response.total_documents);
-      setCurrentPage(response.page); // Ensure current page is updated from backend
-      setItemsPerPage(response.per_page); // Ensure items per page is updated from backend
-    } catch (err: any) {
-      setDocuments([]); // Add this line
-      setError(err.message || 'Failed to fetch documents. Please try again later.');
-    } finally {
-      setIsLoading(false);
+  // In DocumentsView.tsx
+
+const loadDocuments = useCallback(async () => {
+  setIsLoading(true);
+  setError(null);
+  // setFeedbackMessage(null); // Optional: Clear previous feedback if needed
+
+  try {
+    const response: PaginatedDocumentsResponse = await fetchDocuments(
+      selectedSoftwareId === null ? undefined : selectedSoftwareId,
+      currentPage,
+      itemsPerPage,
+      sortBy,
+      sortOrder,
+      docTypeFilter || undefined,
+      createdFromFilter || undefined,
+      createdToFilter || undefined,
+      updatedFromFilter || undefined,
+      updatedToFilter || undefined
+    );
+
+    setDocuments(response.documents);
+    setTotalPages(response.total_pages);
+    setTotalDocuments(response.total_documents);
+    setCurrentPage(response.page); // Ensure current page is updated from backend
+    setItemsPerPage(response.per_page); // Ensure items per page is updated from backend
+
+    // Initialize favoritedItems directly from fetched documents (SUCCESS PATH)
+    const newFavoritedItems = new Map<number, { favoriteId: number | undefined }>();
+    if (isAuthenticated && response.documents && response.documents.length > 0) {
+      for (const doc of response.documents) {
+        if (doc.favorite_id) {
+          newFavoritedItems.set(doc.id, { favoriteId: doc.favorite_id });
+        } else {
+          newFavoritedItems.set(doc.id, { favoriteId: undefined });
+        }
+      }
     }
-  }, [selectedSoftwareId, currentPage, itemsPerPage, sortBy, sortOrder, docTypeFilter, createdFromFilter, createdToFilter, updatedFromFilter, updatedToFilter]);
+    setFavoritedItems(newFavoritedItems);
+
+  } catch (err: any) { // This is the SINGLE, CORRECT catch block
+    console.error("Failed to load documents:", err); // Good practice to log the actual error
+    setDocuments([]); // Clear documents on error
+    setError(err.message || 'Failed to fetch documents. Please try again later.');
+    
+    // Reset pagination and other related states
+    setTotalPages(0);
+    setTotalDocuments(0);
+    // setCurrentPage(1); // Optionally reset to page 1
+    // setItemsPerPage(10); // Optionally reset per_page
+
+    // Clear favoritedItems as the document list is now empty or inconsistent
+    setFavoritedItems(new Map());
+  } finally {
+    setIsLoading(false);
+  }
+}, [
+  selectedSoftwareId,
+  currentPage,
+  itemsPerPage,
+  sortBy,
+  sortOrder,
+  docTypeFilter,
+  createdFromFilter,
+  createdToFilter,
+  updatedFromFilter,
+  updatedToFilter,
+  isAuthenticated
+]);
   
   useEffect(() => {
     if (!isAuthenticated) {
       setFavoritedItems(new Map()); 
     }
+    // loadDocuments will be called by the main useEffect watching `loadDocuments` itself.
   }, [isAuthenticated]);
 
-  useEffect(() => {
-    if (!isAuthenticated || documents.length === 0) return;
-    
-    const fetchStatuses = async () => {
-      // Create a temporary map to avoid modifying state directly in loop
-      const currentFavoritedItems = new Map<number, { favoriteId: number | undefined }>();
-      for (const doc of documents) {
-        // Check if status is already known to avoid redundant API calls
-        // This is a simple check; more sophisticated logic might be needed if items can be re-added
-        // to the `documents` list without a full reload that clears `favoritedItems`.
-        if (!favoritedItems.has(doc.id)) { 
-          try {
-            const status = await getFavoriteStatusApi(doc.id, 'document' as FavoriteItemType); 
-            if (status.is_favorite && typeof status.favorite_id === 'number') {
-              currentFavoritedItems.set(doc.id, { favoriteId: status.favorite_id });
-            } else {
-              currentFavoritedItems.set(doc.id, { favoriteId: undefined });
-            }
-          } catch (error) {
-            console.warn(`Failed to fetch favorite status for document ${doc.id}:`, error);
-            currentFavoritedItems.set(doc.id, { favoriteId: undefined }); 
-          }
-        } else {
-          // If already in map, carry over its existing status
-          currentFavoritedItems.set(doc.id, favoritedItems.get(doc.id)!);
-        }
-      }
-      setFavoritedItems(currentFavoritedItems);
-    };
-    
-    fetchStatuses();
-    // eslint-disable-next-line react-hooks/exhaustive-deps 
-  }, [documents, isAuthenticated]); // favoritedItems is intentionally omitted from deps to prevent loop
+  // REMOVED N+1 useEffect for getFavoriteStatusApi calls
 
   // Handler for applying advanced filters
   const handleApplyAdvancedFilters = () => {

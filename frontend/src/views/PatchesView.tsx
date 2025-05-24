@@ -65,68 +65,78 @@ const PatchesView: React.FC = () => {
   const [favoritedItems, setFavoritedItems] = useState<Map<number, { favoriteId: number | undefined }>>(new Map());
 
   const loadPatches = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    // setFeedbackMessage(null); // Clear previous feedback
-    try {
-      const response: PaginatedPatchesResponse = await fetchPatches(
-        selectedSoftwareId === null ? undefined : selectedSoftwareId,
-        currentPage,
-        itemsPerPage,
-        sortBy,
-        sortOrder,
-        releaseFromFilter || undefined,
-        releaseToFilter || undefined,
-        patchedByDeveloperFilter || undefined
-      );
-      setPatches(response.patches);
-      setTotalPages(response.total_pages);
-      setTotalPatches(response.total_patches);
-      setCurrentPage(response.page); 
-      setItemsPerPage(response.per_page);
-    } catch (err: any) {
-      setPatches([]); // Add this line
-      setError(err.message || 'Failed to fetch patches.');
-    } finally {
-      setIsLoading(false);
+  setIsLoading(true);
+  setError(null);
+  // setFeedbackMessage(null); // Optional: Clear previous feedback if needed
+
+  try {
+    const response: PaginatedPatchesResponse = await fetchPatches(
+      selectedSoftwareId === null ? undefined : selectedSoftwareId,
+      currentPage,
+      itemsPerPage,
+      sortBy,
+      sortOrder,
+      releaseFromFilter || undefined,
+      releaseToFilter || undefined,
+      patchedByDeveloperFilter || undefined
+    );
+
+    setPatches(response.patches);
+    setTotalPages(response.total_pages);
+    setTotalPatches(response.total_patches);
+    setCurrentPage(response.page);
+    setItemsPerPage(response.per_page);
+
+    // Initialize favoritedItems directly from fetched patches (SUCCESS PATH)
+    const newFavoritedItems = new Map<number, { favoriteId: number | undefined }>();
+    if (isAuthenticated && response.patches && response.patches.length > 0) {
+      for (const patch of response.patches) {
+        if (patch.favorite_id) {
+          newFavoritedItems.set(patch.id, { favoriteId: patch.favorite_id });
+        } else {
+          newFavoritedItems.set(patch.id, { favoriteId: undefined });
+        }
+      }
     }
-  }, [selectedSoftwareId, currentPage, itemsPerPage, sortBy, sortOrder, releaseFromFilter, releaseToFilter, patchedByDeveloperFilter]);
+    setFavoritedItems(newFavoritedItems);
+
+  } catch (err: any) { // This is the SINGLE, CORRECT catch block
+    console.error("Failed to load patches:", err);
+    setPatches([]);
+    setError(err.message || 'Failed to fetch patches. Please try again later.');
+
+    // Reset pagination and other related states
+    setTotalPages(0);
+    setTotalPatches(0);
+    // setCurrentPage(1); // Optionally reset to page 1
+    // setItemsPerPage(10); // Optionally reset per_page
+
+    // Clear favoritedItems as the patch list is now empty or inconsistent
+    setFavoritedItems(new Map());
+  } finally {
+    setIsLoading(false);
+  }
+}, [
+  selectedSoftwareId,
+  currentPage,
+  itemsPerPage,
+  sortBy,
+  sortOrder,
+  releaseFromFilter,
+  releaseToFilter,
+  patchedByDeveloperFilter,
+  isAuthenticated
+]);
+ // Added isAuthenticated
   
   useEffect(() => {
     if (!isAuthenticated) {
-      setFavoritedItems(new Map()); // Clear favorites on logout
+      setFavoritedItems(new Map()); 
     }
+    // loadPatches will be called by the main useEffect watching `loadPatches` itself.
   }, [isAuthenticated]);
 
-  // Fetch favorite statuses when patches load or user auth changes
-  useEffect(() => {
-    if (!isAuthenticated || patches.length === 0) return;
-    
-    const fetchStatuses = async () => {
-      const currentFavoritedItems = new Map<number, { favoriteId: number | undefined }>();
-      for (const patch of patches) {
-        if (!favoritedItems.has(patch.id)) { 
-          try {
-            const status = await getFavoriteStatusApi(patch.id, 'patch' as FavoriteItemType); 
-            if (status.is_favorite && typeof status.favorite_id === 'number') {
-              currentFavoritedItems.set(patch.id, { favoriteId: status.favorite_id });
-            } else {
-              currentFavoritedItems.set(patch.id, { favoriteId: undefined });
-            }
-          } catch (error) {
-            console.warn(`Failed to fetch favorite status for patch ${patch.id}:`, error);
-            currentFavoritedItems.set(patch.id, { favoriteId: undefined }); 
-          }
-        } else {
-          currentFavoritedItems.set(patch.id, favoritedItems.get(patch.id)!);
-        }
-      }
-      setFavoritedItems(currentFavoritedItems);
-    };
-    
-    fetchStatuses();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [patches, isAuthenticated]); // favoritedItems is intentionally omitted
+  // REMOVED N+1 useEffect for getFavoriteStatusApi calls
 
   // Handler for applying advanced filters
   const handleApplyAdvancedFilters = () => {

@@ -21,6 +21,11 @@ const LoginPage: React.FC = () => {
         </div>
         <div className="bg-white p-8 shadow rounded-lg">
           <LoginForm />
+          <div className="mt-4 text-center text-sm">
+            <Link to="/forgot-password" className="font-medium text-indigo-600 hover:text-indigo-500">
+              Forgot Password?
+            </Link>
+          </div>
         </div>
       </div>
     </div>

@@ -2,7 +2,7 @@
 import {
   Document as DocumentType,
   Link, Patch, Software, SoftwareVersion, // SoftwareVersion for version dropdowns
-  AuthRequest, AuthResponse, RegisterRequest, RegisterResponse,
+  AuthRequest, AuthResponse as AuthResponseTypeFromTypes, RegisterRequest, RegisterResponse, // Renamed to avoid conflict
   AddDocumentPayload, // Stays as is for documents
 
   // Corrected Payloads for Patches and Links with flexible version handling
@@ -302,6 +302,59 @@ export async function fetchSoftware(): Promise<Software[]> {
   }
 }
 
+// --- Super Admin Database Management Functions ---
+
+export interface BackupResponse {
+  message: string;
+  backup_path: string;
+}
+
+export async function backupDatabase(): Promise<BackupResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/superadmin/database/backup`, {
+      method: 'GET',
+      headers: { ...getAuthHeader() },
+    });
+    return handleApiError(response, 'Failed to create database backup');
+  } catch (error) {
+    console.error('Error creating database backup:', error);
+    throw error;
+  }
+}
+
+export interface RestoreResponse {
+  message: string;
+}
+
+export async function restoreDatabase(formData: FormData): Promise<RestoreResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/superadmin/database/restore`, {
+      method: 'POST',
+      headers: { ...getAuthHeader() }, // Content-Type is set automatically for FormData
+      body: formData,
+    });
+    return handleApiError(response, 'Failed to restore database from backup');
+  } catch (error) {
+    console.error('Error restoring database from backup:', error);
+    throw error;
+  }
+}
+// --- End Super Admin Database Management Functions ---
+
+// --- Super Admin: Force Password Reset ---
+export async function forceUserPasswordReset(userId: number): Promise<{ msg: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/superadmin/users/${userId}/force-password-reset`, {
+      method: 'PUT',
+      headers: { ...getAuthHeader() },
+    });
+    return handleApiError(response, 'Failed to force password reset');
+  } catch (error) {
+    console.error(`Error forcing password reset for user ${userId}:`, error);
+    throw error;
+  }
+}
+
 // --- Admin System Health Function ---
 export async function fetchSystemHealth(): Promise<SystemHealth> {
   try {
@@ -346,6 +399,23 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
     throw error;
   }
 }
+
+// --- Security Questions API Functions ---
+export interface SecurityQuestion {
+  id: number;
+  question_text: string;
+}
+
+export async function fetchSecurityQuestions(): Promise<SecurityQuestion[]> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/security-questions`);
+    return handleApiError(response, 'Failed to fetch security questions');
+  } catch (error) {
+    console.error('Error fetching security questions:', error);
+    throw error;
+  }
+}
+// --- End Security Questions API Functions ---
 
 // --- Admin Software Version Management Functions ---
 
@@ -1038,6 +1108,46 @@ export async function getUserFavoritesApi(
   }
 }
 
+// --- Global Access Control API Functions ---
+export interface GlobalLoginResponse {
+  message: string;
+}
+
+export async function loginGlobal(password: string): Promise<GlobalLoginResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/auth/global-login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ password }),
+    });
+    return handleApiError(response, 'Global login failed');
+  } catch (error) {
+    console.error('Error during global login:', error);
+    throw error;
+  }
+}
+
+export interface ChangeGlobalPasswordPayload {
+  new_password: string;
+}
+
+export async function changeGlobalPassword(payload: ChangeGlobalPasswordPayload): Promise<{ msg: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/superadmin/settings/global-password`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify(payload),
+    });
+    return handleApiError(response, 'Failed to change global password');
+  } catch (error) {
+    console.error('Error changing global password:', error);
+    throw error;
+  }
+}
+
+
 // --- User Profile Management Functions ---
 
 export async function changePassword(payload: ChangePasswordPayload): Promise<{ msg: string }> {
@@ -1067,6 +1177,75 @@ export async function updateEmail(payload: UpdateEmailPayload): Promise<{ msg: s
     throw error;
   }
 }
+
+// --- Password Reset API Functions ---
+export interface RequestPasswordResetInfoPayload {
+  username_or_email: string;
+}
+
+export interface PasswordResetInfoResponse {
+  user_id: number;
+  username: string;
+  questions: Array<{ question_id: number; question_text: string }>;
+}
+
+export interface VerifySecurityAnswersPayload {
+  user_id: number;
+  answers: Array<{ question_id: number; answer: string }>;
+}
+
+export interface VerifySecurityAnswersResponse {
+  reset_token: string;
+  expires_at: string; // ISO date string
+}
+
+export interface ResetPasswordWithTokenPayload {
+  token: string;
+  new_password: string;
+}
+
+export async function requestPasswordResetInfo(payload: RequestPasswordResetInfoPayload): Promise<PasswordResetInfoResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/auth/request-password-reset-info`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return handleApiError(response, 'Failed to request password reset info');
+  } catch (error) {
+    console.error('Error requesting password reset info:', error);
+    throw error;
+  }
+}
+
+export async function verifySecurityAnswers(payload: VerifySecurityAnswersPayload): Promise<VerifySecurityAnswersResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/auth/verify-security-answers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return handleApiError(response, 'Failed to verify security answers');
+  } catch (error) {
+    console.error('Error verifying security answers:', error);
+    throw error;
+  }
+}
+
+export async function resetPasswordWithToken(payload: ResetPasswordWithTokenPayload): Promise<{ msg: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/auth/reset-password-with-token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return handleApiError(response, 'Failed to reset password with token');
+  } catch (error) {
+    console.error('Error resetting password with token:', error);
+    throw error;
+  }
+}
+// --- End Password Reset API Functions ---
 
 // --- Super Admin User Management Functions ---
 

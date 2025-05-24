@@ -1,6 +1,6 @@
 // src/App.tsx
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'; // Import useLocation
 import Layout from './components/Layout';
 import DocumentsView from './views/DocumentsView';
 import PatchesView from './views/PatchesView';
@@ -21,20 +21,67 @@ import AdminVersionsPage from './views/AdminVersionsPage'; // Import the new Adm
 import AuditLogViewer from './components/admin/AuditLogViewer'; 
 import { useAuth } from './context/AuthContext'; 
 import AuthModal from './components/shared/AuthModal'; // Import AuthModal
+import GlobalLoginPage from './views/GlobalLoginPage'; // Import GlobalLoginPage
+import ForgotPasswordPage from './views/ForgotPasswordPage'; // Added Forgot Password Route
+import ForcedPasswordChangePage from './views/ForcedPasswordChangePage'; // Import ForcedPasswordChangePage
 
-function App() {
-  const auth = useAuth(); // Get auth context
-  const { isAuthModalOpen, closeAuthModal, authModalView } = useAuth(); // Get modal state and functions
+
+// We need to wrap the main logic in a component that can use useLocation
+function AppContent() {
+  const auth = useAuth();
+  const location = useLocation();
+  const { 
+    isAuthModalOpen, 
+    closeAuthModal, 
+    authModalView, 
+    isGlobalAccessGranted, 
+    isAuthenticated, // Use this from auth context
+    isPasswordResetRequired // Use this from auth context
+  } = auth;
+
+  if (!isGlobalAccessGranted) {
+    // If global access is not granted, only show the GlobalLoginPage
+    // The <Routes> and <Route path="*"> ensure it's the only thing rendered.
+    return <GlobalLoginPage />;
+  }
+
+  // If authenticated and password reset is required, and not already on the reset page
+  if (isAuthenticated && isPasswordResetRequired && location.pathname !== "/force-change-password") {
+    return <Navigate to="/force-change-password" replace />;
+  }
+
+  // If not authenticated and trying to access a path other than public paths, redirect to login.
+  // This is a basic blanket redirect. More granular protected routes can be implemented.
+  const publicPaths = ["/login", "/register", "/forgot-password", "/force-change-password"];
+  if (!isAuthenticated && !publicPaths.includes(location.pathname)) {
+    // Allow access to global login page if not authenticated
+    if (location.pathname !== "/" && !isGlobalAccessGranted) { // Assuming '/' might redirect or be a public landing
+         // This case is mostly covered by the initial isGlobalAccessGranted check,
+         // but kept for clarity if routes were structured differently.
+    } else if (location.pathname !== "/login") { // Avoid redirect loop for /login itself
+        // return <Navigate to="/login" replace />; // Commented out to allow public access to /login, /register, /forgot-password
+    }
+  }
+
 
   return (
-    <BrowserRouter>
+    <> {/* Use Fragment instead of BrowserRouter here, as it's already provided by App */}
       <Routes>
-        {/* Routes WITHOUT the main Layout (Login, Register) */}
+        {/* Publicly accessible routes (even if not authenticated, but after global access) */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        
+        {/* Forced password change route - accessible only if authenticated and flag is set (handled by redirect logic) 
+            OR if directly navigated to while authenticated.
+        */}
+        <Route 
+            path="/force-change-password" 
+            element={isAuthenticated ? <ForcedPasswordChangePage /> : <Navigate to="/login" replace />} 
+        />
 
-        {/* Routes WITH the main Layout */}
-        <Route path="/" element={<Layout />}>
+        {/* Routes requiring authentication and using the main Layout */}
+        <Route path="/" element={isAuthenticated ? <Layout /> : <Navigate to="/login" replace />}>
           <Route index element={<Navigate to="/documents" replace />} />
           <Route path="documents" element={<DocumentsView />} />
           <Route path="patches" element={<PatchesView />} />
@@ -42,71 +89,46 @@ function App() {
           <Route path="misc" element={<MiscView />} />
           <Route path="search" element={<SearchResultsView />} />
           <Route path="profile" element={<UserProfilePage />} />
-          <Route path="favorites" element={<FavoritesView />} /> {/* Added Favorites Route */}
+          <Route path="favorites" element={<FavoritesView />} />
           
-          {/* Admin and Super Admin Routes */}
+          {/* Admin and Super Admin Routes - protected by role check within Layout/component or here */}
           <Route 
             path="superadmin" 
-            element={
-              auth.isAuthenticated && auth.role === 'super_admin' ? (
-                <SuperAdminDashboard />
-              ) : (
-                <Navigate to="/login" replace /> 
-              )
-            } 
+            element={auth.role === 'super_admin' ? <SuperAdminDashboard /> : <Navigate to="/documents" replace />} 
           />
-
-          {/* Admin Routes with AdminLayout */}
-          <Route path="/admin" element={<AdminLayout />}>
-            <Route 
-              path="dashboard" 
-              element={
-                auth.isAuthenticated && (auth.role === 'admin' || auth.role === 'super_admin') ? (
-                  <AdminDashboardPage /> 
-                ) : (
-                  <Navigate to="/login" replace />
-                )
-              }
-            />
-             <Route 
-              path="versions" // This is the route for the actual versions management page
-              element={
-                auth.isAuthenticated && (auth.role === 'admin' || auth.role === 'super_admin') ? (
-                  <AdminVersionsPage /> // Use the new AdminVersionsPage
-                ) : (
-                  <Navigate to="/login" replace />
-                )
-              }
-            />
-            <Route 
-              path="audit-logs" 
-              element={
-                auth.isAuthenticated && (auth.role === 'admin' || auth.role === 'super_admin') ? (
-                  <AuditLogViewer />
-                ) : (
-                  <Navigate to="/login" replace />
-                )
-              }
-            />
+          <Route 
+            path="/admin" 
+            element={(auth.role === 'admin' || auth.role === 'super_admin') ? <AdminLayout /> : <Navigate to="/documents" replace />}
+          >
+            <Route path="dashboard" element={<AdminDashboardPage />} />
+            <Route path="versions" element={<AdminVersionsPage />} />
+            <Route path="audit-logs" element={<AuditLogViewer />} />
+            {/* Add other admin routes here */}
           </Route>
-          
-          {/* NEW: Route for the Upload Page */}
-          {/* For now, UploadPage handles its own auth check display.
-              Later, you might wrap this with a <ProtectedRoute> element.
-              e.g., <Route path="upload" element={<ProtectedRoute><UploadPage /></ProtectedRoute>} />
-          */}
-          {/* Add other dashboard routes here later (e.g., /profile) */}
         </Route>
+        
+        {/* Catch-all for authenticated users if no other route matches */}
+        {isAuthenticated && <Route path="*" element={<Navigate to="/documents" replace />} />}
+        
+        {/* If not authenticated and no public route matched, show login or a specific 404 */}
+        {/* This specific catch-all might be too broad if /login etc. are not matched above for some reason */}
+        {!isAuthenticated && <Route path="*" element={<Navigate to="/login" replace />} />}
 
-        {/* Optional: Catch-all for any unmatched routes */}
-        {/* <Route path="*" element={<Navigate to="/" />} /> */}
       </Routes>
-      {/* Render AuthModal globally */}
       <AuthModal 
         isOpen={isAuthModalOpen} 
         onClose={closeAuthModal} 
         initialView={authModalView} 
       />
+    </>
+  );
+}
+
+// Main App component now just sets up BrowserRouter
+function App() {
+  return (
+    <BrowserRouter>
+      <AppContent />
     </BrowserRouter>
   );
 }

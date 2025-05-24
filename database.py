@@ -60,6 +60,26 @@ def init_db(db_path: str):
         else:
             print("DB_HELPER: Could not determine count from software table (table might not exist - check schema).")
 
+        # Add initial security questions (only if table is empty)
+        cursor.execute("SELECT COUNT(*) FROM security_questions")
+        count_row_questions = cursor.fetchone()
+        if count_row_questions is not None and count_row_questions[0] == 0:
+            print("DB_HELPER: Adding initial security questions...")
+            default_questions = [
+                ("What was your first pet's name?",),
+                ("What city were you born in?",),
+                ("What is your mother's maiden name?",),
+                ("What was the name of your elementary school?",),
+                ("What is your favorite book?",),
+                ("What was the model of your first car?",)
+            ]
+            cursor.executemany("INSERT INTO security_questions (question_text) VALUES (?)", default_questions)
+            conn.commit()
+            print(f"DB_HELPER: Added {len(default_questions)} initial security questions.")
+        elif count_row_questions is not None:
+            print("DB_HELPER: Security questions table already populated.")
+        else:
+            print("DB_HELPER: Could not determine count from security_questions table (table might not exist - check schema).")
 
     except sqlite3.Error as e:
         print(f"DB_HELPER: An error occurred during DB initialization: {e}")

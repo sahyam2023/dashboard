@@ -4,8 +4,11 @@ import uuid
 import sqlite3
 import json # Added for audit logging
 import re
-from datetime import datetime, timedelta # Added timedelta
+from datetime import datetime, timedelta, timezone # Added timedelta and timezone
 import math # Added for math.ceil
+import secrets # Added for secure token generation
+import shutil # For file operations if needed, though .backup is preferred for DB
+import click # For CLI arguments
 from functools import wraps
 from flask import Flask, request, g, jsonify, send_from_directory
 from flask_cors import CORS
@@ -74,6 +77,22 @@ bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
 
 # --- Database Connection & Helpers ---
+def get_site_setting(key: str) -> str | None:
+    """Fetches a setting value from the site_settings table."""
+    db = get_db()
+    cursor = db.execute("SELECT setting_value FROM site_settings WHERE setting_key = ?", (key,))
+    row = cursor.fetchone()
+    return row['setting_value'] if row else None
+
+def update_site_setting(key: str, value: str) -> None:
+    """Updates or inserts a setting in the site_settings table."""
+    db = get_db()
+    db.execute(
+        "INSERT OR REPLACE INTO site_settings (setting_key, setting_value) VALUES (?, ?)",
+        (key, value)
+    )
+    db.commit()
+
 def get_db():
     if 'db' not in g:
         g.db = database.get_db_connection(app.config['DATABASE']) # Pass DB path
@@ -96,22 +115,23 @@ def find_user_by_email(email):
     if not email or not email.strip(): return None
     return get_db().execute("SELECT * FROM users WHERE email = ?", (email.strip(),)).fetchone()
 
-def create_user_in_db(username, password, email=None):
+def create_user_in_db(username, password, email=None, role='user'): # Added role, default to 'user'
     hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
     actual_email = email.strip() if email and email.strip() else None
     try:
         cursor = get_db().execute(
-            "INSERT INTO users (username, password_hash, email) VALUES (?, ?, ?)",
-            (username, hashed_password, actual_email)
+            "INSERT INTO users (username, password_hash, email, role) VALUES (?, ?, ?, ?)", # Added role column
+            (username, hashed_password, actual_email, role) # Added role value
         )
         get_db().commit()
-        return cursor.lastrowid
+        user_id = cursor.lastrowid
+        return user_id, role # Return user_id and role
     except sqlite3.IntegrityError as e:
-        app.logger.error(f"DB IntegrityError creating user '{username}': {e}")
-        return None
+        app.logger.error(f"DB IntegrityError creating user '{username}' with role '{role}': {e}")
+        return None, None # Return None for both on error
     except Exception as e:
-        app.logger.error(f"DB General Exception creating user '{username}': {e}")
-        return None
+        app.logger.error(f"DB General Exception creating user '{username}' with role '{role}': {e}")
+        return None, None # Return None for both on error
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -295,6 +315,270 @@ def super_admin_required(fn):
              return jsonify(msg="Invalid user identity in token."), 400
         return fn(*args, **kwargs)
     return wrapper
+
+# --- Authentication Endpoints ---
+@app.route('/api/auth/global-login', methods=['POST'])
+def global_login():
+    data = request.get_json()
+    if not data or 'password' not in data:
+        return jsonify(msg="Password is required"), 400
+
+    provided_password = data['password']
+    stored_hash = get_site_setting('global_password_hash')
+
+    if not stored_hash:
+        # This case should ideally not happen if the DB is initialized correctly.
+        app.logger.error("Global password hash not found in site_settings.")
+        return jsonify(msg="Global access system not configured."), 500
+
+    if bcrypt.check_password_hash(stored_hash, provided_password):
+        # For now, just a success message. Frontend will manage its state.
+        # Consider creating a short-lived global access token/session if needed later.
+        log_audit_action(action_type='GLOBAL_LOGIN_SUCCESS') # Generic log
+        return jsonify(message="Global access granted"), 200
+    else:
+        log_audit_action(action_type='GLOBAL_LOGIN_FAILED', details={'reason': 'Invalid global password'})
+        return jsonify(msg="Invalid global password"), 401
+
+# --- Security Questions Endpoint ---
+@app.route('/api/security-questions', methods=['GET'])
+def get_security_questions():
+    try:
+        db = get_db()
+        questions_cursor = db.execute("SELECT id, question_text FROM security_questions ORDER BY id")
+        questions = [dict(row) for row in questions_cursor.fetchall()]
+        return jsonify(questions), 200
+    except Exception as e:
+        app.logger.error(f"Error fetching security questions: {e}")
+        return jsonify(msg="Failed to retrieve security questions."), 500
+
+# --- Authentication Endpoints ---
+
+@app.route('/api/auth/request-password-reset-info', methods=['POST'])
+def request_password_reset_info():
+    data = request.get_json()
+    if not data:
+        return jsonify(msg="Missing JSON data"), 400
+
+    username_or_email = data.get('username_or_email')
+    if not username_or_email:
+        return jsonify(msg="Username or email is required"), 400
+
+    db = get_db()
+    user = None
+    # Try finding user by username first, then by email if it contains '@'
+    if '@' in username_or_email:
+        user = find_user_by_email(username_or_email)
+    if not user: # If not found by email or input was not an email
+        user = find_user_by_username(username_or_email)
+
+    if not user:
+        return jsonify(msg="User not found."), 404
+
+    # Fetch user's security questions
+    try:
+        questions_cursor = db.execute("""
+            SELECT sq.id as question_id, sq.question_text
+            FROM user_security_answers usa
+            JOIN security_questions sq ON usa.question_id = sq.id
+            WHERE usa.user_id = ?
+            ORDER BY sq.id 
+        """, (user['id'],)) # Ensure user['id'] is correct
+        questions = [dict(row) for row in questions_cursor.fetchall()]
+
+        if len(questions) != 3: # Should ideally always be 3 if registration enforces it
+            app.logger.error(f"User {user['username']} (ID: {user['id']}) has {len(questions)} security questions, expected 3.")
+            return jsonify(msg="Security question configuration error for this user."), 500
+
+        log_audit_action(
+            action_type='PASSWORD_RESET_REQUEST_INFO_SENT',
+            target_table='users',
+            target_id=user['id'],
+            username=user['username'],
+            details={'retrieved_for_user': user['username']}
+        )
+        return jsonify({
+            "user_id": user['id'],
+            "username": user['username'],
+            "questions": questions
+        }), 200
+
+    except Exception as e:
+        app.logger.error(f"Error fetching security questions for user {user['username']}: {e}")
+        return jsonify(msg="Failed to retrieve security question information."), 500
+
+@app.route('/api/auth/verify-security-answers', methods=['POST'])
+def verify_security_answers():
+    data = request.get_json()
+    if not data:
+        return jsonify(msg="Missing JSON data"), 400
+
+    user_id = data.get('user_id')
+    provided_answers = data.get('answers')
+
+    if not isinstance(user_id, int):
+        return jsonify(msg="user_id (integer) is required."), 400
+    if not isinstance(provided_answers, list) or len(provided_answers) != 3:
+        return jsonify(msg="Exactly three answers are required in a list format."), 400
+
+    # Validate structure of provided_answers
+    for ans_obj in provided_answers:
+        if not isinstance(ans_obj, dict) or 'question_id' not in ans_obj or 'answer' not in ans_obj:
+            return jsonify(msg="Each answer must be an object with 'question_id' and 'answer'."), 400
+        if not isinstance(ans_obj['question_id'], int):
+            return jsonify(msg="Each 'question_id' must be an integer."), 400
+        if not isinstance(ans_obj['answer'], str) or not ans_obj['answer'].strip():
+            return jsonify(msg="Each 'answer' must be a non-empty string."), 400
+
+    db = get_db()
+    user = find_user_by_id(user_id) # Fetch user to log username later
+    if not user:
+        return jsonify(msg="User not found."), 404 # Should not happen if user_id came from previous step
+
+    try:
+        # Fetch stored answer hashes for the user
+        stored_answers_cursor = db.execute(
+            "SELECT question_id, answer_hash FROM user_security_answers WHERE user_id = ?", (user_id,)
+        )
+        stored_hashes_dict = {row['question_id']: row['answer_hash'] for row in stored_answers_cursor.fetchall()}
+
+        if len(stored_hashes_dict) != 3:
+            app.logger.error(f"User {user_id} does not have exactly 3 stored security answers.")
+            return jsonify(msg="Security answer configuration error for user."), 500
+
+        answers_correct = 0
+        for pa in provided_answers:
+            q_id = pa['question_id']
+            ans_text = pa['answer']
+            if q_id in stored_hashes_dict:
+                if bcrypt.check_password_hash(stored_hashes_dict[q_id], ans_text):
+                    answers_correct += 1
+        
+        if answers_correct == 3:
+            # All answers are correct, generate and store token
+            token = secrets.token_urlsafe(32)
+            # Ensure datetime objects are timezone-aware if comparing with timezone-aware datetimes
+            # For UTC, datetime.now(timezone.utc) is preferred over datetime.utcnow() in new code.
+            expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+            
+            db.execute(
+                "INSERT INTO password_reset_requests (token, user_id, expires_at) VALUES (?, ?, ?)",
+                (token, user_id, expires_at)
+            )
+            db.commit()
+
+            log_audit_action(
+                action_type='PASSWORD_RESET_ANSWERS_VERIFIED',
+                target_table='users', target_id=user_id, username=user['username'],
+                details={'token_issued': True}
+            )
+            return jsonify({"reset_token": token, "expires_at": expires_at.isoformat()}), 200
+        else:
+            log_audit_action(
+                action_type='PASSWORD_RESET_ANSWERS_FAILED',
+                target_table='users', target_id=user_id, username=user['username'],
+                details={'reason': 'One or more answers incorrect'}
+            )
+            return jsonify(msg="One or more answers were incorrect."), 401
+
+    except Exception as e:
+        app.logger.error(f"Error verifying security answers for user_id {user_id}: {e}")
+        # db.rollback() # Not strictly needed if the only commit is after successful token insertion
+        return jsonify(msg="Failed to verify security answers due to a server error."), 500
+
+@app.route('/api/auth/reset-password-with-token', methods=['POST'])
+def reset_password_with_token():
+    data = request.get_json()
+    if not data:
+        return jsonify(msg="Missing JSON data"), 400
+
+    token = data.get('token')
+    new_password = data.get('new_password')
+
+    if not token or not isinstance(token, str):
+        return jsonify(msg="Valid token is required."), 400
+    if not new_password or not isinstance(new_password, str):
+        return jsonify(msg="New password is required."), 400
+
+    db = get_db()
+    try:
+        # Fetch the token details
+        token_data_cursor = db.execute(
+            "SELECT user_id, expires_at FROM password_reset_requests WHERE token = ?", (token,)
+        )
+        token_data = token_data_cursor.fetchone()
+
+        if not token_data:
+            log_audit_action(action_type='PASSWORD_RESET_TOKEN_FAILED', details={'reason': 'Token not found', 'provided_token': token})
+            return jsonify(msg="Invalid or expired reset token."), 400 # Or 404
+
+        # Check expiry - ensure comparison is between timezone-aware datetimes if stored as such
+        # If expires_at is stored as UTC string, parse it and compare with current UTC time.
+        # Assuming expires_at was stored using datetime.now(timezone.utc).isoformat() or similar
+        expires_at_dt = datetime.fromisoformat(token_data['expires_at'])
+        if expires_at_dt < datetime.now(timezone.utc):
+            # Clean up expired token
+            db.execute("DELETE FROM password_reset_requests WHERE token = ?", (token,))
+            db.commit()
+            log_audit_action(action_type='PASSWORD_RESET_TOKEN_FAILED', target_id=token_data['user_id'], details={'reason': 'Token expired'})
+            return jsonify(msg="Invalid or expired reset token."), 400
+
+        # Validate new password strength
+        is_strong, strength_msg = is_password_strong(new_password)
+        if not is_strong:
+            # Do not delete token on password strength failure, allow user to retry with same token
+            return jsonify(msg=strength_msg), 400
+
+        # Hash the new password
+        hashed_new_password = bcrypt.generate_password_hash(new_password).decode('utf-8')
+
+        # Update user's password
+        db.execute(
+            "UPDATE users SET password_hash = ? WHERE id = ?",
+            (hashed_new_password, token_data['user_id'])
+        )
+        
+        # Delete the token to prevent reuse
+        db.execute("DELETE FROM password_reset_requests WHERE token = ?", (token,))
+        db.commit()
+
+        user_for_log = find_user_by_id(token_data['user_id']) # For username in log
+        log_audit_action(
+            action_type='PASSWORD_RESET_TOKEN_SUCCESS',
+            target_table='users',
+            target_id=token_data['user_id'],
+            username=user_for_log['username'] if user_for_log else None
+        )
+        return jsonify(msg="Password has been reset successfully."), 200
+
+    except Exception as e:
+        app.logger.error(f"Error during password reset with token: {e}")
+        db.rollback() # Rollback any partial changes from this transaction
+        return jsonify(msg="Failed to reset password due to a server error."), 500
+
+
+@app.route('/api/auth/global-login', methods=['POST'])
+def global_login():
+    data = request.get_json()
+    if not data or 'password' not in data:
+        return jsonify(msg="Password is required"), 400
+
+    provided_password = data['password']
+    stored_hash = get_site_setting('global_password_hash')
+
+    if not stored_hash:
+        # This case should ideally not happen if the DB is initialized correctly.
+        app.logger.error("Global password hash not found in site_settings.")
+        return jsonify(msg="Global access system not configured."), 500
+
+    if bcrypt.check_password_hash(stored_hash, provided_password):
+        # For now, just a success message. Frontend will manage its state.
+        # Consider creating a short-lived global access token/session if needed later.
+        log_audit_action(action_type='GLOBAL_LOGIN_SUCCESS') # Generic log
+        return jsonify(message="Global access granted"), 200
+    else:
+        log_audit_action(action_type='GLOBAL_LOGIN_FAILED', details={'reason': 'Invalid global password'})
+        return jsonify(msg="Invalid global password"), 401
 
 # --- Super Admin User Management Endpoints ---
 @app.route('/api/superadmin/users', methods=['GET'])
@@ -520,14 +804,81 @@ def delete_user(user_id):
         app.logger.error(f"Error deleting user {user_id}: {e}")
         return jsonify(msg="Failed to delete user due to a server error."), 500
 
+@app.route('/api/superadmin/users/<int:user_id>/force-password-reset', methods=['PUT'])
+@jwt_required()
+@super_admin_required
+def force_password_reset(user_id):
+    db = get_db()
+    target_user = find_user_by_id(user_id)
+
+    if not target_user:
+        return jsonify(msg="Target user not found."), 404
+
+    # Prevent a super admin from forcing password reset on another super admin
+    if target_user['role'] == 'super_admin':
+        return jsonify(msg="Super admin passwords cannot be force-reset this way."), 403
+    
+    # Prevent a super admin from forcing password reset on themselves via this route
+    # (though the above check would also catch this if they are the target_user)
+    current_super_admin_id_str = get_jwt_identity()
+    current_super_admin_id = int(current_super_admin_id_str)
+    if user_id == current_super_admin_id:
+        return jsonify(msg="Super admins cannot force-reset their own password via this route."), 403
+
+
+    try:
+        db.execute("UPDATE users SET password_reset_required = TRUE WHERE id = ?", (user_id,))
+        db.commit()
+
+        log_audit_action(
+            action_type='USER_FORCE_PASSWORD_RESET_INITIATED',
+            target_table='users',
+            target_id=user_id,
+            details={'forced_by_super_admin_id': current_super_admin_id, 'target_username': target_user['username']}
+            # user_id and username in log_audit_action will be the super_admin performing the action
+        )
+        return jsonify(msg="User will be required to reset their password on next login."), 200
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"Error forcing password reset for user {user_id}: {e}")
+        return jsonify(msg="Failed to force password reset due to a server error."), 500
+
 # --- Authentication Endpoints ---
 @app.route('/api/auth/register', methods=['POST'])
 def register():
     data = request.get_json()
     if not data: return jsonify(msg="Missing JSON data"), 400
     username, password, email = data.get('username'), data.get('password'), data.get('email')
+    security_answers = data.get('security_answers')
 
     if not username or not password: return jsonify(msg="Missing username or password"), 400
+
+    # --- Security Answers Validation ---
+    if not security_answers or not isinstance(security_answers, list) or len(security_answers) != 3:
+        return jsonify(msg="Exactly three security answers are required."), 400
+
+    question_ids = []
+    for ans in security_answers:
+        if not isinstance(ans, dict) or 'question_id' not in ans or 'answer' not in ans:
+            return jsonify(msg="Each security answer must be an object with 'question_id' and 'answer' fields."), 400
+        if not isinstance(ans['question_id'], int):
+            return jsonify(msg="Each 'question_id' must be an integer."), 400
+        if not isinstance(ans['answer'], str) or not ans['answer'].strip():
+            return jsonify(msg="Each security 'answer' must be a non-empty string."), 400
+        question_ids.append(ans['question_id'])
+
+    if len(set(question_ids)) != 3:
+        return jsonify(msg="All three 'question_id's must be unique."), 400
+    
+    # Optional: Validate question_ids exist in DB
+    db = get_db() # Ensure db is available for this check
+    placeholders = ','.join(['?'] * len(question_ids))
+    query = f"SELECT COUNT(*) FROM security_questions WHERE id IN ({placeholders})"
+    cursor = db.execute(query, question_ids)
+    count_row = cursor.fetchone()
+    if count_row is None or count_row[0] != 3:
+        return jsonify(msg="One or more provided security question IDs are invalid."), 400
+    # --- End Security Answers Validation ---
 
     # Password strength check
     is_strong, strength_msg = is_password_strong(password)
@@ -541,19 +892,53 @@ def register():
     # For simplicity, let's prepare actual_email as it would be in create_user_in_db
     actual_email_for_log = email.strip() if email and email.strip() else None
 
-    user_id = create_user_in_db(username, password, email) # This commits the user creation
+    # Determine role based on existing user count
+    # db = get_db() # db is already fetched for question ID validation
+    user_count_cursor = db.execute("SELECT COUNT(*) as count FROM users")
+    user_count = user_count_cursor.fetchone()['count']
+    role_to_assign = 'super_admin' if user_count == 0 else 'user'
+
+    user_id, assigned_role = create_user_in_db(username, password, email, role_to_assign) # This commits the user creation
+    
     if user_id:
-        log_audit_action(
-            action_type='CREATE_USER',
-            target_table='users',
-            target_id=user_id,
-            details={'username': username, 'email': actual_email_for_log}, # Use the prepared email
-            user_id=user_id, # Explicitly pass new user's ID as actor
-            username=username   # Explicitly pass new user's username as actor
-        )
-        # Note: create_user_in_db already commits. Audit log will be a separate commit.
-        return jsonify(msg="User created successfully", user_id=user_id), 201
-    return jsonify(msg="Failed to create user due to a database issue."), 500
+        try:
+            # Hash and store security answers
+            for ans in security_answers:
+                hashed_answer = bcrypt.generate_password_hash(ans['answer']).decode('utf-8')
+                db.execute(
+                    "INSERT INTO user_security_answers (user_id, question_id, answer_hash) VALUES (?, ?, ?)",
+                    (user_id, ans['question_id'], hashed_answer)
+                )
+            db.commit() # Commit security answers
+            
+            log_audit_action(
+                action_type='CREATE_USER',
+                target_table='users',
+                target_id=user_id,
+                details={'username': username, 'email': actual_email_for_log, 'role': assigned_role, 'security_questions_set': True},
+                user_id=user_id, 
+                username=username
+            )
+            return jsonify(msg="User created successfully", user_id=user_id, role=assigned_role), 201
+        except sqlite3.IntegrityError as e:
+            # This might happen if somehow (user_id, question_id) is duplicated despite prior validation,
+            # or if a question_id is invalid and not caught by optional check.
+            # Since user is already created, this is a partial failure state.
+            # For now, log and return error. A more robust solution might rollback user creation.
+            db.rollback() # Rollback security answer insertions
+            app.logger.error(f"DB IntegrityError storing security answers for user '{username}': {e}")
+            # Consider deleting the created user if security questions are mandatory for all users
+            # db.execute("DELETE FROM users WHERE id = ?", (user_id,))
+            # db.commit()
+            # app.logger.info(f"Rolled back user creation for {username} due to security answer storage failure.")
+            return jsonify(msg="User created, but failed to store security answers due to a database conflict."), 500
+        except Exception as e:
+            db.rollback() # Rollback security answer insertions
+            app.logger.error(f"General Exception storing security answers for user '{username}': {e}")
+            # Similarly, consider user rollback.
+            return jsonify(msg="User created, but failed to store security answers due to a server error."), 500
+    else: # user_id was None from create_user_in_db
+        return jsonify(msg="Failed to create user due to a database issue."), 500
 
 @app.route('/api/auth/login', methods=['POST'])
 def login():
@@ -584,7 +969,13 @@ def login():
             user_id=user['id'], # Explicitly pass logged-in user's ID
             username=user['username'] # Explicitly pass logged-in user's username
         )
-        return jsonify(access_token=access_token, username=user['username'], role=user['role']), 200
+        # Include password_reset_required flag in the response
+        return jsonify(
+            access_token=access_token, 
+            username=user['username'], 
+            role=user['role'],
+            password_reset_required=user['password_reset_required'] # Added this line
+        ), 200
     
     # Log failed login attempt (bad username or password)
     # Need to determine if user exists to get target_id, or log without it if user not found
@@ -637,11 +1028,21 @@ def change_password():
     
     try:
         db = get_db()
-        db.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hashed_new_password, current_user_id))
+        audit_details = {} # Initialize empty dict for audit details
+
+        # Check if password reset was required
+        if user['password_reset_required']:
+            db.execute("UPDATE users SET password_hash = ?, password_reset_required = FALSE WHERE id = ?", (hashed_new_password, current_user_id))
+            audit_details['forced_reset_cleared'] = True
+        else:
+            db.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hashed_new_password, current_user_id))
+            audit_details['forced_reset_cleared'] = False # Or simply omit if not relevant
+
         log_audit_action(
             action_type='CHANGE_PASSWORD',
             target_table='users',
-            target_id=current_user_id
+            target_id=current_user_id,
+            details=audit_details # Add custom details
         )
         db.commit()
         return jsonify(msg="Password updated successfully."), 200
@@ -3620,6 +4021,207 @@ def search_api():
 def init_db_command():
     database.init_db(app.config['DATABASE']) # Pass DB path to init_db
     print('Initialized the database.')
+
+    # Initialize global password setting
+    try:
+        db = get_db() # Use app's get_db to ensure context
+        cursor = db.execute("SELECT setting_value FROM site_settings WHERE setting_key = 'global_password_hash'")
+        existing_setting = cursor.fetchone()
+
+        if not existing_setting:
+            print("Initializing default global password...")
+            default_password = "Admin@123"
+            hashed_password = bcrypt.generate_password_hash(default_password).decode('utf-8')
+            db.execute("INSERT INTO site_settings (setting_key, setting_value) VALUES (?, ?)",
+                       ('global_password_hash', hashed_password))
+            db.commit()
+            print("Default global password initialized.")
+        else:
+            print("Global password already set.")
+    except Exception as e:
+        print(f"Error during global password initialization: {e}")
+        # Potentially rollback if db connection was part of a larger transaction context,
+        # but init_db_command is usually standalone.
+    # close_db is handled by teardown_appcontext
+
+# --- Endpoint for Super Admin to change Global Password ---
+@app.route('/api/superadmin/settings/global-password', methods=['PUT'])
+@jwt_required()
+@super_admin_required # Ensures only super admins can access
+def change_global_password():
+    data = request.get_json()
+    if not data or 'new_password' not in data:
+        return jsonify(msg="New password is required"), 400
+
+    new_password = data['new_password']
+
+    # Basic password validation (e.g., minimum length)
+    # Using the existing is_password_strong function for consistency,
+    # though the subtask didn't explicitly ask for strength for this one.
+    # If a simpler validation (e.g. just length) is preferred, this can be adjusted.
+    is_strong, strength_msg = is_password_strong(new_password)
+    if not is_strong:
+        return jsonify(msg=strength_msg), 400
+
+    try:
+        new_hashed_password = bcrypt.generate_password_hash(new_password).decode('utf-8')
+        update_site_setting('global_password_hash', new_hashed_password)
+
+        log_audit_action(
+            action_type='GLOBAL_PASSWORD_CHANGED',
+            # target_table='site_settings', # Optional, as it's a specific setting
+            # target_id=None, # No specific ID for this setting key
+            details={'setting_key': 'global_password_hash'}
+            # user_id and username are automatically picked up by log_audit_action
+        )
+        return jsonify(msg="Global password updated successfully"), 200
+    except Exception as e:
+        app.logger.error(f"Error changing global password: {e}")
+        # Potentially rollback if update_site_setting doesn't commit immediately
+        # or if it's part of a larger transaction (not the case here).
+        return jsonify(msg="Failed to update global password due to a server error."), 500
+
+# --- Database Backup Endpoint (Super Admin) ---
+@app.route('/api/superadmin/database/backup', methods=['GET'])
+@jwt_required()
+@super_admin_required
+def backup_database():
+    try:
+        # Ensure shutil and os are imported (should be at the top of the file)
+        # Ensure datetime from datetime is imported (should be at the top of the file)
+
+        # Define backup directory path
+        backup_dir = os.path.join(app.config['INSTANCE_FOLDER_PATH'], 'backups')
+
+        # Create backup directory if it doesn't exist
+        os.makedirs(backup_dir, exist_ok=True)
+
+        # Database file path
+        source_db_path = app.config['DATABASE']
+
+        # Create timestamped backup filename
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        backup_filename = f"software_dashboard_{timestamp}.db"
+        backup_file_path = os.path.join(backup_dir, backup_filename)
+
+        # Copy the database file
+        shutil.copy2(source_db_path, backup_file_path)
+
+        # Log audit action
+        log_audit_action(
+            action_type='DATABASE_BACKUP_SUCCESS',
+            details={'backup_path': backup_file_path}
+            # User performing action is automatically logged by log_audit_action
+        )
+
+        return jsonify(message="Database backup successful.", backup_path=backup_file_path), 200
+
+    except Exception as e:
+        app.logger.error(f"Database backup failed: {e}", exc_info=True) # Log with traceback
+        return jsonify(msg="Database backup failed.", error=str(e)), 500
+
+# --- Database Restore Endpoint (Super Admin) ---
+@app.route('/api/superadmin/database/restore', methods=['POST'])
+@jwt_required()
+@super_admin_required
+def restore_database():
+    # Ensure necessary imports are at the top of app.py:
+    # import os
+    # import shutil
+    # from werkzeug.utils import secure_filename
+
+    temp_uploaded_db_path = None # Initialize to None for error handling
+    failsafe_db_backup_path = None # Initialize for error handling
+
+    try:
+        # 2. Check if 'backup_file' is in request.files
+        if 'backup_file' not in request.files:
+            return jsonify(msg="No backup file part in request"), 400
+
+        # 3. Get the uploaded file object
+        uploaded_file = request.files['backup_file']
+
+        # 4. If uploaded_file.filename == ''
+        if uploaded_file.filename == '':
+            return jsonify(msg="No backup file selected"), 400
+
+        # 5. Secure the filename
+        original_filename = secure_filename(uploaded_file.filename)
+
+        # 6. Validate if original_filename.endswith('.db')
+        if not original_filename.endswith('.db'):
+            return jsonify(msg="Invalid file type. Please upload a .db file."), 400
+
+        # 7. Define the current database path
+        current_db_path = app.config['DATABASE']
+        
+        # Define a failsafe backup path for the current live DB
+        failsafe_db_backup_path = current_db_path + ".restore_failsafe"
+
+
+        # 8. Define a temporary path for the uploaded file
+        # Save in instance folder to avoid potential permission issues in app root
+        temp_uploaded_db_path = os.path.join(app.config['INSTANCE_FOLDER_PATH'], original_filename + ".tmp_restore")
+
+        # 9. Save the uploaded file to temp_uploaded_db_path
+        uploaded_file.save(temp_uploaded_db_path)
+
+        # 10. Replace the current database file
+        # Create a failsafe backup of the current live DB
+        try:
+            if os.path.exists(current_db_path): # Only backup if current DB exists
+                 shutil.copy2(current_db_path, failsafe_db_backup_path)
+                 app.logger.info(f"Created failsafe backup of current DB at {failsafe_db_backup_path}")
+        except Exception as e_backup:
+            app.logger.error(f"Failed to create failsafe backup of current DB: {e_backup}")
+            # Decide if to proceed or not. For now, we'll proceed but this is a risk.
+            # Consider returning an error here if failsafe is critical.
+
+        # Move the uploaded file to replace the current database
+        # This operation should be atomic on most systems if source and destination are on the same filesystem.
+        shutil.move(temp_uploaded_db_path, current_db_path)
+        app.logger.info(f"Successfully moved uploaded DB {temp_uploaded_db_path} to {current_db_path}")
+
+
+        # 11. Log an audit action
+        log_audit_action(
+            action_type='DATABASE_RESTORE_SUCCESS',
+            details={'restored_from_file': original_filename}
+        )
+        
+        # Clean up the failsafe backup if restore was successful
+        if failsafe_db_backup_path and os.path.exists(failsafe_db_backup_path):
+            try:
+                os.remove(failsafe_db_backup_path)
+                app.logger.info(f"Cleaned up failsafe DB backup: {failsafe_db_backup_path}")
+            except Exception as e_cleanup_failsafe:
+                app.logger.error(f"Error cleaning up failsafe DB backup {failsafe_db_backup_path}: {e_cleanup_failsafe}")
+
+
+        # 12. Return success response
+        return jsonify(message="Database restore successful. Application restart might be required if issues occur."), 200
+
+    except Exception as e:
+        # 13. In case of any Exception
+        app.logger.error(f"Database restore failed: {str(e)}", exc_info=True)
+
+        # Attempt to remove the temporary uploaded file if it exists
+        if temp_uploaded_db_path and os.path.exists(temp_uploaded_db_path):
+            try:
+                os.remove(temp_uploaded_db_path)
+                app.logger.info(f"Cleaned up temporary uploaded DB file: {temp_uploaded_db_path}")
+            except Exception as e_remove_tmp:
+                app.logger.error(f"Error removing temporary uploaded DB file {temp_uploaded_db_path}: {e_remove_tmp}")
+        
+        # Log if the failsafe backup exists, user might need to restore it manually.
+        if failsafe_db_backup_path and os.path.exists(failsafe_db_backup_path):
+            app.logger.warning(f"Database restore process failed. A failsafe backup of the original database might exist at: {failsafe_db_backup_path}. Manual intervention may be required.")
+            # For now, we do not automatically restore the failsafe backup.
+            # This decision depends on how robust the recovery strategy should be.
+            # If shutil.move failed after deleting current_db_path (though unlikely with shutil.move for files),
+            # or if it failed mid-operation, the state of current_db_path might be uncertain.
+
+        return jsonify(msg="Database restore failed.", error=str(e)), 500
 
 # --- Main Execution ---
 if __name__ == '__main__':

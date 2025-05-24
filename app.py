@@ -2845,86 +2845,98 @@ def admin_create_version():
 @jwt_required()
 @admin_required
 def admin_list_versions():
-    try:
+    try: # Outer try block starts here
         db = get_db()
 
         # Get and validate query parameters
-    page = request.args.get('page', default=1, type=int)
-    per_page = request.args.get('per_page', default=10, type=int)
-    sort_by_param = request.args.get('sort_by', default='version_number', type=str)
-    sort_order = request.args.get('sort_order', default='asc', type=str).lower()
-    software_id_filter = request.args.get('software_id', type=int)
+        # CORRECTED INDENTATION for all lines below
+        page = request.args.get('page', default=1, type=int)
+        per_page = request.args.get('per_page', default=10, type=int)
+        sort_by_param = request.args.get('sort_by', default='version_number', type=str)
+        sort_order = request.args.get('sort_order', default='asc', type=str).lower()
+        software_id_filter = request.args.get('software_id', type=int)
 
-    if page <= 0: page = 1
-    if per_page <= 0: per_page = 10
-    
-    allowed_sort_by_map = {
-        'id': 'v.id',
-        'software_name': 's.name',
-        'version_number': 'v.version_number',
-        'release_date': 'v.release_date',
-        'created_at': 'v.created_at',
-        'updated_at': 'v.updated_at'
-    }
-    sort_by_column = allowed_sort_by_map.get(sort_by_param, 'v.version_number')
+        if page <= 0: page = 1
+        if per_page <= 0: per_page = 10
+        if per_page > 100: per_page = 100 # Max per page limit
 
-    if sort_order not in ['asc', 'desc']:
-        sort_order = 'asc'
+        allowed_sort_by_map = {
+            'id': 'v.id',
+            'software_name': 's.name',
+            'version_number': 'v.version_number',
+            'release_date': 'v.release_date',
+            'created_at': 'v.created_at',
+            'updated_at': 'v.updated_at'
+        }
+        sort_by_column = allowed_sort_by_map.get(sort_by_param, 'v.version_number')
 
-    # Construct Base Query and Parameters for Filtering
-    base_query_select = "SELECT v.id, v.software_id, v.version_number, v.release_date, v.main_download_link, v.changelog, v.known_bugs, v.created_by_user_id, v.created_at, v.updated_by_user_id, v.updated_at, s.name as software_name"
-    base_query_from = "FROM versions v JOIN software s ON v.software_id = s.id"
-    
-    filter_conditions = []
-    params = []
+        if sort_order not in ['asc', 'desc']:
+            sort_order = 'asc'
 
-    if software_id_filter:
-        filter_conditions.append("v.software_id = ?")
-        params.append(software_id_filter)
-    
-    where_clause = ""
-    if filter_conditions:
-        where_clause = " WHERE " + " AND ".join(filter_conditions)
+        # Construct Base Query and Parameters for Filtering
+        base_query_select = "SELECT v.id, v.software_id, v.version_number, v.release_date, v.main_download_link, v.changelog, v.known_bugs, v.created_by_user_id, v.created_at, v.updated_by_user_id, v.updated_at, s.name as software_name"
+        base_query_from = "FROM versions v JOIN software s ON v.software_id = s.id"
 
-    # Database Query for Total Count
-    count_query = f"SELECT COUNT(v.id) as count {base_query_from}{where_clause}"
-    try:
-        total_versions_cursor = db.execute(count_query, tuple(params))
-        total_versions = total_versions_cursor.fetchone()['count']
-    except Exception as e:
-        app.logger.error(f"Error fetching total version count: {e}")
-        return jsonify(msg="Error fetching version count."), 500
+        filter_conditions = []
+        params = []
 
-    total_pages = math.ceil(total_versions / per_page) if total_versions > 0 else 1
-    offset = (page - 1) * per_page
+        if software_id_filter is not None: # Check for None explicitly for integers
+            filter_conditions.append("v.software_id = ?")
+            params.append(software_id_filter)
 
-    if page > total_pages and total_versions > 0:
-        page = total_pages
+        where_clause = ""
+        if filter_conditions:
+            where_clause = " WHERE " + " AND ".join(filter_conditions)
+
+        # Database Query for Total Count
+        count_query = f"SELECT COUNT(v.id) as count {base_query_from}{where_clause}"
+        try:
+            total_versions_cursor = db.execute(count_query, tuple(params))
+            total_versions_result = total_versions_cursor.fetchone()
+            if total_versions_result is None:
+                app.logger.error("Failed to fetch total version count: query returned None.")
+                return jsonify(msg="Error fetching version count: No result from count query."), 500
+            total_versions = total_versions_result['count']
+        except sqlite3.Error as e: # Be specific with database errors if possible
+            app.logger.error(f"Database error fetching total version count: {e}")
+            return jsonify(msg=f"Database error fetching version count: {e}"), 500
+        except KeyError:
+            app.logger.error("Failed to fetch total version count: 'count' key missing.")
+            return jsonify(msg="Error fetching version count: Malformed count query result."), 500
+
+
+        total_pages = math.ceil(total_versions / per_page) if total_versions > 0 else 1
         offset = (page - 1) * per_page
-    
-    final_query = f"{base_query_select} {base_query_from}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
-    
-    paginated_params = list(params)
-    paginated_params.extend([per_page, offset])
-    
-    try:
-        versions_cursor = db.execute(final_query, tuple(paginated_params))
-        versions_list = [dict(row) for row in versions_cursor.fetchall()]
-    except Exception as e:
-        app.logger.error(f"Error fetching paginated versions: {e}")
-        return jsonify(msg="Error fetching versions."), 500
 
-    return jsonify({
-        "versions": versions_list,
-        "page": page,
-        "per_page": per_page,
-        "total_versions": total_versions,
-        "total_pages": total_pages
-    }), 200
+        if page > total_pages and total_versions > 0:
+            page = total_pages
+            offset = (page - 1) * per_page
+
+        final_query = f"{base_query_select} {base_query_from}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
+
+        paginated_params = list(params) # Create a new list for these params
+        paginated_params.extend([per_page, offset])
+
+        try:
+            versions_cursor = db.execute(final_query, tuple(paginated_params))
+            versions_list = [dict(row) for row in versions_cursor.fetchall()]
+        except sqlite3.Error as e: # Be specific with database errors if possible
+            app.logger.error(f"Database error fetching paginated versions: {e}")
+            return jsonify(msg=f"Database error fetching versions: {e}"), 500
+
+        return jsonify({
+            "versions": versions_list,
+            "page": page,
+            "per_page": per_page,
+            "total_versions": total_versions,
+            "total_pages": total_pages
+        }), 200
+
+    # This except block now correctly corresponds to the outer try
     except Exception as e:
-        app.logger.error(f"Error in admin_list_versions: {e}", exc_info=True)
+        app.logger.error(f"Unexpected error in admin_list_versions: {e}", exc_info=True)
         return jsonify(error="Failed to retrieve software versions", details=str(e)), 500
-
+    
 @app.route('/api/admin/versions/<int:version_id>', methods=['GET'])
 @jwt_required()
 @admin_required

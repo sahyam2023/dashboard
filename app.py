@@ -557,29 +557,6 @@ def reset_password_with_token():
         return jsonify(msg="Failed to reset password due to a server error."), 500
 
 
-@app.route('/api/auth/global-login', methods=['POST'])
-def global_login():
-    data = request.get_json()
-    if not data or 'password' not in data:
-        return jsonify(msg="Password is required"), 400
-
-    provided_password = data['password']
-    stored_hash = get_site_setting('global_password_hash')
-
-    if not stored_hash:
-        # This case should ideally not happen if the DB is initialized correctly.
-        app.logger.error("Global password hash not found in site_settings.")
-        return jsonify(msg="Global access system not configured."), 500
-
-    if bcrypt.check_password_hash(stored_hash, provided_password):
-        # For now, just a success message. Frontend will manage its state.
-        # Consider creating a short-lived global access token/session if needed later.
-        log_audit_action(action_type='GLOBAL_LOGIN_SUCCESS') # Generic log
-        return jsonify(message="Global access granted"), 200
-    else:
-        log_audit_action(action_type='GLOBAL_LOGIN_FAILED', details={'reason': 'Invalid global password'})
-        return jsonify(msg="Invalid global password"), 401
-
 # --- Super Admin User Management Endpoints ---
 @app.route('/api/superadmin/users', methods=['GET'])
 @jwt_required()
@@ -4673,49 +4650,51 @@ def get_weekly_download_counts(db, weeks=4):
 def get_dashboard_stats():
     db = get_db()
     try:
-        # Total users
-        users_cursor = db.execute("SELECT COUNT(*) as count FROM users")
-        total_users = users_cursor.fetchone()['count']
+        # --- Basic Counts ---
+        total_users = db.execute("SELECT COUNT(*) as count FROM users").fetchone()['count']
+        total_software_titles = db.execute("SELECT COUNT(*) as count FROM software").fetchone()['count']
 
-        # Total software titles
-        software_cursor = db.execute("SELECT COUNT(*) as count FROM software")
-        total_software_titles = software_cursor.fetchone()['count']
+        # --- Recent Activities (Audit Logs) ---
+        recent_activities = [
+            dict(row) for row in db.execute(
+                "SELECT action_type, username, timestamp, details FROM audit_logs ORDER BY timestamp DESC LIMIT 5"
+            ).fetchall()
+        ]
 
-        # Recent activities (audit logs)
-        audit_logs_cursor = db.execute(
-            "SELECT action_type, username, timestamp, details FROM audit_logs ORDER BY timestamp DESC LIMIT 5"
-        )
-        recent_activities = [dict(row) for row in audit_logs_cursor.fetchall()]
-
-        # 1. Recent Additions
+        # --- Recent Additions (last 5 across all types) ---
         recent_additions = []
-        # Documents
-        docs_cursor = db.execute("SELECT id, doc_name as name, created_at, 'Document' as type FROM documents ORDER BY created_at DESC LIMIT 5")
-        recent_additions.extend([dict(row) for row in docs_cursor.fetchall()])
-        # Patches
-        patches_cursor = db.execute("SELECT id, patch_name as name, created_at, 'Patch' as type FROM patches ORDER BY created_at DESC LIMIT 5")
-        recent_additions.extend([dict(row) for row in patches_cursor.fetchall()])
-        # Link Files (is_external_link = FALSE)
-        link_files_cursor = db.execute("SELECT id, title as name, created_at, 'Link File' as type FROM links WHERE is_external_link = FALSE ORDER BY created_at DESC LIMIT 5")
-        recent_additions.extend([dict(row) for row in link_files_cursor.fetchall()])
-        # Misc Files
-        misc_files_cursor = db.execute("SELECT id, COALESCE(user_provided_title, original_filename) as name, created_at, 'Misc File' as type FROM misc_files ORDER BY created_at DESC LIMIT 5")
-        recent_additions.extend([dict(row) for row in misc_files_cursor.fetchall()])
-        
+        recent_additions += [
+            dict(row) for row in db.execute(
+                "SELECT id, doc_name as name, created_at, 'Document' as type FROM documents ORDER BY created_at DESC LIMIT 5"
+            ).fetchall()
+        ]
+        recent_additions += [
+            dict(row) for row in db.execute(
+                "SELECT id, patch_name as name, created_at, 'Patch' as type FROM patches ORDER BY created_at DESC LIMIT 5"
+            ).fetchall()
+        ]
+        recent_additions += [
+            dict(row) for row in db.execute(
+                "SELECT id, title as name, created_at, 'Link File' as type FROM links WHERE is_external_link = FALSE ORDER BY created_at DESC LIMIT 5"
+            ).fetchall()
+        ]
+        recent_additions += [
+            dict(row) for row in db.execute(
+                "SELECT id, COALESCE(user_provided_title, original_filename) as name, created_at, 'Misc File' as type FROM misc_files ORDER BY created_at DESC LIMIT 5"
+            ).fetchall()
+        ]
         recent_additions.sort(key=lambda x: x['created_at'], reverse=True)
         top_recent_additions = recent_additions[:5]
 
-        # 2. Popular Downloads
-        popular_downloads_query = """
+        # --- Popular Downloads ---
+        popular_downloads = []
+        for item in db.execute("""
             SELECT file_id, file_type, COUNT(*) as download_count
             FROM download_log
             GROUP BY file_id, file_type
             ORDER BY download_count DESC
             LIMIT 5
-        """
-        popular_downloads_raw = db.execute(popular_downloads_query).fetchall()
-        popular_downloads_detailed = []
-        for item in popular_downloads_raw:
+        """).fetchall():
             name = "Unknown/Deleted Item"
             if item['file_type'] == 'document':
                 res = db.execute("SELECT doc_name FROM documents WHERE id = ?", (item['file_id'],)).fetchone()
@@ -4729,41 +4708,38 @@ def get_dashboard_stats():
             elif item['file_type'] == 'misc_file':
                 res = db.execute("SELECT COALESCE(user_provided_title, original_filename) as name FROM misc_files WHERE id = ?", (item['file_id'],)).fetchone()
                 if res: name = res['name']
-            
-            popular_downloads_detailed.append({
+            popular_downloads.append({
                 "name": name,
                 "type": item['file_type'],
                 "download_count": item['download_count']
             })
 
-        # 3. Documents per Software
-        docs_per_software_query = """
-            SELECT s.name as software_name, COUNT(d.id) as document_count
-            FROM software s
-            LEFT JOIN documents d ON s.id = d.software_id
-            GROUP BY s.id, s.name
-            ORDER BY s.name
-        """
-        docs_per_software_cursor = db.execute(docs_per_software_query)
-        documents_per_software = [dict(row) for row in docs_per_software_cursor.fetchall()]
+        # --- Documents per Software ---
+        documents_per_software = [
+            dict(row) for row in db.execute("""
+                SELECT s.name as software_name, COUNT(d.id) as document_count
+                FROM software s
+                LEFT JOIN documents d ON s.id = d.software_id
+                GROUP BY s.id, s.name
+                ORDER BY s.name
+            """).fetchall()
+        ]
 
-        # User Activity Trends
+        # --- User Activity Trends ---
         daily_logins = get_daily_counts(db, ['USER_LOGIN'], days=7)
         weekly_logins = get_weekly_counts(db, ['USER_LOGIN'], weeks=4)
-
         upload_action_types = [
             'CREATE_DOCUMENT_FILE', 'CREATE_PATCH_FILE', 'CREATE_LINK_FILE', 'CREATE_MISC_FILE',
             'UPDATE_DOCUMENT_FILE', 'UPDATE_PATCH_FILE', 'UPDATE_LINK_FILE', 'UPDATE_MISC_FILE_UPLOAD'
         ]
         daily_uploads = get_daily_counts(db, upload_action_types, days=7)
         weekly_uploads = get_weekly_counts(db, upload_action_types, weeks=4)
-
         user_activity_trends = {
             "logins": {"daily": daily_logins, "weekly": weekly_logins},
             "uploads": {"daily": daily_uploads, "weekly": weekly_uploads}
         }
 
-        # Download Trends
+        # --- Download Trends ---
         daily_downloads = get_daily_download_counts(db, days=7)
         weekly_downloads = get_weekly_download_counts(db, weeks=4)
         download_trends = {
@@ -4771,118 +4747,82 @@ def get_dashboard_stats():
             "weekly": weekly_downloads
         }
 
-        # Calculate Total Storage Utilization
-        docs_size_cursor = db.execute("SELECT SUM(file_size) as total FROM documents WHERE is_external_link = FALSE AND stored_filename IS NOT NULL")
-        docs_size = (docs_size_cursor.fetchone()['total'] or 0) if docs_size_cursor else 0
-
-        patches_size_cursor = db.execute("SELECT SUM(file_size) as total FROM patches WHERE is_external_link = FALSE AND stored_filename IS NOT NULL")
-        patches_size = (patches_size_cursor.fetchone()['total'] or 0) if patches_size_cursor else 0
-
-        links_size_cursor = db.execute("SELECT SUM(file_size) as total FROM links WHERE is_external_link = FALSE AND stored_filename IS NOT NULL")
-        links_size = (links_size_cursor.fetchone()['total'] or 0) if links_size_cursor else 0
-        
-        misc_files_size_cursor = db.execute("SELECT SUM(file_size) as total FROM misc_files WHERE stored_filename IS NOT NULL")
-        misc_files_size = (misc_files_size_cursor.fetchone()['total'] or 0) if misc_files_size_cursor else 0
-
+        # --- Storage Utilization ---
+        docs_size = db.execute("SELECT SUM(file_size) as total FROM documents WHERE is_external_link = FALSE AND stored_filename IS NOT NULL").fetchone()['total'] or 0
+        patches_size = db.execute("SELECT SUM(file_size) as total FROM patches WHERE is_external_link = FALSE AND stored_filename IS NOT NULL").fetchone()['total'] or 0
+        links_size = db.execute("SELECT SUM(file_size) as total FROM links WHERE is_external_link = FALSE AND stored_filename IS NOT NULL").fetchone()['total'] or 0
+        misc_files_size = db.execute("SELECT SUM(file_size) as total FROM misc_files WHERE stored_filename IS NOT NULL").fetchone()['total'] or 0
         total_storage_utilized_bytes = docs_size + patches_size + links_size + misc_files_size
 
+        # --- Content Health Indicators ---
+        stale_threshold_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+        content_health = {"missing_descriptions": {}, "stale_content": {}}
+
+        # Missing Descriptions
+        content_health['missing_descriptions']['documents'] = {
+            'missing': db.execute("SELECT COUNT(*) as count FROM documents WHERE description IS NULL OR description = ''").fetchone()['count'] or 0,
+            'total': db.execute("SELECT COUNT(*) as count FROM documents").fetchone()['count'] or 0
+        }
+        content_health['missing_descriptions']['patches'] = {
+            'missing': db.execute("SELECT COUNT(*) as count FROM patches WHERE description IS NULL OR description = ''").fetchone()['count'] or 0,
+            'total': db.execute("SELECT COUNT(*) as count FROM patches").fetchone()['count'] or 0
+        }
+        content_health['missing_descriptions']['links'] = {
+            'missing': db.execute("SELECT COUNT(*) as count FROM links WHERE description IS NULL OR description = ''").fetchone()['count'] or 0,
+            'total': db.execute("SELECT COUNT(*) as count FROM links").fetchone()['count'] or 0
+        }
+        content_health['missing_descriptions']['misc_categories'] = {
+            'missing': db.execute("SELECT COUNT(*) as count FROM misc_categories WHERE description IS NULL OR description = ''").fetchone()['count'] or 0,
+            'total': db.execute("SELECT COUNT(*) as count FROM misc_categories").fetchone()['count'] or 0
+        }
+        content_health['missing_descriptions']['software'] = {
+            'missing': db.execute("SELECT COUNT(*) as count FROM software WHERE description IS NULL OR description = ''").fetchone()['count'] or 0,
+            'total': total_software_titles
+        }
+        content_health['missing_descriptions']['misc_files'] = {
+            'missing': db.execute("SELECT COUNT(*) as count FROM misc_files WHERE user_provided_description IS NULL OR user_provided_description = ''").fetchone()['count'] or 0,
+            'total': db.execute("SELECT COUNT(*) as count FROM misc_files").fetchone()['count'] or 0
+        }
+
+        # Stale Content
+        content_health['stale_content']['documents'] = {
+            'stale': db.execute("SELECT COUNT(*) as count FROM documents WHERE date(updated_at) < date(?)", (stale_threshold_date,)).fetchone()['count'] or 0,
+            'total': content_health['missing_descriptions']['documents']['total']
+        }
+        content_health['stale_content']['patches'] = {
+            'stale': db.execute("SELECT COUNT(*) as count FROM patches WHERE date(updated_at) < date(?)", (stale_threshold_date,)).fetchone()['count'] or 0,
+            'total': content_health['missing_descriptions']['patches']['total']
+        }
+        content_health['stale_content']['links'] = {
+            'stale': db.execute("SELECT COUNT(*) as count FROM links WHERE date(updated_at) < date(?)", (stale_threshold_date,)).fetchone()['count'] or 0,
+            'total': content_health['missing_descriptions']['links']['total']
+        }
+        content_health['stale_content']['misc_files'] = {
+            'stale': db.execute("SELECT COUNT(*) as count FROM misc_files WHERE date(updated_at) < date(?)", (stale_threshold_date,)).fetchone()['count'] or 0,
+            'total': content_health['missing_descriptions']['misc_files']['total']
+        }
+        content_health['stale_content']['versions'] = {
+            'stale': db.execute("SELECT COUNT(*) as count FROM versions WHERE date(updated_at) < date(?)", (stale_threshold_date,)).fetchone()['count'] or 0,
+            'total': db.execute("SELECT COUNT(*) as count FROM versions").fetchone()['count'] or 0
+        }
+        content_health['stale_content']['misc_categories'] = {
+            'stale': db.execute("SELECT COUNT(*) as count FROM misc_categories WHERE date(updated_at) < date(?)", (stale_threshold_date,)).fetchone()['count'] or 0,
+            'total': content_health['missing_descriptions']['misc_categories']['total']
+        }
+
+        # --- Response ---
         return jsonify(
             total_users=total_users,
             total_software_titles=total_software_titles,
             recent_activities=recent_activities,
             recent_additions=top_recent_additions,
-            popular_downloads=popular_downloads_detailed,
+            popular_downloads=popular_downloads,
             documents_per_software=documents_per_software,
             user_activity_trends=user_activity_trends,
-            download_trends=download_trends, 
-            total_storage_utilized_bytes=total_storage_utilized_bytes
-        )
-
-        # Content Health Indicators
-        stale_threshold_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
-        content_health = {
-            "missing_descriptions": {},
-            "stale_content": {}
-        }
-
-        # --- Missing Descriptions ---
-        # Documents
-        docs_missing_desc_cursor = db.execute("SELECT COUNT(*) as count FROM documents WHERE description IS NULL OR description = ''")
-        docs_missing_desc = (docs_missing_desc_cursor.fetchone()['count'] or 0) if docs_missing_desc_cursor else 0
-        docs_total_cursor = db.execute("SELECT COUNT(*) as count FROM documents")
-        docs_total = (docs_total_cursor.fetchone()['count'] or 0) if docs_total_cursor else 0
-        content_health['missing_descriptions']['documents'] = {'missing': docs_missing_desc, 'total': docs_total}
-
-        # Patches
-        patches_missing_desc_cursor = db.execute("SELECT COUNT(*) as count FROM patches WHERE description IS NULL OR description = ''")
-        patches_missing_desc = (patches_missing_desc_cursor.fetchone()['count'] or 0) if patches_missing_desc_cursor else 0
-        patches_total_cursor = db.execute("SELECT COUNT(*) as count FROM patches")
-        patches_total = (patches_total_cursor.fetchone()['count'] or 0) if patches_total_cursor else 0
-        content_health['missing_descriptions']['patches'] = {'missing': patches_missing_desc, 'total': patches_total}
-
-        # Links
-        links_missing_desc_cursor = db.execute("SELECT COUNT(*) as count FROM links WHERE description IS NULL OR description = ''")
-        links_missing_desc = (links_missing_desc_cursor.fetchone()['count'] or 0) if links_missing_desc_cursor else 0
-        links_total_cursor = db.execute("SELECT COUNT(*) as count FROM links")
-        links_total = (links_total_cursor.fetchone()['count'] or 0) if links_total_cursor else 0
-        content_health['missing_descriptions']['links'] = {'missing': links_missing_desc, 'total': links_total}
-
-        # Misc Categories
-        mc_missing_desc_cursor = db.execute("SELECT COUNT(*) as count FROM misc_categories WHERE description IS NULL OR description = ''")
-        mc_missing_desc = (mc_missing_desc_cursor.fetchone()['count'] or 0) if mc_missing_desc_cursor else 0
-        mc_total_cursor = db.execute("SELECT COUNT(*) as count FROM misc_categories")
-        mc_total = (mc_total_cursor.fetchone()['count'] or 0) if mc_total_cursor else 0
-        content_health['missing_descriptions']['misc_categories'] = {'missing': mc_missing_desc, 'total': mc_total}
-
-        # Software
-        sw_missing_desc_cursor = db.execute("SELECT COUNT(*) as count FROM software WHERE description IS NULL OR description = ''")
-        sw_missing_desc = (sw_missing_desc_cursor.fetchone()['count'] or 0) if sw_missing_desc_cursor else 0
-        # total_software_titles already fetched above
-        content_health['missing_descriptions']['software'] = {'missing': sw_missing_desc, 'total': total_software_titles}
-        
-        # Misc Files
-        mf_missing_desc_cursor = db.execute("SELECT COUNT(*) as count FROM misc_files WHERE user_provided_description IS NULL OR user_provided_description = ''")
-        mf_missing_desc = (mf_missing_desc_cursor.fetchone()['count'] or 0) if mf_missing_desc_cursor else 0
-        mf_total_cursor = db.execute("SELECT COUNT(*) as count FROM misc_files")
-        mf_total = (mf_total_cursor.fetchone()['count'] or 0) if mf_total_cursor else 0
-        content_health['missing_descriptions']['misc_files'] = {'missing': mf_missing_desc, 'total': mf_total}
-
-        # --- Stale Content ---
-        # Documents
-        docs_stale_cursor = db.execute("SELECT COUNT(*) as count FROM documents WHERE date(updated_at) < date(?)", (stale_threshold_date,))
-        docs_stale = (docs_stale_cursor.fetchone()['count'] or 0) if docs_stale_cursor else 0
-        content_health['stale_content']['documents'] = {'stale': docs_stale, 'total': docs_total}
-
-        # Patches
-        patches_stale_cursor = db.execute("SELECT COUNT(*) as count FROM patches WHERE date(updated_at) < date(?)", (stale_threshold_date,))
-        patches_stale = (patches_stale_cursor.fetchone()['count'] or 0) if patches_stale_cursor else 0
-        content_health['stale_content']['patches'] = {'stale': patches_stale, 'total': patches_total}
-
-        # Links
-        links_stale_cursor = db.execute("SELECT COUNT(*) as count FROM links WHERE date(updated_at) < date(?)", (stale_threshold_date,))
-        links_stale = (links_stale_cursor.fetchone()['count'] or 0) if links_stale_cursor else 0
-        content_health['stale_content']['links'] = {'stale': links_stale, 'total': links_total}
-        
-        # Misc Files
-        mf_stale_cursor = db.execute("SELECT COUNT(*) as count FROM misc_files WHERE date(updated_at) < date(?)", (stale_threshold_date,))
-        mf_stale = (mf_stale_cursor.fetchone()['count'] or 0) if mf_stale_cursor else 0
-        content_health['stale_content']['misc_files'] = {'stale': mf_stale, 'total': mf_total}
-
-        # Versions
-        versions_stale_cursor = db.execute("SELECT COUNT(*) as count FROM versions WHERE date(updated_at) < date(?)", (stale_threshold_date,))
-        versions_stale = (versions_stale_cursor.fetchone()['count'] or 0) if versions_stale_cursor else 0
-        versions_total_cursor = db.execute("SELECT COUNT(*) as count FROM versions")
-        versions_total = (versions_total_cursor.fetchone()['count'] or 0) if versions_total_cursor else 0
-        content_health['stale_content']['versions'] = {'stale': versions_stale, 'total': versions_total}
-        
-        # Misc Categories (Stale)
-        mc_stale_cursor = db.execute("SELECT COUNT(*) as count FROM misc_categories WHERE date(updated_at) < date(?)", (stale_threshold_date,))
-        mc_stale = (mc_stale_cursor.fetchone()['count'] or 0) if mc_stale_cursor else 0
-        content_health['stale_content']['misc_categories'] = {'stale': mc_stale, 'total': mc_total}
-
-
-        response_data.update({"content_health": content_health})
-        return jsonify(response_data), 200
+            download_trends=download_trends,
+            total_storage_utilized_bytes=total_storage_utilized_bytes,
+            content_health=content_health
+        ), 200
 
     except sqlite3.Error as e:
         app.logger.error(f"Database error in get_dashboard_stats: {e}")

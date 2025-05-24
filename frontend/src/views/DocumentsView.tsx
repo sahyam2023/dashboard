@@ -199,8 +199,10 @@ const DocumentsView: React.FC = () => {
         </a>
       )
     },
-    { key: 'created_at', header: 'Created At', sortable: true, render: (doc) => doc.created_at ? new Date(doc.created_at).toLocaleDateString() : '-' },
-    { key: 'updated_at', header: 'Updated At', sortable: true, render: (doc) => doc.updated_at ? new Date(doc.updated_at).toLocaleDateString() : '-' },
+    { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: (doc) => doc.uploaded_by_username || 'N/A' },
+    { key: 'updated_by_username', header: 'Updated By', sortable: false, render: (doc) => doc.updated_by_username || 'N/A' }, // Not typically sorted
+    { key: 'created_at', header: 'Created At', sortable: true, render: (doc) => doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-CA') : '-' },
+    { key: 'updated_at', header: 'Updated At', sortable: true, render: (doc) => doc.updated_at ? new Date(doc.updated_at).toLocaleDateString('en-CA') : '-' },
     ...(isAuthenticated && (role === 'admin' || role === 'super_admin') ? [{
       key: 'actions' as keyof DocumentType | 'actions', // Type assertion for actions
       header: 'Actions',

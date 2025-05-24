@@ -30,6 +30,8 @@ export interface Document {
   file_type?: string | null;
   created_at?: string;
   updated_at?: string;
+  uploaded_by_username?: string;
+  updated_by_username?: string;
 }
 
 // --- Patch Types ---
@@ -55,6 +57,9 @@ export interface Patch {
   file_type?: string | null;
   created_at?: string;
   updated_at?: string;
+  patch_by_developer?: string | null;
+  uploaded_by_username?: string;
+  updated_by_username?: string;
 }
 
 // --- Link Types ---
@@ -79,6 +84,8 @@ export interface Link {
   file_type?: string | null;
   created_at?: string;
   updated_at?: string;
+  uploaded_by_username?: string;
+  updated_by_username?: string;
   // category?: string; // Removed as it's not in the current backend schema for links
 }
 
@@ -125,6 +132,7 @@ export interface AddPatchPayloadFlexible extends BasePayloadWithFlexibleVersion 
   patch_name: string;
   release_date?: string; // YYYY-MM-DD string
   download_link?: string; // For URL mode (required if inputMode is URL)
+  patch_by_developer?: string | null; // Added
   // software_id is inherited.
   // version_id OR typed_version_string must lead to a valid version (enforced by form/backend).
 }
@@ -190,6 +198,8 @@ export interface MiscFile {
   file_size: number | null;
   created_at?: string; // Assuming backend field is created_at
   updated_at?: string;
+  uploaded_by_username?: string;
+  updated_by_username?: string;
 }
 // No specific EditMiscFilePayload type is defined here as edit operations for misc files
 // (like replacing the file or changing metadata) will likely use FormData via editAdminMiscFile.

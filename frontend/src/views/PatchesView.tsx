@@ -185,6 +185,7 @@ const PatchesView: React.FC = () => {
     { key: 'patch_name', header: 'Patch Name', sortable: true },
     { key: 'software_name', header: 'Software', sortable: true },
     { key: 'version_number', header: 'Version', sortable: true },
+    { key: 'patch_by_developer', header: 'Patch Developer', sortable: true, render: (patch) => patch.patch_by_developer || '-' },
     { key: 'description', header: 'Description', render: (patch: PatchType) => (
         <span className="text-sm text-gray-600 block max-w-xs truncate" title={patch.description || ''}>
           {patch.description || '-'}
@@ -207,7 +208,10 @@ const PatchesView: React.FC = () => {
         </a>
       )
     },
+    { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: (patch) => patch.uploaded_by_username || 'N/A' },
+    { key: 'updated_by_username', header: 'Updated By', sortable: false, render: (patch) => patch.updated_by_username || 'N/A' }, // Not typically sorted
     { key: 'created_at', header: 'Created At', sortable: true, render: (patch) => formatDate(patch.created_at) },
+    { key: 'updated_at', header: 'Updated At', sortable: true, render: (patch) => formatDate(patch.updated_at) },
     ...(isAuthenticated && (role === 'admin' || role === 'super_admin') ? [{
       key: 'actions' as keyof PatchType | 'actions',
       header: 'Actions',

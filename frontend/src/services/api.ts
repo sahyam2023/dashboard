@@ -208,7 +208,17 @@ const handleApiError = async (response: Response, defaultMessage: string) => {
     error.response = { data: errorData, status: response.status }; // Attach response data for more detailed error handling
     throw error;
   }
-  return response.json(); // If response is ok, parse JSON
+
+  // If response.ok is true, attempt to parse the JSON.
+  const responseText = await response.text(); // Get text first for logging if JSON parsing fails
+  try {
+    return JSON.parse(responseText); // Attempt to parse the text as JSON
+  } catch (e) {
+    // Log detailed error if JSON parsing fails
+    console.error('JSON parsing error for URL:', response.url, 'Received non-JSON response:', responseText);
+    // Throw a new error that includes the URL and a snippet of the response text
+    throw new Error(`JSON parsing failed for URL: ${response.url}. Response: ${responseText.substring(0, 200)}...`);
+  }
 };
 
 // --- Basic Data Fetching ---

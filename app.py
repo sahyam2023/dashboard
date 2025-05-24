@@ -2845,9 +2845,10 @@ def admin_create_version():
 @jwt_required()
 @admin_required
 def admin_list_versions():
-    db = get_db()
+    try:
+        db = get_db()
 
-    # Get and validate query parameters
+        # Get and validate query parameters
     page = request.args.get('page', default=1, type=int)
     per_page = request.args.get('per_page', default=10, type=int)
     sort_by_param = request.args.get('sort_by', default='version_number', type=str)
@@ -2920,6 +2921,9 @@ def admin_list_versions():
         "total_versions": total_versions,
         "total_pages": total_pages
     }), 200
+    except Exception as e:
+        app.logger.error(f"Error in admin_list_versions: {e}", exc_info=True)
+        return jsonify(error="Failed to retrieve software versions", details=str(e)), 500
 
 @app.route('/api/admin/versions/<int:version_id>', methods=['GET'])
 @jwt_required()

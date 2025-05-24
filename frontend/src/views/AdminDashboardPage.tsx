@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fetchDashboardStats, DashboardStats, RecentActivityItem } from '../../services/api'; // Adjusted path
+import { fetchDashboardStats, DashboardStats, RecentActivityItem } from '..//services/api'
 // import ConfirmationModal from '../../shared/ConfirmationModal'; // Not used in this update
 // import Modal from '../../shared/Modal'; // Not used in this update
 

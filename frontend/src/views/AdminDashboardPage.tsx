@@ -178,159 +178,8 @@ const AdminDashboardPage: React.FC = () => {
     getHealth();
   }, []);
 
-  // Chart data and options
-  const documentsPerSoftwareChartData = {
-    labels: dashboardStats?.documents_per_software?.map(item => item.software_name) || [],
-    datasets: [
-      {
-        label: 'Documents per Software',
-        data: dashboardStats?.documents_per_software?.map(item => item.document_count) || [],
-        backgroundColor: 'rgba(54, 162, 235, 0.6)', // Blue
-        borderColor: 'rgba(54, 162, 235, 1)',
-        borderWidth: 1,
-      },
-    ],
-  };
-
-  const popularDownloadsChartData = {
-    labels: dashboardStats?.popular_downloads?.map(item => `${item.name} (${item.type})`) || [],
-    datasets: [
-      {
-        label: 'Popular Downloads',
-        data: dashboardStats?.popular_downloads?.map(item => item.download_count) || [],
-        backgroundColor: [ // Array of colors for Pie chart segments
-          'rgba(255, 99, 132, 0.6)',  // Red
-          'rgba(75, 192, 192, 0.6)',  // Green
-          'rgba(255, 205, 86, 0.6)',  // Yellow
-          'rgba(201, 203, 207, 0.6)', // Grey
-          'rgba(153, 102, 255, 0.6)', // Purple
-        ],
-        borderColor: [
-          'rgba(255, 99, 132, 1)',
-          'rgba(75, 192, 192, 1)',
-          'rgba(255, 205, 86, 1)',
-          'rgba(201, 203, 207, 1)',
-          'rgba(153, 102, 255, 1)',
-        ],
-        borderWidth: 1,
-      },
-    ],
-  };
-
-  const chartBaseOptions = {
-      responsive: true,
-      maintainAspectRatio: false, // Important for sizing within Paper
-      plugins: {
-        legend: {
-          position: 'top' as const,
-        },
-        tooltip: {
-          callbacks: {
-              label: function(context: any) {
-                  let label = context.dataset.label || '';
-                  if (label) {
-                      label += ': ';
-                  }
-                  if (context.parsed.y !== null) { // For Bar/Line chart
-                      label += context.parsed.y;
-                  } else if (context.parsed !== null && context.chart.config.type === 'pie') { // For Pie chart
-                      label += context.parsed;
-                  }
-                  return label;
-              }
-          }
-        },
-        title: {
-          display: false,
-          text: '',
-        }
-      },
-      scales: { // Common scale options, can be overridden
-          y: {
-              beginAtZero: true
-          }
-      }
-    };
-
-  const dailyLoginData = {
-    labels: dashboardStats?.user_activity_trends?.logins?.daily?.map(item => item.date) || [],
-    datasets: [
-      {
-        label: 'Logins',
-        data: dashboardStats?.user_activity_trends?.logins?.daily?.map(item => item.count) || [],
-        fill: false,
-        borderColor: 'rgb(75, 192, 192)',
-        tension: 0.1,
-      },
-    ],
-  };
-
-  const dailyUploadData = {
-    labels: dashboardStats?.user_activity_trends?.uploads?.daily?.map(item => item.date) || [],
-    datasets: [
-      {
-        label: 'Uploads',
-        data: dashboardStats?.user_activity_trends?.uploads?.daily?.map(item => item.count) || [],
-        fill: false,
-        borderColor: 'rgb(255, 99, 132)',
-        tension: 0.1,
-      },
-    ],
-  };
-
-  const dailyDownloadData = {
-    labels: dashboardStats?.download_trends?.daily?.map(item => item.date) || [],
-    datasets: [
-      {
-        label: 'Downloads',
-        data: dashboardStats?.download_trends?.daily?.map(item => item.count) || [],
-        fill: false,
-        borderColor: 'rgb(75, 192, 75)', // Green color for downloads
-        tension: 0.1,
-      },
-    ],
-  };
-  
-  if (loadingStats || loadingHealth) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="calc(100vh - 64px)"> {/* Adjust height based on AppBar/Header */}
-        <CircularProgress />
-        <Typography sx={{ ml: 2 }}>Loading Dashboard Data...</Typography>
-      </Box>
-    );
-  }
-
-  // Helper to render content health statistics lists
-  const renderHealthStatsList = (
-    healthData: { [key: string]: { missing?: number; stale?: number; total: number } } | undefined,
-    dataType: 'missing' | 'stale'
-  ) => {
-    if (loadingStats) return <CircularProgress />; 
-    if (!healthData || Object.keys(healthData).length === 0) {
-      return <Typography sx={{ textAlign: 'center', mt: 2 }}>No data available.</Typography>;
-    }
-
-    return (
-      <List dense sx={{ maxHeight: 300, overflow: 'auto' }}>
-        {Object.entries(healthData).map(([key, stats]) => {
-          const count = dataType === 'missing' ? stats.missing : stats.stale;
-          const percentage = stats.total > 0 && count !== undefined ? ((count / stats.total) * 100).toFixed(1) : '0.0';
-          const displayName = key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ');
-          const itemText = `${displayName}: ${count ?? 0} / ${stats.total} (${percentage}%)`;
-          
-          return (
-            <ListItem key={key} divider>
-              <ListItemText primary={itemText} />
-            </ListItem>
-          );
-        })}
-      </List>
-    );
-  };
-
-  // Define WIDGET_DEFINITIONS and initialize widgetConfigs state
-  // This needs to be within the component scope to access props and state like dashboardStats, loadingStats etc.
-  
+  // === MOVED HOOKS SECTION START ===
+  // Ensure WIDGET_DEFINITIONS_ARRAY (useMemo) is here
   const WIDGET_DEFINITIONS_ARRAY: Array<{
     id: string;
     name: string;
@@ -501,17 +350,18 @@ const AdminDashboardPage: React.FC = () => {
       )
     },
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], []); // Dependencies for useMemo
+  ], []); // Dependency array must be empty
 
+  // Ensure widgetConfigs (useState) is here
   const [widgetConfigs, setWidgetConfigs] = useState<WidgetConfig[]>(() => {
     const defaultsFromDefs = WIDGET_DEFINITIONS_ARRAY.map(def => ({
       id: def.id,
       name: def.name,
-      layout: { ...def.defaultLayout, i: def.id }, // Ensure 'i' is present and matches id
-      visible: true, // Default visibility
+      layout: { ...def.defaultLayout, i: def.id },
+      visible: true,
       component: def.component
     }));
-
+    // ... rest of widgetConfigs initialization logic, including localStorage load ...
     const savedConfigStr = localStorage.getItem(WIDGET_CONFIG_STORAGE_KEY);
     if (savedConfigStr) {
       try {
@@ -533,9 +383,12 @@ const AdminDashboardPage: React.FC = () => {
         console.error("Error parsing saved widget config:", e);
       }
     }
-    return defaultsFromDefs;
+    return defaultsFromDefs; // Or the result after checking localStorage
   });
-
+  // === MOVED HOOKS SECTION END ===
+  
+  // Subsequent useEffect hook (e.g., for saving widgetConfigs to localStorage)
+  // This useEffect depends on widgetConfigs, so it should come after widgetConfigs is defined.
   useEffect(() => {
     const simplifiedConfigs = widgetConfigs.map(wc => ({
       id: wc.id,
@@ -550,6 +403,156 @@ const AdminDashboardPage: React.FC = () => {
     }));
     localStorage.setItem(WIDGET_CONFIG_STORAGE_KEY, JSON.stringify(simplifiedConfigs));
   }, [widgetConfigs]);
+
+  // Chart data and options
+  const documentsPerSoftwareChartData = {
+    labels: dashboardStats?.documents_per_software?.map(item => item.software_name) || [],
+    datasets: [
+      {
+        label: 'Documents per Software',
+        data: dashboardStats?.documents_per_software?.map(item => item.document_count) || [],
+        backgroundColor: 'rgba(54, 162, 235, 0.6)', // Blue
+        borderColor: 'rgba(54, 162, 235, 1)',
+        borderWidth: 1,
+      },
+    ],
+  };
+
+  const popularDownloadsChartData = {
+    labels: dashboardStats?.popular_downloads?.map(item => `${item.name} (${item.type})`) || [],
+    datasets: [
+      {
+        label: 'Popular Downloads',
+        data: dashboardStats?.popular_downloads?.map(item => item.download_count) || [],
+        backgroundColor: [ // Array of colors for Pie chart segments
+          'rgba(255, 99, 132, 0.6)',  // Red
+          'rgba(75, 192, 192, 0.6)',  // Green
+          'rgba(255, 205, 86, 0.6)',  // Yellow
+          'rgba(201, 203, 207, 0.6)', // Grey
+          'rgba(153, 102, 255, 0.6)', // Purple
+        ],
+        borderColor: [
+          'rgba(255, 99, 132, 1)',
+          'rgba(75, 192, 192, 1)',
+          'rgba(255, 205, 86, 1)',
+          'rgba(201, 203, 207, 1)',
+          'rgba(153, 102, 255, 1)',
+        ],
+        borderWidth: 1,
+      },
+    ],
+  };
+
+  const chartBaseOptions = {
+      responsive: true,
+      maintainAspectRatio: false, // Important for sizing within Paper
+      plugins: {
+        legend: {
+          position: 'top' as const,
+        },
+        tooltip: {
+          callbacks: {
+              label: function(context: any) {
+                  let label = context.dataset.label || '';
+                  if (label) {
+                      label += ': ';
+                  }
+                  if (context.parsed.y !== null) { // For Bar/Line chart
+                      label += context.parsed.y;
+                  } else if (context.parsed !== null && context.chart.config.type === 'pie') { // For Pie chart
+                      label += context.parsed;
+                  }
+                  return label;
+              }
+          }
+        },
+        title: {
+          display: false,
+          text: '',
+        }
+      },
+      scales: { // Common scale options, can be overridden
+          y: {
+              beginAtZero: true
+          }
+      }
+    };
+
+  const dailyLoginData = {
+    labels: dashboardStats?.user_activity_trends?.logins?.daily?.map(item => item.date) || [],
+    datasets: [
+      {
+        label: 'Logins',
+        data: dashboardStats?.user_activity_trends?.logins?.daily?.map(item => item.count) || [],
+        fill: false,
+        borderColor: 'rgb(75, 192, 192)',
+        tension: 0.1,
+      },
+    ],
+  };
+
+  const dailyUploadData = {
+    labels: dashboardStats?.user_activity_trends?.uploads?.daily?.map(item => item.date) || [],
+    datasets: [
+      {
+        label: 'Uploads',
+        data: dashboardStats?.user_activity_trends?.uploads?.daily?.map(item => item.count) || [],
+        fill: false,
+        borderColor: 'rgb(255, 99, 132)',
+        tension: 0.1,
+      },
+    ],
+  };
+
+  const dailyDownloadData = {
+    labels: dashboardStats?.download_trends?.daily?.map(item => item.date) || [],
+    datasets: [
+      {
+        label: 'Downloads',
+        data: dashboardStats?.download_trends?.daily?.map(item => item.count) || [],
+        fill: false,
+        borderColor: 'rgb(75, 192, 75)', // Green color for downloads
+        tension: 0.1,
+      },
+    ],
+  };
+  
+  if (loadingStats || loadingHealth) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="calc(100vh - 64px)"> {/* Adjust height based on AppBar/Header */}
+        <CircularProgress />
+        <Typography sx={{ ml: 2 }}>Loading Dashboard Data...</Typography>
+      </Box>
+    );
+  }
+
+  // Helper to render content health statistics lists
+  const renderHealthStatsList = (
+    healthData: { [key: string]: { missing?: number; stale?: number; total: number } } | undefined,
+    dataType: 'missing' | 'stale'
+  ) => {
+    if (loadingStats) return <CircularProgress />; 
+    if (!healthData || Object.keys(healthData).length === 0) {
+      return <Typography sx={{ textAlign: 'center', mt: 2 }}>No data available.</Typography>;
+    }
+
+    return (
+      <List dense sx={{ maxHeight: 300, overflow: 'auto' }}>
+        {Object.entries(healthData).map(([key, stats]) => {
+          const count = dataType === 'missing' ? stats.missing : stats.stale;
+          const percentage = stats.total > 0 && count !== undefined ? ((count / stats.total) * 100).toFixed(1) : '0.0';
+          const displayName = key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ');
+          const itemText = `${displayName}: ${count ?? 0} / ${stats.total} (${percentage}%)`;
+          
+          return (
+            <ListItem key={key} divider>
+              <ListItemText primary={itemText} />
+            </ListItem>
+          );
+        })}
+      </List>
+    );
+  };
 
   const handleLayoutChange = (_currentLayout: ReactGridLayout.Layout[], allLayouts: ReactGridLayout.Layouts) => {
     const currentLgLayout = allLayouts.lg;

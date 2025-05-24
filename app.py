@@ -2911,7 +2911,7 @@ def admin_delete_misc_file(file_id):
             target_table='misc_files',
             target_id=file_id,
             details={
-                'deleted_title': misc_file_item('user_provided_title'), 
+                'deleted_title': misc_file_item['user_provided_title'], 
                 'stored_filename': misc_file_item['stored_filename'], 
                 'category_id': misc_file_item['misc_category_id']
             }

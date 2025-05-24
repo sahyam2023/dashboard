@@ -166,6 +166,13 @@ export interface DashboardStats {
 }
 // --- End of Interface for Dashboard Statistics ---
 
+// --- Interface for System Health ---
+export interface SystemHealth {
+  api_status: string;
+  db_connection: string;
+}
+// --- End of Interface for System Health ---
+
 // --- Interfaces for Audit Log ---
 export interface AuditLogEntry {
   id: number;
@@ -233,6 +240,21 @@ export async function fetchSoftware(): Promise<Software[]> {
     return await response.json();
   } catch (error) {
     console.error('Error fetching software:', error);
+    throw error;
+  }
+}
+
+// --- Admin System Health Function ---
+export async function fetchSystemHealth(): Promise<SystemHealth> {
+  try {
+    const url = `${API_BASE_URL}/api/admin/system-health`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { ...getAuthHeader() },
+    });
+    return handleApiError(response, 'Failed to fetch system health');
+  } catch (error) {
+    console.error('Error fetching system health:', error);
     throw error;
   }
 }

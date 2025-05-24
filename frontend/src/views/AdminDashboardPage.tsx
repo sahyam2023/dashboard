@@ -1,166 +1,324 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import { Link as RouterLink } from 'react-router-dom';
 import { 
-  fetchDashboardStats, 
-  DashboardStats, 
-  RecentActivityItem, 
-  RecentAdditionItem, 
-  PopularDownloadItem, 
-  DocumentsPerSoftwareItem 
-} from '../services/api'; // Corrected import for RecentActivityItem and added others
+  fetchDashboardStats, DashboardStats, RecentActivityItem, PopularDownloadItem, DocumentsPerSoftwareItem, RecentAdditionItem,
+  fetchSystemHealth, SystemHealth // Import new items
+} from '../services/api';
+import { Box, CircularProgress, Typography, Paper, List, ListItem, ListItemText, Divider, Alert, Link, ListItemButton } from '@mui/material'; // MUI components
+import { Grid } from '@mui/material';
+import { Bar, Pie } from 'react-chartjs-2'; // Import chart components
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  ArcElement,
+  Title,
+  Tooltip,
+  Legend,
+} from 'chart.js'; // Import Chart.js modules
+
+// Register Chart.js components
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  ArcElement,
+  Title,
+  Tooltip,
+  Legend
+);
 
 const AdminDashboardPage: React.FC = () => {
   const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
+  const [loadingStats, setLoadingStats] = useState<boolean>(true);
+  const [loadingHealth, setLoadingHealth] = useState<boolean>(true);
+  const [statsError, setStatsError] = useState<string | null>(null);
+  const [healthError, setHealthError] = useState<string | null>(null);
 
-  // Helper to format date string
+  // Helper to format date string (retained from original, can be used if needed or removed)
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
       year: 'numeric', month: 'short', day: 'numeric',
       hour: '2-digit', minute: '2-digit'
     });
   };
-  
+
   useEffect(() => {
-    const loadDashboardData = async () => {
-      setIsLoading(true);
+    const getStats = async () => {
       try {
-        const data = await fetchDashboardStats();
-        setDashboardStats(data);
-        setError(null);
+        setLoadingStats(true);
+        const stats = await fetchDashboardStats();
+        setDashboardStats(stats);
+        setStatsError(null);
       } catch (err: any) {
-        setError(err.message || "Failed to load dashboard statistics.");
-        setDashboardStats(null);
+        setStatsError(err.message || 'Failed to fetch dashboard statistics');
+        console.error(err);
       } finally {
-        setIsLoading(false);
+        setLoadingStats(false);
       }
     };
 
-    loadDashboardData();
+    const getHealth = async () => {
+      try {
+        setLoadingHealth(true);
+        const health = await fetchSystemHealth();
+        setSystemHealth(health);
+        setHealthError(null);
+      } catch (err: any) {
+        setHealthError(err.message || 'Failed to fetch system health');
+        console.error(err);
+      } finally {
+        setLoadingHealth(false);
+      }
+    };
+
+    getStats();
+    getHealth();
   }, []);
 
-  if (isLoading) {
-    return <div className="p-4 text-center">Loading dashboard statistics...</div>;
-  }
+  // Chart data and options
+  const documentsPerSoftwareChartData = {
+    labels: dashboardStats?.documents_per_software?.map(item => item.software_name) || [],
+    datasets: [
+      {
+        label: 'Documents per Software',
+        data: dashboardStats?.documents_per_software?.map(item => item.document_count) || [],
+        backgroundColor: 'rgba(54, 162, 235, 0.6)', // Blue
+        borderColor: 'rgba(54, 162, 235, 1)',
+        borderWidth: 1,
+      },
+    ],
+  };
 
-  if (error) {
-    return <div className="p-4 text-red-600 bg-red-100 rounded-md">Error: {error}</div>;
+  const popularDownloadsChartData = {
+    labels: dashboardStats?.popular_downloads?.map(item => `${item.name} (${item.type})`) || [],
+    datasets: [
+      {
+        label: 'Popular Downloads',
+        data: dashboardStats?.popular_downloads?.map(item => item.download_count) || [],
+        backgroundColor: [ // Array of colors for Pie chart segments
+          'rgba(255, 99, 132, 0.6)',  // Red
+          'rgba(75, 192, 192, 0.6)',  // Green
+          'rgba(255, 205, 86, 0.6)',  // Yellow
+          'rgba(201, 203, 207, 0.6)', // Grey
+          'rgba(153, 102, 255, 0.6)', // Purple
+        ],
+        borderColor: [
+          'rgba(255, 99, 132, 1)',
+          'rgba(75, 192, 192, 1)',
+          'rgba(255, 205, 86, 1)',
+          'rgba(201, 203, 207, 1)',
+          'rgba(153, 102, 255, 1)',
+        ],
+        borderWidth: 1,
+      },
+    ],
+  };
+
+  const chartBaseOptions = {
+    responsive: true,
+    maintainAspectRatio: false, // Important for sizing within Paper
+    plugins: {
+      legend: {
+        position: 'top' as const,
+      },
+      tooltip: {
+        callbacks: {
+            label: function(context: any) {
+                let label = context.dataset.label || '';
+                if (label) {
+                    label += ': ';
+                }
+                if (context.parsed.y !== null) { // For Bar chart
+                    label += context.parsed.y;
+                } else if (context.parsed !== null) { // For Pie chart (parsed is the value itself)
+                    label += context.parsed;
+                }
+                return label;
+            }
+        }
+      }
+    },
+  };
+  
+  if (loadingStats || loadingHealth) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="calc(100vh - 64px)"> {/* Adjust height based on AppBar/Header */}
+        <CircularProgress />
+        <Typography sx={{ ml: 2 }}>Loading Dashboard Data...</Typography>
+      </Box>
+    );
   }
 
   return (
-    <div className="container mx-auto p-6 bg-gray-50 min-h-screen">
-      <h1 className="text-3xl font-semibold text-gray-800 mb-8">Admin Dashboard</h1>
+    <Box sx={{ flexGrow: 1, p: 3, backgroundColor: 'grey.100' }}> {/* Using MUI theme colors */}
+      <Typography variant="h4" gutterBottom component="div" sx={{ color: 'primary.main', mb: 4 }}>
+        Admin Dashboard
+      </Typography>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {/* Quick Stats Card */}
-        <div className="bg-white p-6 rounded-lg shadow-md">
-          <h2 className="text-xl font-semibold text-gray-700 mb-3">Quick Stats</h2>
-          <p className="text-gray-600">Total Users: {dashboardStats?.total_users ?? 'N/A'}</p>
-          <p className="text-gray-600">Software Titles: {dashboardStats?.total_software_titles ?? 'N/A'}</p>
-        </div>
+      {statsError && <Alert severity="error" sx={{ mb: 2 }}>Error loading dashboard statistics: {statsError}</Alert>}
+      {healthError && <Alert severity="error" sx={{ mb: 2 }}>Error loading system health: {healthError}</Alert>}
+      
+      <Grid container spacing={3}>
+        {/* System Health Card */}
+        <Grid item xs={12} md={4}>
+          <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%', minHeight: 160 }}>
+            <Typography component="h2" variant="h6" color="primary" gutterBottom>
+              System Health
+            </Typography>
+            {loadingHealth ? (
+              <CircularProgress size={24} />
+            ) : systemHealth ? (
+              <>
+                <Typography component="p" variant="body1" sx={{ mb: 1 }}>
+                  API Status: 
+                  <Typography component="span" sx={{ fontWeight: 'bold', color: systemHealth.api_status === 'OK' ? 'success.main' : 'error.main' }}>
+                    {` ${systemHealth.api_status}`}
+                  </Typography>
+                </Typography>
+                <Typography component="p" variant="body1">
+                  Database Connection: 
+                  <Typography component="span" sx={{ fontWeight: 'bold', color: systemHealth.db_connection === 'OK' ? 'success.main' : 'error.main' }}>
+                    {` ${systemHealth.db_connection}`}
+                  </Typography>
+                </Typography>
+              </>
+            ) : (
+              <Typography component="p" variant="body1">
+                System health data unavailable.
+              </Typography>
+            )}
+          </Paper>
+        </Grid>
 
-        {/* Recent Activity Card - Spans 3 columns on larger screens */}
-        <div className="bg-white p-6 rounded-lg shadow-md col-span-1 md:col-span-2 lg:col-span-3">
-          <h2 className="text-xl font-semibold text-gray-700 mb-3">Recent Activity</h2>
-          {dashboardStats && dashboardStats.recent_activities && dashboardStats.recent_activities.length > 0 ? (
-            <ul className="space-y-3 text-sm">
-              {dashboardStats.recent_activities.map((activity: RecentActivityItem, index: number) => (
-                <li key={index} className="p-3 bg-gray-50 rounded-md shadow-sm">
-                  <div className="font-medium text-gray-700">
-                    Action: <span className="font-normal text-gray-600">{activity.action_type}</span>
-                  </div>
-                  {activity.username && (
-                    <div className="text-gray-600">
-                      User: <span className="font-normal">{activity.username}</span>
-                    </div>
-                  )}
-                  <div className="text-gray-600">
-                    Time: <span className="font-normal">{formatDate(activity.timestamp)}</span>
-                  </div>
-                  {activity.details && (
-                     <div className="mt-1 text-xs text-gray-500 overflow-auto max-h-20">
-                       <pre className="whitespace-pre-wrap break-all">Details: {typeof activity.details === 'object' ? JSON.stringify(activity.details, null, 2) : activity.details}</pre>
-                     </div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-gray-500">No recent activity to display.</p>
-          )}
-        </div>
+        {/* Summary Cards */}
+        <Grid item xs={12} sm={6} md={4}>
+          <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%', minHeight: 160, justifyContent: 'center' }}>
+            <Typography component="h2" variant="h6" color="primary" gutterBottom>
+              Total Users
+            </Typography>
+            {loadingStats ? <CircularProgress size={24} /> : 
+              <Typography component="p" variant="h4">
+                {dashboardStats?.total_users ?? 'N/A'}
+              </Typography>
+            }
+          </Paper>
+        </Grid>
+        <Grid item xs={12} sm={6} md={4}>
+          <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%', minHeight: 160, justifyContent: 'center' }}>
+            <Typography component="h2" variant="h6" color="primary" gutterBottom>
+              Total Software Titles
+            </Typography>
+            {loadingStats ? <CircularProgress size={24} /> :
+              <Typography component="p" variant="h4">
+                {dashboardStats?.total_software_titles ?? 'N/A'}
+              </Typography>
+            }
+          </Paper>
+        </Grid>
+
+        {/* Recent Activities */}
+        <Grid item xs={12} md={7}> {/* Adjusted grid size */}
+          <Paper sx={{ p: 2, minHeight: 360 }}> {/* Adjusted minHeight */}
+            <Typography variant="h6" gutterBottom>Recent Activities</Typography>
+            {loadingStats ? <CircularProgress /> : dashboardStats?.recent_activities?.length ? (
+              <List dense sx={{maxHeight: 300, overflow: 'auto'}}>
+                {dashboardStats.recent_activities.map((activity, index) => (
+                  <ListItem key={index} divider>
+                    <ListItemText
+                      primary={`${activity.action_type} by ${activity.username || 'System'}`}
+                      secondary={`${formatDate(activity.timestamp)} - Details: ${typeof activity.details === 'object' ? JSON.stringify(activity.details) : activity.details}`}
+                    />
+                  </ListItem>
+                ))}
+              </List>
+            ) : (
+              <Typography>No recent activities.</Typography>
+            )}
+          </Paper>
+        </Grid>
+
+        {/* Recent Additions */}
+        <Grid item xs={12} md={5}> {/* Adjusted grid size */}
+          <Paper sx={{ p: 2, minHeight: 360 }}> {/* Adjusted minHeight */}
+            <Typography variant="h6" gutterBottom>Recent Additions (Top 5)</Typography>
+            {loadingStats ? <CircularProgress /> : dashboardStats?.recent_additions?.length ? (
+              <List dense sx={{maxHeight: 300, overflow: 'auto'}}>
+                {dashboardStats.recent_additions.map((item: RecentAdditionItem, index: number) => (
+                  <ListItem key={item.id || index} divider>
+                    <ListItemText
+                      primary={
+                        <Link component={RouterLink} to={`/${item.type.toLowerCase().replace(' ', '')}s`}> {/* Basic link */}
+                           {`${item.name} (${item.type})`}
+                        </Link>
+                      }
+                      secondary={`Added on: ${formatDate(item.created_at)}`}
+                    />
+                  </ListItem>
+                ))}
+              </List>
+            ) : (
+              <Typography>No recent additions.</Typography>
+            )}
+          </Paper>
+        </Grid>
         
-        {/* Recent Additions Card */}
-        <div className="bg-white p-6 rounded-lg shadow-md col-span-1 md:col-span-1">
-          <h2 className="text-xl font-semibold text-gray-700 mb-3">Recent Additions</h2>
-          {dashboardStats && dashboardStats.recent_additions && dashboardStats.recent_additions.length > 0 ? (
-            <ul className="space-y-3 text-sm">
-              {dashboardStats.recent_additions.map((item: RecentAdditionItem, index: number) => (
-                <li key={item.id || index} className="p-3 bg-gray-50 rounded-md shadow-sm"> {/* Use item.id if available for key */}
-                  <div className="font-medium text-gray-700">
-                    {item.name} <span className="text-xs text-indigo-500">({item.type})</span>
-                  </div>
-                  <div className="text-gray-500 text-xs">
-                    Added: {formatDate(item.created_at)}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-gray-500">No recent additions to display.</p>
-          )}
-        </div>
-        
-        {/* Top 5 Downloads Card */}
-        <div className="bg-white p-6 rounded-lg shadow-md col-span-1 md:col-span-1">
-          <h2 className="text-xl font-semibold text-gray-700 mb-3">Top 5 Downloads</h2>
-          {dashboardStats && dashboardStats.popular_downloads && dashboardStats.popular_downloads.length > 0 ? (
-            <ul className="space-y-3 text-sm">
-              {dashboardStats.popular_downloads.map((item: PopularDownloadItem, index: number) => (
-                <li key={index} className="p-3 bg-gray-50 rounded-md shadow-sm">
-                  <div className="font-medium text-gray-700">
-                    {item.name} <span className="text-xs text-green-500">({item.type})</span>
-                  </div>
-                  <div className="text-gray-500 text-xs">
-                    Downloads: {item.download_count}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-gray-500">No download data to display.</p>
-          )}
-        </div>
+        {/* Documents per Software Chart */}
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 2, height: 400 }}> 
+            <Typography variant="h6" gutterBottom>Documents per Software</Typography>
+            {loadingStats ? <CircularProgress /> : dashboardStats?.documents_per_software?.length ? (
+              <Box sx={{ height: 'calc(100% - 48px)'}}> {/* Subtracted approx title height */}
+                <Bar 
+                  data={documentsPerSoftwareChartData} 
+                  options={{...chartBaseOptions, plugins: {...chartBaseOptions.plugins, title: {...chartBaseOptions.plugins.title, display: true, text: 'Documents per Software'}}}} 
+                />
+              </Box>
+            ) : (
+              <Typography sx={{textAlign: 'center', mt: 4}}>No document data available for chart.</Typography>
+            )}
+          </Paper>
+        </Grid>
 
-        {/* Documents per Software Card */}
-        <div className="bg-white p-6 rounded-lg shadow-md col-span-1 md:col-span-1">
-          <h2 className="text-xl font-semibold text-gray-700 mb-3">Documents per Software</h2>
-          {dashboardStats && dashboardStats.documents_per_software && dashboardStats.documents_per_software.length > 0 ? (
-            <ul className="space-y-2 text-sm">
-              {dashboardStats.documents_per_software.map((item: DocumentsPerSoftwareItem, index: number) => (
-                <li key={index} className="flex justify-between p-2 bg-gray-50 rounded-md">
-                  <span className="font-medium text-gray-700">{item.software_name}</span>
-                  <span className="text-gray-600">{item.document_count}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-gray-500">No document count data available.</p>
-          )}
-        </div>
+        {/* Popular Downloads Chart */}
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 2, height: 400 }}> 
+            <Typography variant="h6" gutterBottom>Popular Downloads (Top 5)</Typography>
+            {loadingStats ? <CircularProgress /> : dashboardStats?.popular_downloads?.length ? (
+               <Box sx={{ height: 'calc(100% - 48px)'}}> {/* Subtracted approx title height */}
+                <Pie 
+                  data={popularDownloadsChartData} 
+                  options={{...chartBaseOptions, plugins: {...chartBaseOptions.plugins, title: {...chartBaseOptions.plugins.title, display: true, text: 'Popular Downloads'}}}} 
+                />
+              </Box>
+            ) : (
+              <Typography sx={{textAlign: 'center', mt: 4}}>No download data available for chart.</Typography>
+            )}
+          </Paper>
+        </Grid>
 
-        {/* Quick Links Card - Adjusted to fit new layout if necessary, or keep as is */}
-        <div className="bg-white p-6 rounded-lg shadow-md col-span-1 md:col-span-3"> {/* Example: making it full width if other cards take up rows */}
-          <h2 className="text-xl font-semibold text-gray-700 mb-3">Quick Links</h2>
-          <ul className="space-y-2">
-            <li><a href="/admin/versions" className="text-indigo-600 hover:text-indigo-800">Manage Versions</a></li>
-            <li><a href="/admin/audit-logs" className="text-indigo-600 hover:text-indigo-800">View Audit Logs</a></li>
-            <li><a href="/admin/users" className="text-indigo-600 hover:text-indigo-800">Manage Users (Super Admin)</a></li>
-            {/* Add more admin quick links here */}
-          </ul>
-        </div>
-      </div>
-    </div>
+        {/* Quick Links Card */}
+        <Grid item xs={12}>
+          <Paper sx={{ p: 2 }}>
+            <Typography variant="h6" gutterBottom>Quick Links</Typography>
+            <List dense>
+                <ListItemButton component={RouterLink} to="/admin/versions">
+                    <ListItemText primary="Manage Versions" />
+                </ListItemButton>
+                <ListItemButton component={RouterLink} to="/admin/audit-logs">
+                    <ListItemText primary="View Audit Logs" />
+                </ListItemButton>
+                <ListItemButton component={RouterLink} to="/admin/users">
+                    <ListItemText primary="Manage Users (Super Admin)" />
+                </ListItemButton>
+                {/* Add more links as needed */}
+            </List>
+          </Paper>
+        </Grid>
+      </Grid>
+    </Box>
   );
 };
 

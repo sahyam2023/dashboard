@@ -3899,6 +3899,29 @@ def get_audit_logs():
         app.logger.error(f"Failed to retrieve audit logs: {e}", exc_info=True)
         return jsonify(error="Failed to retrieve audit logs", details=str(e)), 500
 
+# --- Admin System Health Endpoint ---
+@app.route('/api/admin/system-health', methods=['GET'])
+@jwt_required()
+@admin_required
+def get_system_health():
+    db_status = "OK"
+    try:
+        # Attempt to get a database connection.
+        db = get_db()
+        # Perform a simple query to be absolutely sure the connection is usable.
+        db.execute("SELECT 1").fetchone()
+    except sqlite3.Error as e: # Catch SQLite specific errors
+        app.logger.error(f"System health DB check failed with sqlite3.Error: {e}")
+        db_status = f"Error: Could not connect to database. Details: {e}"
+    except Exception as e: # Catch any other unexpected errors during DB check
+        app.logger.error(f"System health DB check failed with unexpected error: {e}")
+        db_status = f"Error: Could not connect to database. Unexpected error: {e}"
+
+    return jsonify({
+        "api_status": "OK",
+        "db_connection": db_status
+    }), 200
+
 # --- Admin Dashboard Statistics Endpoint ---
 @app.route('/api/admin/dashboard-stats', methods=['GET'])
 @jwt_required()

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { FiChevronDown, FiChevronUp, FiFilter, FiLoader, FiAlertTriangle } from 'react-icons/fi'; // Using react-icons
-import { fetchAuditLogEntries, AuditLogResponse, AuditLogEntry } from '../../../services/api';
+import { fetchAuditLogEntries, AuditLogResponse, AuditLogEntry } from '../../services/api'; // Adjust the import path as necessary
 
 // --- TypeScript Interfaces ---
 // AuditLogEntry and AuditLogResponse are now imported from api.ts

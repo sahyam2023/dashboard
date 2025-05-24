@@ -12,15 +12,17 @@ import { MiscCategory, MiscFile } from '../types';
 import DataTable, { ColumnDef } from '../components/DataTable'; // Import DataTable and ColumnDef
 // import LoadingState from '../components/LoadingState'; // DataTable has its own
 import ErrorState from '../components/ErrorState';
+import { useFavorites } from '../context/FavoritesContext'; // Added useFavorites
 import AdminUploadToMiscForm from '../components/admin/AdminUploadToMiscForm';
 import AdminMiscCategoryForm from '../components/admin/AdminMiscCategoryForm';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
-import { Download, FileText, CalendarDays, PlusCircle, Edit3, Trash2 } from 'lucide-react'; // Keep existing icons
+import { Download, FileText, CalendarDays, PlusCircle, Edit3, Trash2, Star } from 'lucide-react'; // Added Star
 
 const API_BASE_URL = 'http://127.0.0.1:5000'; // Consider importing from a central config
 
 const MiscView: React.FC = () => {
   const { isAuthenticated, role } = useAuth();
+  const { addFavoriteItem, removeFavoriteItem, isFavorited, isLoadingFavorites } = useFavorites(); // Consumed favorites context
 
   // Categories State
   const [categories, setCategories] = useState<MiscCategory[]>([]);
@@ -33,6 +35,7 @@ const MiscView: React.FC = () => {
   const [errorFiles, setErrorFiles] = useState<string | null>(null);
   
   // Filter State
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState<boolean>(false);
   const [activeCategoryId, setActiveCategoryId] = useState<number | null>(null);
 
   // Pagination State
@@ -215,7 +218,41 @@ const MiscView: React.FC = () => {
   };
 
   const columns: ColumnDef<MiscFile>[] = [
-    { key: 'user_provided_title', header: 'Title', sortable: true },
+    // Favorite Column
+    {
+      key: 'favorite' as keyof MiscFile | 'favorite',
+      header: '', // No text header
+      render: (file: MiscFile) => {
+        const isFileFavorited = isFavorited(file.id, 'misc_file');
+        
+        const handleFavoriteToggle = async (e: React.MouseEvent) => {
+          e.stopPropagation();
+          try {
+            if (isFileFavorited) {
+              await removeFavoriteItem('misc_file', file.id);
+            } else {
+              await addFavoriteItem(file.id, 'misc_file');
+            }
+          } catch (error) {
+            console.error('Failed to toggle misc_file favorite:', error);
+            // Optionally show a toast error to the user here
+          }
+        };
+
+        return (
+          <button
+            onClick={handleFavoriteToggle}
+            disabled={isLoadingFavorites}
+            title={isFileFavorited ? 'Remove from favorites' : 'Add to favorites'}
+            className={`p-1 rounded-full hover:bg-gray-200 ${isFileFavorited ? 'text-yellow-500' : 'text-gray-400 hover:text-yellow-400'}`}
+          >
+            <Star size={18} fill={isFileFavorited ? 'currentColor' : 'none'} />
+          </button>
+        );
+      },
+    },
+    // Existing Columns
+    { key: 'user_provided_title', header: 'Title', sortable: true, render: (file) => file.user_provided_title || file.original_filename  },
     { key: 'original_filename', header: 'Original Filename', sortable: true },
     { key: 'category_name', header: 'Category', sortable: true }, // Backend sorts by mc.name
     { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: (file) => file.uploaded_by_username || 'N/A' },
@@ -361,6 +398,20 @@ const MiscView: React.FC = () => {
         {errorCategories && <p className="text-sm text-red-500 mt-1">{errorCategories}</p>}
       </div>
 
+      {/* Show Favorites Only Checkbox */}
+      <div className="my-4 flex items-center">
+        <input
+          type="checkbox"
+          id="showFavoritesOnlyCheckboxMisc" // Unique ID
+          checked={showFavoritesOnly}
+          onChange={(e) => setShowFavoritesOnly(e.target.checked)}
+          className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+        />
+        <label htmlFor="showFavoritesOnlyCheckboxMisc" className="ml-2 text-sm text-gray-700">
+          Show Favorites Only
+        </label>
+      </div>
+
       {/* DataTable for Misc Files */}
       {errorFiles && miscFiles.length === 0 && !isLoadingFiles ? (
         <ErrorState message={errorFiles} onRetry={loadMiscFiles} />
@@ -369,7 +420,7 @@ const MiscView: React.FC = () => {
           {errorFiles && <div className="p-3 my-2 bg-red-100 text-red-700 rounded text-sm">{errorFiles}</div>}
           <DataTable
             columns={columns}
-            data={miscFiles} // DataTable expects the raw data
+            data={miscFilesToDisplay} // Use the new filtered list
             isLoading={isLoadingFiles}
             currentPage={currentPage}
             totalPages={totalPages}
@@ -411,5 +462,17 @@ const MiscView: React.FC = () => {
     </div>
   );
 };
+
+// New useMemo for data to be passed to table:
+const useMiscFilesToDisplay = (miscFiles: MiscFile[], showFavoritesOnly: boolean, isFavorited: (itemId: number, itemType: string) => boolean) => {
+  return useMemo(() => {
+    if (showFavoritesOnly) {
+      // The item type for misc files is 'misc_file'
+      return miscFiles.filter(file => isFavorited(file.id, 'misc_file'));
+    }
+    return miscFiles;
+  }, [miscFiles, showFavoritesOnly, isFavorited]); // Add dependencies
+};
+
 
 export default MiscView;

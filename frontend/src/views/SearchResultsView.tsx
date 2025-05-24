@@ -3,10 +3,6 @@ import { useSearchParams, useNavigate, Link } from 'react-router-dom'; // Remove
 import { searchData } from '../services/api';
 import LoadingState from '../components/LoadingState';
 import ErrorState from '../components/ErrorState';
-import { API_BASE_URL } from '../config'; // For download links
-
-// Define a more specific type for search results if possible
-// For now, using 'any' for flexibility as per existing structure
 interface SearchResultItem {
   id: number | string;
   name?: string;
@@ -103,13 +99,13 @@ const SearchResultsView: React.FC = () => {
           isExternal = true;
         } else if (result.stored_filename) {
           // Assuming official_uploads for links, adjust if path varies
-          downloadUrl = `${API_BASE_URL}/official_uploads/links/${result.stored_filename}`;
+          downloadUrl = `/official_uploads/links/${result.stored_filename}`;
           isDownload = true;
         }
         break;
       case 'misc_file':
         if (result.stored_filename) {
-          downloadUrl = `${API_BASE_URL}/misc_uploads/${result.stored_filename}`;
+          downloadUrl = `/misc_uploads/${result.stored_filename}`;
           isDownload = true;
         }
         break;

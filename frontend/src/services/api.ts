@@ -237,6 +237,85 @@ export async function fetchSoftware(): Promise<Software[]> {
   }
 }
 
+// --- User Favorites API Functions ---
+
+export interface FavoriteIdentifier {
+  item_id: number;
+  item_type: string;
+}
+
+// FullFavoriteItem type definition
+// Ensure DocumentType, Patch, Link, MiscFile are imported and have id, and name/title-like properties
+export type FullFavoriteItem = (DocumentType | Patch | Link | MiscFile) & { 
+  item_type: string; 
+  name: string; // Backend normalizes this field
+  // id is expected to be part of DocumentType, Patch, Link, MiscFile
+};
+
+export async function addFavorite(itemId: number, itemType: string): Promise<{ msg: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/favorites`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeader(),
+      },
+      body: JSON.stringify({ item_id: itemId, item_type: itemType }),
+    });
+    return handleApiError(response, `Failed to add ${itemType} to favorites`);
+  } catch (error) {
+    console.error(`Error adding ${itemType} to favorites:`, error);
+    throw error;
+  }
+}
+
+export async function removeFavorite(itemType: string, itemId: number): Promise<{ msg: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/favorites/${itemType}/${itemId}`, {
+      method: 'DELETE',
+      headers: {
+        ...getAuthHeader(),
+      },
+    });
+    return handleApiError(response, `Failed to remove ${itemType} from favorites`);
+  } catch (error) {
+    console.error(`Error removing ${itemType} from favorites:`, error);
+    throw error;
+  }
+}
+
+export async function fetchUserFavoriteIds(): Promise<FavoriteIdentifier[]> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/user/favorites/ids`, {
+      method: 'GET',
+      headers: {
+        ...getAuthHeader(),
+      },
+    });
+    return handleApiError(response, 'Failed to fetch user favorite IDs');
+  } catch (error) {
+    console.error('Error fetching user favorite IDs:', error);
+    throw error;
+  }
+}
+
+export async function fetchFullUserFavorites(): Promise<FullFavoriteItem[]> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/user/favorites`, { // Note: No '/ids'
+      method: 'GET',
+      headers: {
+        ...getAuthHeader(),
+      },
+    });
+    // The backend is expected to return an array of items, each with an 'item_type' field
+    // and other details specific to that type, plus a normalized 'name'.
+    return handleApiError(response, 'Failed to fetch full user favorites');
+  } catch (error) {
+    console.error('Error fetching full user favorites:', error);
+    throw error;
+  }
+}
+// --- End User Favorites API Functions ---
 // --- Audit Log Fetch Function ---
 export async function fetchAuditLogEntries(params: URLSearchParams): Promise<AuditLogResponse> {
   try {

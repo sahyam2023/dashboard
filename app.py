@@ -699,6 +699,205 @@ def update_email():
         app.logger.error(f"Error updating email for user {current_user_id}: {e}")
         return jsonify(msg="Failed to update email due to a server error."), 500
 
+# --- User Favorites Endpoints ---
+@app.route('/api/favorites', methods=['POST'])
+@jwt_required()
+def add_favorite():
+    current_user_id_str = get_jwt_identity()
+    try:
+        user_id = int(current_user_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid user identity in token."), 400
+        
+    data = request.get_json()
+
+    if not data or 'item_id' not in data or 'item_type' not in data:
+        return jsonify(msg="Missing item_id or item_type"), 400
+
+    item_id = data.get('item_id')
+    item_type = data.get('item_type')
+
+    allowed_item_types = ['document', 'patch', 'link', 'misc_file', 'software', 'version'] 
+    if not item_type or item_type not in allowed_item_types:
+        return jsonify(msg=f"Invalid item_type. Allowed types: {', '.join(allowed_item_types)}"), 400
+    
+    if not isinstance(item_id, int) or item_id <= 0: # Assuming IDs are positive integers
+         return jsonify(msg="item_id must be a positive integer"), 400
+
+    db = get_db()
+    try:
+        db.execute(
+            "INSERT INTO user_favorites (user_id, item_id, item_type) VALUES (?, ?, ?)",
+            (user_id, item_id, item_type)
+        )
+        log_audit_action(
+            action_type='ADD_FAVORITE',
+            target_table='user_favorites', 
+            target_id=None, # The favorite itself is the new item, not directly pointing to the favorited item's table
+            user_id=user_id, # Explicitly log who performed the action
+            details={'item_type': item_type, 'item_id': item_id, 'favorited_by_user_id': user_id}
+        )
+        db.commit()
+        return jsonify(msg=f"{item_type.capitalize()} with ID {item_id} added to favorites."), 201
+    except sqlite3.IntegrityError:
+        db.rollback() 
+        return jsonify(msg=f"{item_type.capitalize()} with ID {item_id} is already a favorite."), 200
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"Error adding favorite for user {user_id}, item {item_id}/{item_type}: {e}")
+        return jsonify(msg="Server error adding favorite."), 500
+
+@app.route('/api/favorites/<string:item_type>/<int:item_id>', methods=['DELETE'])
+@jwt_required()
+def remove_favorite(item_type: str, item_id: int):
+    current_user_id_str = get_jwt_identity()
+    try:
+        user_id = int(current_user_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid user identity in token."), 400
+
+    # Optional: Validate item_type if necessary, though not strictly required for deletion
+    # allowed_item_types = ['document', 'patch', 'link', 'misc_file', 'software', 'version']
+    # if item_type not in allowed_item_types:
+    #     return jsonify(msg=f"Invalid item_type specified in URL."), 400
+
+    db = get_db()
+    try:
+        cursor = db.execute(
+            "DELETE FROM user_favorites WHERE user_id = ? AND item_id = ? AND item_type = ?",
+            (user_id, item_id, item_type)
+        )
+        if cursor.rowcount == 0:
+            return jsonify(msg=f"Favorite {item_type.capitalize()} with ID {item_id} not found for this user."), 404
+        
+        log_audit_action(
+            action_type='REMOVE_FAVORITE',
+            target_table='user_favorites',
+            target_id=None, # As above, action is on the favorite entry itself
+            user_id=user_id,
+            details={'item_type': item_type, 'item_id': item_id, 'removed_by_user_id': user_id}
+        )
+        db.commit()
+        return jsonify(msg=f"{item_type.capitalize()} with ID {item_id} removed from favorites."), 200
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"Error removing favorite for user {user_id}, item {item_id}/{item_type}: {e}")
+        return jsonify(msg="Server error removing favorite."), 500
+
+@app.route('/api/user/favorites/ids', methods=['GET'])
+@jwt_required()
+def get_user_favorite_ids():
+    current_user_id_str = get_jwt_identity()
+    try:
+        user_id = int(current_user_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid user identity in token."), 400
+
+    db = get_db()
+    try:
+        favorites_cursor = db.execute(
+            "SELECT item_id, item_type FROM user_favorites WHERE user_id = ?",
+            (user_id,)
+        )
+        favorites_list = [dict(row) for row in favorites_cursor.fetchall()]
+        return jsonify(favorites_list), 200
+    except Exception as e:
+        app.logger.error(f"Error fetching favorite IDs for user {user_id}: {e}")
+        return jsonify(msg="Server error fetching favorites."), 500
+
+@app.route('/api/user/favorites', methods=['GET'])
+@jwt_required()
+def get_user_favorites_details():
+    current_user_id_str = get_jwt_identity()
+    try:
+        user_id = int(current_user_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid user identity in token."), 400
+
+    db = get_db()
+    detailed_favorites = []
+
+    try:
+        favorite_ids_rows = db.execute(
+            "SELECT item_id, item_type FROM user_favorites WHERE user_id = ?", (user_id,)
+        ).fetchall()
+
+        for fav_row in favorite_ids_rows:
+            item_id = fav_row['item_id']
+            item_type = fav_row['item_type']
+            item_details_row = None
+
+            if item_type == 'document':
+                doc_cursor = db.execute(
+                    "SELECT d.id, d.doc_name, d.description, d.doc_type, d.is_external_link, d.download_link, "
+                    "s.name as software_name, d.created_at, d.updated_at, u.username as uploaded_by_username "
+                    "FROM documents d "
+                    "JOIN software s ON d.software_id = s.id "
+                    "LEFT JOIN users u ON d.created_by_user_id = u.id "
+                    "WHERE d.id = ?", (item_id,)
+                )
+                item_details_row = doc_cursor.fetchone()
+            elif item_type == 'patch':
+                patch_cursor = db.execute(
+                    "SELECT p.id, p.patch_name, p.description, p.release_date, p.is_external_link, p.download_link, "
+                    "v.version_number, s.name as software_name, u.username as uploaded_by_username "
+                    "FROM patches p "
+                    "JOIN versions v ON p.version_id = v.id "
+                    "JOIN software s ON v.software_id = s.id "
+                    "LEFT JOIN users u ON p.created_by_user_id = u.id "
+                    "WHERE p.id = ?", (item_id,)
+                )
+                item_details_row = patch_cursor.fetchone()
+            elif item_type == 'link':
+                link_cursor = db.execute(
+                    "SELECT l.id, l.title, l.description, l.url, l.is_external_link, "
+                    "s.name as software_name, v.version_number as version_name, u.username as uploaded_by_username "
+                    "FROM links l "
+                    "JOIN software s ON l.software_id = s.id "
+                    "LEFT JOIN versions v ON l.version_id = v.id "
+                    "LEFT JOIN users u ON l.created_by_user_id = u.id "
+                    "WHERE l.id = ?", (item_id,)
+                )
+                item_details_row = link_cursor.fetchone()
+            elif item_type == 'misc_file':
+                misc_cursor = db.execute(
+                    "SELECT mf.id, mf.user_provided_title, mf.original_filename, mf.user_provided_description as description, "
+                    "mf.file_path, mc.name as category_name, u.username as uploaded_by_username "
+                    "FROM misc_files mf "
+                    "JOIN misc_categories mc ON mf.misc_category_id = mc.id "
+                    "LEFT JOIN users u ON mf.created_by_user_id = u.id "
+                    "WHERE mf.id = ?", (item_id,)
+                )
+                item_details_row = misc_cursor.fetchone()
+
+            if item_details_row:
+                details_dict = dict(item_details_row)
+                details_dict['item_type'] = item_type 
+                # Normalize 'name' or 'title' field for easier frontend display
+                if 'doc_name' in details_dict:
+                    details_dict['name'] = details_dict.pop('doc_name')
+                elif 'patch_name' in details_dict:
+                    details_dict['name'] = details_dict.pop('patch_name')
+                elif 'title' in details_dict: # For links
+                    details_dict['name'] = details_dict.pop('title')
+                elif 'user_provided_title' in details_dict and details_dict['user_provided_title']: # For misc_files
+                    details_dict['name'] = details_dict.pop('user_provided_title')
+                elif 'original_filename' in details_dict: # Fallback for misc_files
+                     details_dict['name'] = details_dict['original_filename']
+
+
+                detailed_favorites.append(details_dict)
+            else:
+                # Item was favorited but no longer exists in its original table.
+                # Log this or handle as needed. For now, we just skip it.
+                app.logger.warning(f"User {user_id} has a favorite {item_type} with ID {item_id}, but it was not found in its table.")
+
+        return jsonify(detailed_favorites), 200
+
+    except Exception as e:
+        app.logger.error(f"Error fetching detailed favorites for user {user_id}: {e}")
+        return jsonify(msg="Server error fetching detailed favorites."), 500
+
 # --- Public GET Endpoints (Read-only data for dashboard) ---
 @app.route('/api/software', methods=['GET'])
 def get_all_software_api():

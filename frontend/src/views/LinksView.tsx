@@ -19,9 +19,10 @@ import FilterTabs from '../components/FilterTabs';
 // import LoadingState from '../components/LoadingState'; // DataTable has its own
 import ErrorState from '../components/ErrorState';
 import { useAuth } from '../context/AuthContext';
+import { useFavorites } from '../context/FavoritesContext'; // Added useFavorites
 import AdminLinkEntryForm from '../components/admin/AdminLinkEntryForm';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
-import { PlusCircle, Edit3, Trash2, ExternalLink } from 'lucide-react';
+import { PlusCircle, Edit3, Trash2, ExternalLink, Star } from 'lucide-react'; // Added Star
 
 interface OutletContextType {
   searchTerm: string;
@@ -30,6 +31,7 @@ interface OutletContextType {
 const LinksView: React.FC = () => {
   const { searchTerm } = useOutletContext<OutletContextType>();
   const { isAuthenticated, role } = useAuth();
+  const { addFavoriteItem, removeFavoriteItem, isFavorited, isLoadingFavorites } = useFavorites(); // Consumed favorites context
 
   // Data and Table State
   const [links, setLinks] = useState<LinkType[]>([]);
@@ -58,6 +60,9 @@ const LinksView: React.FC = () => {
   // Loading and Error State
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Favorite Filter State
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState<boolean>(false);
 
   // UI State for Forms and Modals
   const [showAddOrEditForm, setShowAddOrEditForm] = useState(false);
@@ -246,7 +251,51 @@ const LinksView: React.FC = () => {
     );
   }, [links, searchTerm]);
 
+  const linksToDisplay = useMemo(() => {
+    let processedLinks = filteredLinksBySearch; // Start with text-searched/base links
+
+    if (showFavoritesOnly) {
+      processedLinks = processedLinks.filter(link => isFavorited(link.id, 'link'));
+    }
+    
+    return processedLinks;
+  }, [filteredLinksBySearch, showFavoritesOnly, isFavorited]); // Add dependencies
+
   const columns: ColumnDef<LinkType>[] = [
+    // Favorite Column
+    {
+      key: 'favorite' as keyof LinkType | 'favorite',
+      header: '', // No text header
+      render: (link: LinkType) => {
+        const isLinkFavorited = isFavorited(link.id, 'link');
+        
+        const handleFavoriteToggle = async (e: React.MouseEvent) => {
+          e.stopPropagation();
+          try {
+            if (isLinkFavorited) {
+              await removeFavoriteItem('link', link.id);
+            } else {
+              await addFavoriteItem(link.id, 'link');
+            }
+          } catch (error) {
+            console.error('Failed to toggle link favorite:', error);
+            // Optionally show a toast error to the user here
+          }
+        };
+
+        return (
+          <button
+            onClick={handleFavoriteToggle}
+            disabled={isLoadingFavorites}
+            title={isLinkFavorited ? 'Remove from favorites' : 'Add to favorites'}
+            className={`p-1 rounded-full hover:bg-gray-200 ${isLinkFavorited ? 'text-yellow-500' : 'text-gray-400 hover:text-yellow-400'}`}
+          >
+            <Star size={18} fill={isLinkFavorited ? 'currentColor' : 'none'} />
+          </button>
+        );
+      },
+    },
+    // Existing Columns
     { key: 'title', header: 'Title', sortable: true },
     { key: 'software_name', header: 'Software', sortable: true },
     { key: 'version_name', header: 'Version', sortable: true },
@@ -400,6 +449,19 @@ const LinksView: React.FC = () => {
             Clear Filters
           </button>
         </div>
+        {/* Show Favorites Only Checkbox */}
+        <div className="flex items-center pt-5"> {/* Adjust styling/alignment as needed */}
+          <input
+            type="checkbox"
+            id="showFavoritesOnlyCheckboxLinks" // Unique ID
+            checked={showFavoritesOnly}
+            onChange={(e) => setShowFavoritesOnly(e.target.checked)}
+            className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+          />
+          <label htmlFor="showFavoritesOnlyCheckboxLinks" className="ml-2 text-sm text-gray-700">
+            Show Favorites Only
+          </label>
+        </div>
       </div>
 
 
@@ -410,7 +472,7 @@ const LinksView: React.FC = () => {
           {error && <div className="p-3 my-2 bg-red-100 text-red-700 rounded text-sm">{error}</div>}
           <DataTable
             columns={columns}
-            data={filteredLinksBySearch} // Use client-side search results
+            data={linksToDisplay} // Use the new filtered list
             isLoading={isLoading}
             currentPage={currentPage}
             totalPages={totalPages}

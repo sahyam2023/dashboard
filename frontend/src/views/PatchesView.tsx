@@ -1,9 +1,10 @@
 // src/views/PatchesView.tsx
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { ExternalLink, PlusCircle, Edit3, Trash2 } from 'lucide-react';
+import { ExternalLink, PlusCircle, Edit3, Trash2, Star } from 'lucide-react'; // Added Star
 import { fetchPatches, fetchSoftware, deleteAdminPatch, PaginatedPatchesResponse } from '../services/api'; // Import PaginatedPatchesResponse
 import { Patch as PatchType, Software } from '../types';
+import { useFavorites } from '../context/FavoritesContext'; // Added useFavorites
 import DataTable, { ColumnDef } from '../components/DataTable'; // Import DataTable and ColumnDef
 import FilterTabs from '../components/FilterTabs';
 import LoadingState from '../components/LoadingState'; // Can be replaced by DataTable's isLoading
@@ -19,6 +20,7 @@ interface OutletContextType {
 const PatchesView: React.FC = () => {
   const { searchTerm } = useOutletContext<OutletContextType>();
   const { isAuthenticated, role } = useAuth();
+  const { addFavoriteItem, removeFavoriteItem, isFavorited, isLoadingFavorites } = useFavorites(); // Consumed favorites context
 
   // Data and Table State
   const [patches, setPatches] = useState<PatchType[]>([]);
@@ -43,6 +45,9 @@ const PatchesView: React.FC = () => {
   // Loading and Error State
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Favorite Filter State
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState<boolean>(false);
 
   // UI State for Forms and Modals
   const [showAddOrEditForm, setShowAddOrEditForm] = useState(false);
@@ -196,6 +201,18 @@ const PatchesView: React.FC = () => {
     );
   }, [patches, searchTerm]);
 
+  const patchesToDisplay = useMemo(() => {
+    let processedPatches = filteredPatchesBySearch; // Start with text-searched patches
+
+    // Then, apply "Show Favorites Only" filter if active
+    if (showFavoritesOnly) {
+      // The item type for patches is 'patch'
+      processedPatches = processedPatches.filter(patch => isFavorited(patch.id, 'patch'));
+    }
+    
+    return processedPatches;
+  }, [filteredPatchesBySearch, showFavoritesOnly, isFavorited]); // Add dependencies
+
   const formatDate = (dateString: string | null | undefined): string => {
     if (!dateString) return 'N/A';
     try {
@@ -204,6 +221,40 @@ const PatchesView: React.FC = () => {
   };
 
   const columns: ColumnDef<PatchType>[] = [
+    // Favorite Column
+    {
+      key: 'favorite' as keyof PatchType | 'favorite',
+      header: '', // No text header
+      render: (patch: PatchType) => {
+        const isPatchFavorited = isFavorited(patch.id, 'patch');
+        
+        const handleFavoriteToggle = async (e: React.MouseEvent) => {
+          e.stopPropagation();
+          try {
+            if (isPatchFavorited) {
+              await removeFavoriteItem('patch', patch.id);
+            } else {
+              await addFavoriteItem(patch.id, 'patch');
+            }
+          } catch (error) {
+            console.error('Failed to toggle patch favorite:', error);
+            // Optionally show a toast error to the user here
+          }
+        };
+
+        return (
+          <button
+            onClick={handleFavoriteToggle}
+            disabled={isLoadingFavorites}
+            title={isPatchFavorited ? 'Remove from favorites' : 'Add to favorites'}
+            className={`p-1 rounded-full hover:bg-gray-200 ${isPatchFavorited ? 'text-yellow-500' : 'text-gray-400 hover:text-yellow-400'}`}
+          >
+            <Star size={18} fill={isPatchFavorited ? 'currentColor' : 'none'} />
+          </button>
+        );
+      },
+    },
+    // Existing Columns
     { key: 'patch_name', header: 'Patch Name', sortable: true },
     { key: 'software_name', header: 'Software', sortable: true },
     { key: 'version_number', header: 'Version', sortable: true },
@@ -286,7 +337,7 @@ const PatchesView: React.FC = () => {
       )}
 
       {/* Advanced Filter UI */}
-      <div className="my-4 p-4 border rounded-md bg-gray-50 space-y-4 md:space-y-0 md:flex md:flex-wrap md:items-end md:gap-4">
+      <div className="my-4 p-4 border rounded-md bg-gray-50 space-y-4 md:space-y-0 md:flex md:flex-wrap md:items-start md:gap-4"> {/* Changed items-end to items-start for better alignment with checkbox */}
         {/* Patched By Developer Filter */}
         <div className="flex flex-col">
           <label htmlFor="patchedByDeveloperFilterInput" className="text-sm font-medium text-gray-700 mb-1">Developer</label>
@@ -325,6 +376,19 @@ const PatchesView: React.FC = () => {
             Clear Filters
           </button>
         </div>
+        {/* Show Favorites Only Checkbox */}
+        <div className="flex items-center pt-5"> {/* Adjust styling as needed, pt-5 if it's in the same row as buttons */}
+          <input
+            type="checkbox"
+            id="showFavoritesOnlyCheckboxPatches" // Unique ID
+            checked={showFavoritesOnly}
+            onChange={(e) => setShowFavoritesOnly(e.target.checked)}
+            className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+          />
+          <label htmlFor="showFavoritesOnlyCheckboxPatches" className="ml-2 text-sm text-gray-700">
+            Show Favorites Only
+          </label>
+        </div>
       </div>
 
       {error && patches.length === 0 && !isLoading ? (
@@ -334,7 +398,7 @@ const PatchesView: React.FC = () => {
         {error && <div className="p-3 my-2 bg-red-100 text-red-700 rounded text-sm">{error}</div>}
         <DataTable
           columns={columns}
-          data={filteredPatchesBySearch}
+          data={patchesToDisplay} // Use the new filtered list
           isLoading={isLoading}
           currentPage={currentPage}
           totalPages={totalPages}

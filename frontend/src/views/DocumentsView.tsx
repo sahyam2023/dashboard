@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { ExternalLink, PlusCircle, Edit3, Trash2 } from 'lucide-react';
+import { ExternalLink, PlusCircle, Edit3, Trash2, Star } from 'lucide-react'; // Added Star
 import { fetchDocuments, fetchSoftware, deleteAdminDocument, PaginatedDocumentsResponse } from '../services/api'; // Import PaginatedDocumentsResponse
 import { Document as DocumentType, Software } from '../types'; // Ensure DocumentType matches the API response structure
+import { useFavorites } from '../context/FavoritesContext'; // Import useFavorites from FavoritesContext
 import DataTable, { ColumnDef } from '../components/DataTable'; // Import DataTable and ColumnDef
 import FilterTabs from '../components/FilterTabs';
 import LoadingState from '../components/LoadingState'; // Can be replaced by DataTable's isLoading
@@ -18,6 +19,7 @@ interface OutletContextType {
 const DocumentsView: React.FC = () => {
   const { searchTerm } = useOutletContext<OutletContextType>();
   const { isAuthenticated, role } = useAuth();
+  const { addFavoriteItem, removeFavoriteItem, isFavorited, isLoadingFavorites } = useFavorites(); // Consumed favorites context
 
   // Data and Table State
   const [documents, setDocuments] = useState<DocumentType[]>([]);
@@ -44,6 +46,9 @@ const DocumentsView: React.FC = () => {
   // Loading and Error State
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Favorite Filter State
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState<boolean>(false);
 
   // UI State for Forms and Modals
   const [showAddDocumentForm, setShowAddDocumentForm] = useState(false);
@@ -191,18 +196,75 @@ const DocumentsView: React.FC = () => {
     }
   };
 
-  const filteredDocumentsBySearch = useMemo(() => {
-    // Client-side search on the currently fetched page of documents
-    if (!searchTerm) return documents;
-    const lowerSearchTerm = searchTerm.toLowerCase();
-    return documents.filter(doc =>
-      doc.doc_name.toLowerCase().includes(lowerSearchTerm) ||
-      (doc.description || '').toLowerCase().includes(lowerSearchTerm) ||
-      (doc.software_name || '').toLowerCase().includes(lowerSearchTerm)
-    );
-  }, [documents, searchTerm]);
+  // const filteredDocumentsBySearch = useMemo(() => {
+  //   // Client-side search on the currently fetched page of documents
+  //   if (!searchTerm) return documents;
+  //   const lowerSearchTerm = searchTerm.toLowerCase();
+  //   return documents.filter(doc =>
+  //     doc.doc_name.toLowerCase().includes(lowerSearchTerm) ||
+  //     (doc.description || '').toLowerCase().includes(lowerSearchTerm) ||
+  //     (doc.software_name || '').toLowerCase().includes(lowerSearchTerm)
+  //   );
+  // }, [documents, searchTerm]);
+
+  const documentsToDisplay = useMemo(() => {
+    let processedDocs = documents; // Start with all documents for the current page/filters
+
+    // Apply client-side text search first
+    if (searchTerm) {
+      const lowerSearchTerm = searchTerm.toLowerCase();
+      processedDocs = processedDocs.filter(doc =>
+        doc.doc_name.toLowerCase().includes(lowerSearchTerm) ||
+        (doc.description || '').toLowerCase().includes(lowerSearchTerm) ||
+        (doc.software_name || '').toLowerCase().includes(lowerSearchTerm)
+      );
+    }
+
+    // Then, apply "Show Favorites Only" filter if active
+    if (showFavoritesOnly) {
+      // Ensure `isFavorited` is available from `useFavorites()`
+      // The item type for documents is 'document'
+      processedDocs = processedDocs.filter(doc => isFavorited(doc.id, 'document'));
+    }
+    
+    return processedDocs;
+  }, [documents, searchTerm, showFavoritesOnly, isFavorited]); // Add showFavoritesOnly and isFavorited to dependencies
 
   const columns: ColumnDef<DocumentType>[] = [
+    // Favorite Column
+    {
+      key: 'favorite' as keyof DocumentType | 'favorite',
+      header: '', // No text header
+      render: (document: DocumentType) => {
+        const isDocFavorited = isFavorited(document.id, 'document');
+        
+        const handleFavoriteToggle = async (e: React.MouseEvent) => {
+          e.stopPropagation();
+          try {
+            if (isDocFavorited) {
+              await removeFavoriteItem('document', document.id);
+            } else {
+              await addFavoriteItem(document.id, 'document');
+            }
+          } catch (error) {
+            console.error('Failed to toggle favorite:', error);
+            // Optionally show a toast error to the user here
+          }
+        };
+
+        return (
+          <button
+            onClick={handleFavoriteToggle}
+            disabled={isLoadingFavorites}
+            title={isDocFavorited ? 'Remove from favorites' : 'Add to favorites'}
+            className={`p-1 rounded-full hover:bg-gray-200 ${isDocFavorited ? 'text-yellow-500' : 'text-gray-400 hover:text-yellow-400'}`}
+          >
+            <Star size={18} fill={isDocFavorited ? 'currentColor' : 'none'} />
+          </button>
+        );
+      },
+    },
+    // Existing Columns
     { key: 'doc_name', header: 'Name', sortable: true },
     { key: 'doc_type', header: 'Type', sortable: true },
     { key: 'software_name', header: 'Software', sortable: true },
@@ -342,6 +404,19 @@ const DocumentsView: React.FC = () => {
         </div>
       </div>
 
+      {/* Show Favorites Only Checkbox */}
+      <div className="flex items-center mt-4 mb-2">
+        <input
+          type="checkbox"
+          id="showFavoritesOnlyCheckbox"
+          checked={showFavoritesOnly}
+          onChange={(e) => setShowFavoritesOnly(e.target.checked)}
+          className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+        />
+        <label htmlFor="showFavoritesOnlyCheckbox" className="ml-2 text-sm text-gray-700">
+          Show Favorites Only
+        </label>
+      </div>
 
       {error && documents.length === 0 && !isLoading ? (
         <ErrorState message={error} onRetry={loadDocuments} />
@@ -351,7 +426,7 @@ const DocumentsView: React.FC = () => {
           {error && documents.length > 0 && <div className="p-3 my-2 bg-red-100 text-red-700 rounded text-sm">{error}</div>}
           <DataTable
             columns={columns}
-            data={filteredDocumentsBySearch} // Pass client-side searched data
+            data={documentsToDisplay} // Use the new filtered list
             isLoading={isLoading}
             currentPage={currentPage}
             totalPages={totalPages}

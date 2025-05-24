@@ -25,6 +25,21 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE INDEX IF NOT EXISTS idx_users_username ON users (username);
 CREATE INDEX IF NOT EXISTS idx_users_role ON users (role);
 
+-- Table for User Favorites
+CREATE TABLE IF NOT EXISTS user_favorites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    item_id INTEGER NOT NULL,           -- ID of the favorited item (e.g., document_id, patch_id)
+    item_type TEXT NOT NULL,            -- Type of the item (e.g., 'document', 'patch', 'link', 'misc_file')
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    UNIQUE (user_id, item_id, item_type) -- Ensure a user cannot favorite the same item multiple times
+);
+
+-- Indexes for user_favorites
+CREATE INDEX IF NOT EXISTS idx_user_favorites_user_id ON user_favorites (user_id);
+CREATE INDEX IF NOT EXISTS idx_user_favorites_user_item_type ON user_favorites (user_id, item_id, item_type);
+
 -- Table for Software Products
 CREATE TABLE IF NOT EXISTS software (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

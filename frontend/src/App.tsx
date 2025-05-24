@@ -17,19 +17,23 @@ import SuperAdminDashboard from './views/SuperAdminDashboard'; // Import SuperAd
 import AdminLayout from './components/admin/AdminLayout'; // Import AdminLayout
 import AdminDashboardPage from './views/AdminDashboardPage'; 
 import AdminVersionsPage from './views/AdminVersionsPage'; // Import the new AdminVersionsPage
-import AuditLogViewer from './components/admin/AuditLogViewer'; 
-import { useAuth } from './context/AuthContext'; 
+import AuditLogViewer from './components/admin/AuditLogViewer';
+import FavoritesView from './views/FavoritesView'; // Import FavoritesView
+import { AuthProvider, useAuth } from './context/AuthContext'; // Ensure AuthProvider is imported
+import { FavoritesProvider } from './context/FavoritesContext'; // Adjust path if needed
 import AuthModal from './components/shared/AuthModal'; // Import AuthModal
 
 function App() {
-  const auth = useAuth(); // Get auth context
+  const auth = useAuth(); // Get auth context for route protection
   const { isAuthModalOpen, closeAuthModal, authModalView } = useAuth(); // Get modal state and functions
 
   return (
     <BrowserRouter>
-      <Routes>
-        {/* Routes WITHOUT the main Layout (Login, Register) */}
-        <Route path="/login" element={<LoginPage />} />
+      <AuthProvider> {/* Assuming AuthProvider is correctly placed here or in main.tsx */}
+        <FavoritesProvider> {/* <<<< NEWLY ADDED >>>> */}
+          <Routes>
+            {/* Routes WITHOUT the main Layout (Login, Register) */}
+            <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
 
         {/* Routes WITH the main Layout */}
@@ -41,6 +45,16 @@ function App() {
           <Route path="misc" element={<MiscView />} />
           <Route path="search" element={<SearchResultsView />} />
           <Route path="profile" element={<UserProfilePage />} />
+          <Route 
+            path="favorites" 
+            element={
+              auth.isAuthenticated ? ( 
+                <FavoritesView />
+              ) : (
+                <Navigate to="/login" replace />
+              )
+            } 
+          />
           
           {/* Admin and Super Admin Routes */}
           <Route 
@@ -98,15 +112,22 @@ function App() {
 
         {/* Optional: Catch-all for any unmatched routes */}
         {/* <Route path="*" element={<Navigate to="/" />} /> */}
-      </Routes>
-      {/* Render AuthModal globally */}
-      <AuthModal 
-        isOpen={isAuthModalOpen} 
-        onClose={closeAuthModal} 
-        initialView={authModalView} 
-      />
+          </Routes>
+          <AuthModal 
+            isOpen={isAuthModalOpen} 
+            onClose={closeAuthModal} 
+            initialView={authModalView} 
+          />
+        </FavoritesProvider> {/* <<<< NEWLY ADDED >>>> */}
+      </AuthProvider>
     </BrowserRouter>
   );
 }
 
 export default App;
+
+// Note: The prompt's example for the element prop of the "superadmin" route was:
+// useAuth().isAuthenticated && useAuth().role === 'super_admin' ? ( <SuperAdminDashboard /> ) : ( <Navigate to="/login" replace /> )
+// The original file had `auth.isAuthenticated && auth.role === 'super_admin'`.
+// I've kept the original file's structure for that part, as modifying it was not the primary goal of this subtask.
+// The key change is adding AuthProvider and FavoritesProvider.

@@ -4,7 +4,7 @@ import uuid
 import sqlite3
 import json # Added for audit logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta # Added timedelta
 import math # Added for math.ceil
 from functools import wraps
 from flask import Flask, request, g, jsonify, send_from_directory
@@ -3923,6 +3923,148 @@ def get_system_health():
     }), 200
 
 # --- Admin Dashboard Statistics Endpoint ---
+
+def get_daily_counts(db, action_types, days=7):
+    if not action_types:
+        return []
+    
+    placeholders = ','.join(['?'] * len(action_types))
+    query = f"""
+        WITH RECURSIVE dates(date) AS (
+          SELECT date('now', '-{days-1} days') -- Corrected to ensure 'days' includes today
+          UNION ALL
+          SELECT date(date, '+1 day')
+          FROM dates
+          WHERE date < date('now')
+        )
+        SELECT
+          d.date,
+          COALESCE(COUNT(al.id), 0) as count
+        FROM dates d
+        LEFT JOIN audit_logs al
+          ON date(al.timestamp) = d.date AND al.action_type IN ({placeholders})
+        GROUP BY d.date
+        ORDER BY d.date ASC;
+    """
+    params = list(action_types)
+    results = db.execute(query, params).fetchall()
+    return [dict(row) for row in results]
+
+def get_weekly_counts(db, action_types, weeks=4):
+    if not action_types:
+        return []
+
+    placeholders = ','.join(['?'] * len(action_types))
+    # Calculate the start date for the recursive CTE:
+    # (weeks-1)*7 days ago from today, then find the Sunday of that week.
+    # Example: for 4 weeks, this is 21 days ago.
+    start_date_offset = (weeks - 1) * 7
+    query = f"""
+        WITH RECURSIVE week_starts(week_start_date) AS (
+          SELECT date('now', 'weekday 0', '-{start_date_offset + 6} days') 
+          UNION ALL
+          SELECT date(week_start_date, '+7 days')
+          FROM week_starts
+          WHERE date(week_start_date, '+7 days') <= date('now', 'weekday 0', '+1 day') 
+        )
+        SELECT
+          w.week_start_date,
+          COALESCE(COUNT(al.id), 0) as count
+        FROM week_starts w
+        LEFT JOIN audit_logs al
+          ON date(al.timestamp, 'weekday 0', '-6 days') = w.week_start_date AND al.action_type IN ({placeholders})
+        GROUP BY w.week_start_date
+        ORDER BY w.week_start_date ASC;
+    """
+    # The recursive CTE for weeks needs to generate Sundays.
+    # If today is Sunday, 'weekday 0' gives today.
+    # If today is Monday, 'weekday 0' gives yesterday (Sunday).
+    # So, date('now', 'weekday 0', '-{X} days') is the correct way to get a past Sunday.
+    # For `weeks=4`: we want this week's Sunday, and 3 previous Sundays.
+    # `date('now', 'weekday 0')` is this week's Sunday.
+    # `date('now', 'weekday 0', '-7 days')` is last week's Sunday.
+    # `date('now', 'weekday 0', '-14 days')` is two weeks ago Sunday.
+    # `date('now', 'weekday 0', '-21 days')` is three weeks ago Sunday.
+    # So the initial SELECT for weeks should be `date('now', 'weekday 0', '-{(weeks-1)*7} days')`
+    # The condition `WHERE date(week_start_date, '+7 days') <= date('now', 'weekday 0', '+1 day')` seems a bit off.
+    # It should be `WHERE week_start_date < date('now', 'weekday 0')` if the initial date is correct.
+    # Or, more simply, limit the recursion count or ensure the last date is not beyond current week's Sunday.
+    # Let's adjust the initial select and the recursive condition.
+    # If weeks = 4, initial select: date('now', 'weekday 0', '-21 days')
+    # Loop while date(week_start_date, '+7 days') <= date('now', 'weekday 0')
+
+    # Corrected weekly query logic:
+    # Initial date: Sunday of the week (weeks-1) weeks ago.
+    # End date: Sunday of the current week.
+    initial_sunday_offset = (weeks - 1) * 7
+    query_corrected_weekly = f"""
+        WITH RECURSIVE week_dates(week_start_date) AS (
+          SELECT date('now', 'weekday 0', '-{initial_sunday_offset} days')
+          UNION ALL
+          SELECT date(week_start_date, '+7 days')
+          FROM week_dates
+          WHERE date(week_start_date, '+7 days') <= date('now', 'weekday 0')
+        )
+        SELECT
+          wd.week_start_date,
+          COALESCE(COUNT(al.id), 0) as count
+        FROM week_dates wd
+        LEFT JOIN audit_logs al
+          ON date(al.timestamp, 'weekday 0', '-6 days') = wd.week_start_date AND al.action_type IN ({placeholders})
+        GROUP BY wd.week_start_date
+        ORDER BY wd.week_start_date ASC;
+    """
+    # Check if the number of weeks generated is correct.
+    # If weeks = 1, initial_sunday_offset = 0. Dates: current Sunday. Correct.
+    # If weeks = 4, initial_sunday_offset = 21. Dates: Sun(-3w), Sun(-2w), Sun(-1w), Sun(current). Correct.
+
+    params = list(action_types)
+    results = db.execute(query_corrected_weekly, params).fetchall()
+    return [dict(row) for row in results]
+
+def get_daily_download_counts(db, days=7):
+    query = f"""
+        WITH RECURSIVE dates(date) AS (
+          SELECT date('now', '-{days-1} days')
+          UNION ALL
+          SELECT date(date, '+1 day')
+          FROM dates
+          WHERE date < date('now')
+        )
+        SELECT
+          d.date,
+          COALESCE(COUNT(dl.id), 0) as count
+        FROM dates d
+        LEFT JOIN download_log dl
+          ON date(dl.download_timestamp) = d.date
+        GROUP BY d.date
+        ORDER BY d.date ASC;
+    """
+    results = db.execute(query).fetchall()
+    return [dict(row) for row in results]
+
+def get_weekly_download_counts(db, weeks=4):
+    initial_sunday_offset = (weeks - 1) * 7
+    query = f"""
+        WITH RECURSIVE week_dates(week_start_date) AS (
+          SELECT date('now', 'weekday 0', '-{initial_sunday_offset} days')
+          UNION ALL
+          SELECT date(week_start_date, '+7 days')
+          FROM week_dates
+          WHERE date(week_start_date, '+7 days') <= date('now', 'weekday 0')
+        )
+        SELECT
+          wd.week_start_date,
+          COALESCE(COUNT(dl.id), 0) as count
+        FROM week_dates wd
+        LEFT JOIN download_log dl
+          ON date(dl.download_timestamp, 'weekday 0', '-6 days') = wd.week_start_date
+        GROUP BY wd.week_start_date
+        ORDER BY wd.week_start_date ASC;
+    """
+    results = db.execute(query).fetchall()
+    return [dict(row) for row in results]
+
 @app.route('/api/admin/dashboard-stats', methods=['GET'])
 @jwt_required()
 @admin_required
@@ -3958,7 +4100,6 @@ def get_dashboard_stats():
         misc_files_cursor = db.execute("SELECT id, COALESCE(user_provided_title, original_filename) as name, created_at, 'Misc File' as type FROM misc_files ORDER BY created_at DESC LIMIT 5")
         recent_additions.extend([dict(row) for row in misc_files_cursor.fetchall()])
         
-        # Sort all recent additions by created_at and take top 5
         recent_additions.sort(key=lambda x: x['created_at'], reverse=True)
         top_recent_additions = recent_additions[:5]
 
@@ -3973,14 +4114,14 @@ def get_dashboard_stats():
         popular_downloads_raw = db.execute(popular_downloads_query).fetchall()
         popular_downloads_detailed = []
         for item in popular_downloads_raw:
-            name = "Unknown/Deleted Item" # Default name
+            name = "Unknown/Deleted Item"
             if item['file_type'] == 'document':
                 res = db.execute("SELECT doc_name FROM documents WHERE id = ?", (item['file_id'],)).fetchone()
                 if res: name = res['doc_name']
             elif item['file_type'] == 'patch':
                 res = db.execute("SELECT patch_name FROM patches WHERE id = ?", (item['file_id'],)).fetchone()
                 if res: name = res['patch_name']
-            elif item['file_type'] == 'link_file': # was 'link' in _log_download_activity, but schema implies 'links' table for files uploaded as links
+            elif item['file_type'] == 'link_file':
                 res = db.execute("SELECT title FROM links WHERE id = ?", (item['file_id'],)).fetchone()
                 if res: name = res['title']
             elif item['file_type'] == 'misc_file':
@@ -4004,14 +4145,142 @@ def get_dashboard_stats():
         docs_per_software_cursor = db.execute(docs_per_software_query)
         documents_per_software = [dict(row) for row in docs_per_software_cursor.fetchall()]
 
+        # User Activity Trends
+        daily_logins = get_daily_counts(db, ['USER_LOGIN'], days=7)
+        weekly_logins = get_weekly_counts(db, ['USER_LOGIN'], weeks=4)
+
+        upload_action_types = [
+            'CREATE_DOCUMENT_FILE', 'CREATE_PATCH_FILE', 'CREATE_LINK_FILE', 'CREATE_MISC_FILE',
+            'UPDATE_DOCUMENT_FILE', 'UPDATE_PATCH_FILE', 'UPDATE_LINK_FILE', 'UPDATE_MISC_FILE_UPLOAD'
+        ]
+        daily_uploads = get_daily_counts(db, upload_action_types, days=7)
+        weekly_uploads = get_weekly_counts(db, upload_action_types, weeks=4)
+
+        user_activity_trends = {
+            "logins": {"daily": daily_logins, "weekly": weekly_logins},
+            "uploads": {"daily": daily_uploads, "weekly": weekly_uploads}
+        }
+
+        # Download Trends
+        daily_downloads = get_daily_download_counts(db, days=7)
+        weekly_downloads = get_weekly_download_counts(db, weeks=4)
+        download_trends = {
+            "daily": daily_downloads,
+            "weekly": weekly_downloads
+        }
+
+        # Calculate Total Storage Utilization
+        docs_size_cursor = db.execute("SELECT SUM(file_size) as total FROM documents WHERE is_external_link = FALSE AND stored_filename IS NOT NULL")
+        docs_size = (docs_size_cursor.fetchone()['total'] or 0) if docs_size_cursor else 0
+
+        patches_size_cursor = db.execute("SELECT SUM(file_size) as total FROM patches WHERE is_external_link = FALSE AND stored_filename IS NOT NULL")
+        patches_size = (patches_size_cursor.fetchone()['total'] or 0) if patches_size_cursor else 0
+
+        links_size_cursor = db.execute("SELECT SUM(file_size) as total FROM links WHERE is_external_link = FALSE AND stored_filename IS NOT NULL")
+        links_size = (links_size_cursor.fetchone()['total'] or 0) if links_size_cursor else 0
+        
+        misc_files_size_cursor = db.execute("SELECT SUM(file_size) as total FROM misc_files WHERE stored_filename IS NOT NULL")
+        misc_files_size = (misc_files_size_cursor.fetchone()['total'] or 0) if misc_files_size_cursor else 0
+
+        total_storage_utilized_bytes = docs_size + patches_size + links_size + misc_files_size
+
         return jsonify(
             total_users=total_users,
             total_software_titles=total_software_titles,
             recent_activities=recent_activities,
             recent_additions=top_recent_additions,
             popular_downloads=popular_downloads_detailed,
-            documents_per_software=documents_per_software
-        ), 200
+            documents_per_software=documents_per_software,
+            user_activity_trends=user_activity_trends,
+            download_trends=download_trends, 
+            total_storage_utilized_bytes=total_storage_utilized_bytes
+        )
+
+        # Content Health Indicators
+        stale_threshold_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+        content_health = {
+            "missing_descriptions": {},
+            "stale_content": {}
+        }
+
+        # --- Missing Descriptions ---
+        # Documents
+        docs_missing_desc_cursor = db.execute("SELECT COUNT(*) as count FROM documents WHERE description IS NULL OR description = ''")
+        docs_missing_desc = (docs_missing_desc_cursor.fetchone()['count'] or 0) if docs_missing_desc_cursor else 0
+        docs_total_cursor = db.execute("SELECT COUNT(*) as count FROM documents")
+        docs_total = (docs_total_cursor.fetchone()['count'] or 0) if docs_total_cursor else 0
+        content_health['missing_descriptions']['documents'] = {'missing': docs_missing_desc, 'total': docs_total}
+
+        # Patches
+        patches_missing_desc_cursor = db.execute("SELECT COUNT(*) as count FROM patches WHERE description IS NULL OR description = ''")
+        patches_missing_desc = (patches_missing_desc_cursor.fetchone()['count'] or 0) if patches_missing_desc_cursor else 0
+        patches_total_cursor = db.execute("SELECT COUNT(*) as count FROM patches")
+        patches_total = (patches_total_cursor.fetchone()['count'] or 0) if patches_total_cursor else 0
+        content_health['missing_descriptions']['patches'] = {'missing': patches_missing_desc, 'total': patches_total}
+
+        # Links
+        links_missing_desc_cursor = db.execute("SELECT COUNT(*) as count FROM links WHERE description IS NULL OR description = ''")
+        links_missing_desc = (links_missing_desc_cursor.fetchone()['count'] or 0) if links_missing_desc_cursor else 0
+        links_total_cursor = db.execute("SELECT COUNT(*) as count FROM links")
+        links_total = (links_total_cursor.fetchone()['count'] or 0) if links_total_cursor else 0
+        content_health['missing_descriptions']['links'] = {'missing': links_missing_desc, 'total': links_total}
+
+        # Misc Categories
+        mc_missing_desc_cursor = db.execute("SELECT COUNT(*) as count FROM misc_categories WHERE description IS NULL OR description = ''")
+        mc_missing_desc = (mc_missing_desc_cursor.fetchone()['count'] or 0) if mc_missing_desc_cursor else 0
+        mc_total_cursor = db.execute("SELECT COUNT(*) as count FROM misc_categories")
+        mc_total = (mc_total_cursor.fetchone()['count'] or 0) if mc_total_cursor else 0
+        content_health['missing_descriptions']['misc_categories'] = {'missing': mc_missing_desc, 'total': mc_total}
+
+        # Software
+        sw_missing_desc_cursor = db.execute("SELECT COUNT(*) as count FROM software WHERE description IS NULL OR description = ''")
+        sw_missing_desc = (sw_missing_desc_cursor.fetchone()['count'] or 0) if sw_missing_desc_cursor else 0
+        # total_software_titles already fetched above
+        content_health['missing_descriptions']['software'] = {'missing': sw_missing_desc, 'total': total_software_titles}
+        
+        # Misc Files
+        mf_missing_desc_cursor = db.execute("SELECT COUNT(*) as count FROM misc_files WHERE user_provided_description IS NULL OR user_provided_description = ''")
+        mf_missing_desc = (mf_missing_desc_cursor.fetchone()['count'] or 0) if mf_missing_desc_cursor else 0
+        mf_total_cursor = db.execute("SELECT COUNT(*) as count FROM misc_files")
+        mf_total = (mf_total_cursor.fetchone()['count'] or 0) if mf_total_cursor else 0
+        content_health['missing_descriptions']['misc_files'] = {'missing': mf_missing_desc, 'total': mf_total}
+
+        # --- Stale Content ---
+        # Documents
+        docs_stale_cursor = db.execute("SELECT COUNT(*) as count FROM documents WHERE date(updated_at) < date(?)", (stale_threshold_date,))
+        docs_stale = (docs_stale_cursor.fetchone()['count'] or 0) if docs_stale_cursor else 0
+        content_health['stale_content']['documents'] = {'stale': docs_stale, 'total': docs_total}
+
+        # Patches
+        patches_stale_cursor = db.execute("SELECT COUNT(*) as count FROM patches WHERE date(updated_at) < date(?)", (stale_threshold_date,))
+        patches_stale = (patches_stale_cursor.fetchone()['count'] or 0) if patches_stale_cursor else 0
+        content_health['stale_content']['patches'] = {'stale': patches_stale, 'total': patches_total}
+
+        # Links
+        links_stale_cursor = db.execute("SELECT COUNT(*) as count FROM links WHERE date(updated_at) < date(?)", (stale_threshold_date,))
+        links_stale = (links_stale_cursor.fetchone()['count'] or 0) if links_stale_cursor else 0
+        content_health['stale_content']['links'] = {'stale': links_stale, 'total': links_total}
+        
+        # Misc Files
+        mf_stale_cursor = db.execute("SELECT COUNT(*) as count FROM misc_files WHERE date(updated_at) < date(?)", (stale_threshold_date,))
+        mf_stale = (mf_stale_cursor.fetchone()['count'] or 0) if mf_stale_cursor else 0
+        content_health['stale_content']['misc_files'] = {'stale': mf_stale, 'total': mf_total}
+
+        # Versions
+        versions_stale_cursor = db.execute("SELECT COUNT(*) as count FROM versions WHERE date(updated_at) < date(?)", (stale_threshold_date,))
+        versions_stale = (versions_stale_cursor.fetchone()['count'] or 0) if versions_stale_cursor else 0
+        versions_total_cursor = db.execute("SELECT COUNT(*) as count FROM versions")
+        versions_total = (versions_total_cursor.fetchone()['count'] or 0) if versions_total_cursor else 0
+        content_health['stale_content']['versions'] = {'stale': versions_stale, 'total': versions_total}
+        
+        # Misc Categories (Stale)
+        mc_stale_cursor = db.execute("SELECT COUNT(*) as count FROM misc_categories WHERE date(updated_at) < date(?)", (stale_threshold_date,))
+        mc_stale = (mc_stale_cursor.fetchone()['count'] or 0) if mc_stale_cursor else 0
+        content_health['stale_content']['misc_categories'] = {'stale': mc_stale, 'total': mc_total}
+
+
+        response_data.update({"content_health": content_health})
+        return jsonify(response_data), 200
 
     except sqlite3.Error as e:
         app.logger.error(f"Database error in get_dashboard_stats: {e}")

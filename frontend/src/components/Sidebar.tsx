@@ -59,7 +59,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
     // Admin-specific links
     {
       path: '/admin/versions',
-      label: 'Manage Versions',
+      label: 'Management',
       icon: (isCollapsed) => <SettingsIcon size={isCollapsed ? 24 : 20} />,
       requiresAuth: true,
       roles: ['admin', 'super_admin'], // Only for admin and super_admin

@@ -3,6 +3,7 @@ import os
 import uuid
 import sqlite3
 import json # Added for audit logging
+import re
 from datetime import datetime
 import math # Added for math.ceil
 from functools import wraps
@@ -114,6 +115,28 @@ def create_user_in_db(username, password, email=None):
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+# --- Password Strength Helper ---
+def is_password_strong(password: str) -> tuple[bool, str]:
+    """
+    Checks if the password meets the strength criteria.
+    Returns: (True, "Password is strong") or (False, "error message").
+    """
+    if len(password) < 8:
+        return False, "Password must be at least 8 characters long."
+    if not re.search(r"[A-Z]", password):
+        return False, "Password must include at least one uppercase letter."
+    if not re.search(r"[a-z]", password):
+        return False, "Password must include at least one lowercase letter."
+    if not re.search(r"[0-9]", password):
+        return False, "Password must include at least one digit."
+    
+    # Consolidated message if multiple criteria are preferred to be listed at once
+    # For now, returning specific messages as per above.
+    # A general message could be:
+    # "Password must be at least 8 characters long, include an uppercase letter, a lowercase letter, and a digit."
+    
+    return True, "Password is strong"
 
 # --- Audit Log Helper ---
 def log_audit_action(action_type: str, target_table: str = None, target_id: int = None, details: dict = None, user_id: int = None, username: str = None):
@@ -505,6 +528,12 @@ def register():
     username, password, email = data.get('username'), data.get('password'), data.get('email')
 
     if not username or not password: return jsonify(msg="Missing username or password"), 400
+
+    # Password strength check
+    is_strong, strength_msg = is_password_strong(password)
+    if not is_strong:
+        return jsonify(msg=strength_msg), 400
+
     if find_user_by_username(username): return jsonify(msg="Username already exists"), 409
     if email and find_user_by_email(email): return jsonify(msg="Email address already registered"), 409
 
@@ -598,6 +627,11 @@ def change_password():
 
     if not bcrypt.check_password_hash(user['password_hash'], current_password):
         return jsonify(msg="Incorrect current password."), 401
+
+    # Password strength check for the new password
+    is_strong, strength_msg = is_password_strong(new_password)
+    if not is_strong:
+        return jsonify(msg=strength_msg), 400
 
     hashed_new_password = bcrypt.generate_password_hash(new_password).decode('utf-8')
     

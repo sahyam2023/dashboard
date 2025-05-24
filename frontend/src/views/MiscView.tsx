@@ -218,8 +218,11 @@ const MiscView: React.FC = () => {
     { key: 'user_provided_title', header: 'Title', sortable: true },
     { key: 'original_filename', header: 'Original Filename', sortable: true },
     { key: 'category_name', header: 'Category', sortable: true }, // Backend sorts by mc.name
+    { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: (file) => file.uploaded_by_username || 'N/A' },
+    { key: 'updated_by_username', header: 'Updated By', sortable: false, render: (file) => file.updated_by_username || 'N/A' },
     { key: 'file_size', header: 'Size', sortable: true, render: (file) => formatFileSize(file.file_size) },
     { key: 'created_at', header: 'Uploaded At', sortable: true, render: (file) => formatDate(file.created_at) },
+    { key: 'updated_at', header: 'Updated At', sortable: true, render: (file) => formatDate(file.updated_at) },
     {
       key: 'file_path',
       header: 'Link',

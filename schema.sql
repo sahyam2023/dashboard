@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS patches (
     original_filename_ref TEXT,
     file_size INTEGER,
     file_type TEXT,
+    patch_by_developer TEXT,
     created_by_user_id INTEGER NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_by_user_id INTEGER,

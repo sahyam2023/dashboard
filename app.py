@@ -736,20 +736,24 @@ def get_all_documents_api():
     allowed_sort_by_map = {
         'id': 'd.id',
         'doc_name': 'd.doc_name',
-        'software_name': 's.name', # s.name is aliased as software_name in SELECT
+        'software_name': 's.name', 
         'doc_type': 'd.doc_type',
+        'uploaded_by_username': 'u.username', # Added for sorting
         'created_at': 'd.created_at',
         'updated_at': 'd.updated_at'
+        # patch_by_developer is not applicable to documents
     }
     
-    sort_by_column = allowed_sort_by_map.get(sort_by_param, 'd.doc_name') # Default to d.doc_name
+    sort_by_column = allowed_sort_by_map.get(sort_by_param, 'd.doc_name') 
 
     if sort_order not in ['asc', 'desc']:
         sort_order = 'asc'
 
     # Construct Base Query and Parameters for Filtering
-    base_query_select = "SELECT d.id, d.software_id, d.doc_name, d.description, d.doc_type, d.is_external_link, d.download_link, d.stored_filename, d.original_filename_ref, d.file_size, d.file_type, d.created_by_user_id, d.created_at, d.updated_by_user_id, d.updated_at, s.name as software_name"
-    base_query_from = "FROM documents d JOIN software s ON d.software_id = s.id"
+    # Added u.username as uploaded_by_username to SELECT
+    # Added JOIN users u ON d.created_by_user_id = u.id to FROM
+    base_query_select = "SELECT d.id, d.software_id, d.doc_name, d.description, d.doc_type, d.is_external_link, d.download_link, d.stored_filename, d.original_filename_ref, d.file_size, d.file_type, d.created_by_user_id, u.username as uploaded_by_username, d.created_at, d.updated_by_user_id, upd_u.username as updated_by_username, d.updated_at, s.name as software_name"
+    base_query_from = "FROM documents d JOIN software s ON d.software_id = s.id LEFT JOIN users u ON d.created_by_user_id = u.id LEFT JOIN users upd_u ON d.updated_by_user_id = upd_u.id"
     
     filter_conditions = []
     params = []
@@ -826,18 +830,22 @@ def get_all_patches_api():
         'software_name': 's.name',
         'version_number': 'v.version_number',
         'release_date': 'p.release_date',
+        'patch_by_developer': 'p.patch_by_developer', # Retained
+        'uploaded_by_username': 'u.username', # Retained (creator)
         'created_at': 'p.created_at',
         'updated_at': 'p.updated_at'
+        # updated_by_username can be added if sorting by editor is needed
     }
     
-    sort_by_column = allowed_sort_by_map.get(sort_by_param, 'p.patch_name') # Default to p.patch_name
+    sort_by_column = allowed_sort_by_map.get(sort_by_param, 'p.patch_name') 
 
     if sort_order not in ['asc', 'desc']:
         sort_order = 'asc'
 
     # Construct Base Query and Parameters for Filtering
-    base_query_select = "SELECT p.id, p.version_id, p.patch_name, p.description, p.release_date, p.is_external_link, p.download_link, p.stored_filename, p.original_filename_ref, p.file_size, p.file_type, p.created_by_user_id, p.created_at, p.updated_by_user_id, p.updated_at, s.name as software_name, s.id as software_id, v.version_number"
-    base_query_from = "FROM patches p JOIN versions v ON p.version_id = v.id JOIN software s ON v.software_id = s.id"
+    # Added u.username as uploaded_by_username, upd_u.username as updated_by_username, and p.patch_by_developer
+    base_query_select = "SELECT p.id, p.version_id, p.patch_name, p.description, p.release_date, p.is_external_link, p.download_link, p.stored_filename, p.original_filename_ref, p.file_size, p.file_type, p.patch_by_developer, p.created_by_user_id, u.username as uploaded_by_username, p.created_at, p.updated_by_user_id, upd_u.username as updated_by_username, p.updated_at, s.name as software_name, s.id as software_id, v.version_number"
+    base_query_from = "FROM patches p JOIN versions v ON p.version_id = v.id JOIN software s ON v.software_id = s.id LEFT JOIN users u ON p.created_by_user_id = u.id LEFT JOIN users upd_u ON p.updated_by_user_id = upd_u.id"
     
     filter_conditions = []
     params = []
@@ -915,19 +923,22 @@ def get_all_links_api():
         'id': 'l.id',
         'title': 'l.title',
         'software_name': 's.name',
-        'version_name': 'v.version_number', # Note: version_name in JSON, version_number in DB for v table
+        'version_name': 'v.version_number', 
+        'uploaded_by_username': 'u.username', # Added for sorting by creator
         'created_at': 'l.created_at',
         'updated_at': 'l.updated_at'
+        # patch_by_developer is not applicable to links
     }
     
-    sort_by_column = allowed_sort_by_map.get(sort_by_param, 'l.title') # Default to l.title
+    sort_by_column = allowed_sort_by_map.get(sort_by_param, 'l.title') 
 
     if sort_order not in ['asc', 'desc']:
         sort_order = 'asc'
 
     # Construct Base Query and Parameters for Filtering
-    base_query_select = "SELECT l.id, l.title, l.description, l.software_id, l.version_id, l.is_external_link, l.url, l.stored_filename, l.original_filename_ref, l.file_size, l.file_type, l.created_by_user_id, l.created_at, l.updated_by_user_id, l.updated_at, s.name as software_name, v.version_number as version_name"
-    base_query_from = "FROM links l JOIN software s ON l.software_id = s.id LEFT JOIN versions v ON l.version_id = v.id"
+    # Added u.username as uploaded_by_username and upd_u.username as updated_by_username
+    base_query_select = "SELECT l.id, l.title, l.description, l.software_id, l.version_id, l.is_external_link, l.url, l.stored_filename, l.original_filename_ref, l.file_size, l.file_type, l.created_by_user_id, u.username as uploaded_by_username, l.created_at, l.updated_by_user_id, upd_u.username as updated_by_username, l.updated_at, s.name as software_name, v.version_number as version_name"
+    base_query_from = "FROM links l JOIN software s ON l.software_id = s.id LEFT JOIN versions v ON l.version_id = v.id LEFT JOIN users u ON l.created_by_user_id = u.id LEFT JOIN users upd_u ON l.updated_by_user_id = upd_u.id"
     
     filter_conditions = []
     params = []
@@ -1011,20 +1022,23 @@ def get_all_misc_files_api():
         'id': 'mf.id',
         'user_provided_title': 'mf.user_provided_title',
         'original_filename': 'mf.original_filename',
-        'category_name': 'mc.name', # mc.name is aliased as category_name in SELECT
+        'category_name': 'mc.name', 
+        'uploaded_by_username': 'u.username', # Added for sorting by creator
         'created_at': 'mf.created_at',
         'file_size': 'mf.file_size',
-        'updated_at': 'mf.updated_at' 
+        'updated_at': 'mf.updated_at'
+        # patch_by_developer is not applicable
     }
     
-    sort_by_column = allowed_sort_by_map.get(sort_by_param, 'mf.user_provided_title') # Default
+    sort_by_column = allowed_sort_by_map.get(sort_by_param, 'mf.user_provided_title')
 
     if sort_order not in ['asc', 'desc']:
         sort_order = 'asc'
 
     # Construct Base Query and Parameters for Filtering
-    base_query_select = "SELECT mf.id, mf.misc_category_id, mf.user_id, mf.user_provided_title, mf.user_provided_description, mf.original_filename, mf.stored_filename, mf.file_path, mf.file_type, mf.file_size, mf.created_by_user_id, mf.created_at, mf.updated_by_user_id, mf.updated_at, mc.name as category_name"
-    base_query_from = "FROM misc_files mf JOIN misc_categories mc ON mf.misc_category_id = mc.id"
+    # Added u.username as uploaded_by_username and upd_u.username as updated_by_username
+    base_query_select = "SELECT mf.id, mf.misc_category_id, mf.user_id, mf.user_provided_title, mf.user_provided_description, mf.original_filename, mf.stored_filename, mf.file_path, mf.file_type, mf.file_size, mf.created_by_user_id, u.username as uploaded_by_username, mf.created_at, mf.updated_by_user_id, upd_u.username as updated_by_username, mf.updated_at, mc.name as category_name"
+    base_query_from = "FROM misc_files mf JOIN misc_categories mc ON mf.misc_category_id = mc.id LEFT JOIN users u ON mf.created_by_user_id = u.id LEFT JOIN users upd_u ON mf.updated_by_user_id = upd_u.id"
     
     filter_conditions = []
     params = []
@@ -1100,7 +1114,7 @@ def _admin_handle_file_upload_and_db_insert(
     metadata_fields, required_form_fields, sql_insert_query, sql_params_tuple,
     resolved_fks: dict = None
 ):
-    current_user_id = int(get_jwt_identity())
+    current_user_id = int(get_jwt_identity()) # Ensure this is correctly used for created_by_user_id
     if resolved_fks is None:
         resolved_fks = {}
 
@@ -1115,13 +1129,17 @@ def _admin_handle_file_upload_and_db_insert(
         return jsonify(msg="No file selected"), 400
 
     form_data = {}
-    for field in metadata_fields:
+    for field in metadata_fields: # metadata_fields will be adjusted for 'patches' if needed
         form_data[field] = request.form.get(field)
     
+    # Special handling for patch_by_developer for 'patches' table
+    if table_name == 'patches':
+        form_data['patch_by_developer'] = request.form.get('patch_by_developer')
+
     for fk_name, fk_value in resolved_fks.items():
         form_data[fk_name] = fk_value
 
-    for req_field in required_form_fields:
+    for req_field in required_form_fields: # required_form_fields will be adjusted for 'patches'
         if req_field == 'file':
             if not uploaded_file_obj or not uploaded_file_obj.filename:
                 app.logger.warning(f"_admin_helper: Validation failed for 'file' requirement for table {table_name}.")
@@ -1186,34 +1204,38 @@ def _admin_handle_file_upload_and_db_insert(
             fetch_back_query = ""
             if table_name == 'patches':
                  fetch_back_query = """
-                    SELECT p.*, s.name as software_name, v.version_number
+                    SELECT p.*, s.name as software_name, v.version_number, u.username as uploaded_by_username, p.patch_by_developer
                     FROM patches p
                     JOIN versions v ON p.version_id = v.id
                     JOIN software s ON v.software_id = s.id
+                    JOIN users u ON p.created_by_user_id = u.id
                     WHERE p.id = ?"""
             elif table_name == 'links':
                  fetch_back_query = """
-                    SELECT l.*, s.name as software_name, v.version_number as version_name
+                    SELECT l.*, s.name as software_name, v.version_number as version_name, u.username as uploaded_by_username
                     FROM links l
                     JOIN software s ON l.software_id = s.id
                     LEFT JOIN versions v ON l.version_id = v.id
+                    JOIN users u ON l.created_by_user_id = u.id
                     WHERE l.id = ?"""
-            elif table_name == 'misc_files': # **** THIS WAS MISSING/REPLACED ****
+            elif table_name == 'misc_files':
                  fetch_back_query = """
-                    SELECT mf.*, mc.name as category_name
+                    SELECT mf.*, mc.name as category_name, u.username as uploaded_by_username
                     FROM misc_files mf
                     JOIN misc_categories mc ON mf.misc_category_id = mc.id
+                    JOIN users u ON mf.created_by_user_id = u.id
                     WHERE mf.id = ?"""
-            elif table_name == 'documents': # **** THIS WAS MISSING/REPLACED ****
+            elif table_name == 'documents':
                  fetch_back_query = """
-                    SELECT d.*, s.name as software_name
+                    SELECT d.*, s.name as software_name, u.username as uploaded_by_username
                     FROM documents d
                     JOIN software s ON d.software_id = s.id
+                    JOIN users u ON d.created_by_user_id = u.id
                     WHERE d.id = ?"""
             else:
                 # This default is a fallback, but ideally all tables handled by this helper
                 # should have specific fetch-back queries if they need joins.
-                app.logger.warning(f"_admin_helper: Using default fetch-back query for table {table_name}. No joins performed.")
+                app.logger.warning(f"_admin_helper: Using default fetch-back query for table {table_name} (no uploaded_by_username). No joins performed.")
                 fetch_back_query = f"SELECT * FROM {table_name} WHERE id = ?"
 
             app.logger.debug(f"_admin_helper: Attempting to fetch back from {table_name} with ID {new_id} using query: {fetch_back_query}")
@@ -1319,37 +1341,49 @@ def _admin_add_item_with_external_link(
         app.logger.warning(f"ADMIN_HELPER_LINK: Missing JSON data for table {table_name}")
         return jsonify(msg="Missing JSON data"), 400
 
-    form_data = {}
-    all_present = True
-    missing_fields_list = [] # For better error message
+    # Prepare form_data by extracting relevant fields from the JSON payload (data)
+    # This is crucial because sql_params_tuple refers to keys in form_data.
+    form_data = {} 
+    # Populate form_data with expected fields from data, including patch_by_developer if table is 'patches'
+    # This step ensures that 'patch_by_developer' (and other fields) are available if they are in sql_params_tuple.
+    for key in data: # Iterate over keys in the input JSON data
+        form_data[key] = data[key]
 
-    for field_name in sql_params_tuple: # Iterate through expected params to build form_data map
-        if field_name not in ['is_external_link', 'created_by_user_id', 'updated_by_user_id', 
-                               'stored_filename', 'original_filename_ref', 'file_size', 'file_type']: # System-set fields
-            form_data[field_name] = data.get(field_name)
+    # Ensure 'patch_by_developer' is in form_data if table_name is 'patches' and it's expected by sql_params_tuple
+    if table_name == 'patches' and 'patch_by_developer' not in form_data:
+        form_data['patch_by_developer'] = data.get('patch_by_developer') # defaults to None if not in data
+
+    all_present = True
+    missing_fields_list = []
 
     for req_field in required_fields:
-        if not form_data.get(req_field): # Check if the value is missing or falsy (e.g., empty string for text)
-            # Allow 0 for IDs if that's valid, but generally IDs are > 0
-            if isinstance(form_data.get(req_field), int) and form_data.get(req_field) == 0:
-                pass # Allow 0 if it's a valid ID in some context (though unusual for FKs)
-            else:
+        # Check against 'data' (original JSON payload) for required fields, not form_data
+        if data.get(req_field) is None or (isinstance(data.get(req_field), str) and str(data.get(req_field)).strip() == ""):
+            # Allow 0 for IDs if that's valid
+            if not (isinstance(data.get(req_field), int) and data.get(req_field) == 0):
                 all_present = False
                 missing_fields_list.append(req_field)
-
+    
     if not all_present:
         error_msg = f"Missing one or more required fields: {', '.join(missing_fields_list)}"
         app.logger.warning(f"ADMIN_HELPER_LINK: {error_msg} for table {table_name}. Data: {data}")
         return jsonify(msg=error_msg), 400
 
     # Convert IDs (example, adapt if more ID fields are used by different tables)
-    if 'software_id' in form_data and form_data['software_id'] is not None:
-        try: form_data['software_id'] = int(form_data['software_id'])
+    # Use 'data.get' for these conversions as form_data might not have them if they are not in sql_params_tuple
+    # software_id is usually a required_field, so it should be in 'data'
+    if 'software_id' in data and data.get('software_id') is not None:
+        try: 
+            # This conversion is for validation; the actual value used in SQL params comes from form_data
+            # which should already have the correct type if it came from JSON.
+            # However, if form_data['software_id'] is used later, ensure it's int.
+            form_data['software_id'] = int(data['software_id']) 
         except (ValueError, TypeError): return jsonify(msg="Invalid software_id format"), 400
-    if 'version_id' in form_data and form_data['version_id'] is not None:
-        try: form_data['version_id'] = int(form_data['version_id'])
+    
+    if 'version_id' in data and data.get('version_id') is not None:
+        try: 
+            form_data['version_id'] = int(data['version_id'])
         except (ValueError, TypeError): return jsonify(msg="Invalid version_id format"), 400
-    # Add similar conversions for other ID fields if necessary
 
 
     final_sql_params = []
@@ -1360,7 +1394,7 @@ def _admin_add_item_with_external_link(
             final_sql_params.append(current_user_id)
         elif param_name_in_tuple == 'updated_by_user_id': # Also set updated_by on creation
             final_sql_params.append(current_user_id)
-        elif param_name_in_tuple in form_data:
+        elif param_name_in_tuple in form_data: # Check form_data which now contains relevant items from data
             final_sql_params.append(form_data[param_name_in_tuple])
         else:
             # This handles optional fields that were not in required_fields AND not in form_data
@@ -1375,19 +1409,33 @@ def _admin_add_item_with_external_link(
         new_id = cursor.lastrowid
         app.logger.info(f"ADMIN_HELPER_LINK: Inserted into {table_name} with ID: {new_id}. Fetching back...")
 
-        # Fetch the newly created item to return it
-        new_item_row = db.execute(f"SELECT * FROM {table_name} WHERE id = ?", (new_id,)).fetchone()
+        # --- MODIFIED FETCH-BACK SECTION for _admin_add_item_with_external_link ---
+        fetch_back_query = ""
+        # Base select needs to be table-specific to use correct alias for created_by_user_id
+        if table_name == 'documents':
+            fetch_back_query = "SELECT d.*, u.username as uploaded_by_username FROM documents d JOIN users u ON d.created_by_user_id = u.id WHERE d.id = ?"
+        elif table_name == 'patches':
+            fetch_back_query = "SELECT p.*, u.username as uploaded_by_username, p.patch_by_developer FROM patches p JOIN users u ON p.created_by_user_id = u.id WHERE p.id = ?"
+        elif table_name == 'links':
+            fetch_back_query = "SELECT l.*, u.username as uploaded_by_username FROM links l JOIN users u ON l.created_by_user_id = u.id WHERE l.id = ?"
+        # misc_files are not typically added via external link, but if a case arises:
+        elif table_name == 'misc_files': 
+            fetch_back_query = "SELECT mf.*, u.username as uploaded_by_username FROM misc_files mf JOIN users u ON mf.created_by_user_id = u.id WHERE mf.id = ?"
+        else: # Fallback, though ideally all relevant tables are covered
+            app.logger.warning(f"ADMIN_HELPER_LINK: Using default fetch-back for {table_name} (no uploaded_by_username).")
+            fetch_back_query = f"SELECT * FROM {table_name} WHERE id = ?"
+
+        new_item_row = db.execute(fetch_back_query, (new_id,)).fetchone()
         
         if new_item_row:
             new_item = dict(new_item_row)
+            # If the table is 'patches', ensure 'patch_by_developer' is in the response if it was selected.
+            # The fetch_back_query for 'patches' now includes it.
             app.logger.info(f"ADMIN_HELPER_LINK: Successfully fetched back new item from {table_name}: {new_item}")
             return jsonify(new_item), 201
         else:
-            app.logger.error(f"ADMIN_HELPER_LINK: CRITICAL - Failed to fetch newly added item from {table_name} with ID: {new_id} immediately after commit.")
-            # Data IS in the DB. This part of your UI message is correct.
-            # The question is why it can't be fetched back immediately.
-            # Return a 207 Multi-Status: one part succeeded (insert), one part failed (fetch-back for immediate confirmation)
-            return jsonify(msg=f"Item added to {table_name} (ID: {new_id}) but could not be immediately retrieved for confirmation. Please refresh the list."), 207
+            app.logger.error(f"ADMIN_HELPER_LINK: CRITICAL - Failed to fetch newly added item from {table_name} with ID: {new_id} immediately after commit using query: {fetch_back_query}")
+            return jsonify(msg=f"Item added to {table_name} (ID: {new_id}) but could not be immediately retrieved with full details. Please refresh the list."), 207
 
     except sqlite3.IntegrityError as e:
         db.rollback() # Rollback on integrity error
@@ -1409,9 +1457,11 @@ def admin_add_document_with_url():
         required_fields=['software_id', 'doc_name', 'download_link'],
         sql_insert_query="""INSERT INTO documents (software_id, doc_name, download_link, description, doc_type,
                                                is_external_link, created_by_user_id, updated_by_user_id)
-                              VALUES (?, ?, ?, ?, ?, TRUE, ?, ?)""", # 8 params, is_external_link is TRUE
-        sql_params_tuple=('software_id', 'doc_name', 'download_link', 'description', 'doc_type',
-                           'created_by_user_id', 'updated_by_user_id') # removed is_external_link from tuple as it's hardcoded
+                              VALUES (?, ?, ?, ?, ?, TRUE, ?, ?)""", 
+        # sql_params_tuple should align with the VALUES placeholders, excluding is_external_link (hardcoded TRUE)
+        # created_by_user_id and updated_by_user_id are handled by the helper.
+        sql_params_tuple=('software_id', 'doc_name', 'download_link', 'description', 'doc_type', 
+                           'created_by_user_id', 'updated_by_user_id') 
     )
     if response[1] == 201: # Check if creation was successful
         new_doc_data = response[0].get_json()
@@ -1444,12 +1494,14 @@ def admin_upload_document_file():
         sql_insert_query="""INSERT INTO documents (software_id, doc_name, download_link, description, doc_type,
                                                is_external_link, stored_filename, original_filename_ref, file_size, file_type,
                                                created_by_user_id, updated_by_user_id)
-                              VALUES (?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)""",
+                              VALUES (?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)""", # 12 placeholders
         sql_params_tuple=(
-            'software_id', 'doc_name', 'download_link_or_url', 'description', 'doc_type',
-            'stored_filename', 'original_filename_ref', 'file_size', 'file_type',
-            'created_by_user_id', 'updated_by_user_id'
-        )
+            'software_id', 'doc_name', 'download_link_or_url', 'description', 'doc_type', # 5
+            # is_external_link is hardcoded FALSE
+            'stored_filename', 'original_filename_ref', 'file_size', 'file_type', # 4
+            'created_by_user_id', 'updated_by_user_id' # 2 -> Total 11 from tuple, matches placeholders if we exclude is_external_link
+        ) # Corrected: download_link_or_url is one param, is_external_link is hardcoded.
+          # created_by_user_id and updated_by_user_id are handled by the helper.
     )
     if response[1] == 201: # Check if creation was successful
         new_doc_data = response[0].get_json()
@@ -1512,20 +1564,26 @@ def admin_add_patch_with_url():
 
     # Update data payload for the helper
     data['version_id'] = final_version_id # This is now the resolved ID
+    # Ensure patch_by_developer is explicitly added to data from the JSON payload
+    # Ensure patch_by_developer is explicitly added to data from the JSON payload before calling helper
+    # The helper's logic for form_data population will pick this up if 'patch_by_developer' is in sql_params_tuple
+    data['patch_by_developer'] = data.get('patch_by_developer') # data is request.get_json()
     data.pop('software_id', None) # Clean up, helper doesn't need these if version_id is set
     data.pop('typed_version_string', None)
 
     response = _admin_add_item_with_external_link(
         table_name='patches',
-        data=data, # This data has already been modified to include final_version_id
-        required_fields=['version_id', 'patch_name', 'download_link'],
-        sql_insert_query="""INSERT INTO patches (version_id, patch_name, download_link, description, release_date,
-                                             is_external_link, created_by_user_id, updated_by_user_id)
-                              VALUES (?, ?, ?, ?, ?, TRUE, ?, ?)""",
+        data=data, # This data has already been modified to include final_version_id and patch_by_developer
+        required_fields=['version_id', 'patch_name', 'download_link'], # patch_by_developer is optional
+        sql_insert_query="""INSERT INTO patches (version_id, patch_name, download_link, description, release_date, patch_by_developer,
+                                               is_external_link, created_by_user_id, updated_by_user_id)
+                              VALUES (?, ?, ?, ?, ?, ?, TRUE, ?, ?)""", # 9 placeholders
         sql_params_tuple=(
-            'version_id', 'patch_name', 'download_link', 'description', 'release_date',
-            'created_by_user_id', 'updated_by_user_id'
-        )
+            'version_id', 'patch_name', 'download_link', 'description', 'release_date', 
+            'patch_by_developer', # This is now included
+            # is_external_link is hardcoded TRUE
+            'created_by_user_id', 'updated_by_user_id' # Handled by helper
+        ) # Tuple has 8 elements, matching the non-hardcoded placeholders.
     )
     if response[1] == 201: # Check if creation was successful
         new_patch_data = response[0].get_json()
@@ -1537,7 +1595,8 @@ def admin_add_patch_with_url():
                 'patch_name': new_patch_data.get('patch_name'), 
                 'url': new_patch_data.get('download_link'), 
                 'version_id': new_patch_data.get('version_id'),
-                'release_date': new_patch_data.get('release_date')
+                'release_date': new_patch_data.get('release_date'),
+                'patch_by_developer': new_patch_data.get('patch_by_developer') 
             }
         )
     return response
@@ -1577,22 +1636,30 @@ def admin_upload_patch_file():
     # Original form data for logging
     patch_name_val = request.form.get('patch_name')
     release_date_val = request.form.get('release_date')
+    patch_by_developer_val = request.form.get('patch_by_developer') 
+
+    # metadata_fields for _admin_handle_file_upload_and_db_insert should include 'patch_by_developer'
+    # The helper will then populate form_data['patch_by_developer'] from request.form
+    current_metadata_fields = ['patch_name', 'description', 'release_date', 'patch_by_developer']
 
     response = _admin_handle_file_upload_and_db_insert(
         table_name='patches',
         upload_folder_config_key='PATCH_UPLOAD_FOLDER',
         server_path_prefix='/official_uploads/patches',
-        metadata_fields=['patch_name', 'description', 'release_date'],
-        required_form_fields=['patch_name'],
-        sql_insert_query="""INSERT INTO patches (version_id, patch_name, download_link, description, release_date,
+        metadata_fields=current_metadata_fields, # Includes 'patch_by_developer'
+        required_form_fields=['patch_name'], # patch_by_developer is optional here for form validation
+        sql_insert_query="""INSERT INTO patches (version_id, patch_name, download_link, description, release_date, patch_by_developer,
                                              is_external_link, stored_filename, original_filename_ref, file_size, file_type,
                                              created_by_user_id, updated_by_user_id)
-                              VALUES (?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)""",
+                              VALUES (?, ?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)""", # 13 placeholders
         sql_params_tuple=(
-            'version_id', 'patch_name', 'download_link_or_url', 'description', 'release_date',
-            'stored_filename', 'original_filename_ref', 'file_size', 'file_type',
-            'created_by_user_id', 'updated_by_user_id'
-        ),
+            'version_id', # Resolved FK
+            'patch_name', 'download_link_or_url', 'description', 'release_date', 
+            'patch_by_developer', # Now correctly expected from form_data by the helper
+            # is_external_link is hardcoded FALSE
+            'stored_filename', 'original_filename_ref', 'file_size', 'file_type', # File details
+            'created_by_user_id', 'updated_by_user_id' # User details
+        ), # Tuple has 12 elements, matching non-hardcoded placeholders
         resolved_fks={'version_id': final_version_id}
     )
     if response[1] == 201: # Check if creation was successful
@@ -1605,7 +1672,8 @@ def admin_upload_patch_file():
                 'patch_name': patch_name_val,
                 'filename': new_patch_data.get('original_filename_ref'), 
                 'version_id': final_version_id, # Resolved version_id
-                'release_date': release_date_val
+                'release_date': release_date_val,
+                'patch_by_developer': patch_by_developer_val # Added
             }
         )
     return response
@@ -1666,7 +1734,7 @@ def admin_edit_document_url(document_id):
             SET software_id = ?, doc_name = ?, description = ?, doc_type = ?,
                 download_link = ?, is_external_link = TRUE, stored_filename = NULL,
                 original_filename_ref = NULL, file_size = NULL, file_type = NULL,
-                updated_by_user_id = ?
+                updated_by_user_id = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         """, (software_id, doc_name, description, doc_type, download_link,
               current_user_id, document_id))
@@ -1678,8 +1746,20 @@ def admin_edit_document_url(document_id):
         )
         db.commit()
         
-        updated_doc = db.execute("SELECT d.*, s.name as software_name FROM documents d JOIN software s ON d.software_id = s.id WHERE d.id = ?", (document_id,)).fetchone()
-        return jsonify(dict(updated_doc)), 200
+        updated_doc_row = db.execute("""
+            SELECT d.*, s.name as software_name, 
+                   cr_u.username as uploaded_by_username, upd_u.username as updated_by_username
+            FROM documents d 
+            JOIN software s ON d.software_id = s.id
+            LEFT JOIN users cr_u ON d.created_by_user_id = cr_u.id
+            LEFT JOIN users upd_u ON d.updated_by_user_id = upd_u.id
+            WHERE d.id = ?
+        """, (document_id,)).fetchone()
+        if updated_doc_row:
+            return jsonify(dict(updated_doc_row)), 200
+        else:
+            app.logger.error(f"Failed to fetch document with ID {document_id} after edit_url.")
+            return jsonify(msg="Document updated but failed to retrieve full details."), 500
     except sqlite3.IntegrityError as e:
         db.rollback()
         app.logger.error(f"Admin edit document URL DB IntegrityError: {e}")
@@ -1778,7 +1858,7 @@ def admin_edit_document_file(document_id):
             SET software_id = ?, doc_name = ?, description = ?, doc_type = ?,
                 download_link = ?, is_external_link = FALSE, stored_filename = ?,
                 original_filename_ref = ?, file_size = ?, file_type = ?,
-                updated_by_user_id = ?
+                updated_by_user_id = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         """, (software_id, doc_name, description, doc_type,
               new_download_link, new_stored_filename, new_original_filename,
@@ -1791,8 +1871,20 @@ def admin_edit_document_file(document_id):
         )
         db.commit()
         
-        updated_doc = db.execute("SELECT d.*, s.name as software_name FROM documents d JOIN software s ON d.software_id = s.id WHERE d.id = ?", (document_id,)).fetchone()
-        return jsonify(dict(updated_doc)), 200
+        updated_doc_row = db.execute("""
+            SELECT d.*, s.name as software_name, 
+                   cr_u.username as uploaded_by_username, upd_u.username as updated_by_username
+            FROM documents d 
+            JOIN software s ON d.software_id = s.id
+            LEFT JOIN users cr_u ON d.created_by_user_id = cr_u.id
+            LEFT JOIN users upd_u ON d.updated_by_user_id = upd_u.id
+            WHERE d.id = ?
+        """, (document_id,)).fetchone()
+        if updated_doc_row:
+            return jsonify(dict(updated_doc_row)), 200
+        else:
+            app.logger.error(f"Failed to fetch document with ID {document_id} after edit_file.")
+            return jsonify(msg="Document updated but failed to retrieve full details."), 500
     except sqlite3.IntegrityError as e:
         db.rollback()
         # If a new file was saved but DB failed, try to delete the newly saved file.
@@ -1892,13 +1984,15 @@ def admin_upload_link_file():
         sql_insert_query="""INSERT INTO links (software_id, version_id, title, url, description,
                                            is_external_link, stored_filename, original_filename_ref, file_size, file_type,
                                            created_by_user_id, updated_by_user_id)
-                              VALUES (?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)""", 
+                              VALUES (?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)""", # 12 placeholders
         sql_params_tuple=( 
-            'software_id', 'version_id', 'title', 'download_link_or_url', 'description',
-            'stored_filename', 'original_filename_ref', 'file_size', 'file_type',
-            'created_by_user_id', 'updated_by_user_id'
-        ),
-        resolved_fks={'version_id': final_version_id_for_db}
+            'software_id', 'version_id', # Resolved FKs
+            'title', 'download_link_or_url', 'description', # Basic info + URL placeholder
+            # is_external_link is hardcoded FALSE
+            'stored_filename', 'original_filename_ref', 'file_size', 'file_type', # File details
+            'created_by_user_id', 'updated_by_user_id' # User details
+        ), # Tuple has 11 elements, matching non-hardcoded placeholders
+        resolved_fks={'version_id': final_version_id_for_db, 'software_id': software_id} # Pass software_id as resolved FK
     )
     if response[1] == 201: # Check if creation was successful
         new_link_data = response[0].get_json()
@@ -1961,6 +2055,7 @@ def admin_edit_patch_url(patch_id_from_url): # Renamed to avoid conflict with va
     description = data.get('description', patch['description'])
     release_date = data.get('release_date', patch['release_date'])
     download_link = data.get('download_link', patch['download_link'])
+    patch_by_developer = data.get('patch_by_developer', patch['patch_by_developer']) 
 
     # Basic validation for required fields during edit
     if not patch_name or not download_link: # software_id/version handled above
@@ -1971,19 +2066,29 @@ def admin_edit_patch_url(patch_id_from_url): # Renamed to avoid conflict with va
 
     try:
         log_details = {
-            'updated_fields': ['version_id', 'patch_name', 'description', 'release_date', 'download_link', 'is_external_link'],
+            'updated_fields': [], # Will be populated based on actual changes
             'version_id': final_version_id,
             'patch_name': patch_name,
             'url': download_link,
             'release_date': release_date,
+            'patch_by_developer': patch_by_developer, # Ensure it's in the log
             'is_external_link': True
         }
+        # Populate updated_fields in log_details
+        if final_version_id != patch['version_id']: log_details['updated_fields'].append('version_id')
+        if patch_name != patch['patch_name']: log_details['updated_fields'].append('patch_name')
+        if description != patch['description']: log_details['updated_fields'].append('description') # Not explicitly in details, but good to track field changes
+        if release_date != patch['release_date']: log_details['updated_fields'].append('release_date')
+        if download_link != patch['download_link']: log_details['updated_fields'].append('download_link')
+        if patch_by_developer != patch['patch_by_developer']: log_details['updated_fields'].append('patch_by_developer')
+        if not patch['is_external_link']: log_details['updated_fields'].append('is_external_link') # Becoming external
+
         db.execute("""
             UPDATE patches SET version_id = ?, patch_name = ?, description = ?, release_date = ?,
-            download_link = ?, is_external_link = TRUE, stored_filename = NULL,
+            download_link = ?, patch_by_developer = ?, is_external_link = TRUE, stored_filename = NULL,
             original_filename_ref = NULL, file_size = NULL, file_type = NULL,
-            updated_by_user_id = ? WHERE id = ?""",
-            (final_version_id, patch_name, description, release_date, download_link,
+            updated_by_user_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
+            (final_version_id, patch_name, description, release_date, download_link, patch_by_developer,
              current_user_id, patch_id_from_url))
         log_audit_action(
             action_type='UPDATE_PATCH_URL',
@@ -1992,8 +2097,24 @@ def admin_edit_patch_url(patch_id_from_url): # Renamed to avoid conflict with va
             details=log_details
         )
         db.commit()
-        updated_item = db.execute("SELECT p.*, s.name as software_name, v.version_number FROM patches p JOIN versions v ON p.version_id = v.id JOIN software s ON v.software_id = s.id WHERE p.id = ?", (patch_id_from_url,)).fetchone()
-        return jsonify(dict(updated_item)), 200
+        # Fetch back with JOINs for consistent response, including created_by and updated_by usernames
+        updated_item_row = db.execute("""
+            SELECT p.*, s.name as software_name, v.version_number, 
+                   cr_u.username as uploaded_by_username, upd_u.username as updated_by_username
+            FROM patches p
+            JOIN versions v ON p.version_id = v.id
+            JOIN software s ON v.software_id = s.id
+            LEFT JOIN users cr_u ON p.created_by_user_id = cr_u.id
+            LEFT JOIN users upd_u ON p.updated_by_user_id = upd_u.id
+            WHERE p.id = ?""", (patch_id_from_url,)).fetchone()
+        
+        if updated_item_row:
+            return jsonify(dict(updated_item_row)), 200
+        else:
+            # This case should ideally not be reached if the update was successful.
+            app.logger.error(f"Failed to fetch patch with ID {patch_id_from_url} after edit_url.")
+            return jsonify(msg="Patch updated but failed to retrieve full details."), 500
+            
     except sqlite3.IntegrityError as e: db.rollback(); return jsonify(msg=f"DB error: {e}"), 409
     except Exception as e: db.rollback(); return jsonify(msg=f"Server error: {e}"), 500
 
@@ -2014,6 +2135,9 @@ def admin_edit_patch_file(patch_id):
     patch_name = request.form.get('patch_name', patch['patch_name'])
     description = request.form.get('description', patch['description'])
     release_date = request.form.get('release_date', patch['release_date'])
+    # Retrieve patch_by_developer from form, defaulting to existing if not provided in form
+    patch_by_developer = request.form.get('patch_by_developer', patch['patch_by_developer'])
+
 
     # Determine final version ID using the improved logic from second file
     final_version_id = patch['version_id']  # Default to current version
@@ -2080,10 +2204,11 @@ def admin_edit_patch_file(patch_id):
     try:
         action_type_log = 'UPDATE_PATCH_METADATA'
         log_details = {
-            'updated_fields': ['version_id', 'patch_name', 'description', 'release_date'],
+            'updated_fields': ['version_id', 'patch_name', 'description', 'release_date', 'patch_by_developer'],
             'version_id': final_version_id,
             'patch_name': patch_name,
-            'release_date': release_date
+            'release_date': release_date,
+            'patch_by_developer': patch_by_developer
         }
         if new_physical_file and new_physical_file.filename != '':
             action_type_log = 'UPDATE_PATCH_FILE'
@@ -2094,11 +2219,11 @@ def admin_edit_patch_file(patch_id):
 
         db.execute("""
             UPDATE patches SET version_id = ?, patch_name = ?, description = ?, release_date = ?,
-            download_link = ?, is_external_link = FALSE, stored_filename = ?,
-            original_filename_ref = ?, file_size = ?, file_type = ?, updated_by_user_id = ?
+            download_link = ?, patch_by_developer = ?, is_external_link = FALSE, stored_filename = ?,
+            original_filename_ref = ?, file_size = ?, file_type = ?, updated_by_user_id = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?""",
             (final_version_id, patch_name, description, release_date, new_download_link,
-             new_stored_filename, new_original_filename, new_file_size, new_file_type,
+             patch_by_developer, new_stored_filename, new_original_filename, new_file_size, new_file_type,
              current_user_id, patch_id))
         log_audit_action(
             action_type=action_type_log,
@@ -2107,15 +2232,26 @@ def admin_edit_patch_file(patch_id):
             details=log_details
         )
         db.commit()
-        updated_item = db.execute(
-            """SELECT p.*, s.name as software_name, v.version_number
+        # Fetch back with JOINs for consistent response, including created_by and updated_by usernames
+        updated_item_row = db.execute(
+            """SELECT p.*, s.name as software_name, v.version_number, 
+                      cr_u.username as uploaded_by_username, upd_u.username as updated_by_username
                FROM patches p 
                JOIN versions v ON p.version_id = v.id 
-               JOIN software s ON v.software_id = s.id 
+               JOIN software s ON v.software_id = s.id
+               LEFT JOIN users cr_u ON p.created_by_user_id = cr_u.id
+               LEFT JOIN users upd_u ON p.updated_by_user_id = upd_u.id
                WHERE p.id = ?""", 
             (patch_id,)
         ).fetchone()
-        return jsonify(dict(updated_item)), 200
+
+        if updated_item_row:
+            return jsonify(dict(updated_item_row)), 200
+        else:
+            # This case should ideally not be reached if the update was successful.
+            app.logger.error(f"Failed to fetch patch with ID {patch_id} after edit_file.")
+            return jsonify(msg="Patch updated but failed to retrieve full details."), 500
+            
     except sqlite3.IntegrityError as e:
         db.rollback()
         if file_save_path and os.path.exists(file_save_path):
@@ -2310,8 +2446,18 @@ def admin_edit_link_url(link_id_from_url):
             FROM links l
             JOIN software s ON l.software_id = s.id
             JOIN versions v ON l.version_id = v.id
+            LEFT JOIN users cr_u ON l.created_by_user_id = cr_u.id
+            LEFT JOIN users upd_u ON l.updated_by_user_id = upd_u.id
             WHERE l.id = ?""", (link_id_from_url,)).fetchone()
-        return jsonify(dict(updated_item_dict) if updated_item_dict else None), 200
+        
+        if updated_item_dict:
+            response_data = dict(updated_item_dict)
+            # Ensure uploaded_by_username (creator) and updated_by_username (editor) are distinct if needed
+            # The query aliases cr_u.username to uploaded_by_username and upd_u.username to updated_by_username
+            return jsonify(response_data), 200
+        else:
+            app.logger.error(f"Failed to fetch link with ID {link_id_from_url} after edit_url.")
+            return jsonify(msg="Link updated but failed to retrieve full details."), 500
     except sqlite3.IntegrityError as e:
         db.rollback()
         return jsonify(msg=f"Database integrity error: {e}"), 409
@@ -2456,8 +2602,15 @@ def admin_edit_link_file(link_id_from_url):
             FROM links l
             JOIN software s ON l.software_id = s.id
             JOIN versions v ON l.version_id = v.id
+            LEFT JOIN users cr_u ON l.created_by_user_id = cr_u.id
+            LEFT JOIN users upd_u ON l.updated_by_user_id = upd_u.id
             WHERE l.id = ?""", (link_id_from_url,)).fetchone()
-        return jsonify(dict(updated_item_dict) if updated_item_dict else None), 200
+
+        if updated_item_dict:
+            return jsonify(dict(updated_item_dict)), 200
+        else:
+            app.logger.error(f"Failed to fetch link with ID {link_id_from_url} after edit_file.")
+            return jsonify(msg="Link updated but failed to retrieve full details."), 500
     except sqlite3.IntegrityError as e:
         db.rollback()
         if file_actually_saved_path and os.path.exists(file_actually_saved_path): # Cleanup newly saved file on DB error
@@ -2524,7 +2677,7 @@ def admin_edit_misc_category(category_id):
         
         db.execute("""
             UPDATE misc_categories
-            SET name = ?, description = ?, updated_by_user_id = ?
+            SET name = ?, description = ?, updated_by_user_id = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         """, (name, description, current_user_id, category_id))
         log_audit_action(
@@ -2540,8 +2693,18 @@ def admin_edit_misc_category(category_id):
             }
         )
         db.commit()
-        updated_category = db.execute("SELECT * FROM misc_categories WHERE id = ?", (category_id,)).fetchone()
-        return jsonify(dict(updated_category)), 200
+        updated_category_row = db.execute("""
+            SELECT mc.*, cr_u.username as created_by_username, upd_u.username as updated_by_username
+            FROM misc_categories mc
+            LEFT JOIN users cr_u ON mc.created_by_user_id = cr_u.id
+            LEFT JOIN users upd_u ON mc.updated_by_user_id = upd_u.id
+            WHERE mc.id = ?
+        """, (category_id,)).fetchone()
+        if updated_category_row:
+            return jsonify(dict(updated_category_row)), 200
+        else:
+            app.logger.error(f"Failed to fetch misc_category with ID {category_id} after edit.")
+            return jsonify(msg="Misc category updated but failed to retrieve full details."), 500
     except sqlite3.IntegrityError as e: # Likely unique constraint on name
         db.rollback()
         return jsonify(msg=f"Database error: Category name '{name}' might already exist. {e}"), 409
@@ -2684,7 +2847,7 @@ def admin_edit_misc_file(file_id):
             UPDATE misc_files
             SET misc_category_id = ?, user_provided_title = ?, user_provided_description = ?,
                 original_filename = ?, stored_filename = ?, file_path = ?,
-                file_type = ?, file_size = ?, updated_by_user_id = ?
+                file_type = ?, file_size = ?, updated_by_user_id = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         """, (misc_category_id, user_provided_title, user_provided_description,
               new_original_filename, new_stored_filename, new_file_path,
@@ -2699,13 +2862,23 @@ def admin_edit_misc_file(file_id):
             )
         db.commit()
 
-        updated_file = db.execute("""
-            SELECT mf.*, mc.name as category_name
+        # Fetch back with JOINs for consistent response, including created_by (uploaded_by_username)
+        updated_file_row = db.execute("""
+            SELECT mf.*, mc.name as category_name, 
+                   cr_u.username as uploaded_by_username, upd_u.username as updated_by_username
             FROM misc_files mf
             JOIN misc_categories mc ON mf.misc_category_id = mc.id
+            LEFT JOIN users cr_u ON mf.created_by_user_id = cr_u.id
+            LEFT JOIN users upd_u ON mf.updated_by_user_id = upd_u.id
             WHERE mf.id = ?
         """, (file_id,)).fetchone()
-        return jsonify(dict(updated_file)), 200
+        
+        if updated_file_row:
+            return jsonify(dict(updated_file_row)), 200
+        else:
+            app.logger.error(f"Failed to fetch misc_file with ID {file_id} after edit.")
+            return jsonify(msg="Misc file updated but failed to retrieve full details."),500
+
     except sqlite3.IntegrityError as e: # e.g., unique constraint on (misc_category_id, user_provided_title) or (misc_category_id, original_filename)
         db.rollback()
         if current_file_save_path and os.path.exists(current_file_save_path): 
@@ -2738,7 +2911,7 @@ def admin_delete_misc_file(file_id):
             target_table='misc_files',
             target_id=file_id,
             details={
-                'deleted_title': misc_file_item['user_provided_title'], 
+                'deleted_title': misc_file_item.get('user_provided_title'), 
                 'stored_filename': misc_file_item['stored_filename'], 
                 'category_id': misc_file_item['misc_category_id']
             }
@@ -2832,11 +3005,12 @@ def admin_add_link_with_url():
         required_fields=['software_id', 'version_id', 'title', 'url'],
         sql_insert_query="""INSERT INTO links (software_id, version_id, title, url, description,
                                            is_external_link, created_by_user_id, updated_by_user_id)
-                              VALUES (?, ?, ?, ?, ?, TRUE, ?, ?)""",
+                              VALUES (?, ?, ?, ?, ?, TRUE, ?, ?)""", # 8 placeholders
         sql_params_tuple=(
             'software_id', 'version_id', 'title', 'url', 'description',
-            'created_by_user_id', 'updated_by_user_id'
-        )
+            # is_external_link is hardcoded TRUE
+            'created_by_user_id', 'updated_by_user_id' # Handled by helper
+        ) # Tuple has 7 elements, matching non-hardcoded placeholders
     )
     if response[1] == 201: # Check if creation was successful
         new_link_data = response[0].get_json()
@@ -2962,6 +3136,8 @@ def admin_list_versions():
             'software_name': 's.name',
             'version_number': 'v.version_number',
             'release_date': 'v.release_date',
+        'patch_by_developer': 'p.patch_by_developer',
+        'uploaded_by_username': 'u.username',
             'created_at': 'v.created_at',
             'updated_at': 'v.updated_at'
         }
@@ -3107,7 +3283,7 @@ def admin_update_version(version_id):
             UPDATE versions
             SET software_id = ?, version_number = ?, release_date = ?, 
                 main_download_link = ?, changelog = ?, known_bugs = ?,
-                updated_by_user_id = ?
+                updated_by_user_id = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         """, (software_id, version_number, release_date, main_download_link, changelog, known_bugs,
               current_user_id, version_id))
@@ -3121,11 +3297,14 @@ def admin_update_version(version_id):
             )
         db.commit()
 
-        # Fetch the updated version with software_name
+        # Fetch the updated version with software_name, created_by_username, and updated_by_username
         updated_version_row = db.execute("""
-            SELECT v.*, s.name as software_name
+            SELECT v.*, s.name as software_name, 
+                   cr_u.username as created_by_username, upd_u.username as updated_by_username
             FROM versions v
             JOIN software s ON v.software_id = s.id
+            LEFT JOIN users cr_u ON v.created_by_user_id = cr_u.id
+            LEFT JOIN users upd_u ON v.updated_by_user_id = upd_u.id
             WHERE v.id = ?
         """, (version_id,)).fetchone()
 

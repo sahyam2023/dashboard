@@ -247,7 +247,10 @@ const LinksView: React.FC = () => {
         </a>
       ) 
     },
-    { key: 'created_at', header: 'Created At', sortable: true, render: (link) => link.created_at ? new Date(link.created_at).toLocaleDateString() : '-' },
+    { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: (link) => link.uploaded_by_username || 'N/A' },
+    { key: 'updated_by_username', header: 'Updated By', sortable: false, render: (link) => link.updated_by_username || 'N/A' },
+    { key: 'created_at', header: 'Created At', sortable: true, render: (link) => link.created_at ? new Date(link.created_at).toLocaleDateString('en-CA') : '-' },
+    { key: 'updated_at', header: 'Updated At', sortable: true, render: (link) => link.updated_at ? new Date(link.updated_at).toLocaleDateString('en-CA') : '-' },
     ...(isAuthenticated && (role === 'admin' || role === 'super_admin') ? [{
       key: 'actions' as keyof LinkType | 'actions',
       header: 'Actions',

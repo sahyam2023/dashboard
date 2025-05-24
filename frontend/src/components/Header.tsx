@@ -18,18 +18,18 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSearch(searchValue);
-    // Optional: Navigate to search results page if search term is not empty
-    // if (searchValue.trim()) {
-    //   navigate(`/search?q=${encodeURIComponent(searchValue.trim())}`);
-    // }
+    // REMOVE: onSearch(searchValue); 
+    if (searchValue.trim()) {
+      navigate(`/search?q=${encodeURIComponent(searchValue.trim())}`);
+    }
   };
 
   const clearSearch = () => {
     setSearchValue('');
-    onSearch('');
+    // REMOVE: onSearch('');
     // Optional: Navigate away from search results if currently there
-    // if (location.pathname === '/search') navigate('/documents');
+    // This depends on desired UX, for now, just clear the input.
+    // if (location.pathname === '/search') navigate('/documents'); 
   };
 
   const handleLogout = () => {

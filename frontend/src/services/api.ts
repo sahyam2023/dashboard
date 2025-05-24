@@ -181,6 +181,27 @@ export interface DashboardStats {
 }
 // --- End of Interface for Dashboard Statistics ---
 
+// --- Interfaces for Audit Log ---
+export interface AuditLogEntry {
+  id: number;
+  user_id: number | null;
+  username: string | null;
+  action_type: string;
+  target_table: string | null;
+  target_id: number | null;
+  details: any; // Can be JSON string or object
+  timestamp: string; // ISO date string
+}
+
+export interface AuditLogResponse {
+  logs: AuditLogEntry[];
+  page: number;
+  per_page: number;
+  total_logs: number;
+  total_pages: number;
+}
+// --- End of Interfaces for Audit Log ---
+
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
 // Helper to construct Authorization header
@@ -232,6 +253,21 @@ export async function fetchSoftware(): Promise<Software[]> {
     return await response.json();
   } catch (error) {
     console.error('Error fetching software:', error);
+    throw error;
+  }
+}
+
+// --- Audit Log Fetch Function ---
+export async function fetchAuditLogEntries(params: URLSearchParams): Promise<AuditLogResponse> {
+  try {
+    const url = `${API_BASE_URL}/api/admin/audit-logs?${params.toString()}`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { ...getAuthHeader() },
+    });
+    return handleApiError(response, 'Failed to fetch audit logs');
+  } catch (error) {
+    console.error('Error fetching audit logs:', error);
     throw error;
   }
 }

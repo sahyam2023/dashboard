@@ -1,25 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { FiChevronDown, FiChevronUp, FiFilter, FiLoader, FiAlertTriangle } from 'react-icons/fi'; // Using react-icons
+import { fetchAuditLogEntries, AuditLogResponse, AuditLogEntry } from '../../../services/api';
 
 // --- TypeScript Interfaces ---
-interface AuditLogEntry {
-  id: number;
-  user_id: number | null;
-  username: string | null;
-  action_type: string;
-  target_table: string | null;
-  target_id: number | null;
-  details: string | null; // JSON string or simple string
-  timestamp: string;
-}
-
-interface AuditLogResponse {
-  logs: AuditLogEntry[];
-  page: number;
-  per_page: number;
-  total_logs: number;
-  total_pages: number;
-}
+// AuditLogEntry and AuditLogResponse are now imported from api.ts
 
 interface Filters {
   user_id: string;
@@ -74,16 +58,7 @@ const AuditLogViewer: React.FC = () => {
     if (appliedFilters.date_to) params.append('date_to', appliedFilters.date_to);
 
     try {
-      const response = await fetch(`/api/admin/audit-logs?${params.toString()}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`, // Assuming token is in localStorage
-        },
-      });
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.msg || `Error ${response.status}`);
-      }
-      const data: AuditLogResponse = await response.json();
+      const data: AuditLogResponse = await fetchAuditLogEntries(params);
       setLogs(data.logs);
       setCurrentPage(data.page);
       setPerPage(data.per_page);

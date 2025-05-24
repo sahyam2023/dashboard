@@ -310,7 +310,7 @@ const AdminDashboardPage: React.FC = () => {
                 <ListItemButton component={RouterLink} to="/admin/audit-logs">
                     <ListItemText primary="View Audit Logs" />
                 </ListItemButton>
-                <ListItemButton component={RouterLink} to="/admin/users">
+                <ListItemButton component={RouterLink} to="/superadmin">
                     <ListItemText primary="Manage Users (Super Admin)" />
                 </ListItemButton>
                 {/* Add more links as needed */}

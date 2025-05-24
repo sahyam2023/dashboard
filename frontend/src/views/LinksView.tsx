@@ -242,7 +242,7 @@ const LinksView: React.FC = () => {
       link.title.toLowerCase().includes(lowerSearchTerm) ||
       (link.description || '').toLowerCase().includes(lowerSearchTerm) ||
       (link.software_name || '').toLowerCase().includes(lowerSearchTerm) ||
-      (link.version_name || '').toLowerCase().includes(lowerSearchTerm)
+      (link.version_number || '').toLowerCase().includes(lowerSearchTerm)
     );
   }, [links, searchTerm]);
 

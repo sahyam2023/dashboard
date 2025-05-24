@@ -94,12 +94,29 @@ const AdminDashboardPage: React.FC = () => {
     isResizable?: boolean;
   }
 
+  // Props that will be passed to each widget component
+  interface WidgetComponentProps {
+    dashboardStats: DashboardStats | null;
+    systemHealth: SystemHealth | null;
+    loadingStats: boolean;
+    loadingHealth: boolean;
+    formatBytes: (bytes?: number | null, decimals?: number) => string;
+    formatDate: (dateString: string) => string;
+    chartBaseOptions: any; 
+    documentsPerSoftwareChartData: any;
+    popularDownloadsChartData: any;
+    dailyLoginData: any;
+    dailyUploadData: any;
+    dailyDownloadData: any;
+    renderHealthStatsList: (healthData: any, dataType: 'missing' | 'stale') => React.ReactNode;
+  }
+
   interface WidgetConfig {
     id: string; // Unique key, same as LayoutItem.i
     name: string; // Display name for UI controls later
     layout: LayoutItem;
     visible: boolean;
-    component: React.ReactNode; // To store the actual widget component/JSX
+    component: (props: WidgetComponentProps) => React.ReactNode; // Widget is now a functional component
   }
   
   // Initial layout definition for the 'lg' breakpoint (12 columns)
@@ -314,91 +331,91 @@ const AdminDashboardPage: React.FC = () => {
   // Define WIDGET_DEFINITIONS and initialize widgetConfigs state
   // This needs to be within the component scope to access props and state like dashboardStats, loadingStats etc.
   
-  const WIDGET_DEFINITIONS_ARRAY: Array<{ 
-    id: string; 
-    name: string; 
-    component: React.ReactNode; 
-    defaultLayout: LayoutItem; 
+  const WIDGET_DEFINITIONS_ARRAY: Array<{
+    id: string;
+    name: string;
+    component: (props: WidgetComponentProps) => React.ReactNode; // Updated component type
+    defaultLayout: LayoutItem;
   }> = React.useMemo(() => [ // Use useMemo to avoid re-creating on every render
-    { 
-      id: WIDGET_KEYS.SYSTEM_HEALTH, 
-      name: "System Health", 
-      defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.SYSTEM_HEALTH)!, 
-      component: (
+    {
+      id: WIDGET_KEYS.SYSTEM_HEALTH,
+      name: "System Health",
+      defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.SYSTEM_HEALTH)!,
+      component: (props: WidgetComponentProps) => (
         <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%', minHeight: '100%' }}>
           <Typography component="h2" variant="h6" color="primary" gutterBottom>System Health</Typography>
-          {loadingHealth ? <CircularProgress size={24} /> : systemHealth ? (
+          {props.loadingHealth ? <CircularProgress size={24} /> : props.systemHealth ? (
             <>
-              <Typography component="p" variant="body1" sx={{ mb: 1 }}>API Status: <Typography component="span" sx={{ fontWeight: 'bold', color: systemHealth.api_status === 'OK' ? 'success.main' : 'error.main' }}>{` ${systemHealth.api_status}`}</Typography></Typography>
-              <Typography component="p" variant="body1">Database Connection: <Typography component="span" sx={{ fontWeight: 'bold', color: systemHealth.db_connection === 'OK' ? 'success.main' : 'error.main' }}>{` ${systemHealth.db_connection}`}</Typography></Typography>
+              <Typography component="p" variant="body1" sx={{ mb: 1 }}>API Status: <Typography component="span" sx={{ fontWeight: 'bold', color: props.systemHealth.api_status === 'OK' ? 'success.main' : 'error.main' }}>{` ${props.systemHealth.api_status}`}</Typography></Typography>
+              <Typography component="p" variant="body1">Database Connection: <Typography component="span" sx={{ fontWeight: 'bold', color: props.systemHealth.db_connection === 'OK' ? 'success.main' : 'error.main' }}>{` ${props.systemHealth.db_connection}`}</Typography></Typography>
             </>
           ) : <Typography component="p" variant="body1">System health data unavailable.</Typography>}
         </Paper>
-      ) 
+      )
     },
-    { 
-      id: WIDGET_KEYS.TOTAL_STORAGE, 
-      name: "Total Storage", 
-      defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.TOTAL_STORAGE)!, 
-      component: (
+    {
+      id: WIDGET_KEYS.TOTAL_STORAGE,
+      name: "Total Storage",
+      defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.TOTAL_STORAGE)!,
+      component: (props: WidgetComponentProps) => (
         <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'center' }}>
           <Typography component="h2" variant="h6" color="primary" gutterBottom>Total Storage Utilized</Typography>
-          {loadingStats ? <CircularProgress size={24} /> : <Typography component="p" variant="h4">{formatBytes(dashboardStats?.total_storage_utilized_bytes)}</Typography>}
+          {props.loadingStats ? <CircularProgress size={24} /> : <Typography component="p" variant="h4">{props.formatBytes(props.dashboardStats?.total_storage_utilized_bytes)}</Typography>}
         </Paper>
       )
     },
-    { 
-      id: WIDGET_KEYS.TOTAL_USERS, 
-      name: "Total Users", 
-      defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.TOTAL_USERS)!, 
-      component: (
+    {
+      id: WIDGET_KEYS.TOTAL_USERS,
+      name: "Total Users",
+      defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.TOTAL_USERS)!,
+      component: (props: WidgetComponentProps) => (
         <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'center' }}>
           <Typography component="h2" variant="h6" color="primary" gutterBottom>Total Users</Typography>
-          {loadingStats ? <CircularProgress size={24} /> : <Typography component="p" variant="h4">{dashboardStats?.total_users ?? 'N/A'}</Typography>}
-        </Paper>
-      ) 
-    },
-    { 
-      id: WIDGET_KEYS.TOTAL_SOFTWARE, 
-      name: "Total Software", 
-      defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.TOTAL_SOFTWARE)!, 
-      component: (
-        <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'center' }}>
-          <Typography component="h2" variant="h6" color="primary" gutterBottom>Total Software Titles</Typography>
-          {loadingStats ? <CircularProgress size={24} /> : <Typography component="p" variant="h4">{dashboardStats?.total_software_titles ?? 'N/A'}</Typography>}
+          {props.loadingStats ? <CircularProgress size={24} /> : <Typography component="p" variant="h4">{props.dashboardStats?.total_users ?? 'N/A'}</Typography>}
         </Paper>
       )
     },
-    { 
-      id: WIDGET_KEYS.DOWNLOAD_TRENDS, 
-      name: "Download Trends", 
-      defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.DOWNLOAD_TRENDS)!, 
-      component: (
+    {
+      id: WIDGET_KEYS.TOTAL_SOFTWARE,
+      name: "Total Software",
+      defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.TOTAL_SOFTWARE)!,
+      component: (props: WidgetComponentProps) => (
+        <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'center' }}>
+          <Typography component="h2" variant="h6" color="primary" gutterBottom>Total Software Titles</Typography>
+          {props.loadingStats ? <CircularProgress size={24} /> : <Typography component="p" variant="h4">{props.dashboardStats?.total_software_titles ?? 'N/A'}</Typography>}
+        </Paper>
+      )
+    },
+    {
+      id: WIDGET_KEYS.DOWNLOAD_TRENDS,
+      name: "Download Trends",
+      defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.DOWNLOAD_TRENDS)!,
+      component: (props: WidgetComponentProps) => (
         <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
           <Typography variant="h6" gutterBottom>Daily Downloads (Last 7 Days)</Typography>
-          {loadingStats ? <CircularProgress /> : dashboardStats?.download_trends?.daily?.length ? (<Box sx={{ flexGrow: 1, height: 'calc(100% - 48px)'}}><Line data={dailyDownloadData} options={{...chartBaseOptions, plugins: {...chartBaseOptions.plugins, title: {...chartBaseOptions.plugins.title, display: true, text: 'Daily Downloads (Last 7 Days)'}}}} /></Box>) : (<Typography sx={{textAlign: 'center', mt: 4}}>No download trend data available.</Typography>)}
+          {props.loadingStats ? <CircularProgress /> : props.dashboardStats?.download_trends?.daily?.length ? (<Box sx={{ flexGrow: 1, height: 'calc(100% - 48px)'}}><Line data={props.dailyDownloadData} options={{...props.chartBaseOptions, plugins: {...props.chartBaseOptions.plugins, title: {...props.chartBaseOptions.plugins.title, display: true, text: 'Daily Downloads (Last 7 Days)'}}}} /></Box>) : (<Typography sx={{textAlign: 'center', mt: 4}}>No download trend data available.</Typography>)}
         </Paper>
-      ) 
+      )
     },
-    { 
-      id: WIDGET_KEYS.LOGIN_TRENDS, 
-      name: "Login Trends", 
-      defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.LOGIN_TRENDS)!, 
-      component: (
+    {
+      id: WIDGET_KEYS.LOGIN_TRENDS,
+      name: "Login Trends",
+      defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.LOGIN_TRENDS)!,
+      component: (props: WidgetComponentProps) => (
         <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
           <Typography variant="h6" gutterBottom>Daily Logins (Last 7 Days)</Typography>
-          {loadingStats ? <CircularProgress /> : dashboardStats?.user_activity_trends?.logins?.daily?.length ? (<Box sx={{ flexGrow: 1, height: 'calc(100% - 48px)'}}><Line data={dailyLoginData} options={{...chartBaseOptions, plugins: {...chartBaseOptions.plugins, title: {...chartBaseOptions.plugins.title, display: true, text: 'Daily Logins (Last 7 Days)'}}}} /></Box>) : (<Typography sx={{textAlign: 'center', mt: 4}}>No login trend data available.</Typography>)}
+          {props.loadingStats ? <CircularProgress /> : props.dashboardStats?.user_activity_trends?.logins?.daily?.length ? (<Box sx={{ flexGrow: 1, height: 'calc(100% - 48px)'}}><Line data={props.dailyLoginData} options={{...props.chartBaseOptions, plugins: {...props.chartBaseOptions.plugins, title: {...props.chartBaseOptions.plugins.title, display: true, text: 'Daily Logins (Last 7 Days)'}}}} /></Box>) : (<Typography sx={{textAlign: 'center', mt: 4}}>No login trend data available.</Typography>)}
         </Paper>
-      ) 
+      )
     },
-    { 
-      id: WIDGET_KEYS.UPLOAD_TRENDS, 
-      name: "Upload Trends", 
-      defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.UPLOAD_TRENDS)!, 
-      component: (
+    {
+      id: WIDGET_KEYS.UPLOAD_TRENDS,
+      name: "Upload Trends",
+      defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.UPLOAD_TRENDS)!,
+      component: (props: WidgetComponentProps) => (
         <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
           <Typography variant="h6" gutterBottom>Daily Uploads (Last 7 Days)</Typography>
-          {loadingStats ? <CircularProgress /> : dashboardStats?.user_activity_trends?.uploads?.daily?.length ? (<Box sx={{ flexGrow: 1, height: 'calc(100% - 48px)'}}><Line data={dailyUploadData} options={{...chartBaseOptions, plugins: {...chartBaseOptions.plugins, title: {...chartBaseOptions.plugins.title, display: true, text: 'Daily Uploads (Last 7 Days)'}}}} /></Box>) : (<Typography sx={{textAlign: 'center', mt: 4}}>No upload trend data available.</Typography>)}
+          {props.loadingStats ? <CircularProgress /> : props.dashboardStats?.user_activity_trends?.uploads?.daily?.length ? (<Box sx={{ flexGrow: 1, height: 'calc(100% - 48px)'}}><Line data={props.dailyUploadData} options={{...props.chartBaseOptions, plugins: {...props.chartBaseOptions.plugins, title: {...props.chartBaseOptions.plugins.title, display: true, text: 'Daily Uploads (Last 7 Days)'}}}} /></Box>) : (<Typography sx={{textAlign: 'center', mt: 4}}>No upload trend data available.</Typography>)}
         </Paper>
       )
     },
@@ -406,10 +423,10 @@ const AdminDashboardPage: React.FC = () => {
       id: WIDGET_KEYS.RECENT_ACTIVITIES,
       name: "Recent Activities",
       defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.RECENT_ACTIVITIES)!,
-      component: (
+      component: (props: WidgetComponentProps) => (
         <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
           <Typography variant="h6" gutterBottom>Recent Activities</Typography>
-          {loadingStats ? <CircularProgress /> : dashboardStats?.recent_activities?.length ? (<List dense sx={{maxHeight: 'calc(100% - 48px)', overflow: 'auto'}}>{dashboardStats.recent_activities.map((activity, index) => (<ListItem key={index} divider><ListItemText primary={`${activity.action_type} by ${activity.username || 'System'}`} secondary={`${formatDate(activity.timestamp)} - Details: ${typeof activity.details === 'object' ? JSON.stringify(activity.details) : activity.details}`} /></ListItem>))}</List>) : (<Typography>No recent activities.</Typography>)}
+          {props.loadingStats ? <CircularProgress /> : props.dashboardStats?.recent_activities?.length ? (<List dense sx={{maxHeight: 'calc(100% - 48px)', overflow: 'auto'}}>{props.dashboardStats.recent_activities.map((activity, index) => (<ListItem key={index} divider><ListItemText primary={`${activity.action_type} by ${activity.username || 'System'}`} secondary={`${props.formatDate(activity.timestamp)} - Details: ${typeof activity.details === 'object' ? JSON.stringify(activity.details) : activity.details}`} /></ListItem>))}</List>) : (<Typography>No recent activities.</Typography>)}
         </Paper>
       )
     },
@@ -417,10 +434,10 @@ const AdminDashboardPage: React.FC = () => {
       id: WIDGET_KEYS.RECENT_ADDITIONS,
       name: "Recent Additions",
       defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.RECENT_ADDITIONS)!,
-      component: (
+      component: (props: WidgetComponentProps) => (
         <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
           <Typography variant="h6" gutterBottom>Recent Additions (Top 5)</Typography>
-          {loadingStats ? <CircularProgress /> : dashboardStats?.recent_additions?.length ? (<List dense sx={{maxHeight: 'calc(100% - 48px)', overflow: 'auto'}}>{dashboardStats.recent_additions.map((item: RecentAdditionItem, index: number) => (<ListItem key={item.id || index} divider><ListItemText primary={<Link component={RouterLink} to={`/${item.type.toLowerCase().replace(' ', '')}s`}>{`${item.name} (${item.type})`}</Link>} secondary={`Added on: ${formatDate(item.created_at)}`} /></ListItem>))}</List>) : (<Typography>No recent additions.</Typography>)}
+          {props.loadingStats ? <CircularProgress /> : props.dashboardStats?.recent_additions?.length ? (<List dense sx={{maxHeight: 'calc(100% - 48px)', overflow: 'auto'}}>{props.dashboardStats.recent_additions.map((item: RecentAdditionItem, index: number) => (<ListItem key={item.id || index} divider><ListItemText primary={<Link component={RouterLink} to={`/${item.type.toLowerCase().replace(' ', '')}s`}>{`${item.name} (${item.type})`}</Link>} secondary={`Added on: ${props.formatDate(item.created_at)}`} /></ListItem>))}</List>) : (<Typography>No recent additions.</Typography>)}
         </Paper>
       )
     },
@@ -428,10 +445,10 @@ const AdminDashboardPage: React.FC = () => {
       id: WIDGET_KEYS.DOCS_PER_SOFTWARE,
       name: "Documents per Software",
       defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.DOCS_PER_SOFTWARE)!,
-      component: (
+      component: (props: WidgetComponentProps) => (
         <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}> 
           <Typography variant="h6" gutterBottom>Documents per Software</Typography>
-          {loadingStats ? <CircularProgress /> : dashboardStats?.documents_per_software?.length ? (<Box sx={{ flexGrow: 1, height: 'calc(100% - 48px)'}}><Bar data={documentsPerSoftwareChartData} options={{...chartBaseOptions, plugins: {...chartBaseOptions.plugins, title: {...chartBaseOptions.plugins.title, display: true, text: 'Documents per Software'}}}} /></Box>) : (<Typography sx={{textAlign: 'center', mt: 4}}>No document data available for chart.</Typography>)}
+          {props.loadingStats ? <CircularProgress /> : props.dashboardStats?.documents_per_software?.length ? (<Box sx={{ flexGrow: 1, height: 'calc(100% - 48px)'}}><Bar data={props.documentsPerSoftwareChartData} options={{...props.chartBaseOptions, plugins: {...props.chartBaseOptions.plugins, title: {...props.chartBaseOptions.plugins.title, display: true, text: 'Documents per Software'}}}} /></Box>) : (<Typography sx={{textAlign: 'center', mt: 4}}>No document data available for chart.</Typography>)}
         </Paper>
       )
     },
@@ -439,10 +456,10 @@ const AdminDashboardPage: React.FC = () => {
       id: WIDGET_KEYS.POPULAR_DOWNLOADS,
       name: "Popular Downloads",
       defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.POPULAR_DOWNLOADS)!,
-      component: (
+      component: (props: WidgetComponentProps) => (
         <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}> 
           <Typography variant="h6" gutterBottom>Popular Downloads (Top 5)</Typography>
-          {loadingStats ? <CircularProgress /> : dashboardStats?.popular_downloads?.length ? (<Box sx={{ flexGrow: 1, height: 'calc(100% - 48px)'}}><Pie data={popularDownloadsChartData} options={{...chartBaseOptions, plugins: {...chartBaseOptions.plugins, title: {...chartBaseOptions.plugins.title, display: true, text: 'Popular Downloads'}}}} /></Box>) : (<Typography sx={{textAlign: 'center', mt: 4}}>No download data available for chart.</Typography>)}
+          {props.loadingStats ? <CircularProgress /> : props.dashboardStats?.popular_downloads?.length ? (<Box sx={{ flexGrow: 1, height: 'calc(100% - 48px)'}}><Pie data={props.popularDownloadsChartData} options={{...props.chartBaseOptions, plugins: {...props.chartBaseOptions.plugins, title: {...props.chartBaseOptions.plugins.title, display: true, text: 'Popular Downloads'}}}} /></Box>) : (<Typography sx={{textAlign: 'center', mt: 4}}>No download data available for chart.</Typography>)}
         </Paper>
       )
     },
@@ -450,10 +467,10 @@ const AdminDashboardPage: React.FC = () => {
       id: WIDGET_KEYS.MISSING_DESCRIPTIONS,
       name: "Missing Descriptions",
       defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.MISSING_DESCRIPTIONS)!,
-      component: (
+      component: (props: WidgetComponentProps) => (
         <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
           <Typography variant="h6" gutterBottom>Content: Missing Descriptions</Typography>
-          {renderHealthStatsList(dashboardStats?.content_health?.missing_descriptions, 'missing')}
+          {props.renderHealthStatsList(props.dashboardStats?.content_health?.missing_descriptions, 'missing')}
         </Paper>
       )
     },
@@ -461,10 +478,10 @@ const AdminDashboardPage: React.FC = () => {
       id: WIDGET_KEYS.STALE_CONTENT,
       name: "Stale Content",
       defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.STALE_CONTENT)!,
-      component: (
+      component: (props: WidgetComponentProps) => (
         <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
           <Typography variant="h6" gutterBottom>Content: Stale Items (Older than 1 year)</Typography>
-          {renderHealthStatsList(dashboardStats?.content_health?.stale_content, 'stale')}
+          {props.renderHealthStatsList(props.dashboardStats?.content_health?.stale_content, 'stale')}
         </Paper>
       )
     },
@@ -472,7 +489,7 @@ const AdminDashboardPage: React.FC = () => {
       id: WIDGET_KEYS.QUICK_LINKS,
       name: "Quick Links",
       defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.QUICK_LINKS)!,
-      component: (
+      component: (props: WidgetComponentProps) => (
         <Paper sx={{ p: 2, height: '100%' }}>
           <Typography variant="h6" gutterBottom>Quick Links</Typography>
           <List dense>
@@ -483,8 +500,8 @@ const AdminDashboardPage: React.FC = () => {
         </Paper>
       )
     },
-  // eslint-disable-next-line react-hooks/exhaustive-deps 
-  ], [dashboardStats, systemHealth, loadingHealth, loadingStats]); // Dependencies for useMemo
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], []); // Dependencies for useMemo
 
   const [widgetConfigs, setWidgetConfigs] = useState<WidgetConfig[]>(() => {
     const defaultsFromDefs = WIDGET_DEFINITIONS_ARRAY.map(def => ({
@@ -617,11 +634,29 @@ const AdminDashboardPage: React.FC = () => {
         useCSSTransforms={true}
         onLayoutChange={handleLayoutChange}
       >
-        {widgetConfigs.filter(w => w.visible).map(widget => (
-          <div key={widget.id}>
-            {widget.component}
-          </div>
-        ))}
+        {widgetConfigs.filter(w => w.visible).map(widget => {
+          // Prepare props for each widget instance
+          const widgetProps: WidgetComponentProps = {
+            dashboardStats,
+            systemHealth,
+            loadingStats,
+            loadingHealth,
+            formatBytes,
+            formatDate,
+            chartBaseOptions,
+            documentsPerSoftwareChartData,
+            popularDownloadsChartData,
+            dailyLoginData,
+            dailyUploadData,
+            dailyDownloadData,
+            renderHealthStatsList
+          };
+          return (
+            <div key={widget.id}>
+              {widget.component(widgetProps)}
+            </div>
+          );
+        })}
       </ResponsiveGridLayout>
     </Box>
   );

@@ -15,6 +15,7 @@ import {
 import { MiscCategory, MiscFile } from '../types';
 import DataTable, { ColumnDef } from '../components/DataTable';
 import ErrorState from '../components/ErrorState';
+import LoadingState from '../components/LoadingState'; // Added import
 import AdminUploadToMiscForm from '../components/admin/AdminUploadToMiscForm';
 import AdminMiscCategoryForm from '../components/admin/AdminMiscCategoryForm';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
@@ -407,7 +408,7 @@ const MiscView: React.FC = () => {
       {isAuthenticated && (role === 'admin' || role === 'super_admin') && (
         <div className="my-8 p-4 border border-gray-200 rounded-lg shadow">
           <h3 className="text-lg font-semibold mb-4 text-gray-700">Manage Categories</h3>
-          {isLoadingCategories && <p className="text-sm text-gray-500">Loading categories...</p>}
+          {isLoadingCategories && <LoadingState type="table" count={3} message="Loading categories..." />}
           {errorCategories && <p className="text-sm text-red-500">{errorCategories}</p>}
           {!isLoadingCategories && !errorCategories && categories.length === 0 && (
             <p className="text-sm text-gray-500">No categories found. Add one using the "Add/Edit Category" button above.</p>
@@ -468,7 +469,7 @@ const MiscView: React.FC = () => {
             <option key={category.id} value={category.id}>{category.name}</option>
           ))}
         </select>
-        {isLoadingCategories && <p className="text-sm text-gray-500 mt-1">Loading categories...</p>}
+        {isLoadingCategories && <LoadingState type="general" count={1} message="Loading filter options..." />}
         {errorCategories && <p className="text-sm text-red-500 mt-1">{errorCategories}</p>}
       </div>
 

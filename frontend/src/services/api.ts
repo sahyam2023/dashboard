@@ -32,42 +32,6 @@ export interface User { // Already defined, ensure it's comprehensive
   created_at?: string; // Optional, if needed by UI from paginated response
 }
 
-// export interface DocumentType { // Placeholder, ensure this matches your actual DocumentType
-//   id: number;
-//   doc_name: string;
-//   software_name?: string;
-//   // ... other fields
-//   [key: string]: any; // Allow other fields if not fully defined here
-// }
-
-// export interface Patch { // Placeholder
-//   id: number;
-//   patch_name: string;
-//   software_name?: string;
-//   version_number?: string;
-//   // ... other fields
-//   [key: string]: any;
-// }
-
-// export interface Link { // Placeholder
-//   id: number;
-//   title: string;
-//   software_name?: string;
-//   version_name?: string;
-//   // ... other fields
-//   [key: string]: any;
-// }
-
-// export interface MiscFile { // Placeholder
-//   id: number;
-//   user_provided_title: string;
-//   original_filename: string;
-//   category_name?: string;
-//   // ... other fields
-//   [key: string]: any;
-// }
-
-
 export interface ChangePasswordPayload {
   current_password: string;
   new_password: string;
@@ -174,10 +138,31 @@ export interface RecentActivityItem {
   details: any; // Details can be an object or string, using 'any' for flexibility
 }
 
+export interface RecentAdditionItem {
+  id: number; 
+  name: string;
+  type: string;
+  created_at: string; 
+}
+
+export interface PopularDownloadItem {
+  name: string;
+  type: string;
+  download_count: number;
+}
+
+export interface DocumentsPerSoftwareItem {
+  software_name: string;
+  document_count: number;
+}
+
 export interface DashboardStats {
   total_users: number;
   total_software_titles: number;
   recent_activities: RecentActivityItem[];
+  recent_additions?: RecentAdditionItem[]; 
+  popular_downloads?: PopularDownloadItem[]; 
+  documents_per_software?: DocumentsPerSoftwareItem[];
 }
 // --- End of Interface for Dashboard Statistics ---
 
@@ -205,12 +190,12 @@ export interface AuditLogResponse {
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
 // Helper to construct Authorization header
-const getAuthHeader = (): Record<string, string> => { // Explicitly type the return
+const getAuthHeader = (): Record<string, string> => { 
   const token = localStorage.getItem('authToken');
   if (token) {
     return { 'Authorization': `Bearer ${token}` };
   }
-  return {}; // Return an empty object if no token
+  return {}; 
 };
 
 // Generic error handler for API calls
@@ -220,24 +205,19 @@ const handleApiError = async (response: Response, defaultMessage: string) => {
     try {
       errorData = await response.json();
     } catch (e) {
-      // If response is not JSON, use status text
       throw new Error(`${defaultMessage}: ${response.status} ${response.statusText}`);
     }
-    // Use message from backend if available, otherwise default
     const message = errorData?.msg || `${defaultMessage}: ${response.status}`;
-    const error: any = new Error(message); // Create an error object
-    error.response = { data: errorData, status: response.status }; // Attach response data for more detailed error handling
+    const error: any = new Error(message); 
+    error.response = { data: errorData, status: response.status }; 
     throw error;
   }
 
-  // If response.ok is true, attempt to parse the JSON.
-  const responseText = await response.text(); // Get text first for logging if JSON parsing fails
+  const responseText = await response.text(); 
   try {
-    return JSON.parse(responseText); // Attempt to parse the text as JSON
+    return JSON.parse(responseText); 
   } catch (e) {
-    // Log detailed error if JSON parsing fails
     console.error('JSON parsing error for URL:', response.url, 'Received non-JSON response:', responseText);
-    // Throw a new error that includes the URL and a snippet of the response text
     throw new Error(`JSON parsing failed for URL: ${response.url}. Response: ${responseText.substring(0, 200)}...`);
   }
 };
@@ -461,7 +441,7 @@ export async function searchData(query: string): Promise<any[]> {
   }
 }
 
-export async function fetchVersionsForSoftware(softwareId: number): Promise<SoftwareVersion[]> { // Updated return type
+export async function fetchVersionsForSoftware(softwareId: number): Promise<SoftwareVersion[]> { 
   try {
     const response = await fetch(`${API_BASE_URL}/api/versions_for_software?software_id=${softwareId}`);
     return handleApiError(response, 'Failed to fetch versions for software');
@@ -498,8 +478,6 @@ export async function loginUser(credentials: AuthRequest): Promise<AuthResponse>
       },
       body: JSON.stringify(credentials),
     });
-    // The AuthResponse type expects access_token and username
-    // The backend /api/auth/login returns { access_token: "...", username: "..." }
     return handleApiError(response, 'Login failed');
   } catch (error) {
     console.error('Error during login:', error);
@@ -507,28 +485,27 @@ export async function loginUser(credentials: AuthRequest): Promise<AuthResponse>
   }
 }
 
-export async function fetchProtectedData(): Promise<any> { // Define a more specific return type
+export async function fetchProtectedData(): Promise<any> { 
   try {
-    const baseHeaders: Record<string, string> = { // Start with base headers
+    const baseHeaders: Record<string, string> = { 
       'Content-Type': 'application/json',
     };
 
-    const authHeader = getAuthHeader(); // Get auth header (which is Record<string, string>)
+    const authHeader = getAuthHeader(); 
 
-    // Combine them. The spread of authHeader will add Authorization if present.
     const headers = {
       ...baseHeaders,
-      ...authHeader, // Spread the auth header here
+      ...authHeader, 
     };
 
     const response = await fetch(`${API_BASE_URL}/api/protected`, {
       method: 'GET',
-      headers: headers, // Pass the combined headers object
+      headers: headers, 
     });
     return handleApiError(response, 'Failed to fetch protected data');
   } catch (error) {
     console.error('Error fetching protected data:', error);
-    throw error; // Re-throw to be caught by calling component
+    throw error; 
   }
 }
 
@@ -539,7 +516,7 @@ export async function addAdminDocumentWithUrl(payload: AddDocumentPayload): Prom
     const response = await fetch(`${API_BASE_URL}/api/admin/documents/add_with_url`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify({...payload, is_external_link: true }), // Explicitly set flag
+      body: JSON.stringify({...payload, is_external_link: true }), 
     });
     return handleApiError(response, 'Failed to add document with URL');
   } catch (error) { 
@@ -549,11 +526,10 @@ export async function addAdminDocumentWithUrl(payload: AddDocumentPayload): Prom
 }
 
 export async function uploadAdminDocumentFile(formData: FormData): Promise<DocumentType> {
-  // FormData should contain 'file' and other metadata fields like 'software_id', 'doc_name', etc.
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/documents/upload_file`, {
       method: 'POST',
-      headers: { ...getAuthHeader() }, // Content-Type is set by browser for FormData
+      headers: { ...getAuthHeader() }, 
       body: formData,
     });
     return handleApiError(response, 'Failed to upload document file');
@@ -578,8 +554,6 @@ export async function addAdminPatchWithUrl(payload: AddPatchPayloadFlexible): Pr
 }
 
 export async function uploadAdminPatchFile(formData: FormData): Promise<Patch> {
-  // FormData from AdminPatchEntryForm will contain:
-  // 'file', 'software_id', ( 'version_id' OR 'typed_version_string' ), 'patch_name', etc.
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/patches/upload_file`, {
       method: 'POST', headers: { ...getAuthHeader() }, body: formData,
@@ -602,8 +576,6 @@ export async function addAdminLinkWithUrl(payload: AddLinkPayloadFlexible): Prom
   } catch (error) { console.error('Error adding admin link with URL:', error); throw error; }
 }
 export async function uploadAdminLinkFile(formData: FormData): Promise<Link> {
-  // FormData from AdminLinkEntryForm will contain:
-  // 'file', 'software_id', ( 'version_id' OR 'typed_version_string' ), 'title', etc.
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/links/upload_file`, {
       method: 'POST', headers: { ...getAuthHeader() }, body: formData,
@@ -641,7 +613,6 @@ export async function addAdminMiscCategory(categoryData: AddCategoryPayload): Pr
 // --- Misc File API Functions ---
 
 export async function uploadAdminMiscFile(formData: FormData): Promise<MiscFile> {
-  // FormData should contain 'file', 'misc_category_id', 'user_provided_title', 'user_provided_description'
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/misc_files/upload`, {
       method: 'POST',
@@ -724,7 +695,7 @@ export async function editAdminPatchWithUrl(patchId: number, payload: EditPatchP
     const response = await fetch(`${API_BASE_URL}/api/admin/patches/${patchId}/edit_url`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify(backendPayload), // Send only changed fields if payload is constructed that way
+      body: JSON.stringify(backendPayload), 
     });
     return handleApiError(response, 'Failed to update patch with URL');
   } catch (error) { console.error('Error updating patch with URL:', error); throw error; }
@@ -732,7 +703,6 @@ export async function editAdminPatchWithUrl(patchId: number, payload: EditPatchP
 
 
 export async function editAdminPatchFile(patchId: number, formData: FormData): Promise<Patch> {
-  // FormData from AdminPatchEntryForm for edit will contain relevant fields
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/patches/${patchId}/edit_file`, {
       method: 'PUT', headers: { ...getAuthHeader() }, body: formData,
@@ -786,8 +756,6 @@ export async function deleteAdminLink(linkId: number): Promise<{ msg: string }> 
 
 // --- Admin Misc Category Edit/Delete Functions ---
 
-// Assuming EditCategoryPayload is similar to AddCategoryPayload or just { name?: string; description?: string }
-
 export async function editAdminMiscCategory(categoryId: number, payload: EditCategoryPayload): Promise<MiscCategory> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/misc_categories/${categoryId}/edit`, {
@@ -811,19 +779,12 @@ export async function deleteAdminMiscCategory(categoryId: number): Promise<{ msg
 
 
 // --- Admin Misc File Edit/Delete Functions ---
-
-// For editing a misc file, the payload might just be metadata.
-// File replacement is handled by `editAdminMiscFileWithNewUpload` if needed,
-// or the backend PUT /edit route for misc_files handles FormData which might include a new file.
-export interface EditMiscFilePayload { // For metadata-only updates via JSON
+export interface EditMiscFilePayload { 
   misc_category_id?: number;
   user_provided_title?: string;
   user_provided_description?: string;
 }
-// If you have a dedicated route for metadata-only JSON updates:
-// export async function editAdminMiscFileMetadata(fileId: number, payload: EditMiscFilePayload): Promise<MiscFile> { ... }
 
-// For editing misc file (metadata and/or replacing file via FormData)
 export async function editAdminMiscFile(fileId: number, formData: FormData): Promise<MiscFile> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/misc_files/${fileId}/edit`, {
@@ -922,7 +883,7 @@ export async function deactivateUser(userId: number): Promise<{ msg: string } | 
   try {
     const response = await fetch(`${API_BASE_URL}/api/superadmin/users/${userId}/deactivate`, {
       method: 'PUT',
-      headers: { ...getAuthHeader() }, // No body needed for deactivate
+      headers: { ...getAuthHeader() }, 
     });
     return handleApiError(response, 'Failed to deactivate user');
   } catch (error) {
@@ -935,10 +896,8 @@ export async function activateUser(userId: number): Promise<{ msg: string } | Us
   try {
     const response = await fetch(`${API_BASE_URL}/api/superadmin/users/${userId}/activate`, {
       method: 'PUT',
-      headers: { ...getAuthHeader() }, // No body needed for activate
+      headers: { ...getAuthHeader() }, 
     });
-    // Assuming the backend for activateUser will return a similar response structure to deactivateUser
-    // or the updated user object.
     return handleApiError(response, 'Failed to activate user');
   } catch (error) {
     console.error('Error activating user:', error);

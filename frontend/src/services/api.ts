@@ -166,6 +166,21 @@ export interface AddAdminVersionPayload {
 export type EditAdminVersionPayload = Partial<AddAdminVersionPayload>;
 // --- End of Type Definitions ---
 
+// --- Interface for Dashboard Statistics ---
+export interface RecentActivityItem {
+  action_type: string;
+  username: string | null; // Username can be null for system actions or if user is deleted
+  timestamp: string; // ISO date string
+  details: any; // Details can be an object or string, using 'any' for flexibility
+}
+
+export interface DashboardStats {
+  total_users: number;
+  total_software_titles: number;
+  recent_activities: RecentActivityItem[];
+}
+// --- End of Interface for Dashboard Statistics ---
+
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
 // Helper to construct Authorization header
@@ -207,6 +222,21 @@ export async function fetchSoftware(): Promise<Software[]> {
     return await response.json();
   } catch (error) {
     console.error('Error fetching software:', error);
+    throw error;
+  }
+}
+
+// --- Admin Dashboard Statistics Function ---
+export async function fetchDashboardStats(): Promise<DashboardStats> {
+  try {
+    const url = `${API_BASE_URL}/api/admin/dashboard-stats`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { ...getAuthHeader() },
+    });
+    return handleApiError(response, 'Failed to fetch dashboard statistics');
+  } catch (error) {
+    console.error('Error fetching dashboard statistics:', error);
     throw error;
   }
 }

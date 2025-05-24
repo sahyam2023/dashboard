@@ -3175,7 +3175,7 @@ if __name__ == '__main__':
 @jwt_required()
 @admin_required
 def get_audit_logs():
-    try: # Outer try block starts here
+    try:
         db = get_db()
 
         # Pagination parameters
@@ -3287,5 +3287,39 @@ def get_audit_logs():
 
     # This is the except block for the outer try
     except Exception as e:
-        app.logger.error(f"Unexpected error in get_audit_logs: {e}", exc_info=True) # Log full traceback
-        return jsonify(msg="An unexpected error occurred while fetching audit logs."), 500
+        app.logger.error(f"Failed to retrieve audit logs: {e}", exc_info=True)
+        return jsonify(error="Failed to retrieve audit logs", details=str(e)), 500
+
+# --- Admin Dashboard Statistics Endpoint ---
+@app.route('/api/admin/dashboard-stats', methods=['GET'])
+@jwt_required()
+@admin_required
+def get_dashboard_stats():
+    db = get_db()
+    try:
+        # Total users
+        users_cursor = db.execute("SELECT COUNT(*) as count FROM users")
+        total_users = users_cursor.fetchone()['count']
+
+        # Total software titles
+        software_cursor = db.execute("SELECT COUNT(*) as count FROM software")
+        total_software_titles = software_cursor.fetchone()['count']
+
+        # Recent activities (audit logs)
+        audit_logs_cursor = db.execute(
+            "SELECT action_type, username, timestamp, details FROM audit_logs ORDER BY timestamp DESC LIMIT 5"
+        )
+        recent_activities = [dict(row) for row in audit_logs_cursor.fetchall()]
+
+        return jsonify(
+            total_users=total_users,
+            total_software_titles=total_software_titles,
+            recent_activities=recent_activities
+        ), 200
+
+    except sqlite3.Error as e:
+        app.logger.error(f"Database error in get_dashboard_stats: {e}")
+        return jsonify(error="Database error", details=str(e)), 500
+    except Exception as e:
+        app.logger.error(f"Unexpected error in get_dashboard_stats: {e}", exc_info=True)
+        return jsonify(error="An unexpected error occurred", details=str(e)), 500

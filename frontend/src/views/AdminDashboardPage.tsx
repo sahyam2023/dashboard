@@ -1,13 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { fetchDashboardStats, DashboardStats, RecentActivityItem } from '..//services/api'
-// import ConfirmationModal from '../../shared/ConfirmationModal'; // Not used in this update
-// import Modal from '../../shared/Modal'; // Not used in this update
+import { 
+  fetchDashboardStats, 
+  DashboardStats, 
+  RecentActivityItem, 
+  RecentAdditionItem, 
+  PopularDownloadItem, 
+  DocumentsPerSoftwareItem 
+} from '../services/api'; // Corrected import for RecentActivityItem and added others
 
 const AdminDashboardPage: React.FC = () => {
   const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Helper to format date string
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric', month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit'
+    });
+  };
+  
   useEffect(() => {
     const loadDashboardData = async () => {
       setIsLoading(true);
@@ -46,12 +59,12 @@ const AdminDashboardPage: React.FC = () => {
           <p className="text-gray-600">Software Titles: {dashboardStats?.total_software_titles ?? 'N/A'}</p>
         </div>
 
-        {/* Recent Activity Card */}
-        <div className="bg-white p-6 rounded-lg shadow-md col-span-1 md:col-span-2">
+        {/* Recent Activity Card - Spans 3 columns on larger screens */}
+        <div className="bg-white p-6 rounded-lg shadow-md col-span-1 md:col-span-2 lg:col-span-3">
           <h2 className="text-xl font-semibold text-gray-700 mb-3">Recent Activity</h2>
-          {dashboardStats && dashboardStats.recent_activities.length > 0 ? (
+          {dashboardStats && dashboardStats.recent_activities && dashboardStats.recent_activities.length > 0 ? (
             <ul className="space-y-3 text-sm">
-              {dashboardStats.recent_activities.map((activity, index) => (
+              {dashboardStats.recent_activities.map((activity: RecentActivityItem, index: number) => (
                 <li key={index} className="p-3 bg-gray-50 rounded-md shadow-sm">
                   <div className="font-medium text-gray-700">
                     Action: <span className="font-normal text-gray-600">{activity.action_type}</span>
@@ -62,7 +75,7 @@ const AdminDashboardPage: React.FC = () => {
                     </div>
                   )}
                   <div className="text-gray-600">
-                    Time: <span className="font-normal">{new Date(activity.timestamp).toLocaleString()}</span>
+                    Time: <span className="font-normal">{formatDate(activity.timestamp)}</span>
                   </div>
                   {activity.details && (
                      <div className="mt-1 text-xs text-gray-500 overflow-auto max-h-20">
@@ -77,22 +90,76 @@ const AdminDashboardPage: React.FC = () => {
           )}
         </div>
         
-        {/* Quick Links Card - Kept original structure */}
-        <div className="bg-white p-6 rounded-lg shadow-md">
+        {/* Recent Additions Card */}
+        <div className="bg-white p-6 rounded-lg shadow-md col-span-1 md:col-span-1">
+          <h2 className="text-xl font-semibold text-gray-700 mb-3">Recent Additions</h2>
+          {dashboardStats && dashboardStats.recent_additions && dashboardStats.recent_additions.length > 0 ? (
+            <ul className="space-y-3 text-sm">
+              {dashboardStats.recent_additions.map((item: RecentAdditionItem, index: number) => (
+                <li key={item.id || index} className="p-3 bg-gray-50 rounded-md shadow-sm"> {/* Use item.id if available for key */}
+                  <div className="font-medium text-gray-700">
+                    {item.name} <span className="text-xs text-indigo-500">({item.type})</span>
+                  </div>
+                  <div className="text-gray-500 text-xs">
+                    Added: {formatDate(item.created_at)}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-gray-500">No recent additions to display.</p>
+          )}
+        </div>
+        
+        {/* Top 5 Downloads Card */}
+        <div className="bg-white p-6 rounded-lg shadow-md col-span-1 md:col-span-1">
+          <h2 className="text-xl font-semibold text-gray-700 mb-3">Top 5 Downloads</h2>
+          {dashboardStats && dashboardStats.popular_downloads && dashboardStats.popular_downloads.length > 0 ? (
+            <ul className="space-y-3 text-sm">
+              {dashboardStats.popular_downloads.map((item: PopularDownloadItem, index: number) => (
+                <li key={index} className="p-3 bg-gray-50 rounded-md shadow-sm">
+                  <div className="font-medium text-gray-700">
+                    {item.name} <span className="text-xs text-green-500">({item.type})</span>
+                  </div>
+                  <div className="text-gray-500 text-xs">
+                    Downloads: {item.download_count}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-gray-500">No download data to display.</p>
+          )}
+        </div>
+
+        {/* Documents per Software Card */}
+        <div className="bg-white p-6 rounded-lg shadow-md col-span-1 md:col-span-1">
+          <h2 className="text-xl font-semibold text-gray-700 mb-3">Documents per Software</h2>
+          {dashboardStats && dashboardStats.documents_per_software && dashboardStats.documents_per_software.length > 0 ? (
+            <ul className="space-y-2 text-sm">
+              {dashboardStats.documents_per_software.map((item: DocumentsPerSoftwareItem, index: number) => (
+                <li key={index} className="flex justify-between p-2 bg-gray-50 rounded-md">
+                  <span className="font-medium text-gray-700">{item.software_name}</span>
+                  <span className="text-gray-600">{item.document_count}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-gray-500">No document count data available.</p>
+          )}
+        </div>
+
+        {/* Quick Links Card - Adjusted to fit new layout if necessary, or keep as is */}
+        <div className="bg-white p-6 rounded-lg shadow-md col-span-1 md:col-span-3"> {/* Example: making it full width if other cards take up rows */}
           <h2 className="text-xl font-semibold text-gray-700 mb-3">Quick Links</h2>
           <ul className="space-y-2">
             <li><a href="/admin/versions" className="text-indigo-600 hover:text-indigo-800">Manage Versions</a></li>
             <li><a href="/admin/audit-logs" className="text-indigo-600 hover:text-indigo-800">View Audit Logs</a></li>
+            <li><a href="/admin/users" className="text-indigo-600 hover:text-indigo-800">Manage Users (Super Admin)</a></li>
             {/* Add more admin quick links here */}
           </ul>
         </div>
       </div>
-      
-      {/* ConfirmationModal and Modal components are not used in this specific update,
-          but kept here if they are used by other functionalities on this page. 
-          If not, they can be removed from imports. */}
-      {/* <ConfirmationModal isOpen={false} onClose={() => {}} onConfirm={() => {}} title="Confirm" message="Are you sure?" /> */}
-      {/* <Modal isOpen={false} onClose={() => {}} title="Information"> Modal Content </Modal> */}
     </div>
   );
 };

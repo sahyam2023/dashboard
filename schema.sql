@@ -2,6 +2,7 @@
 
 -- Drop tables in reverse order of dependency for clean re-initialization
 DROP TABLE IF EXISTS audit_logs;
+DROP TABLE IF EXISTS download_log;
 DROP TABLE IF EXISTS misc_files;
 DROP TABLE IF EXISTS misc_categories;
 DROP TABLE IF EXISTS links;
@@ -189,6 +190,21 @@ CREATE TRIGGER IF NOT EXISTS update_misc_files_updated_at
 AFTER UPDATE ON misc_files FOR EACH ROW BEGIN
     UPDATE misc_files SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
 END;
+
+-- Table for Download Logs
+CREATE TABLE IF NOT EXISTS download_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    file_id INTEGER NOT NULL, -- Can refer to documents.id, patches.id, links.id, or misc_files.id
+    file_type TEXT NOT NULL, -- 'document', 'patch', 'link', 'misc_file'
+    download_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    ip_address TEXT,
+    user_agent TEXT,
+    FOREIGN KEY (user_id) REFERENCES users (id)
+);
+CREATE INDEX IF NOT EXISTS idx_download_log_user_id ON download_log (user_id);
+CREATE INDEX IF NOT EXISTS idx_download_log_file_id_file_type ON download_log (file_id, file_type);
+CREATE INDEX IF NOT EXISTS idx_download_log_timestamp ON download_log (download_timestamp);
 
 -- Table for Audit Logs
 CREATE TABLE IF NOT EXISTS audit_logs (

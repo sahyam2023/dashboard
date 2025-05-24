@@ -180,6 +180,69 @@ def log_audit_action(action_type: str, target_table: str = None, target_id: int 
         # Catch any other unexpected errors
         app.logger.error(f"Audit log: General error logging action '{action_type}': {e_general}")
 
+# --- Download Log Helper ---
+def _log_download_activity(filename_to_serve: str, item_type: str, current_db: sqlite3.Connection):
+    """Logs download activity to the download_log table."""
+    try:
+        table_map = {
+            'document': {'table_name': 'documents', 'id_column': 'id'},
+            'patch': {'table_name': 'patches', 'id_column': 'id'},
+            'link_file': {'table_name': 'links', 'id_column': 'id'}, # Assuming 'links' table for files uploaded via "Links"
+            'misc_file': {'table_name': 'misc_files', 'id_column': 'id'}
+        }
+
+        if item_type not in table_map:
+            app.logger.error(f"Download log: Invalid item_type '{item_type}' for filename '{filename_to_serve}'.")
+            return
+
+        table_info = table_map[item_type]
+        table_name = table_info['table_name']
+        # id_column = table_info['id_column'] # Currently always 'id'
+
+        item_id = None
+        # Query to find the item_id based on stored_filename
+        # Note: For 'misc_files', the column is 'stored_filename'.
+        # For 'documents', 'patches', 'links', it's also 'stored_filename'.
+        query = f"SELECT id FROM {table_name} WHERE stored_filename = ?"
+        item_cursor = current_db.execute(query, (filename_to_serve,))
+        item_row = item_cursor.fetchone()
+
+        if item_row:
+            item_id = item_row['id']
+        else:
+            app.logger.error(f"Download log: Could not find item_id for filename '{filename_to_serve}' in table '{table_name}'.")
+            return # Cannot log if item not found
+
+        user_id_for_log = None
+        try:
+            # Try to get user_id from JWT. Optional=True means it won't raise error if JWT is missing/invalid.
+            verify_jwt_in_request(optional=True)
+            current_user_jwt_identity = get_jwt_identity()
+            if current_user_jwt_identity:
+                user_id_for_log = int(current_user_jwt_identity)
+        except ValueError:
+            app.logger.warning(f"Download log: Invalid user ID format in JWT for download of '{filename_to_serve}'.")
+        except Exception as e_jwt:
+            # Log other JWT related errors but don't fail download logging
+            app.logger.warning(f"Download log: Error processing JWT for download of '{filename_to_serve}': {e_jwt}")
+
+        ip_address = request.remote_addr
+
+        # Insert into download_log
+        current_db.execute("""
+            INSERT INTO download_log (file_id, file_type, user_id, ip_address, download_timestamp)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """, (item_id, item_type, user_id_for_log, ip_address))
+        current_db.commit()
+        app.logger.info(f"Download logged: File '{filename_to_serve}', Type '{item_type}', UserID '{user_id_for_log}', IP '{ip_address}'")
+
+    except sqlite3.Error as e_db:
+        app.logger.error(f"Download log: Database error for '{filename_to_serve}': {e_db}")
+        # Potentially rollback if the commit failed, though commit is for this specific transaction.
+        # current_db.rollback() # Only if part of a larger transaction that needs to be rolled back.
+    except Exception as e_general:
+        app.logger.error(f"Download log: General error for '{filename_to_serve}': {e_general}")
+
 # --- Authorization Decorator ---
 def admin_required(fn):
     @wraps(fn)
@@ -3096,18 +3159,40 @@ def admin_delete_version(version_id):
 # --- File Serving Endpoints ---
 @app.route('/official_uploads/docs/<path:filename>')
 def serve_official_doc_file(filename):
+    try:
+        db_conn = get_db() # Get DB connection
+        _log_download_activity(filename, 'document', db_conn)
+    except Exception as e:
+        # Log any error from get_db() or the call itself, but do not prevent file serving
+        app.logger.error(f"Error during pre-download logging for doc '{filename}': {e}")
+    
     return send_from_directory(app.config['DOC_UPLOAD_FOLDER'], filename, as_attachment=True)
 
 @app.route('/official_uploads/patches/<path:filename>')
 def serve_official_patch_file(filename):
+    try:
+        db_conn = get_db()
+        _log_download_activity(filename, 'patch', db_conn)
+    except Exception as e:
+        app.logger.error(f"Error during pre-download logging for patch '{filename}': {e}")
     return send_from_directory(app.config['PATCH_UPLOAD_FOLDER'], filename, as_attachment=True)
 
 @app.route('/official_uploads/links/<path:filename>') # For files uploaded as "Links"
 def serve_official_link_file(filename):
+    try:
+        db_conn = get_db()
+        _log_download_activity(filename, 'link_file', db_conn) # 'link_file' as per previous definition
+    except Exception as e:
+        app.logger.error(f"Error during pre-download logging for link file '{filename}': {e}")
     return send_from_directory(app.config['LINK_UPLOAD_FOLDER'], filename, as_attachment=True)
 
 @app.route('/misc_uploads/<path:filename>')
 def serve_misc_file(filename):
+    try:
+        db_conn = get_db()
+        _log_download_activity(filename, 'misc_file', db_conn)
+    except Exception as e:
+        app.logger.error(f"Error during pre-download logging for misc file '{filename}': {e}")
     return send_from_directory(app.config['MISC_UPLOAD_FOLDER'], filename, as_attachment=True)
 
 # --- Search API (Keep as is, or enhance later) ---
@@ -3327,10 +3412,74 @@ def get_dashboard_stats():
         )
         recent_activities = [dict(row) for row in audit_logs_cursor.fetchall()]
 
+        # 1. Recent Additions
+        recent_additions = []
+        # Documents
+        docs_cursor = db.execute("SELECT id, doc_name as name, created_at, 'Document' as type FROM documents ORDER BY created_at DESC LIMIT 5")
+        recent_additions.extend([dict(row) for row in docs_cursor.fetchall()])
+        # Patches
+        patches_cursor = db.execute("SELECT id, patch_name as name, created_at, 'Patch' as type FROM patches ORDER BY created_at DESC LIMIT 5")
+        recent_additions.extend([dict(row) for row in patches_cursor.fetchall()])
+        # Link Files (is_external_link = FALSE)
+        link_files_cursor = db.execute("SELECT id, title as name, created_at, 'Link File' as type FROM links WHERE is_external_link = FALSE ORDER BY created_at DESC LIMIT 5")
+        recent_additions.extend([dict(row) for row in link_files_cursor.fetchall()])
+        # Misc Files
+        misc_files_cursor = db.execute("SELECT id, COALESCE(user_provided_title, original_filename) as name, created_at, 'Misc File' as type FROM misc_files ORDER BY created_at DESC LIMIT 5")
+        recent_additions.extend([dict(row) for row in misc_files_cursor.fetchall()])
+        
+        # Sort all recent additions by created_at and take top 5
+        recent_additions.sort(key=lambda x: x['created_at'], reverse=True)
+        top_recent_additions = recent_additions[:5]
+
+        # 2. Popular Downloads
+        popular_downloads_query = """
+            SELECT file_id, file_type, COUNT(*) as download_count
+            FROM download_log
+            GROUP BY file_id, file_type
+            ORDER BY download_count DESC
+            LIMIT 5
+        """
+        popular_downloads_raw = db.execute(popular_downloads_query).fetchall()
+        popular_downloads_detailed = []
+        for item in popular_downloads_raw:
+            name = "Unknown/Deleted Item" # Default name
+            if item['file_type'] == 'document':
+                res = db.execute("SELECT doc_name FROM documents WHERE id = ?", (item['file_id'],)).fetchone()
+                if res: name = res['doc_name']
+            elif item['file_type'] == 'patch':
+                res = db.execute("SELECT patch_name FROM patches WHERE id = ?", (item['file_id'],)).fetchone()
+                if res: name = res['patch_name']
+            elif item['file_type'] == 'link_file': # was 'link' in _log_download_activity, but schema implies 'links' table for files uploaded as links
+                res = db.execute("SELECT title FROM links WHERE id = ?", (item['file_id'],)).fetchone()
+                if res: name = res['title']
+            elif item['file_type'] == 'misc_file':
+                res = db.execute("SELECT COALESCE(user_provided_title, original_filename) as name FROM misc_files WHERE id = ?", (item['file_id'],)).fetchone()
+                if res: name = res['name']
+            
+            popular_downloads_detailed.append({
+                "name": name,
+                "type": item['file_type'],
+                "download_count": item['download_count']
+            })
+
+        # 3. Documents per Software
+        docs_per_software_query = """
+            SELECT s.name as software_name, COUNT(d.id) as document_count
+            FROM software s
+            LEFT JOIN documents d ON s.id = d.software_id
+            GROUP BY s.id, s.name
+            ORDER BY s.name
+        """
+        docs_per_software_cursor = db.execute(docs_per_software_query)
+        documents_per_software = [dict(row) for row in docs_per_software_cursor.fetchall()]
+
         return jsonify(
             total_users=total_users,
             total_software_titles=total_software_titles,
-            recent_activities=recent_activities
+            recent_activities=recent_activities,
+            recent_additions=top_recent_additions,
+            popular_downloads=popular_downloads_detailed,
+            documents_per_software=documents_per_software
         ), 200
 
     except sqlite3.Error as e:

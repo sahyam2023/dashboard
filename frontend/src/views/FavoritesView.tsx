@@ -13,8 +13,6 @@ import {
 import { useAuth } from '../context/AuthContext';
 import LoadingState from '../components/LoadingState';
 import ErrorState from '../components/ErrorState';
-import { API_BASE_URL } from '../config';
-
 const FavoritesView: React.FC = () => {
   const { isAuthenticated, isAuthLoading } = useAuth();
   const [favorites, setFavorites] = useState<DetailedFavoriteItem[]>([]);

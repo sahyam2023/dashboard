@@ -39,6 +39,11 @@ const LinksView: React.FC = () => {
   // Filter State
   const [activeSoftwareId, setActiveSoftwareId] = useState<number | null>(null);
   const [activeVersionId, setActiveVersionId] = useState<number | null>(null);
+
+  // Advanced Filter States
+  const [linkTypeFilter, setLinkTypeFilter] = useState<string>('');
+  const [createdFromFilter, setCreatedFromFilter] = useState<string>('');
+  const [createdToFilter, setCreatedToFilter] = useState<string>('');
   
   // Pagination State
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -72,7 +77,10 @@ const LinksView: React.FC = () => {
         currentPage,
         itemsPerPage,
         sortBy,
-        sortOrder
+        sortOrder,
+        linkTypeFilter || undefined,
+        createdFromFilter || undefined,
+        createdToFilter || undefined
       );
       setLinks(response.links);
       setTotalPages(response.total_pages);
@@ -86,7 +94,24 @@ const LinksView: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [activeSoftwareId, activeVersionId, currentPage, itemsPerPage, sortBy, sortOrder]);
+  }, [activeSoftwareId, activeVersionId, currentPage, itemsPerPage, sortBy, sortOrder, linkTypeFilter, createdFromFilter, createdToFilter]);
+
+  // Handler for applying advanced filters
+  const handleApplyAdvancedFilters = () => {
+    setCurrentPage(1); // This will trigger loadLinks due to dependency
+  };
+
+  // Handler for clearing advanced filters
+  const handleClearAdvancedFilters = () => {
+    setLinkTypeFilter('');
+    setCreatedFromFilter('');
+    setCreatedToFilter('');
+    // Consider if activeSoftwareId and activeVersionId should be cleared here too.
+    // For now, only clearing new advanced filters as per instruction.
+    // setActiveSoftwareId(null); 
+    // setActiveVersionId(null);
+    setCurrentPage(1); // This will trigger loadLinks
+  };
 
   useEffect(() => {
     const loadSoftwareAndInitialLinks = async () => {
@@ -322,6 +347,61 @@ const LinksView: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Advanced Filter UI */}
+      <div className="my-4 p-4 border rounded-md bg-gray-50 space-y-4 md:space-y-0 md:flex md:flex-wrap md:items-end md:gap-4">
+        {/* Link Type Filter */}
+        <div className="flex flex-col">
+          <label htmlFor="linkTypeFilterSelect" className="text-sm font-medium text-gray-700 mb-1">Link Type</label>
+          <select
+            id="linkTypeFilterSelect"
+            value={linkTypeFilter}
+            onChange={(e) => setLinkTypeFilter(e.target.value)}
+            className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+          >
+            <option value="">All</option>
+            <option value="external">External</option>
+            <option value="uploaded">Uploaded File</option>
+          </select>
+        </div>
+
+        {/* Created At Filter */}
+        <div className="flex flex-col">
+          <label className="text-sm font-medium text-gray-700 mb-1">Created Between</label>
+          <div className="flex items-center gap-2">
+            <input 
+              type="date" 
+              value={createdFromFilter} 
+              onChange={(e) => setCreatedFromFilter(e.target.value)} 
+              className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" 
+            />
+            <span className="text-gray-500">and</span>
+            <input 
+              type="date" 
+              value={createdToFilter} 
+              onChange={(e) => setCreatedToFilter(e.target.value)} 
+              className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" 
+            />
+          </div>
+        </div>
+        
+        {/* Action Buttons */}
+        <div className="flex items-end gap-2 pt-5"> {/* pt-5 to align with labels if inputs are taller */}
+          <button
+            onClick={handleApplyAdvancedFilters}
+            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 text-sm"
+          >
+            Apply Filters
+          </button>
+          <button
+            onClick={handleClearAdvancedFilters}
+            className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 text-sm"
+          >
+            Clear Filters
+          </button>
+        </div>
+      </div>
+
 
       {error && links.length === 0 && !isLoading ? (
         <ErrorState message={error} onRetry={loadLinks} />

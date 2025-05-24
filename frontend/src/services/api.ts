@@ -354,7 +354,11 @@ export async function fetchLinks(
   page?: number,
   perPage?: number,
   sortBy?: string,
-  sortOrder?: 'asc' | 'desc'
+  sortOrder?: 'asc' | 'desc',
+  // <<< --- ADD NEW PARAMETERS HERE (linkType, createdFrom, createdTo) --- >>>
+  linkType?: 'external' | 'uploaded' | string,
+  createdFrom?: string,
+  createdTo?: string
 ): Promise<PaginatedLinksResponse> {
   try {
     const params = new URLSearchParams();
@@ -364,6 +368,11 @@ export async function fetchLinks(
     if (perPage) params.append('per_page', perPage.toString());
     if (sortBy) params.append('sort_by', sortBy);
     if (sortOrder) params.append('sort_order', sortOrder);
+    
+    // <<< --- ADD LOGIC HERE TO APPEND NEW FILTER PARAMETERS --- >>>
+    if (linkType) params.append('link_type', linkType);
+    if (createdFrom) params.append('created_from', createdFrom);
+    if (createdTo) params.append('created_to', createdTo);
     
     const queryString = params.toString();
     const url = `${API_BASE_URL}/api/links${queryString ? `?${queryString}` : ''}`;
@@ -381,7 +390,12 @@ export async function fetchDocuments(
   page?: number,
   perPage?: number,
   sortBy?: string,
-  sortOrder?: 'asc' | 'desc'
+  sortOrder?: 'asc' | 'desc',
+  docType?: string, // New
+  createdFrom?: string, // New
+  createdTo?: string, // New
+  updatedFrom?: string, // New
+  updatedTo?: string // New
 ): Promise<PaginatedDocumentsResponse> {
   try {
     const params = new URLSearchParams();
@@ -390,6 +404,14 @@ export async function fetchDocuments(
     if (perPage) params.append('per_page', perPage.toString());
     if (sortBy) params.append('sort_by', sortBy);
     if (sortOrder) params.append('sort_order', sortOrder);
+
+    // <<< --- ADD LOGIC HERE TO APPEND NEW FILTER PARAMETERS --- >>>
+    if (docType) params.append('doc_type', docType);
+    if (createdFrom) params.append('created_from', createdFrom);
+    if (createdTo) params.append('created_to', createdTo);
+    if (updatedFrom) params.append('updated_from', updatedFrom);
+    if (updatedTo) params.append('updated_to', updatedTo);
+    // <<< --- END OF NEW LOGIC --- >>>
 
     const queryString = params.toString();
     const url = `${API_BASE_URL}/api/documents${queryString ? `?${queryString}` : ''}`;
@@ -407,7 +429,11 @@ export async function fetchPatches(
   page?: number,
   perPage?: number,
   sortBy?: string,
-  sortOrder?: 'asc' | 'desc'
+  sortOrder?: 'asc' | 'desc',
+  // <<< --- ADD NEW PARAMETERS HERE --- >>>
+  releaseFrom?: string,
+  releaseTo?: string,
+  patchedByDeveloper?: string
 ): Promise<PaginatedPatchesResponse> {
   try {
     const params = new URLSearchParams();
@@ -416,6 +442,11 @@ export async function fetchPatches(
     if (perPage) params.append('per_page', perPage.toString());
     if (sortBy) params.append('sort_by', sortBy);
     if (sortOrder) params.append('sort_order', sortOrder);
+
+    // <<< --- ADD LOGIC HERE TO APPEND NEW FILTER PARAMETERS --- >>>
+    if (releaseFrom) params.append('release_from', releaseFrom);
+    if (releaseTo) params.append('release_to', releaseTo);
+    if (patchedByDeveloper) params.append('patched_by_developer', patchedByDeveloper);
 
     const queryString = params.toString();
     const url = `${API_BASE_URL}/api/patches${queryString ? `?${queryString}` : ''}`;

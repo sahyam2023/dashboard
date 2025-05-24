@@ -727,6 +727,13 @@ def get_all_documents_api():
     # Get existing filter parameters
     software_id_filter = request.args.get('software_id', type=int)
 
+    # Get new filter parameters
+    doc_type_filter = request.args.get('doc_type', type=str)
+    created_from_filter = request.args.get('created_from', type=str)
+    created_to_filter = request.args.get('created_to', type=str)
+    updated_from_filter = request.args.get('updated_from', type=str)
+    updated_to_filter = request.args.get('updated_to', type=str)
+
     if page <= 0:
         page = 1
     if per_page <= 0:
@@ -761,6 +768,26 @@ def get_all_documents_api():
     if software_id_filter:
         filter_conditions.append("d.software_id = ?")
         params.append(software_id_filter)
+
+    if doc_type_filter:
+        filter_conditions.append("LOWER(d.doc_type) LIKE ?")
+        params.append(f"%{doc_type_filter.lower()}%")
+    
+    # Date range filters
+    # Note: No explicit date validation here as per instructions, relying on DB behavior.
+    # Consider adding a helper function for date validation (YYYY-MM-DD) for robustness.
+    if created_from_filter:
+        filter_conditions.append("date(d.created_at) >= date(?)")
+        params.append(created_from_filter)
+    if created_to_filter:
+        filter_conditions.append("date(d.created_at) <= date(?)")
+        params.append(created_to_filter)
+    if updated_from_filter:
+        filter_conditions.append("date(d.updated_at) >= date(?)")
+        params.append(updated_from_filter)
+    if updated_to_filter:
+        filter_conditions.append("date(d.updated_at) <= date(?)")
+        params.append(updated_to_filter)
     
     where_clause = ""
     if filter_conditions:
@@ -818,6 +845,11 @@ def get_all_patches_api():
     # Get existing filter parameters
     software_id_filter = request.args.get('software_id', type=int)
 
+    # Get new filter parameters
+    release_from_filter = request.args.get('release_from', type=str)
+    release_to_filter = request.args.get('release_to', type=str)
+    patched_by_developer_filter = request.args.get('patched_by_developer', type=str)
+
     if page <= 0:
         page = 1
     if per_page <= 0:
@@ -853,6 +885,16 @@ def get_all_patches_api():
     if software_id_filter:
         filter_conditions.append("s.id = ?") # Filter by software_id from the software table
         params.append(software_id_filter)
+
+    if release_from_filter:
+        filter_conditions.append("date(p.release_date) >= date(?)")
+        params.append(release_from_filter)
+    if release_to_filter:
+        filter_conditions.append("date(p.release_date) <= date(?)")
+        params.append(release_to_filter)
+    if patched_by_developer_filter:
+        filter_conditions.append("LOWER(p.patch_by_developer) LIKE ?")
+        params.append(f"%{patched_by_developer_filter.lower()}%")
     
     where_clause = ""
     if filter_conditions:
@@ -913,6 +955,11 @@ def get_all_links_api():
     software_id_filter = request.args.get('software_id', type=int)
     version_id_filter = request.args.get('version_id', type=int)
 
+    # Get new filter parameters
+    link_type_filter = request.args.get('link_type', type=str)
+    created_from_filter = request.args.get('created_from', type=str)
+    created_to_filter = request.args.get('created_to', type=str)
+
     if page <= 0:
         page = 1
     if per_page <= 0:
@@ -949,6 +996,20 @@ def get_all_links_api():
     if version_id_filter:
         filter_conditions.append("l.version_id = ?")
         params.append(version_id_filter)
+
+    if link_type_filter:
+        if link_type_filter.lower() == 'external':
+            filter_conditions.append("l.is_external_link = TRUE")
+        elif link_type_filter.lower() == 'uploaded':
+            filter_conditions.append("l.is_external_link = FALSE")
+            # For 'uploaded', no parameter is added to params for this specific condition
+    
+    if created_from_filter:
+        filter_conditions.append("date(l.created_at) >= date(?)")
+        params.append(created_from_filter)
+    if created_to_filter:
+        filter_conditions.append("date(l.created_at) <= date(?)")
+        params.append(created_to_filter)
     
     where_clause = ""
     if filter_conditions:

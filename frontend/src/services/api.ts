@@ -837,6 +837,127 @@ export async function deleteAdminMiscFile(fileId: number): Promise<{ msg: string
   } catch (error) { console.error('Error deleting misc file:', error); throw error; }
 }
 
+// --- Favorites API Functions ---
+
+export type FavoriteItemType = 'document' | 'patch' | 'link' | 'misc_file' | 'software' | 'version';
+
+// Consider defining a specific return type for a favorite record, e.g., the favorite entry itself.
+// For now, using 'any' as per the example.
+export interface FavoriteRecord { 
+  id: number; // ID of the user_favorites table entry
+  user_id: number;
+  item_id: number;
+  item_type: FavoriteItemType;
+  created_at: string;
+}
+
+
+export async function addFavoriteApi(itemId: number, itemType: FavoriteItemType): Promise<FavoriteRecord> { // Changed 'any' to 'FavoriteRecord'
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/favorites`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeader(),
+      },
+      body: JSON.stringify({ item_id: itemId, item_type: itemType }),
+    });
+    return handleApiError(response, 'Failed to add favorite');
+  } catch (error) {
+    console.error('Error adding favorite:', error);
+    throw error;
+  }
+}
+
+export async function removeFavoriteApi(itemId: number, itemType: FavoriteItemType): Promise<{ msg: string }> { // Return type changed to { msg: string }
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/favorites/${itemType}/${itemId}`, {
+      method: 'DELETE',
+      headers: {
+        ...getAuthHeader(),
+      },
+    });
+    return handleApiError(response, 'Failed to remove favorite');
+  } catch (error) {
+    console.error('Error removing favorite:', error);
+    throw error;
+  }
+}
+
+export interface FavoriteStatusResponse {
+  is_favorite: boolean;
+  favorite_id?: number;
+  favorited_at?: string;
+}
+
+export async function getFavoriteStatusApi(itemId: number, itemType: FavoriteItemType): Promise<FavoriteStatusResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/favorites/status/${itemType}/${itemId}`, {
+      method: 'GET',
+      headers: {
+        ...getAuthHeader(),
+      },
+    });
+    return handleApiError(response, 'Failed to get favorite status');
+  } catch (error) {
+    console.error('Error getting favorite status:', error);
+    throw error;
+  }
+}
+
+// Define a more specific type for what a "favorited item" might look like in the response.
+// This will likely be a union of your existing types plus favorite_id and favorited_at.
+// For now, using 'any' as placeholder, but this should be refined.
+export interface DetailedFavoriteItem { // Placeholder - should be more specific
+  favorite_id: number;
+  item_id: number;
+  item_type: FavoriteItemType;
+  favorited_at: string;
+  name: string; // Common field
+  description?: string; // Common field
+  software_name?: string; // Contextual
+  software_id?: number; // Contextual
+  version_number?: string; // Contextual
+  version_id?: number; // Contextual
+  // Add other fields based on what the backend's UNION ALL query for favorites returns
+}
+
+
+export interface PaginatedFavoritesResponse { 
+  favorites: DetailedFavoriteItem[]; // Changed 'any[]' to 'DetailedFavoriteItem[]'
+  page: number;
+  per_page: number;
+  total_favorites: number;
+  total_pages: number;
+}
+
+export async function getUserFavoritesApi(
+  page?: number,
+  perPage?: number,
+  itemType?: FavoriteItemType
+): Promise<PaginatedFavoritesResponse> {
+  try {
+    const params = new URLSearchParams();
+    if (page) params.append('page', page.toString());
+    if (perPage) params.append('per_page', perPage.toString());
+    if (itemType) params.append('item_type', itemType);
+    
+    const queryString = params.toString();
+    const url = `${API_BASE_URL}/api/favorites${queryString ? `?${queryString}` : ''}`;
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        ...getAuthHeader(),
+      },
+    });
+    return handleApiError(response, 'Failed to fetch user favorites');
+  } catch (error) {
+    console.error('Error fetching user favorites:', error);
+    throw error;
+  }
+}
+
 // --- User Profile Management Functions ---
 
 export async function changePassword(payload: ChangePasswordPayload): Promise<{ msg: string }> {

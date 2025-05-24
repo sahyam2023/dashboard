@@ -1,9 +1,18 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { ExternalLink, PlusCircle, Edit3, Trash2 } from 'lucide-react';
-import { fetchDocuments, fetchSoftware, deleteAdminDocument, PaginatedDocumentsResponse } from '../services/api'; // Import PaginatedDocumentsResponse
-import { Document as DocumentType, Software } from '../types'; // Ensure DocumentType matches the API response structure
-import DataTable, { ColumnDef } from '../components/DataTable'; // Import DataTable and ColumnDef
+import { ExternalLink, PlusCircle, Edit3, Trash2, Star } from 'lucide-react';
+import { 
+  fetchDocuments, 
+  fetchSoftware, 
+  deleteAdminDocument, 
+  PaginatedDocumentsResponse,
+  addFavoriteApi,
+  removeFavoriteApi,
+  getFavoriteStatusApi,
+  FavoriteItemType 
+} from '../services/api'; 
+import { Document as DocumentType, Software } from '../types'; 
+import DataTable, { ColumnDef } from '../components/DataTable'; 
 import FilterTabs from '../components/FilterTabs';
 import LoadingState from '../components/LoadingState'; // Can be replaced by DataTable's isLoading
 import ErrorState from '../components/ErrorState';
@@ -53,6 +62,8 @@ const DocumentsView: React.FC = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
 
+  // Favorite State
+  const [favoritedItems, setFavoritedItems] = useState<Map<number, { favoriteId: number | undefined }>>(new Map());
 
   const loadDocuments = useCallback(async () => {
     setIsLoading(true);
@@ -83,6 +94,46 @@ const DocumentsView: React.FC = () => {
       setIsLoading(false);
     }
   }, [selectedSoftwareId, currentPage, itemsPerPage, sortBy, sortOrder, docTypeFilter, createdFromFilter, createdToFilter, updatedFromFilter, updatedToFilter]);
+  
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setFavoritedItems(new Map()); 
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (!isAuthenticated || documents.length === 0) return;
+    
+    const fetchStatuses = async () => {
+      // Create a temporary map to avoid modifying state directly in loop
+      const currentFavoritedItems = new Map<number, { favoriteId: number | undefined }>();
+      for (const doc of documents) {
+        // Check if status is already known to avoid redundant API calls
+        // This is a simple check; more sophisticated logic might be needed if items can be re-added
+        // to the `documents` list without a full reload that clears `favoritedItems`.
+        if (!favoritedItems.has(doc.id)) { 
+          try {
+            const status = await getFavoriteStatusApi(doc.id, 'document' as FavoriteItemType); 
+            if (status.is_favorite && typeof status.favorite_id === 'number') {
+              currentFavoritedItems.set(doc.id, { favoriteId: status.favorite_id });
+            } else {
+              currentFavoritedItems.set(doc.id, { favoriteId: undefined });
+            }
+          } catch (error) {
+            console.warn(`Failed to fetch favorite status for document ${doc.id}:`, error);
+            currentFavoritedItems.set(doc.id, { favoriteId: undefined }); 
+          }
+        } else {
+          // If already in map, carry over its existing status
+          currentFavoritedItems.set(doc.id, favoritedItems.get(doc.id)!);
+        }
+      }
+      setFavoritedItems(currentFavoritedItems);
+    };
+    
+    fetchStatuses();
+    // eslint-disable-next-line react-hooks/exhaustive-deps 
+  }, [documents, isAuthenticated]); // favoritedItems is intentionally omitted from deps to prevent loop
 
   // Handler for applying advanced filters
   const handleApplyAdvancedFilters = () => {
@@ -231,13 +282,27 @@ const DocumentsView: React.FC = () => {
     { key: 'updated_by_username', header: 'Updated By', sortable: false, render: (doc) => doc.updated_by_username || 'N/A' }, // Not typically sorted
     { key: 'created_at', header: 'Created At', sortable: true, render: (doc) => doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-CA') : '-' },
     { key: 'updated_at', header: 'Updated At', sortable: true, render: (doc) => doc.updated_at ? new Date(doc.updated_at).toLocaleDateString('en-CA') : '-' },
-    ...(isAuthenticated && (role === 'admin' || role === 'super_admin') ? [{
+    ...(isAuthenticated ? [{ // Changed condition to isAuthenticated for favorite button
       key: 'actions' as keyof DocumentType | 'actions', // Type assertion for actions
       header: 'Actions',
       render: (document: DocumentType) => (
         <div className="flex space-x-2">
-          <button onClick={(e) => { e.stopPropagation(); openEditForm(document);}} className="p-1 text-blue-600 hover:text-blue-800" title="Edit Document"><Edit3 size={16} /></button>
-          <button onClick={(e) => { e.stopPropagation(); openDeleteConfirm(document);}} className="p-1 text-red-600 hover:text-red-800" title="Delete Document"><Trash2 size={16} /></button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleFavoriteToggle(document, 'document' as FavoriteItemType);
+            }}
+            className={`p-1 ${favoritedItems.get(document.id)?.favoriteId ? 'text-yellow-500' : 'text-gray-400'} hover:text-yellow-600`}
+            title={favoritedItems.get(document.id)?.favoriteId ? "Remove from Favorites" : "Add to Favorites"}
+          >
+            <Star size={16} className={favoritedItems.get(document.id)?.favoriteId ? "fill-current" : ""} />
+          </button>
+          {(role === 'admin' || role === 'super_admin') && (
+            <>
+              <button onClick={(e) => { e.stopPropagation(); openEditForm(document);}} className="p-1 text-blue-600 hover:text-blue-800" title="Edit Document"><Edit3 size={16} /></button>
+              <button onClick={(e) => { e.stopPropagation(); openDeleteConfirm(document);}} className="p-1 text-red-600 hover:text-red-800" title="Delete Document"><Trash2 size={16} /></button>
+            </>
+          )}
         </div>
       ),
     }] : [])
@@ -259,6 +324,63 @@ const DocumentsView: React.FC = () => {
       );
     }
     return null;
+  };
+
+  const handleFavoriteToggle = async (item: DocumentType, itemType: FavoriteItemType) => {
+    if (!isAuthenticated) {
+      setFeedbackMessage("Please log in to manage favorites.");
+      return;
+    }
+
+    const currentStatus = favoritedItems.get(item.id);
+    const isCurrentlyFavorited = !!currentStatus?.favoriteId;
+    
+    // Optimistic UI update
+    const tempFavoritedItems = new Map(favoritedItems);
+    if (isCurrentlyFavorited) {
+      tempFavoritedItems.set(item.id, { favoriteId: undefined });
+    } else {
+      // For optimistic add, we don't have the real favorite_id yet.
+      // We can use a placeholder or handle it by refetching status.
+      // Here, we'll just mark it as favorited and update with real ID later.
+      tempFavoritedItems.set(item.id, { favoriteId: -1 }); // Placeholder for "favorited"
+    }
+    setFavoritedItems(tempFavoritedItems);
+    setFeedbackMessage(null); // Clear previous messages
+
+    try {
+      if (isCurrentlyFavorited && typeof currentStatus?.favoriteId === 'number') {
+        await removeFavoriteApi(item.id, itemType);
+        setFeedbackMessage(`"${item.doc_name}" removed from favorites.`);
+        // UI already updated optimistically for removal, confirm by ensuring it's undefined
+        setFavoritedItems(prev => {
+            const newMap = new Map(prev);
+            newMap.set(item.id, { favoriteId: undefined });
+            return newMap;
+        });
+      } else {
+        const newFavorite = await addFavoriteApi(item.id, itemType);
+        setFavoritedItems(prev => {
+          const newMap = new Map(prev);
+          newMap.set(item.id, { favoriteId: newFavorite.id }); // Update with real ID
+          return newMap;
+        });
+        setFeedbackMessage(`"${item.doc_name}" added to favorites.`);
+      }
+    } catch (error: any) {
+      console.error("Failed to toggle favorite:", error);
+      setFeedbackMessage(error?.response?.data?.msg || error.message || "Failed to update favorite status.");
+      // Revert optimistic update
+      setFavoritedItems(prev => {
+        const newMap = new Map(prev);
+        if (isCurrentlyFavorited) { // Failed to remove, so it's still favorited (revert to original state)
+            newMap.set(item.id, { favoriteId: currentStatus?.favoriteId });
+        } else { // Failed to add, so it's not favorited
+            newMap.set(item.id, { favoriteId: undefined });
+        }
+        return newMap;
+      });
+    }
   };
 
   return (

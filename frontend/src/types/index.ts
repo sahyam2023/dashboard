@@ -5,13 +5,27 @@ export interface Software {
   id: number;
   name: string;
   description: string | null;
+  is_favorited?: boolean;
+  favorite_id?: number;
 }
 
 // --- Version Type (from /api/versions_for_software for dropdowns) ---
+// Also used for full version details in some contexts
 export interface SoftwareVersion {
   id: number; // This is the version_id from the 'versions' table
+  software_id?: number; // Added for consistency, though not always in dropdowns
+  software_name?: string; // Added for consistency
   version_number: string;
-  // release_date?: string; // Optional: if your API returns it and you need it in the dropdown display
+  release_date?: string | null;
+  main_download_link?: string | null;
+  changelog?: string | null;
+  known_bugs?: string | null;
+  created_by_user_id?: number;
+  created_at?: string;
+  updated_by_user_id?: number | null;
+  updated_at?: string | null;
+  is_favorited?: boolean;
+  favorite_id?: number;
 }
 
 // --- Document Types ---
@@ -32,6 +46,8 @@ export interface Document {
   updated_at?: string;
   uploaded_by_username?: string;
   updated_by_username?: string;
+  is_favorited?: boolean;
+  favorite_id?: number;
 }
 
 // --- Patch Types ---
@@ -60,6 +76,8 @@ export interface Patch {
   patch_by_developer?: string | null;
   uploaded_by_username?: string;
   updated_by_username?: string;
+  is_favorited?: boolean;
+  favorite_id?: number;
 }
 
 // --- Link Types ---
@@ -86,6 +104,8 @@ export interface Link {
   updated_at?: string;
   uploaded_by_username?: string;
   updated_by_username?: string;
+  is_favorited?: boolean;
+  favorite_id?: number;
   // category?: string; // Removed as it's not in the current backend schema for links
 }
 
@@ -200,6 +220,8 @@ export interface MiscFile {
   updated_at?: string;
   uploaded_by_username?: string;
   updated_by_username?: string;
+  is_favorited?: boolean;
+  favorite_id?: number;
 }
 // No specific EditMiscFilePayload type is defined here as edit operations for misc files
 // (like replacing the file or changing metadata) will likely use FormData via editAdminMiscFile.

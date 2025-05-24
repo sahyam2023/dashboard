@@ -3483,54 +3483,80 @@ def search_api():
     # Prepare the search term for LIKE queries
     like_query_term = f"%{query_term.lower()}%"
 
+    user_id = None
+    try:
+        verify_jwt_in_request(optional=True)
+        current_user_identity = get_jwt_identity()
+        if current_user_identity:
+            user_id = int(current_user_identity)
+    except Exception as e:
+        app.logger.error(f"Error getting user_id in search: {e}")
+
     # Documents
-    sql_documents = """
-        SELECT id, doc_name AS name, description, 'document' AS type
-        FROM documents
-        WHERE LOWER(doc_name) LIKE ? OR LOWER(description) LIKE ?
-    """
-    results.extend([dict(row) for row in db.execute(sql_documents, (like_query_term, like_query_term)).fetchall()])
+    sql_documents_select = "SELECT d.id, d.doc_name AS name, d.description, 'document' AS type"
+    sql_documents_from = "FROM documents d"
+    doc_params = [like_query_term, like_query_term]
+    if user_id:
+        sql_documents_select += ", uf.id AS favorite_id"
+        sql_documents_from += " LEFT JOIN user_favorites uf ON d.id = uf.item_id AND uf.item_type = 'document' AND uf.user_id = ?"
+        doc_params.append(user_id)
+    sql_documents = f"{sql_documents_select} {sql_documents_from} WHERE (LOWER(d.doc_name) LIKE ? OR LOWER(d.description) LIKE ?)"
+    results.extend([dict(row) for row in db.execute(sql_documents, tuple(doc_params)).fetchall()])
 
     # Patches
-    sql_patches = """
-        SELECT id, patch_name AS name, description, 'patch' AS type
-        FROM patches
-        WHERE LOWER(patch_name) LIKE ? OR LOWER(description) LIKE ?
-    """
-    results.extend([dict(row) for row in db.execute(sql_patches, (like_query_term, like_query_term)).fetchall()])
+    sql_patches_select = "SELECT p.id, p.patch_name AS name, p.description, 'patch' AS type"
+    sql_patches_from = "FROM patches p"
+    patch_params = [like_query_term, like_query_term]
+    if user_id:
+        sql_patches_select += ", uf.id AS favorite_id"
+        sql_patches_from += " LEFT JOIN user_favorites uf ON p.id = uf.item_id AND uf.item_type = 'patch' AND uf.user_id = ?"
+        patch_params.append(user_id)
+    sql_patches = f"{sql_patches_select} {sql_patches_from} WHERE (LOWER(p.patch_name) LIKE ? OR LOWER(p.description) LIKE ?)"
+    results.extend([dict(row) for row in db.execute(sql_patches, tuple(patch_params)).fetchall()])
 
     # Links
-    sql_links = """
-        SELECT id, title AS name, description, url, 'link' AS type
-        FROM links
-        WHERE LOWER(title) LIKE ? OR LOWER(description) LIKE ? OR LOWER(url) LIKE ?
-    """
-    results.extend([dict(row) for row in db.execute(sql_links, (like_query_term, like_query_term, like_query_term)).fetchall()])
+    sql_links_select = "SELECT l.id, l.title AS name, l.description, l.url, l.is_external_link, l.stored_filename, 'link' AS type" # Added is_external_link and stored_filename
+    sql_links_from = "FROM links l"
+    link_params = [like_query_term, like_query_term, like_query_term]
+    if user_id:
+        sql_links_select += ", uf.id AS favorite_id"
+        sql_links_from += " LEFT JOIN user_favorites uf ON l.id = uf.item_id AND uf.item_type = 'link' AND uf.user_id = ?"
+        link_params.append(user_id)
+    sql_links = f"{sql_links_select} {sql_links_from} WHERE (LOWER(l.title) LIKE ? OR LOWER(l.description) LIKE ? OR LOWER(l.url) LIKE ?)"
+    results.extend([dict(row) for row in db.execute(sql_links, tuple(link_params)).fetchall()])
 
     # Misc Files
-    sql_misc_files = """
-        SELECT id, user_provided_title AS name, original_filename, user_provided_description AS description, 'misc_file' AS type
-        FROM misc_files
-        WHERE LOWER(user_provided_title) LIKE ? OR LOWER(user_provided_description) LIKE ? OR LOWER(original_filename) LIKE ?
-    """
-    results.extend([dict(row) for row in db.execute(sql_misc_files, (like_query_term, like_query_term, like_query_term)).fetchall()])
+    sql_misc_files_select = "SELECT mf.id, mf.user_provided_title AS name, mf.original_filename, mf.user_provided_description AS description, mf.stored_filename, 'misc_file' AS type" # Added stored_filename
+    sql_misc_files_from = "FROM misc_files mf"
+    misc_params = [like_query_term, like_query_term, like_query_term]
+    if user_id:
+        sql_misc_files_select += ", uf.id AS favorite_id"
+        sql_misc_files_from += " LEFT JOIN user_favorites uf ON mf.id = uf.item_id AND uf.item_type = 'misc_file' AND uf.user_id = ?"
+        misc_params.append(user_id)
+    sql_misc_files = f"{sql_misc_files_select} {sql_misc_files_from} WHERE (LOWER(mf.user_provided_title) LIKE ? OR LOWER(mf.user_provided_description) LIKE ? OR LOWER(mf.original_filename) LIKE ?)"
+    results.extend([dict(row) for row in db.execute(sql_misc_files, tuple(misc_params)).fetchall()])
 
     # Software
-    sql_software = """
-        SELECT id, name, description, 'software' AS type
-        FROM software
-        WHERE LOWER(name) LIKE ? OR LOWER(description) LIKE ?
-    """
-    results.extend([dict(row) for row in db.execute(sql_software, (like_query_term, like_query_term)).fetchall()])
+    sql_software_select = "SELECT s.id, s.name, s.description, 'software' AS type"
+    sql_software_from = "FROM software s"
+    software_params = [like_query_term, like_query_term]
+    if user_id:
+        sql_software_select += ", uf.id AS favorite_id"
+        sql_software_from += " LEFT JOIN user_favorites uf ON s.id = uf.item_id AND uf.item_type = 'software' AND uf.user_id = ?"
+        software_params.append(user_id)
+    sql_software_query = f"{sql_software_select} {sql_software_from} WHERE (LOWER(s.name) LIKE ? OR LOWER(s.description) LIKE ?)"
+    results.extend([dict(row) for row in db.execute(sql_software_query, tuple(software_params)).fetchall()])
 
     # Versions
-    sql_versions = """
-        SELECT v.id, v.version_number AS name, v.changelog, v.known_bugs, v.software_id, s.name AS software_name, 'version' AS type
-        FROM versions v
-        JOIN software s ON v.software_id = s.id
-        WHERE LOWER(v.version_number) LIKE ? OR LOWER(v.changelog) LIKE ? OR LOWER(v.known_bugs) LIKE ?
-    """
-    results.extend([dict(row) for row in db.execute(sql_versions, (like_query_term, like_query_term, like_query_term)).fetchall()])
+    sql_versions_select = "SELECT v.id, v.version_number AS name, v.changelog, v.known_bugs, v.software_id, s.name AS software_name, 'version' AS type"
+    sql_versions_from = "FROM versions v JOIN software s ON v.software_id = s.id"
+    version_params = [like_query_term, like_query_term, like_query_term]
+    if user_id:
+        sql_versions_select += ", uf.id AS favorite_id"
+        sql_versions_from += " LEFT JOIN user_favorites uf ON v.id = uf.item_id AND uf.item_type = 'version' AND uf.user_id = ?"
+        version_params.append(user_id)
+    sql_versions_query = f"{sql_versions_select} {sql_versions_from} WHERE (LOWER(v.version_number) LIKE ? OR LOWER(v.changelog) LIKE ? OR LOWER(v.known_bugs) LIKE ?)"
+    results.extend([dict(row) for row in db.execute(sql_versions_query, tuple(version_params)).fetchall()])
 
     return jsonify(results)
 
@@ -3544,6 +3570,159 @@ def init_db_command():
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
 
+# --- User Favorites Endpoints ---
+ALLOWED_FAVORITE_ITEM_TYPES = ['document', 'patch', 'link', 'misc_file', 'software', 'version']
+
+@app.route('/api/favorites', methods=['POST'])
+@jwt_required()
+def add_user_favorite():
+    current_user_id_str = get_jwt_identity()
+    try:
+        user_id = int(current_user_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid user identity in token."), 400
+
+    data = request.get_json()
+    if not data:
+        return jsonify(msg="Missing JSON data"), 400
+
+    item_id = data.get('item_id')
+    item_type = data.get('item_type')
+
+    if not isinstance(item_id, int) or item_id <= 0:
+        return jsonify(msg="item_id (positive integer) is required."), 400
+    if not item_type or item_type not in ALLOWED_FAVORITE_ITEM_TYPES:
+        return jsonify(msg=f"item_type is required and must be one of: {', '.join(ALLOWED_FAVORITE_ITEM_TYPES)}."), 400
+
+    db = get_db()
+    
+    # Check if already favorited to prevent duplicate processing by add_favorite if it doesn't handle it.
+    # The current database.add_favorite returns None on IntegrityError (already exists).
+    existing_favorite = database.get_favorite_status(db, user_id, item_id, item_type)
+    if existing_favorite:
+        return jsonify(dict(existing_favorite)), 200 # Already exists, return current favorite info
+
+    favorite_id = database.add_favorite(db, user_id, item_id, item_type)
+
+    if favorite_id:
+        log_audit_action(
+            action_type='ADD_FAVORITE',
+            target_table='user_favorites',
+            target_id=favorite_id, # This is the ID of the entry in user_favorites table
+            details={'item_id': item_id, 'item_type': item_type}
+            # user_id and username are automatically picked up by log_audit_action from JWT
+        )
+        # Fetch the newly created favorite record to return it
+        new_favorite_record = database.get_favorite_status(db, user_id, item_id, item_type)
+        if new_favorite_record:
+            return jsonify(dict(new_favorite_record)), 201
+        else:
+            # This case should ideally not happen if add_favorite returned a valid ID
+            app.logger.error(f"Failed to fetch favorite record for user {user_id}, item {item_id}, type {item_type} after creation.")
+            return jsonify(msg="Favorite added but could not be retrieved."), 500
+    else:
+        # This could be due to an IntegrityError (already favorited and not handled above) or other DB error
+        # The database.add_favorite function prints specific errors.
+        return jsonify(msg="Failed to add favorite. It might already exist or a database error occurred."), 409 # 409 Conflict or 500
+
+@app.route('/api/favorites/<item_type>/<int:item_id>', methods=['DELETE'])
+@jwt_required()
+def remove_user_favorite(item_type, item_id):
+    current_user_id_str = get_jwt_identity()
+    try:
+        user_id = int(current_user_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid user identity in token."), 400
+
+    if item_type not in ALLOWED_FAVORITE_ITEM_TYPES:
+        return jsonify(msg=f"Invalid item_type. Must be one of: {', '.join(ALLOWED_FAVORITE_ITEM_TYPES)}."), 400
+    if item_id <= 0:
+         return jsonify(msg="item_id must be a positive integer."), 400
+
+
+    db = get_db()
+    # Optional: Check if the favorite exists before trying to delete, to provide more specific feedback.
+    # favorite_to_delete = database.get_favorite_status(db, user_id, item_id, item_type)
+    # if not favorite_to_delete:
+    #     return jsonify(msg="Favorite not found."), 404
+        
+    if database.remove_favorite(db, user_id, item_id, item_type):
+        log_audit_action(
+            action_type='REMOVE_FAVORITE',
+            target_table='user_favorites', # The table from which the record was removed
+            # target_id could be the ID of the user_favorites record if known, or just log item_id/item_type
+            details={'item_id': item_id, 'item_type': item_type}
+        )
+        return jsonify(msg="Favorite removed successfully."), 200 # Or 204 No Content
+    else:
+        return jsonify(msg="Failed to remove favorite. It might not exist or a database error occurred."), 404 # Or 500
+
+@app.route('/api/favorites', methods=['GET'])
+@jwt_required()
+def get_user_favorites_api():
+    current_user_id_str = get_jwt_identity()
+    try:
+        user_id = int(current_user_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid user identity in token."), 400
+
+    page = request.args.get('page', default=1, type=int)
+    per_page = request.args.get('per_page', default=10, type=int)
+    item_type_filter = request.args.get('item_type', default=None, type=str)
+
+    if page <= 0: page = 1
+    if per_page <= 0: per_page = 10
+    if per_page > 100: per_page = 100 # Max limit
+
+    if item_type_filter and item_type_filter not in ALLOWED_FAVORITE_ITEM_TYPES:
+        return jsonify(msg=f"Invalid item_type filter. Must be one of: {', '.join(ALLOWED_FAVORITE_ITEM_TYPES)}."), 400
+
+    db = get_db()
+    try:
+        items, total_count = database.get_user_favorites(db, user_id, page, per_page, item_type_filter)
+        
+        total_pages = math.ceil(total_count / per_page) if total_count > 0 else 1
+        
+        # Convert Row objects to dicts for JSON serialization
+        items_as_dicts = [dict(item) for item in items]
+
+        return jsonify({
+            "favorites": items_as_dicts,
+            "page": page,
+            "per_page": per_page,
+            "total_favorites": total_count,
+            "total_pages": total_pages
+        }), 200
+    except Exception as e:
+        app.logger.error(f"Error fetching user favorites for user {user_id}: {e}", exc_info=True)
+        return jsonify(msg="An error occurred while fetching favorites."), 500
+
+
+@app.route('/api/favorites/status/<item_type>/<int:item_id>', methods=['GET'])
+@jwt_required()
+def get_user_favorite_status_api(item_type, item_id):
+    current_user_id_str = get_jwt_identity()
+    try:
+        user_id = int(current_user_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid user identity in token."), 400
+
+    if item_type not in ALLOWED_FAVORITE_ITEM_TYPES:
+        return jsonify(msg=f"Invalid item_type. Must be one of: {', '.join(ALLOWED_FAVORITE_ITEM_TYPES)}."), 400
+    if item_id <= 0:
+         return jsonify(msg="item_id must be a positive integer."), 400
+
+    db = get_db()
+    favorite_record = database.get_favorite_status(db, user_id, item_id, item_type)
+
+    if favorite_record:
+        return jsonify({
+            "is_favorite": True,
+            "favorite_id": favorite_record['id'], # ID of the user_favorites record
+            "favorited_at": favorite_record['created_at']
+        }), 200
+    else:
+        return jsonify({"is_favorite": False, "favorite_id": None}), 200
 
 # --- Audit Log Viewer Endpoint (Admin) ---
 @app.route('/api/admin/audit-logs', methods=['GET'])

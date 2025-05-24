@@ -1,10 +1,19 @@
 // src/views/PatchesView.tsx
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { ExternalLink, PlusCircle, Edit3, Trash2 } from 'lucide-react';
-import { fetchPatches, fetchSoftware, deleteAdminPatch, PaginatedPatchesResponse } from '../services/api'; // Import PaginatedPatchesResponse
+import { ExternalLink, PlusCircle, Edit3, Trash2, Star } from 'lucide-react';
+import { 
+  fetchPatches, 
+  fetchSoftware, 
+  deleteAdminPatch, 
+  PaginatedPatchesResponse,
+  addFavoriteApi, // Added
+  removeFavoriteApi, // Added
+  getFavoriteStatusApi, // Added
+  FavoriteItemType // Added
+} from '../services/api';
 import { Patch as PatchType, Software } from '../types';
-import DataTable, { ColumnDef } from '../components/DataTable'; // Import DataTable and ColumnDef
+import DataTable, { ColumnDef } from '../components/DataTable';
 import FilterTabs from '../components/FilterTabs';
 import LoadingState from '../components/LoadingState'; // Can be replaced by DataTable's isLoading
 import ErrorState from '../components/ErrorState';
@@ -52,6 +61,9 @@ const PatchesView: React.FC = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
 
+  // Favorite State
+  const [favoritedItems, setFavoritedItems] = useState<Map<number, { favoriteId: number | undefined }>>(new Map());
+
   const loadPatches = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -79,6 +91,42 @@ const PatchesView: React.FC = () => {
       setIsLoading(false);
     }
   }, [selectedSoftwareId, currentPage, itemsPerPage, sortBy, sortOrder, releaseFromFilter, releaseToFilter, patchedByDeveloperFilter]);
+  
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setFavoritedItems(new Map()); // Clear favorites on logout
+    }
+  }, [isAuthenticated]);
+
+  // Fetch favorite statuses when patches load or user auth changes
+  useEffect(() => {
+    if (!isAuthenticated || patches.length === 0) return;
+    
+    const fetchStatuses = async () => {
+      const currentFavoritedItems = new Map<number, { favoriteId: number | undefined }>();
+      for (const patch of patches) {
+        if (!favoritedItems.has(patch.id)) { 
+          try {
+            const status = await getFavoriteStatusApi(patch.id, 'patch' as FavoriteItemType); 
+            if (status.is_favorite && typeof status.favorite_id === 'number') {
+              currentFavoritedItems.set(patch.id, { favoriteId: status.favorite_id });
+            } else {
+              currentFavoritedItems.set(patch.id, { favoriteId: undefined });
+            }
+          } catch (error) {
+            console.warn(`Failed to fetch favorite status for patch ${patch.id}:`, error);
+            currentFavoritedItems.set(patch.id, { favoriteId: undefined }); 
+          }
+        } else {
+          currentFavoritedItems.set(patch.id, favoritedItems.get(patch.id)!);
+        }
+      }
+      setFavoritedItems(currentFavoritedItems);
+    };
+    
+    fetchStatuses();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [patches, isAuthenticated]); // favoritedItems is intentionally omitted
 
   // Handler for applying advanced filters
   const handleApplyAdvancedFilters = () => {
@@ -234,17 +282,82 @@ const PatchesView: React.FC = () => {
     { key: 'updated_by_username', header: 'Updated By', sortable: false, render: (patch) => patch.updated_by_username || 'N/A' }, // Not typically sorted
     { key: 'created_at', header: 'Created At', sortable: true, render: (patch) => formatDate(patch.created_at) },
     { key: 'updated_at', header: 'Updated At', sortable: true, render: (patch) => formatDate(patch.updated_at) },
-    ...(isAuthenticated && (role === 'admin' || role === 'super_admin') ? [{
+    ...(isAuthenticated ? [{ // Changed condition to isAuthenticated for favorite button
       key: 'actions' as keyof PatchType | 'actions',
       header: 'Actions',
       render: (patch: PatchType) => (
         <div className="flex space-x-2">
-          <button onClick={(e) => { e.stopPropagation(); openEditForm(patch);}} className="p-1 text-blue-600 hover:text-blue-800" title="Edit Patch"><Edit3 size={16} /></button>
-          <button onClick={(e) => { e.stopPropagation(); openDeleteConfirm(patch);}} className="p-1 text-red-600 hover:text-red-800" title="Delete Patch"><Trash2 size={16} /></button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleFavoriteToggle(patch, 'patch' as FavoriteItemType);
+            }}
+            className={`p-1 ${favoritedItems.get(patch.id)?.favoriteId ? 'text-yellow-500' : 'text-gray-400'} hover:text-yellow-600`}
+            title={favoritedItems.get(patch.id)?.favoriteId ? "Remove from Favorites" : "Add to Favorites"}
+          >
+            <Star size={16} className={favoritedItems.get(patch.id)?.favoriteId ? "fill-current" : ""} />
+          </button>
+          {(role === 'admin' || role === 'super_admin') && (
+            <>
+              <button onClick={(e) => { e.stopPropagation(); openEditForm(patch);}} className="p-1 text-blue-600 hover:text-blue-800" title="Edit Patch"><Edit3 size={16} /></button>
+              <button onClick={(e) => { e.stopPropagation(); openDeleteConfirm(patch);}} className="p-1 text-red-600 hover:text-red-800" title="Delete Patch"><Trash2 size={16} /></button>
+            </>
+          )}
         </div>
       ),
     }] : [])
   ];
+
+  const handleFavoriteToggle = async (item: PatchType, itemType: FavoriteItemType) => {
+    if (!isAuthenticated) {
+      setFeedbackMessage("Please log in to manage favorites.");
+      return;
+    }
+
+    const currentStatus = favoritedItems.get(item.id);
+    const isCurrentlyFavorited = !!currentStatus?.favoriteId;
+    
+    const tempFavoritedItems = new Map(favoritedItems);
+    if (isCurrentlyFavorited) {
+      tempFavoritedItems.set(item.id, { favoriteId: undefined });
+    } else {
+      tempFavoritedItems.set(item.id, { favoriteId: -1 }); // Placeholder
+    }
+    setFavoritedItems(tempFavoritedItems);
+    setFeedbackMessage(null);
+
+    try {
+      if (isCurrentlyFavorited && typeof currentStatus?.favoriteId === 'number') {
+        await removeFavoriteApi(item.id, itemType);
+        setFeedbackMessage(`"${item.patch_name}" removed from favorites.`);
+        setFavoritedItems(prev => {
+            const newMap = new Map(prev);
+            newMap.set(item.id, { favoriteId: undefined });
+            return newMap;
+        });
+      } else {
+        const newFavorite = await addFavoriteApi(item.id, itemType);
+        setFavoritedItems(prev => {
+          const newMap = new Map(prev);
+          newMap.set(item.id, { favoriteId: newFavorite.id });
+          return newMap;
+        });
+        setFeedbackMessage(`"${item.patch_name}" added to favorites.`);
+      }
+    } catch (error: any) {
+      console.error("Failed to toggle favorite:", error);
+      setFeedbackMessage(error?.response?.data?.msg || error.message || "Failed to update favorite status.");
+      setFavoritedItems(prev => {
+        const newMap = new Map(prev);
+        if (isCurrentlyFavorited) {
+            newMap.set(item.id, { favoriteId: currentStatus?.favoriteId });
+        } else {
+            newMap.set(item.id, { favoriteId: undefined });
+        }
+        return newMap;
+      });
+    }
+  };
   
   return (
     <div className="space-y-6">

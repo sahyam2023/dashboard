@@ -1,51 +1,33 @@
-import React, { useState } from 'react'; // Removed useCallback, useEffect for now, will add back if needed for dashboard features
-// import AdminVersionsTable from './AdminVersionsTable'; // Specific to versions, remove or replace
-// import AdminVersionForm from './AdminVersionForm'; // Specific to versions, remove or replace
-// import { AdminSoftwareVersion, Software } from '../../../services/api'; // Specific to versions
-// import { deleteAdminVersion, fetchSoftware } from '../../../services/api'; // Specific to versions
-import ConfirmationModal from '../../shared/ConfirmationModal'; // May be used for other actions
-import Modal from '../../shared/Modal'; // Generic Modal
-
-// Placeholder for potential dashboard-specific data or types
-// interface DashboardSummary {
-//   totalUsers: number;
-//   totalSoftware: number;
-//   recentActivity: any[];
-// }
+import React, { useState, useEffect } from 'react';
+import { fetchDashboardStats, DashboardStats, RecentActivityItem } from '../../services/api'; // Adjusted path
+// import ConfirmationModal from '../../shared/ConfirmationModal'; // Not used in this update
+// import Modal from '../../shared/Modal'; // Not used in this update
 
 const AdminDashboardPage: React.FC = () => {
-  // State for dashboard elements, e.g., summary data, quick links, etc.
-  // const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [isLoading, setIsLoading] = useState(false); // Example, can be used if fetching dashboard data
-  const [error, setError] = useState<string | null>(null);  // Example
+  const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // For now, the dashboard will be simple. Features can be added later.
-  // If we re-introduce version management here, we'll need the related states:
-  // const [isFormModalOpen, setIsFormModalOpen] = useState(false);
-  // const [editingVersion, setEditingVersion] = useState<AdminSoftwareVersion | null>(null);
-  // const [showDeleteConfirm, setShowDeleteConfirm] = useState(false); // If needed for dashboard actions
-  // const [itemToDelete, setItemToDelete] = useState<number | null>(null); // Generic item
-  // const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  useEffect(() => {
+    const loadDashboardData = async () => {
+      setIsLoading(true);
+      try {
+        const data = await fetchDashboardStats();
+        setDashboardStats(data);
+        setError(null);
+      } catch (err: any) {
+        setError(err.message || "Failed to load dashboard statistics.");
+        setDashboardStats(null);
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-
-  // Placeholder for dashboard content
-  // useEffect(() => {
-  //   const fetchDashboardData = async () => {
-  //     setIsLoading(true);
-  //     try {
-  //       // const data = await getDashboardSummary(); // Example API call
-  //       // setSummary(data);
-  //     } catch (err: any) {
-  //       setError(err.message || "Failed to load dashboard data.");
-  //     } finally {
-  //       setIsLoading(false);
-  //     }
-  //   };
-  //   fetchDashboardData();
-  // }, []);
+    loadDashboardData();
+  }, []);
 
   if (isLoading) {
-    return <div className="p-4 text-center">Loading dashboard...</div>;
+    return <div className="p-4 text-center">Loading dashboard statistics...</div>;
   }
 
   if (error) {
@@ -56,27 +38,46 @@ const AdminDashboardPage: React.FC = () => {
     <div className="container mx-auto p-6 bg-gray-50 min-h-screen">
       <h1 className="text-3xl font-semibold text-gray-800 mb-8">Admin Dashboard</h1>
 
-      {/* {feedbackMessage && (
-        <div className={`p-4 mb-4 text-sm rounded-lg ${feedbackMessage.type === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`} role="alert">
-          {feedbackMessage.message}
-        </div>
-      )} */}
-
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {/* Example Dashboard Widgets/Cards */}
+        {/* Quick Stats Card */}
         <div className="bg-white p-6 rounded-lg shadow-md">
           <h2 className="text-xl font-semibold text-gray-700 mb-3">Quick Stats</h2>
-          <p className="text-gray-600">Total Users: {/* summary?.totalUsers ?? 'N/A' */ 'N/A'}</p>
-          <p className="text-gray-600">Software Titles: {/* summary?.totalSoftware ?? 'N/A' */ 'N/A'}</p>
-          {/* Add more stats here */}
+          <p className="text-gray-600">Total Users: {dashboardStats?.total_users ?? 'N/A'}</p>
+          <p className="text-gray-600">Software Titles: {dashboardStats?.total_software_titles ?? 'N/A'}</p>
         </div>
 
-        <div className="bg-white p-6 rounded-lg shadow-md">
+        {/* Recent Activity Card */}
+        <div className="bg-white p-6 rounded-lg shadow-md col-span-1 md:col-span-2">
           <h2 className="text-xl font-semibold text-gray-700 mb-3">Recent Activity</h2>
-          {/* Render recent activity items here, e.g., summary?.recentActivity.map(...) */}
-          <p className="text-gray-500">No recent activity to display.</p>
+          {dashboardStats && dashboardStats.recent_activities.length > 0 ? (
+            <ul className="space-y-3 text-sm">
+              {dashboardStats.recent_activities.map((activity, index) => (
+                <li key={index} className="p-3 bg-gray-50 rounded-md shadow-sm">
+                  <div className="font-medium text-gray-700">
+                    Action: <span className="font-normal text-gray-600">{activity.action_type}</span>
+                  </div>
+                  {activity.username && (
+                    <div className="text-gray-600">
+                      User: <span className="font-normal">{activity.username}</span>
+                    </div>
+                  )}
+                  <div className="text-gray-600">
+                    Time: <span className="font-normal">{new Date(activity.timestamp).toLocaleString()}</span>
+                  </div>
+                  {activity.details && (
+                     <div className="mt-1 text-xs text-gray-500 overflow-auto max-h-20">
+                       <pre className="whitespace-pre-wrap break-all">Details: {typeof activity.details === 'object' ? JSON.stringify(activity.details, null, 2) : activity.details}</pre>
+                     </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-gray-500">No recent activity to display.</p>
+          )}
         </div>
         
+        {/* Quick Links Card - Kept original structure */}
         <div className="bg-white p-6 rounded-lg shadow-md">
           <h2 className="text-xl font-semibold text-gray-700 mb-3">Quick Links</h2>
           <ul className="space-y-2">
@@ -86,9 +87,12 @@ const AdminDashboardPage: React.FC = () => {
           </ul>
         </div>
       </div>
-
-      {/* Modals for actions can be defined here if needed */}
-      {/* e.g., <ConfirmationModal isOpen={showDeleteConfirm} ... /> */}
+      
+      {/* ConfirmationModal and Modal components are not used in this specific update,
+          but kept here if they are used by other functionalities on this page. 
+          If not, they can be removed from imports. */}
+      {/* <ConfirmationModal isOpen={false} onClose={() => {}} onConfirm={() => {}} title="Confirm" message="Are you sure?" /> */}
+      {/* <Modal isOpen={false} onClose={() => {}} title="Information"> Modal Content </Modal> */}
     </div>
   );
 };

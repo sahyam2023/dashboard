@@ -23,6 +23,13 @@ const DocumentsView: React.FC = () => {
   const [documents, setDocuments] = useState<DocumentType[]>([]);
   const [softwareList, setSoftwareList] = useState<Software[]>([]);
   const [selectedSoftwareId, setSelectedSoftwareId] = useState<number | null>(null); // Filter state
+
+  // Advanced Filter States
+  const [docTypeFilter, setDocTypeFilter] = useState<string>('');
+  const [createdFromFilter, setCreatedFromFilter] = useState<string>('');
+  const [createdToFilter, setCreatedToFilter] = useState<string>('');
+  const [updatedFromFilter, setUpdatedFromFilter] = useState<string>('');
+  const [updatedToFilter, setUpdatedToFilter] = useState<string>('');
   
   // Pagination State
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -57,7 +64,12 @@ const DocumentsView: React.FC = () => {
         currentPage,
         itemsPerPage,
         sortBy,
-        sortOrder
+        sortOrder,
+        docTypeFilter || undefined,
+        createdFromFilter || undefined,
+        createdToFilter || undefined,
+        updatedFromFilter || undefined,
+        updatedToFilter || undefined
       );
       setDocuments(response.documents);
       setTotalPages(response.total_pages);
@@ -70,7 +82,23 @@ const DocumentsView: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [selectedSoftwareId, currentPage, itemsPerPage, sortBy, sortOrder]);
+  }, [selectedSoftwareId, currentPage, itemsPerPage, sortBy, sortOrder, docTypeFilter, createdFromFilter, createdToFilter, updatedFromFilter, updatedToFilter]);
+
+  // Handler for applying advanced filters
+  const handleApplyAdvancedFilters = () => {
+    setCurrentPage(1); // This will trigger loadDocuments due to dependency
+  };
+
+  // Handler for clearing advanced filters
+  const handleClearAdvancedFilters = () => {
+    setDocTypeFilter('');
+    setCreatedFromFilter('');
+    setCreatedToFilter('');
+    setUpdatedFromFilter('');
+    setUpdatedToFilter('');
+    // setSelectedSoftwareId(null); // Optional: Clear software tab filter as well
+    setCurrentPage(1); // This will trigger loadDocuments
+  };
 
   useEffect(() => {
     const loadSoftwareForFilters = async () => {
@@ -261,6 +289,59 @@ const DocumentsView: React.FC = () => {
           onSelectFilter={handleFilterChange}
         />
       )}
+
+      {/* Advanced Filter UI */}
+      <div className="my-4 p-4 border rounded-md bg-gray-50 space-y-4 md:space-y-0 md:flex md:flex-wrap md:items-end md:gap-4">
+        {/* Document Type Filter */}
+        <div className="flex flex-col">
+          <label htmlFor="docTypeFilterInput" className="text-sm font-medium text-gray-700 mb-1">Document Type</label>
+          <input
+            id="docTypeFilterInput"
+            type="text"
+            value={docTypeFilter}
+            onChange={(e) => setDocTypeFilter(e.target.value)}
+            placeholder="e.g., Manual, Guide"
+            className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+          />
+        </div>
+
+        {/* Created At Filter */}
+        <div className="flex flex-col">
+          <label className="text-sm font-medium text-gray-700 mb-1">Created Between</label>
+          <div className="flex items-center gap-2">
+            <input type="date" value={createdFromFilter} onChange={(e) => setCreatedFromFilter(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" />
+            <span className="text-gray-500">and</span>
+            <input type="date" value={createdToFilter} onChange={(e) => setCreatedToFilter(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" />
+          </div>
+        </div>
+        
+        {/* Updated At Filter */}
+        <div className="flex flex-col">
+          <label className="text-sm font-medium text-gray-700 mb-1">Updated Between</label>
+          <div className="flex items-center gap-2">
+            <input type="date" value={updatedFromFilter} onChange={(e) => setUpdatedFromFilter(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" />
+            <span className="text-gray-500">and</span>
+            <input type="date" value={updatedToFilter} onChange={(e) => setUpdatedToFilter(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" />
+          </div>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="flex items-end gap-2 pt-5"> {/* pt-5 to align with labels if inputs are taller */}
+          <button
+            onClick={handleApplyAdvancedFilters}
+            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 text-sm"
+          >
+            Apply Filters
+          </button>
+          <button
+            onClick={handleClearAdvancedFilters}
+            className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 text-sm"
+          >
+            Clear Filters
+          </button>
+        </div>
+      </div>
+
 
       {error && documents.length === 0 && !isLoading ? (
         <ErrorState message={error} onRetry={loadDocuments} />

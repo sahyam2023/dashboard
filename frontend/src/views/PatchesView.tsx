@@ -24,6 +24,11 @@ const PatchesView: React.FC = () => {
   const [patches, setPatches] = useState<PatchType[]>([]);
   const [softwareList, setSoftwareList] = useState<Software[]>([]);
   const [selectedSoftwareId, setSelectedSoftwareId] = useState<number | null>(null); // Filter state
+
+  // Advanced Filter States
+  const [releaseFromFilter, setReleaseFromFilter] = useState<string>('');
+  const [releaseToFilter, setReleaseToFilter] = useState<string>('');
+  const [patchedByDeveloperFilter, setPatchedByDeveloperFilter] = useState<string>('');
   
   // Pagination State
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -57,7 +62,10 @@ const PatchesView: React.FC = () => {
         currentPage,
         itemsPerPage,
         sortBy,
-        sortOrder
+        sortOrder,
+        releaseFromFilter || undefined,
+        releaseToFilter || undefined,
+        patchedByDeveloperFilter || undefined
       );
       setPatches(response.patches);
       setTotalPages(response.total_pages);
@@ -70,7 +78,21 @@ const PatchesView: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [selectedSoftwareId, currentPage, itemsPerPage, sortBy, sortOrder]);
+  }, [selectedSoftwareId, currentPage, itemsPerPage, sortBy, sortOrder, releaseFromFilter, releaseToFilter, patchedByDeveloperFilter]);
+
+  // Handler for applying advanced filters
+  const handleApplyAdvancedFilters = () => {
+    setCurrentPage(1); // This will trigger loadPatches due to dependency
+  };
+
+  // Handler for clearing advanced filters
+  const handleClearAdvancedFilters = () => {
+    setReleaseFromFilter('');
+    setReleaseToFilter('');
+    setPatchedByDeveloperFilter('');
+    // setSelectedSoftwareId(null); // Optional: Clear software tab filter as well
+    setCurrentPage(1); // This will trigger loadPatches
+  };
 
   useEffect(() => {
     const loadSoftwareForFilters = async () => {
@@ -262,6 +284,48 @@ const PatchesView: React.FC = () => {
           onSelectFilter={handleFilterChange}
         />
       )}
+
+      {/* Advanced Filter UI */}
+      <div className="my-4 p-4 border rounded-md bg-gray-50 space-y-4 md:space-y-0 md:flex md:flex-wrap md:items-end md:gap-4">
+        {/* Patched By Developer Filter */}
+        <div className="flex flex-col">
+          <label htmlFor="patchedByDeveloperFilterInput" className="text-sm font-medium text-gray-700 mb-1">Developer</label>
+          <input
+            id="patchedByDeveloperFilterInput"
+            type="text"
+            value={patchedByDeveloperFilter}
+            onChange={(e) => setPatchedByDeveloperFilter(e.target.value)}
+            placeholder="e.g., John Doe"
+            className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+          />
+        </div>
+
+        {/* Release Date Filter */}
+        <div className="flex flex-col">
+          <label className="text-sm font-medium text-gray-700 mb-1">Released Between</label>
+          <div className="flex items-center gap-2">
+            <input type="date" value={releaseFromFilter} onChange={(e) => setReleaseFromFilter(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" />
+            <span className="text-gray-500">and</span>
+            <input type="date" value={releaseToFilter} onChange={(e) => setReleaseToFilter(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" />
+          </div>
+        </div>
+        
+        {/* Action Buttons */}
+        <div className="flex items-end gap-2 pt-5"> {/* pt-5 to align with labels if inputs are taller */}
+          <button
+            onClick={handleApplyAdvancedFilters}
+            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 text-sm"
+          >
+            Apply Filters
+          </button>
+          <button
+            onClick={handleClearAdvancedFilters}
+            className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 text-sm"
+          >
+            Clear Filters
+          </button>
+        </div>
+      </div>
 
       {error && patches.length === 0 && !isLoading ? (
         <ErrorState message={error} onRetry={loadPatches} />

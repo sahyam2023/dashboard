@@ -9,6 +9,7 @@ import MiscView from './views/MiscView';
 import SearchResultsView from './views/SearchResultsView';
 import LoginPage from './views/LoginPage';
 import RegisterPage from './views/RegisterPage';
+import FavoritesView from './views/FavoritesView'; // Added FavoritesView
 
 // Optional: You might create this later for better route protection
 // import ProtectedRoute from './components/ProtectedRoute';
@@ -41,6 +42,7 @@ function App() {
           <Route path="misc" element={<MiscView />} />
           <Route path="search" element={<SearchResultsView />} />
           <Route path="profile" element={<UserProfilePage />} />
+          <Route path="favorites" element={<FavoritesView />} /> {/* Added Favorites Route */}
           
           {/* Admin and Super Admin Routes */}
           <Route 

@@ -1,6 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { useSearchParams, useNavigate, Link } from 'react-router-dom'; // Removed useOutletContext
-import { searchData } from '../services/api';
+import { useSearchParams, useNavigate, Link } from 'react-router-dom';
+import { Star } from 'lucide-react';
+import { 
+  searchData,
+  addFavoriteApi, // Added
+  removeFavoriteApi, // Added
+  getFavoriteStatusApi, // Added
+  FavoriteItemType // Added
+} from '../services/api';
+import { useAuth } from '../context/AuthContext'; // Added
 import LoadingState from '../components/LoadingState';
 import ErrorState from '../components/ErrorState';
 import { API_BASE_URL } from '../config'; // For download links
@@ -18,6 +26,8 @@ interface SearchResultItem {
   url?: string; // For external links
   is_external_link?: boolean; // For links
   stored_filename?: string; // For uploaded files (links, misc_files)
+  is_favorited?: boolean; // Added
+  favorite_id?: number; // Added
   // Add other fields that might appear in search results
 }
 
@@ -26,18 +36,26 @@ interface CategorizedResults {
 }
 
 const SearchResultsView: React.FC = () => {
-  // Removed searchTerm from useOutletContext
+  const { isAuthenticated } = useAuth(); // Added
   const [searchParams] = useSearchParams();
-  const navigate = useNavigate(); // Keep navigate if needed for other purposes or future enhancements
-  const query = searchParams.get('q') || ''; // Sole source of truth for search term
+  const navigate = useNavigate(); 
+  const query = searchParams.get('q') || ''; 
 
   const [categorizedResults, setCategorizedResults] = useState<CategorizedResults>({});
   const [totalResults, setTotalResults] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null); // Added
 
-  // Removed useEffect that synced searchTerm with URL
+  // Favorite State for search results
+  const [favoritedItemsSearchResults, setFavoritedItemsSearchResults] = useState<Map<string, { favoriteId: number | undefined }>>(new Map());
 
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setFavoritedItemsSearchResults(new Map()); // Clear favorites on logout
+    }
+  }, [isAuthenticated]);
+  
   useEffect(() => {
     if (!query) {
       setCategorizedResults({});
@@ -64,6 +82,20 @@ const SearchResultsView: React.FC = () => {
         setCategorizedResults(groupedResults);
         setTotalResults(data.length);
 
+        // Initialize favoritedItemsSearchResults directly from search data
+        const newFavoritedItems = new Map<string, { favoriteId: number | undefined }>();
+        if (isAuthenticated && data && data.length > 0) {
+            for (const item of data) {
+                const uniqueKey = `${item.type}-${item.id}`;
+                if (item.favorite_id) { // Check if favorite_id exists and is truthy (not null/undefined)
+                    newFavoritedItems.set(uniqueKey, { favoriteId: item.favorite_id });
+                } else {
+                    newFavoritedItems.set(uniqueKey, { favoriteId: undefined });
+                }
+            }
+        }
+        setFavoritedItemsSearchResults(newFavoritedItems);
+
       } catch (err) {
         setError('Failed to fetch search results. Please try again later.');
         console.error(err);
@@ -75,7 +107,7 @@ const SearchResultsView: React.FC = () => {
     };
 
     fetchSearchResults();
-  }, [query]);
+  }, [query, isAuthenticated]); // Added isAuthenticated as a dependency
 
   const renderResultItem = (result: SearchResultItem, index: number) => {
     const key = `${result.type}-${result.id}-${index}`;
@@ -123,7 +155,22 @@ const SearchResultsView: React.FC = () => {
 
     const content = (
       <>
-        <h4 className="font-medium text-lg text-gray-900 mb-1">{title}</h4>
+        <div className="flex justify-between items-start">
+          <h4 className="font-medium text-lg text-gray-900 mb-1 flex-grow">{title}</h4>
+          {isAuthenticated && ( 
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault(); // Prevent navigation for Link components
+                handleFavoriteToggle(result);
+              }}
+              className={`p-1 ${favoritedItemsSearchResults.get(`${result.type}-${result.id}`)?.favoriteId ? 'text-yellow-500' : 'text-gray-400'} hover:text-yellow-600 flex-shrink-0`}
+              title={favoritedItemsSearchResults.get(`${result.type}-${result.id}`)?.favoriteId ? "Remove from Favorites" : "Add to Favorites"}
+            >
+              <Star size={16} className={favoritedItemsSearchResults.get(`${result.type}-${result.id}`)?.favoriteId ? "fill-current" : ""} />
+            </button>
+          )}
+        </div>
         <p className="text-xs text-gray-500 mb-1 uppercase tracking-wider">
           Type: {result.type}
           {result.type === 'version' && result.software_name && ` (for ${result.software_name})`}
@@ -166,6 +213,64 @@ const SearchResultsView: React.FC = () => {
     );
   };
 
+  const handleFavoriteToggle = async (item: SearchResultItem) => {
+    if (!isAuthenticated) {
+      setFeedbackMessage("Please log in to manage favorites.");
+      return;
+    }
+    const uniqueKey = `${item.type}-${item.id}`;
+    const itemIdAsNumber = typeof item.id === 'string' ? parseInt(item.id, 10) : item.id;
+
+    if (isNaN(itemIdAsNumber)) {
+      setFeedbackMessage("Invalid item ID for favoriting.");
+      return;
+    }
+
+    const currentStatus = favoritedItemsSearchResults.get(uniqueKey);
+    const isCurrentlyFavorited = !!currentStatus?.favoriteId;
+
+    const tempFavoritedItems = new Map(favoritedItemsSearchResults);
+    if (isCurrentlyFavorited) {
+      tempFavoritedItems.set(uniqueKey, { favoriteId: undefined });
+    } else {
+      tempFavoritedItems.set(uniqueKey, { favoriteId: -1 }); // Placeholder
+    }
+    setFavoritedItemsSearchResults(tempFavoritedItems);
+    setFeedbackMessage(null);
+
+
+    try {
+      if (isCurrentlyFavorited && typeof currentStatus?.favoriteId === 'number') {
+        await removeFavoriteApi(itemIdAsNumber, item.type as FavoriteItemType);
+        setFeedbackMessage(`"${item.name || item.title}" removed from favorites.`);
+        setFavoritedItemsSearchResults(prev => {
+          const newMap = new Map(prev);
+          newMap.set(uniqueKey, { favoriteId: undefined });
+          return newMap;
+        });
+      } else {
+        const newFavorite = await addFavoriteApi(itemIdAsNumber, item.type as FavoriteItemType);
+        setFavoritedItemsSearchResults(prev => {
+          const newMap = new Map(prev);
+          newMap.set(uniqueKey, { favoriteId: newFavorite.id });
+          return newMap;
+        });
+        setFeedbackMessage(`"${item.name || item.title}" added to favorites.`);
+      }
+    } catch (error: any) {
+      console.error("Failed to toggle favorite for search result:", error);
+      setFeedbackMessage(error?.response?.data?.msg || error.message || "Failed to update favorite status.");
+      setFavoritedItemsSearchResults(prev => {
+        const newMap = new Map(prev);
+        if (isCurrentlyFavorited) {
+          newMap.set(uniqueKey, { favoriteId: currentStatus?.favoriteId });
+        } else {
+          newMap.set(uniqueKey, { favoriteId: undefined });
+        }
+        return newMap;
+      });
+    }
+  };
 
   if (isLoading) {
     return <LoadingState message="Searching..." />;
@@ -178,6 +283,7 @@ const SearchResultsView: React.FC = () => {
   if (totalResults === 0 && query) {
     return (
       <div className="container mx-auto px-4 py-8">
+        {feedbackMessage && <div className="p-3 my-2 bg-blue-100 text-blue-700 rounded text-sm">{feedbackMessage}</div>}
         <div className="mb-6">
           <h2 className="text-2xl font-bold text-gray-800 mb-2">Search Results</h2>
           <p className="text-gray-600">
@@ -192,10 +298,10 @@ const SearchResultsView: React.FC = () => {
     );
   }
   
-  // Handle case where query is empty (e.g. navigating to /search directly)
   if (!query) {
      return (
       <div className="container mx-auto px-4 py-8">
+        {feedbackMessage && <div className="p-3 my-2 bg-blue-100 text-blue-700 rounded text-sm">{feedbackMessage}</div>}
         <div className="mb-6">
           <h2 className="text-2xl font-bold text-gray-800 mb-2">Search</h2>
           <p className="text-gray-600">Please enter a search term in the header to find results.</p>
@@ -206,6 +312,7 @@ const SearchResultsView: React.FC = () => {
 
   return (
     <div className="container mx-auto px-4 py-8">
+      {feedbackMessage && <div className="p-3 my-2 bg-blue-100 text-blue-700 rounded text-sm">{feedbackMessage}</div>}
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-gray-800 mb-2">Search Results</h2>
         <p className="text-gray-600">
@@ -215,8 +322,8 @@ const SearchResultsView: React.FC = () => {
       
       {Object.entries(categorizedResults).map(([type, items]) => (
         items.length > 0 && (
-          <div key={type} className="mb-8"> {/* Increased mb for more spacing between categories */}
-            <h3 className="text-xl font-semibold text-gray-700 mb-4 capitalize border-b pb-2">{type.replace('_', ' ')}s</h3> {/* Added border-b and pb for styling */}
+          <div key={type} className="mb-8"> 
+            <h3 className="text-xl font-semibold text-gray-700 mb-4 capitalize border-b pb-2">{type.replace('_', ' ')}s</h3> 
             <div className="space-y-4">
               {items.map((result, index) => renderResultItem(result, index))}
             </div>

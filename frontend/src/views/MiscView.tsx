@@ -6,16 +6,19 @@ import {
   fetchMiscFiles,
   deleteAdminMiscCategory,
   deleteAdminMiscFile,
-  PaginatedMiscFilesResponse // Import PaginatedMiscFilesResponse
+  PaginatedMiscFilesResponse, // Import PaginatedMiscFilesResponse
+  addFavoriteApi, // Added
+  removeFavoriteApi, // Added
+  getFavoriteStatusApi, // Added
+  FavoriteItemType // Added
 } from '../services/api';
 import { MiscCategory, MiscFile } from '../types';
-import DataTable, { ColumnDef } from '../components/DataTable'; // Import DataTable and ColumnDef
-// import LoadingState from '../components/LoadingState'; // DataTable has its own
+import DataTable, { ColumnDef } from '../components/DataTable';
 import ErrorState from '../components/ErrorState';
 import AdminUploadToMiscForm from '../components/admin/AdminUploadToMiscForm';
 import AdminMiscCategoryForm from '../components/admin/AdminMiscCategoryForm';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
-import { Download, FileText, CalendarDays, PlusCircle, Edit3, Trash2 } from 'lucide-react'; // Keep existing icons
+import { Download, FileText, CalendarDays, PlusCircle, Edit3, Trash2, Star } from 'lucide-react'; // Keep existing icons, Added Star
 
 const API_BASE_URL = 'http://127.0.0.1:5000'; // Consider importing from a central config
 
@@ -59,6 +62,8 @@ const MiscView: React.FC = () => {
   const [deleteFileError, setDeleteFileError] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
 
+  // Favorite State
+  const [favoritedItems, setFavoritedItems] = useState<Map<number, { favoriteId: number | undefined }>>(new Map());
 
   const loadMiscCategories = useCallback(async () => {
     setIsLoadingCategories(true);
@@ -108,6 +113,41 @@ const MiscView: React.FC = () => {
     loadMiscFiles();
   }, [loadMiscFiles]);
 
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setFavoritedItems(new Map()); // Clear favorites on logout
+    }
+  }, [isAuthenticated]);
+
+  // Fetch favorite statuses when misc files load or user auth changes
+  useEffect(() => {
+    if (!isAuthenticated || miscFiles.length === 0) return;
+    
+    const fetchStatuses = async () => {
+      const currentFavoritedItems = new Map<number, { favoriteId: number | undefined }>();
+      for (const file of miscFiles) {
+        if (!favoritedItems.has(file.id)) { 
+          try {
+            const status = await getFavoriteStatusApi(file.id, 'misc_file' as FavoriteItemType); 
+            if (status.is_favorite && typeof status.favorite_id === 'number') {
+              currentFavoritedItems.set(file.id, { favoriteId: status.favorite_id });
+            } else {
+              currentFavoritedItems.set(file.id, { favoriteId: undefined });
+            }
+          } catch (error) {
+            console.warn(`Failed to fetch favorite status for misc file ${file.id}:`, error);
+            currentFavoritedItems.set(file.id, { favoriteId: undefined }); 
+          }
+        } else {
+          currentFavoritedItems.set(file.id, favoritedItems.get(file.id)!);
+        }
+      }
+      setFavoritedItems(currentFavoritedItems);
+    };
+    
+    fetchStatuses();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [miscFiles, isAuthenticated]); // favoritedItems is intentionally omitted
 
   const handleCategoryFilterChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     const categoryId = event.target.value ? parseInt(event.target.value, 10) : null;
@@ -237,18 +277,83 @@ const MiscView: React.FC = () => {
         </a>
       )
     },
-    ...(isAuthenticated && (role === 'admin' || role === 'super_admin') ? [{
+    ...(isAuthenticated ? [{ // Changed condition to isAuthenticated for favorite button
       key: 'actions' as keyof MiscFile | 'actions',
       header: 'Actions',
       render: (file: MiscFile) => (
         <div className="flex space-x-2">
-          {/* TODO: Implement Edit Misc File functionality if needed */}
-          {/* <button onClick={(e) => { e.stopPropagation(); alert('Edit TBD: '+file.id) }} className="p-1 text-blue-600 hover:text-blue-800" title="Edit File"><Edit3 size={16} /></button> */}
-          <button onClick={(e) => { e.stopPropagation(); handleOpenDeleteFileConfirm(file);}} className="p-1 text-red-600 hover:text-red-800" title="Delete File"><Trash2 size={16} /></button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleFavoriteToggle(file, 'misc_file' as FavoriteItemType);
+            }}
+            className={`p-1 ${favoritedItems.get(file.id)?.favoriteId ? 'text-yellow-500' : 'text-gray-400'} hover:text-yellow-600`}
+            title={favoritedItems.get(file.id)?.favoriteId ? "Remove from Favorites" : "Add to Favorites"}
+          >
+            <Star size={16} className={favoritedItems.get(file.id)?.favoriteId ? "fill-current" : ""} />
+          </button>
+          {(role === 'admin' || role === 'super_admin') && (
+            <>
+              {/* TODO: Implement Edit Misc File functionality if needed */}
+              {/* <button onClick={(e) => { e.stopPropagation(); alert('Edit TBD: '+file.id) }} className="p-1 text-blue-600 hover:text-blue-800" title="Edit File"><Edit3 size={16} /></button> */}
+              <button onClick={(e) => { e.stopPropagation(); handleOpenDeleteFileConfirm(file);}} className="p-1 text-red-600 hover:text-red-800" title="Delete File"><Trash2 size={16} /></button>
+            </>
+          )}
         </div>
       ),
     }] : [])
   ];
+
+  const handleFavoriteToggle = async (item: MiscFile, itemType: FavoriteItemType) => {
+    if (!isAuthenticated) {
+      setFeedbackMessage("Please log in to manage favorites.");
+      return;
+    }
+
+    const currentStatus = favoritedItems.get(item.id);
+    const isCurrentlyFavorited = !!currentStatus?.favoriteId;
+    
+    const tempFavoritedItems = new Map(favoritedItems);
+    if (isCurrentlyFavorited) {
+      tempFavoritedItems.set(item.id, { favoriteId: undefined });
+    } else {
+      tempFavoritedItems.set(item.id, { favoriteId: -1 }); // Placeholder
+    }
+    setFavoritedItems(tempFavoritedItems);
+    setFeedbackMessage(null);
+
+    try {
+      if (isCurrentlyFavorited && typeof currentStatus?.favoriteId === 'number') {
+        await removeFavoriteApi(item.id, itemType);
+        setFeedbackMessage(`"${item.user_provided_title || item.original_filename}" removed from favorites.`);
+        setFavoritedItems(prev => {
+            const newMap = new Map(prev);
+            newMap.set(item.id, { favoriteId: undefined });
+            return newMap;
+        });
+      } else {
+        const newFavorite = await addFavoriteApi(item.id, itemType);
+        setFavoritedItems(prev => {
+          const newMap = new Map(prev);
+          newMap.set(item.id, { favoriteId: newFavorite.id });
+          return newMap;
+        });
+        setFeedbackMessage(`"${item.user_provided_title || item.original_filename}" added to favorites.`);
+      }
+    } catch (error: any) {
+      console.error("Failed to toggle favorite:", error);
+      setFeedbackMessage(error?.response?.data?.msg || error.message || "Failed to update favorite status.");
+      setFavoritedItems(prev => {
+        const newMap = new Map(prev);
+        if (isCurrentlyFavorited) {
+            newMap.set(item.id, { favoriteId: currentStatus?.favoriteId });
+        } else {
+            newMap.set(item.id, { favoriteId: undefined });
+        }
+        return newMap;
+      });
+    }
+  };
 
   return (
     <div className="space-y-8">

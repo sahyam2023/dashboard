@@ -291,6 +291,58 @@ const MiscView: React.FC = () => {
       )}
       
       {/* Category Filter Dropdown */}
+
+      {/* Manage Categories Section */}
+      {isAuthenticated && (role === 'admin' || role === 'super_admin') && (
+        <div className="my-8 p-4 border border-gray-200 rounded-lg shadow">
+          <h3 className="text-lg font-semibold mb-4 text-gray-700">Manage Categories</h3>
+          {isLoadingCategories && <p className="text-sm text-gray-500">Loading categories...</p>}
+          {errorCategories && <p className="text-sm text-red-500">{errorCategories}</p>}
+          {!isLoadingCategories && !errorCategories && categories.length === 0 && (
+            <p className="text-sm text-gray-500">No categories found. Add one using the "Add/Edit Category" button above.</p>
+          )}
+          {!isLoadingCategories && !errorCategories && categories.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {categories.map(category => (
+                    <tr key={category.id}>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{category.name}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 truncate max-w-md" title={category.description || ''}>
+                        {category.description || <span className="italic text-gray-400">No description</span>}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                        <button
+                          onClick={() => handleOpenEditCategoryForm(category)}
+                          className="text-blue-600 hover:text-blue-800 p-1"
+                          title="Edit Category"
+                        >
+                          <Edit3 size={16} />
+                        </button>
+                        <button
+                          onClick={() => handleOpenDeleteCategoryConfirm(category)}
+                          className="text-red-600 hover:text-red-800 p-1"
+                          title="Delete Category"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="my-4">
         <label htmlFor="category-filter" className="block text-sm font-medium text-gray-700 mb-1">Filter by Category:</label>
         <select

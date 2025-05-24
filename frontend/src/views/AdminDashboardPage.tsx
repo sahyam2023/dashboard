@@ -121,20 +121,31 @@ const AdminDashboardPage: React.FC = () => {
   
   // Initial layout definition for the 'lg' breakpoint (12 columns)
   const initialLayoutLg: LayoutItem[] = [
-    { i: WIDGET_KEYS.SYSTEM_HEALTH, x: 0, y: 0, w: 3, h: 5, minH: 5, maxH: 5 },
-    { i: WIDGET_KEYS.TOTAL_STORAGE, x: 3, y: 0, w: 3, h: 5, minH: 5, maxH: 5 },
-    { i: WIDGET_KEYS.TOTAL_USERS, x: 6, y: 0, w: 3, h: 5, minH: 5, maxH: 5 },
-    { i: WIDGET_KEYS.TOTAL_SOFTWARE, x: 9, y: 0, w: 3, h: 5, minH: 5, maxH: 5 },
-    { i: WIDGET_KEYS.DOWNLOAD_TRENDS, x: 0, y: 1, w: 4, h: 9, minH: 6, minW: 3 },
-    { i: WIDGET_KEYS.LOGIN_TRENDS, x: 4, y: 1, w: 4, h: 9, minH: 6, minW: 3 },
-    { i: WIDGET_KEYS.UPLOAD_TRENDS, x: 8, y: 1, w: 4, h: 9, minH: 6, minW: 3 },
-    { i: WIDGET_KEYS.RECENT_ACTIVITIES, x: 0, y: 2, w: 7, h: 12, minH: 8, minW: 4 },
-    { i: WIDGET_KEYS.RECENT_ADDITIONS, x: 7, y: 2, w: 5, h: 12, minH: 8, minW: 3 },
-    { i: WIDGET_KEYS.DOCS_PER_SOFTWARE, x: 0, y: 3, w: 6, h: 10, minH: 8, minW: 4 },
-    { i: WIDGET_KEYS.POPULAR_DOWNLOADS, x: 6, y: 3, w: 6, h: 10, minH: 8, minW: 4 },
-    { i: WIDGET_KEYS.MISSING_DESCRIPTIONS, x: 0, y: 4, w: 6, h: 12, minH: 8, minW: 4 },
-    { i: WIDGET_KEYS.STALE_CONTENT, x: 6, y: 4, w: 6, h: 12, minH: 8, minW: 4 },
-    { i: WIDGET_KEYS.QUICK_LINKS, x: 0, y: 5, w: 12, h: 5, minH: 4, minW: 6 },
+    // Row 1: Stat Cards (y=0)
+    { i: WIDGET_KEYS.SYSTEM_HEALTH,    x: 0, y: 0, w: 3, h: 4, minH: 4, maxH: 4 },
+    { i: WIDGET_KEYS.TOTAL_STORAGE,    x: 3, y: 0, w: 3, h: 4, minH: 4, maxH: 4 },
+    { i: WIDGET_KEYS.TOTAL_USERS,      x: 6, y: 0, w: 3, h: 4, minH: 4, maxH: 4 },
+    { i: WIDGET_KEYS.TOTAL_SOFTWARE,   x: 9, y: 0, w: 3, h: 4, minH: 4, maxH: 4 },
+
+    // Row 2: Trend Charts (y=1)
+    { i: WIDGET_KEYS.DOWNLOAD_TRENDS,  x: 0, y: 1, w: 4, h: 8, minH: 6, minW: 3 },
+    { i: WIDGET_KEYS.LOGIN_TRENDS,     x: 4, y: 1, w: 4, h: 8, minH: 6, minW: 3 },
+    { i: WIDGET_KEYS.UPLOAD_TRENDS,    x: 8, y: 1, w: 4, h: 8, minH: 6, minW: 3 },
+
+    // Row 3: Larger Info Displays - Activities & Software Docs (y=2)
+    { i: WIDGET_KEYS.RECENT_ACTIVITIES,  x: 0, y: 2, w: 7, h: 10, minH: 8, minW: 4 },
+    { i: WIDGET_KEYS.DOCS_PER_SOFTWARE,  x: 7, y: 2, w: 5, h: 10, minH: 8, minW: 4 },
+
+    // Row 4: Other Info Displays - Additions & Popular Downloads (y=3)
+    { i: WIDGET_KEYS.RECENT_ADDITIONS,   x: 0, y: 3, w: 5, h: 10, minH: 8, minW: 3 },
+    { i: WIDGET_KEYS.POPULAR_DOWNLOADS,  x: 5, y: 3, w: 7, h: 10, minH: 8, minW: 4 },
+
+    // Row 5: Content Health (y=4)
+    { i: WIDGET_KEYS.MISSING_DESCRIPTIONS, x: 0, y: 4, w: 6, h: 10, minH: 8, minW: 4 },
+    { i: WIDGET_KEYS.STALE_CONTENT,        x: 6, y: 4, w: 6, h: 10, minH: 8, minW: 4 },
+
+    // Row 6: Quick Links (y=5)
+    { i: WIDGET_KEYS.QUICK_LINKS,          x: 0, y: 5, w: 12, h: 4, minH: 4, minW: 6 },
   ];
 
 

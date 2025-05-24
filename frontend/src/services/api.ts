@@ -131,6 +131,26 @@ export type EditAdminVersionPayload = Partial<AddAdminVersionPayload>;
 // --- End of Type Definitions ---
 
 // --- Interface for Dashboard Statistics ---
+
+// Helper type for daily trends
+export interface TrendItem {
+  date: string; // For daily
+  count: number;
+}
+
+// Helper type for weekly trends
+export interface WeeklyTrendItem {
+  week_start_date: string; // For weekly
+  count: number;
+}
+
+// Helper type for content health statistics per content type
+export interface ContentTypeHealthStats {
+  missing?: number; // For missing_descriptions
+  stale?: number;   // For stale_content
+  total: number;
+}
+
 export interface RecentActivityItem {
   action_type: string;
   username: string | null; // Username can be null for system actions or if user is deleted
@@ -163,6 +183,44 @@ export interface DashboardStats {
   recent_additions?: RecentAdditionItem[]; 
   popular_downloads?: PopularDownloadItem[]; 
   documents_per_software?: DocumentsPerSoftwareItem[];
+
+  // New properties
+  user_activity_trends?: { 
+    logins: {
+      daily: TrendItem[];
+      weekly: WeeklyTrendItem[];
+    };
+    uploads: {
+      daily: TrendItem[];
+      weekly: WeeklyTrendItem[];
+    };
+  };
+
+  total_storage_utilized_bytes?: number;
+
+  download_trends?: {
+    daily: TrendItem[];
+    weekly: WeeklyTrendItem[];
+  };
+
+  content_health?: {
+    missing_descriptions: {
+      documents: ContentTypeHealthStats;
+      patches: ContentTypeHealthStats;
+      links: ContentTypeHealthStats;
+      misc_categories: ContentTypeHealthStats;
+      software: ContentTypeHealthStats;
+      misc_files: ContentTypeHealthStats;
+    };
+    stale_content: {
+      documents: ContentTypeHealthStats;
+      patches: ContentTypeHealthStats;
+      links: ContentTypeHealthStats;
+      misc_files: ContentTypeHealthStats;
+      versions: ContentTypeHealthStats;
+      misc_categories: ContentTypeHealthStats; 
+    };
+  };
 }
 // --- End of Interface for Dashboard Statistics ---
 

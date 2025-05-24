@@ -6,7 +6,7 @@ import {
 } from '../services/api';
 import { Box, CircularProgress, Typography, Paper, List, ListItem, ListItemText, Divider, Alert, Link, ListItemButton } from '@mui/material'; // MUI components
 import { Grid } from '@mui/material';
-import { Bar, Pie } from 'react-chartjs-2'; // Import chart components
+import { Bar, Pie, Line } from 'react-chartjs-2'; // Import chart components
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -16,6 +16,8 @@ import {
   Title,
   Tooltip,
   Legend,
+  PointElement, // Added for Line charts
+  LineElement   // Added for Line charts
 } from 'chart.js'; // Import Chart.js modules
 
 // Register Chart.js components
@@ -26,8 +28,21 @@ ChartJS.register(
   ArcElement,
   Title,
   Tooltip,
-  Legend
+  Legend,
+  PointElement,
+  LineElement
 );
+
+// Helper function for formatting bytes
+function formatBytes(bytes?: number | null, decimals = 2) { // Added type annotation for bytes
+  if (bytes === 0) return '0 Bytes';
+  if (!bytes) return 'N/A'; // Handle null or undefined
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+}
 
 const AdminDashboardPage: React.FC = () => {
   const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
@@ -37,7 +52,6 @@ const AdminDashboardPage: React.FC = () => {
   const [statsError, setStatsError] = useState<string | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
 
-  // Helper to format date string (retained from original, can be used if needed or removed)
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
       year: 'numeric', month: 'short', day: 'numeric',
@@ -131,9 +145,9 @@ const AdminDashboardPage: React.FC = () => {
                 if (label) {
                     label += ': ';
                 }
-                if (context.parsed.y !== null) { // For Bar chart
+                if (context.parsed.y !== null) { // For Bar/Line chart
                     label += context.parsed.y;
-                } else if (context.parsed !== null) { // For Pie chart (parsed is the value itself)
+                } else if (context.parsed !== null && context.chart.config.type === 'pie') { // For Pie chart
                     label += context.parsed;
                 }
                 return label;
@@ -141,6 +155,50 @@ const AdminDashboardPage: React.FC = () => {
         }
       }
     },
+    scales: { // Common scale options, can be overridden
+        y: {
+            beginAtZero: true
+        }
+    }
+  };
+
+  const dailyLoginData = {
+    labels: dashboardStats?.user_activity_trends?.logins?.daily?.map(item => item.date) || [],
+    datasets: [
+      {
+        label: 'Logins',
+        data: dashboardStats?.user_activity_trends?.logins?.daily?.map(item => item.count) || [],
+        fill: false,
+        borderColor: 'rgb(75, 192, 192)',
+        tension: 0.1,
+      },
+    ],
+  };
+
+  const dailyUploadData = {
+    labels: dashboardStats?.user_activity_trends?.uploads?.daily?.map(item => item.date) || [],
+    datasets: [
+      {
+        label: 'Uploads',
+        data: dashboardStats?.user_activity_trends?.uploads?.daily?.map(item => item.count) || [],
+        fill: false,
+        borderColor: 'rgb(255, 99, 132)',
+        tension: 0.1,
+      },
+    ],
+  };
+
+  const dailyDownloadData = {
+    labels: dashboardStats?.download_trends?.daily?.map(item => item.date) || [],
+    datasets: [
+      {
+        label: 'Downloads',
+        data: dashboardStats?.download_trends?.daily?.map(item => item.count) || [],
+        fill: false,
+        borderColor: 'rgb(75, 192, 75)', // Green color for downloads
+        tension: 0.1,
+      },
+    ],
   };
   
   if (loadingStats || loadingHealth) {
@@ -152,8 +210,36 @@ const AdminDashboardPage: React.FC = () => {
     );
   }
 
+  // Helper to render content health statistics lists
+  const renderHealthStatsList = (
+    healthData: { [key: string]: { missing?: number; stale?: number; total: number } } | undefined,
+    dataType: 'missing' | 'stale'
+  ) => {
+    if (loadingStats) return <CircularProgress />; // Show loader if stats are still loading
+    if (!healthData || Object.keys(healthData).length === 0) {
+      return <Typography sx={{ textAlign: 'center', mt: 2 }}>No data available.</Typography>;
+    }
+
+    return (
+      <List dense sx={{ maxHeight: 300, overflow: 'auto' }}>
+        {Object.entries(healthData).map(([key, stats]) => {
+          const count = dataType === 'missing' ? stats.missing : stats.stale;
+          const percentage = stats.total > 0 && count !== undefined ? ((count / stats.total) * 100).toFixed(1) : '0.0';
+          const displayName = key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ');
+          const itemText = `${displayName}: ${count ?? 0} / ${stats.total} (${percentage}%)`;
+          
+          return (
+            <ListItem key={key} divider>
+              <ListItemText primary={itemText} />
+            </ListItem>
+          );
+        })}
+      </List>
+    );
+  };
+
   return (
-    <Box sx={{ flexGrow: 1, p: 3, backgroundColor: 'grey.100' }}> {/* Using MUI theme colors */}
+    <Box sx={{ flexGrow: 1, p: 3, backgroundColor: 'grey.100' }}> 
       <Typography variant="h4" gutterBottom component="div" sx={{ color: 'primary.main', mb: 4 }}>
         Admin Dashboard
       </Typography>
@@ -163,7 +249,7 @@ const AdminDashboardPage: React.FC = () => {
       
       <Grid container spacing={3}>
         {/* System Health Card */}
-        <Grid item xs={12} md={4}>
+        <Grid item xs={12} sm={6} md={3}>
           <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%', minHeight: 160 }}>
             <Typography component="h2" variant="h6" color="primary" gutterBottom>
               System Health
@@ -193,8 +279,71 @@ const AdminDashboardPage: React.FC = () => {
           </Paper>
         </Grid>
 
+        {/* Daily Downloads Chart */}
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 2, height: 400 }}>
+            <Typography variant="h6" gutterBottom>Daily Downloads (Last 7 Days)</Typography>
+            {loadingStats ? <CircularProgress /> : dashboardStats?.download_trends?.daily?.length ? (
+              <Box sx={{ height: 'calc(100% - 48px)'}}>
+                <Line 
+                  data={dailyDownloadData} 
+                  options={{...chartBaseOptions, plugins: {...chartBaseOptions.plugins, title: {...chartBaseOptions.plugins.title, display: true, text: 'Daily Downloads (Last 7 Days)'}}}} 
+                />
+              </Box>
+            ) : (
+              <Typography sx={{textAlign: 'center', mt: 4}}>No download trend data available.</Typography>
+            )}
+          </Paper>
+        </Grid>
+
+        {/* Daily Logins Chart */}
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 2, height: 400 }}>
+            <Typography variant="h6" gutterBottom>Daily Logins (Last 7 Days)</Typography>
+            {loadingStats ? <CircularProgress /> : dashboardStats?.user_activity_trends?.logins?.daily?.length ? (
+              <Box sx={{ height: 'calc(100% - 48px)'}}>
+                <Line 
+                  data={dailyLoginData} 
+                  options={{...chartBaseOptions, plugins: {...chartBaseOptions.plugins, title: {...chartBaseOptions.plugins.title, display: true, text: 'Daily Logins (Last 7 Days)'}}}} 
+                />
+              </Box>
+            ) : (
+              <Typography sx={{textAlign: 'center', mt: 4}}>No login trend data available.</Typography>
+            )}
+          </Paper>
+        </Grid>
+
+        {/* Daily Uploads Chart */}
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 2, height: 400 }}>
+            <Typography variant="h6" gutterBottom>Daily Uploads (Last 7 Days)</Typography>
+            {loadingStats ? <CircularProgress /> : dashboardStats?.user_activity_trends?.uploads?.daily?.length ? (
+              <Box sx={{ height: 'calc(100% - 48px)'}}>
+                <Line 
+                  data={dailyUploadData} 
+                  options={{...chartBaseOptions, plugins: {...chartBaseOptions.plugins, title: {...chartBaseOptions.plugins.title, display: true, text: 'Daily Uploads (Last 7 Days)'}}}} 
+                />
+              </Box>
+            ) : (
+              <Typography sx={{textAlign: 'center', mt: 4}}>No upload trend data available.</Typography>
+            )}
+          </Paper>
+        </Grid>
+
         {/* Summary Cards */}
-        <Grid item xs={12} sm={6} md={4}>
+        <Grid item xs={12} sm={6} md={3}>
+          <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%', minHeight: 160, justifyContent: 'center' }}>
+            <Typography component="h2" variant="h6" color="primary" gutterBottom>
+              Total Storage Utilized
+            </Typography>
+            {loadingStats ? <CircularProgress size={24} /> :
+              <Typography component="p" variant="h4">
+                {formatBytes(dashboardStats?.total_storage_utilized_bytes)}
+              </Typography>
+            }
+          </Paper>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
           <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%', minHeight: 160, justifyContent: 'center' }}>
             <Typography component="h2" variant="h6" color="primary" gutterBottom>
               Total Users
@@ -206,7 +355,7 @@ const AdminDashboardPage: React.FC = () => {
             }
           </Paper>
         </Grid>
-        <Grid item xs={12} sm={6} md={4}>
+        <Grid item xs={12} sm={6} md={3}>
           <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%', minHeight: 160, justifyContent: 'center' }}>
             <Typography component="h2" variant="h6" color="primary" gutterBottom>
               Total Software Titles
@@ -296,6 +445,22 @@ const AdminDashboardPage: React.FC = () => {
             ) : (
               <Typography sx={{textAlign: 'center', mt: 4}}>No download data available for chart.</Typography>
             )}
+          </Paper>
+        </Grid>
+
+        {/* Content: Missing Descriptions Widget */}
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 2, minHeight: 360 }}>
+            <Typography variant="h6" gutterBottom>Content: Missing Descriptions</Typography>
+            {renderHealthStatsList(dashboardStats?.content_health?.missing_descriptions, 'missing')}
+          </Paper>
+        </Grid>
+
+        {/* Content: Stale Items Widget */}
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 2, minHeight: 360 }}>
+            <Typography variant="h6" gutterBottom>Content: Stale Items (Older than 1 year)</Typography>
+            {renderHealthStatsList(dashboardStats?.content_health?.stale_content, 'stale')}
           </Paper>
         </Grid>
 

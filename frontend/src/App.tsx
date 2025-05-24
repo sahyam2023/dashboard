@@ -12,8 +12,17 @@ import RegisterPage from './views/RegisterPage';
 
 // Optional: You might create this later for better route protection
 // import ProtectedRoute from './components/ProtectedRoute';
+import UserProfilePage from './views/UserProfilePage'; // Import UserProfilePage
+import SuperAdminDashboard from './views/SuperAdminDashboard'; // Import SuperAdminDashboard
+import AdminLayout from './components/admin/AdminLayout'; // Import AdminLayout
+import AdminDashboardPage from './views/AdminDashboardPage'; 
+import AdminVersionsPage from './views/AdminVersionsPage'; // Import the new AdminVersionsPage
+import AuditLogViewer from './components/admin/AuditLogViewer'; 
+import { useAuth } from './context/AuthContext'; 
 
 function App() {
+  const auth = useAuth(); // Get auth context
+
   return (
     <BrowserRouter>
       <Routes>
@@ -29,6 +38,53 @@ function App() {
           <Route path="links" element={<LinksView />} />
           <Route path="misc" element={<MiscView />} />
           <Route path="search" element={<SearchResultsView />} />
+          <Route path="profile" element={<UserProfilePage />} />
+          
+          {/* Admin and Super Admin Routes */}
+          <Route 
+            path="superadmin" 
+            element={
+              auth.isAuthenticated && auth.role === 'super_admin' ? (
+                <SuperAdminDashboard />
+              ) : (
+                <Navigate to="/login" replace /> 
+              )
+            } 
+          />
+
+          {/* Admin Routes with AdminLayout */}
+          <Route path="/admin" element={<AdminLayout />}>
+            <Route 
+              path="dashboard" 
+              element={
+                auth.isAuthenticated && (auth.role === 'admin' || auth.role === 'super_admin') ? (
+                  <AdminDashboardPage /> 
+                ) : (
+                  <Navigate to="/login" replace />
+                )
+              }
+            />
+             <Route 
+              path="versions" // This is the route for the actual versions management page
+              element={
+                auth.isAuthenticated && (auth.role === 'admin' || auth.role === 'super_admin') ? (
+                  <AdminVersionsPage /> // Use the new AdminVersionsPage
+                ) : (
+                  <Navigate to="/login" replace />
+                )
+              }
+            />
+            <Route 
+              path="audit-logs" 
+              element={
+                auth.isAuthenticated && (auth.role === 'admin' || auth.role === 'super_admin') ? (
+                  <AuditLogViewer />
+                ) : (
+                  <Navigate to="/login" replace />
+                )
+              }
+            />
+          </Route>
           
           {/* NEW: Route for the Upload Page */}
           {/* For now, UploadPage handles its own auth check display.

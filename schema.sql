@@ -12,6 +12,10 @@ DROP TABLE IF EXISTS documents;
 DROP TABLE IF EXISTS versions;
 DROP TABLE IF EXISTS users;
 DROP TABLE IF EXISTS software;
+DROP TABLE IF EXISTS site_settings;
+DROP TABLE IF EXISTS user_security_answers;
+DROP TABLE IF EXISTS security_questions;
+DROP TABLE IF EXISTS password_reset_requests;
 
 -- Table for Users
 CREATE TABLE IF NOT EXISTS users (
@@ -21,6 +25,7 @@ CREATE TABLE IF NOT EXISTS users (
     email TEXT UNIQUE,
     role TEXT DEFAULT 'user' NOT NULL,
     is_active BOOLEAN DEFAULT TRUE NOT NULL,
+    password_reset_required BOOLEAN DEFAULT FALSE NOT NULL, -- Added this line
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_users_username ON users (username);
@@ -237,3 +242,36 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs (user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_action_type ON audit_logs (action_type);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_target_table ON audit_logs (target_table);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs (timestamp);
+
+-- Table for Site-wide Settings
+CREATE TABLE IF NOT EXISTS site_settings (
+    setting_key TEXT PRIMARY KEY,
+    setting_value TEXT NOT NULL
+);
+
+-- Table for Security Questions
+CREATE TABLE IF NOT EXISTS security_questions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    question_text TEXT NOT NULL UNIQUE
+);
+
+-- Table for User Security Answers
+CREATE TABLE IF NOT EXISTS user_security_answers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    question_id INTEGER NOT NULL,
+    answer_hash TEXT NOT NULL,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(question_id) REFERENCES security_questions(id),
+    UNIQUE(user_id, question_id)
+);
+
+-- Table for Password Reset Tokens
+CREATE TABLE IF NOT EXISTS password_reset_requests (
+    token TEXT PRIMARY KEY, -- Secure random token
+    user_id INTEGER NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_password_reset_requests_user_id ON password_reset_requests (user_id);
+CREATE INDEX IF NOT EXISTS idx_password_reset_requests_expires_at ON password_reset_requests (expires_at);

@@ -117,9 +117,15 @@ export interface AuthRequest {
   email?: string;
 }
 
+export interface SecurityAnswerPayload {
+  question_id: number;
+  answer: string;
+}
+
 export interface RegisterRequest extends AuthRequest {
   password: string; // Make password required
   password_hash?: never;
+  security_answers: SecurityAnswerPayload[];
 }
 
 export interface LoginRequest extends AuthRequest {
@@ -131,6 +137,7 @@ export interface AuthResponse {
   access_token: string;
   username: string;
   role: string;
+  password_reset_required?: boolean; // Added this line
 }
 
 export interface RegisterResponse {

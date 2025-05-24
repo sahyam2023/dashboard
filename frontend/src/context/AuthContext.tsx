@@ -6,7 +6,7 @@ interface AuthContextType {
   username: string | null;
   role: string | null;
   isAuthenticated: boolean;
-  login: (token: string, username: string, role: string) => void;
+  login: (token: string, username: string, role: string, password_reset_required?: boolean) => void; // Added password_reset_required
   logout: () => void;
   isLoading: boolean;
   // New properties for Auth Modal
@@ -14,6 +14,13 @@ interface AuthContextType {
   authModalView: 'login' | 'register';
   openAuthModal: (view: 'login' | 'register') => void;
   closeAuthModal: () => void;
+  // For Global Access
+  isGlobalAccessGranted: boolean;
+  grantGlobalAccess: () => void;
+  revokeGlobalAccess: () => void; 
+  // For Forced Password Reset
+  isPasswordResetRequired: boolean;
+  clearPasswordResetRequiredFlag: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -22,11 +29,17 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   const [token, setToken] = useState<string | null>(localStorage.getItem('authToken'));
   const [username, setUsername] = useState<string | null>(localStorage.getItem('username'));
   const [role, setRole] = useState<string | null>(localStorage.getItem('userRole'));
-  const [isLoading, setIsLoading] = useState<boolean>(true); // To check initial token validity
+  const [isLoading, setIsLoading] = useState<boolean>(true); 
   
-  // New state for Auth Modal
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [authModalView, setAuthModalView] = useState<'login' | 'register'>('login');
+
+  const [isGlobalAccessGranted, setIsGlobalAccessGranted] = useState<boolean>(
+    () => localStorage.getItem('isGlobalAccessGranted') === 'true'
+  );
+
+  // Forced Password Reset State
+  const [isPasswordResetRequired, setIsPasswordResetRequired] = useState<boolean>(false);
 
 
   useEffect(() => {
@@ -37,22 +50,43 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   }, []);
 
 
-  const login = (newToken: string, newUsername: string, newRole: string) => { // <-- ADD ROLE PARAM
+  const login = (newToken: string, newUsername: string, newRole: string, passwordResetRequired: boolean = false) => {
     localStorage.setItem('authToken', newToken);
     localStorage.setItem('username', newUsername);
-    localStorage.setItem('userRole', newRole); // <-- STORE ROLE
+    localStorage.setItem('userRole', newRole);
     setToken(newToken);
     setUsername(newUsername);
-    setRole(newRole); // <-- SET ROLE
+    setRole(newRole);
+    setIsPasswordResetRequired(passwordResetRequired); // Set based on login response
   };
 
   const logout = () => {
     localStorage.removeItem('authToken');
     localStorage.removeItem('username');
-    localStorage.removeItem('userRole'); // <-- REMOVE ROLE
+    localStorage.removeItem('userRole');
     setToken(null);
     setUsername(null);
-    setRole(null); // <-- CLEAR ROLE
+    setRole(null);
+    setIsPasswordResetRequired(false); // Clear flag on logout
+    // Also revoke global access on regular logout for full security,
+    // or manage separately if global access should persist across user sessions.
+    // For now, let's assume global access is also session-bound or needs re-entry.
+    revokeGlobalAccess();
+  };
+
+  const clearPasswordResetRequiredFlag = () => {
+    setIsPasswordResetRequired(false);
+  };
+
+  // Global Access Functions
+  const grantGlobalAccess = () => {
+    localStorage.setItem('isGlobalAccessGranted', 'true');
+    setIsGlobalAccessGranted(true);
+  };
+
+  const revokeGlobalAccess = () => {
+    localStorage.removeItem('isGlobalAccessGranted');
+    setIsGlobalAccessGranted(false);
   };
 
   // New functions for Auth Modal
@@ -78,7 +112,14 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
       isAuthModalOpen,
       authModalView,
       openAuthModal,
-      closeAuthModal
+      closeAuthModal,
+      // Provide global access state and functions
+      isGlobalAccessGranted,
+      grantGlobalAccess,
+      revokeGlobalAccess,
+      // Provide forced password reset state and functions
+      isPasswordResetRequired,
+      clearPasswordResetRequiredFlag
     }}>
       {children}
     </AuthContext.Provider>

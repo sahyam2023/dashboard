@@ -42,10 +42,12 @@ This document outlines suggested features, fixes, and UI/UX enhancements to make
 
 ## III. Feature Suggestions for Admin Dashboard (`AdminDashboardPage.tsx`)
 
-1.  **Interactive Charts:**
+1.  **Interactive Charts:** - **Implemented**
     *   Convert static lists for "Documents per Software" and "Popular Downloads" into interactive charts (bar, pie charts using e.g., `Chart.js` or `Recharts`).
-2.  **More Granular & Actionable Stats:**
+        *   Note: "Documents per Software" and "Popular Downloads" are now displayed as bar charts.
+2.  **More Granular & Actionable Stats:** - **Partially Implemented**
     *   Add widgets for user activity trends (logins, uploads), storage utilization, download trends over time, and content health indicators (e.g., items missing descriptions, stale content).
+        *   Note: Widgets for "User activity trends (logins, uploads)", "Storage utilization", "Download trends over time", and "Content health indicators" have been added to the Admin Dashboard. These currently use mock data. Backend API integration is required to display live data.
 3.  **Customizable Dashboard Widgets:**
     *   Allow admins to show/hide and rearrange dashboard widgets (e.g., using `react-grid-layout`).
 4.  **Export Functionality:**

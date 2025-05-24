@@ -187,6 +187,82 @@ export interface AuditLogResponse {
 }
 // --- End of Interfaces for Audit Log ---
 
+// --- Interfaces for User Activity Trends ---
+export interface UserActivityTrendItem {
+  date: string; // e.g., "2023-10-01"
+  count: number;
+}
+
+export interface UserActivityTrendsResponse {
+  logins: UserActivityTrendItem[];
+  uploads: UserActivityTrendItem[];
+  // Potentially more types of activities like 'downloads', 'document_views'
+}
+// --- End of Interfaces for User Activity Trends ---
+
+// --- Interfaces for Storage Utilization ---
+export interface StorageCategoryUsage {
+  category: string; // e.g., "Documents", "Patches", "Links", "Misc Files"
+  size_gb: number;
+}
+
+export interface StorageUtilizationResponse {
+  total_storage_gb: number;
+  used_storage_gb: number;
+  by_category: StorageCategoryUsage[];
+}
+// --- End of Interfaces for Storage Utilization ---
+
+// --- Interfaces for Download Trends ---
+export interface DownloadTrendItem {
+  date: string; // e.g., "2023-10-01"
+  count: number;
+}
+
+export interface DownloadTrendsResponse {
+  overall: DownloadTrendItem[];
+  // Optional: by_type could provide trends for "Document", "Patch", "Link", "MiscFile"
+  by_type?: { 
+    [type: string]: DownloadTrendItem[];
+  };
+}
+// --- End of Interfaces for Download Trends ---
+
+// --- Interfaces for Content Health Statistics ---
+export interface ContentHealthStats {
+  documents: {
+    total: number;
+    missing_description: number;
+    missing_file_url: number; // For external links that are broken, or uploaded files missing path
+    missing_software_association: number;
+  };
+  patches: {
+    total: number;
+    missing_description: number;
+    missing_file_url: number;
+    missing_version_association: number;
+    stale_older_than_90_days: number; // Based on release_date
+  };
+  links: {
+    total: number;
+    missing_description: number;
+    // Assuming links are always external or have a path if "uploaded"
+    // No specific 'stale' concept unless defined by last_checked_date or similar
+  };
+  misc_files: {
+    total: number;
+    missing_description: number;
+    missing_category_association: number;
+  };
+  software_versions: {
+    total: number;
+    missing_download_link: number; // main_download_link is null/empty
+    missing_release_date: number;
+    missing_changelog: number;
+  };
+}
+// --- End of Interfaces for Content Health Statistics ---
+
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
 // Helper to construct Authorization header
@@ -345,6 +421,237 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
     throw error;
   }
 }
+
+// --- Admin User Activity Trends Function (with Mock Data) ---
+export async function fetchUserActivityTrends(): Promise<UserActivityTrendsResponse> {
+  console.log('fetchUserActivityTrends called - returning mock data');
+  // Simulate API call delay
+  await new Promise(resolve => setTimeout(resolve, 500));
+
+  // Mock data for the last 7 days
+  const today = new Date();
+  const mockLogins: UserActivityTrendItem[] = [];
+  const mockUploads: UserActivityTrendItem[] = [];
+
+  for (let i = 6; i >= 0; i--) {
+    const date = new Date(today);
+    date.setDate(today.getDate() - i);
+    const dateString = date.toISOString().split('T')[0]; // YYYY-MM-DD
+
+    mockLogins.push({
+      date: dateString,
+      count: Math.floor(Math.random() * 50) + 10, // Random login counts
+    });
+    mockUploads.push({
+      date: dateString,
+      count: Math.floor(Math.random() * 20) + 5,  // Random upload counts
+    });
+  }
+
+  // To simulate a potential error case for testing:
+  // if (Math.random() < 0.1) { // 10% chance of error
+  //   throw new Error("Mock API Error: Failed to fetch user activity trends.");
+  // }
+
+  return {
+    logins: mockLogins,
+    uploads: mockUploads,
+  };
+  // Actual API call would look like this:
+  /*
+  try {
+    const url = `${API_BASE_URL}/api/admin/stats/user-activity-trends`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { ...getAuthHeader() },
+    });
+    return handleApiError(response, 'Failed to fetch user activity trends');
+  } catch (error) {
+    console.error('Error fetching user activity trends:', error);
+    throw error;
+  }
+  */
+}
+// --- End Admin User Activity Trends Function ---
+
+// --- Admin Storage Utilization Function (with Mock Data) ---
+export async function fetchStorageUtilization(): Promise<StorageUtilizationResponse> {
+  console.log('fetchStorageUtilization called - returning mock data');
+  // Simulate API call delay
+  await new Promise(resolve => setTimeout(resolve, 500));
+
+  const total_storage_gb = 250;
+  const categories: StorageCategoryUsage[] = [
+    { category: 'Documents', size_gb: parseFloat((Math.random() * 40 + 10).toFixed(2)) }, // 10-50 GB
+    { category: 'Patches', size_gb: parseFloat((Math.random() * 60 + 20).toFixed(2)) },   // 20-80 GB
+    { category: 'Links', size_gb: parseFloat((Math.random() * 5 + 1).toFixed(2)) },       // 1-6 GB (assuming links are primarily metadata or small uploaded files)
+    { category: 'Misc Files', size_gb: parseFloat((Math.random() * 30 + 5).toFixed(2)) }, // 5-35 GB
+    { category: 'Software Versions', size_gb: parseFloat((Math.random() * 50 + 10).toFixed(2)) }, // 10-60 GB (for main_download_link files if stored, or metadata)
+  ];
+
+  const used_storage_gb = parseFloat(categories.reduce((sum, cat) => sum + cat.size_gb, 0).toFixed(2));
+
+  // Ensure used doesn't exceed total (highly unlikely with this random generation, but good practice)
+  if (used_storage_gb > total_storage_gb) {
+    // This case should ideally not happen with well-defined mock data generation
+    // For now, we can log or adjust, e.g., cap at total_storage_gb
+    console.warn("Mock data generation: used_storage_gb exceeded total_storage_gb. Adjusting.");
+    // categories could be scaled down here if necessary, or just cap used_storage_gb
+  }
+  
+  // To simulate a potential error case for testing:
+  // if (Math.random() < 0.1) { // 10% chance of error
+  //   throw new Error("Mock API Error: Failed to fetch storage utilization.");
+  // }
+
+  return {
+    total_storage_gb,
+    used_storage_gb: Math.min(used_storage_gb, total_storage_gb), // Cap used at total
+    by_category: categories,
+  };
+
+  // Actual API call would look like this:
+  /*
+  try {
+    const url = `${API_BASE_URL}/api/admin/stats/storage-utilization`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { ...getAuthHeader() },
+    });
+    return handleApiError(response, 'Failed to fetch storage utilization');
+  } catch (error) {
+    console.error('Error fetching storage utilization:', error);
+    throw error;
+  }
+  */
+}
+// --- End Admin Storage Utilization Function ---
+
+// --- Admin Download Trends Function (with Mock Data) ---
+export async function fetchDownloadTrends(): Promise<DownloadTrendsResponse> {
+  console.log('fetchDownloadTrends called - returning mock data');
+  // Simulate API call delay
+  await new Promise(resolve => setTimeout(resolve, 500));
+
+  const today = new Date();
+  const overallTrends: DownloadTrendItem[] = [];
+  // Mock data for the last 10 days for overall downloads
+  for (let i = 9; i >= 0; i--) {
+    const date = new Date(today);
+    date.setDate(today.getDate() - i);
+    const dateString = date.toISOString().split('T')[0]; // YYYY-MM-DD
+    overallTrends.push({
+      date: dateString,
+      count: Math.floor(Math.random() * 100) + 20, // Random overall download counts (20-119)
+    });
+  }
+
+  // Optional: Mock data for by_type trends
+  const byTypeTrends: { [type: string]: DownloadTrendItem[] } = {
+    Document: [],
+    Patch: [],
+    MiscFile: [],
+  };
+
+  const types = ['Document', 'Patch', 'MiscFile'];
+  for (const type of types) {
+    for (let i = 9; i >= 0; i--) {
+      const date = new Date(today);
+      date.setDate(today.getDate() - i);
+      const dateString = date.toISOString().split('T')[0];
+      byTypeTrends[type].push({
+        date: dateString,
+        count: Math.floor(Math.random() * 30) + 5, // Smaller random counts for specific types
+      });
+    }
+  }
+  
+  // To simulate a potential error case for testing:
+  // if (Math.random() < 0.1) { // 10% chance of error
+  //   throw new Error("Mock API Error: Failed to fetch download trends.");
+  // }
+
+  return {
+    overall: overallTrends,
+    by_type: byTypeTrends, // Include if you plan to use it, otherwise can be omitted
+  };
+
+  // Actual API call would look like this:
+  /*
+  try {
+    const url = `${API_BASE_URL}/api/admin/stats/download-trends`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { ...getAuthHeader() },
+    });
+    return handleApiError(response, 'Failed to fetch download trends');
+  } catch (error) {
+    console.error('Error fetching download trends:', error);
+    throw error;
+  }
+  */
+}
+// --- End Admin Download Trends Function ---
+
+// --- Admin Content Health Statistics Function (with Mock Data) ---
+export async function fetchContentHealthStats(): Promise<ContentHealthStats> {
+  console.log('fetchContentHealthStats called - returning mock data');
+  // Simulate API call delay
+  await new Promise(resolve => setTimeout(resolve, 500));
+
+  // To simulate a potential error case for testing:
+  // if (Math.random() < 0.1) { // 10% chance of error
+  //   throw new Error("Mock API Error: Failed to fetch content health stats.");
+  // }
+  
+  return {
+    documents: {
+      total: Math.floor(Math.random() * 200) + 100, // 100-299
+      missing_description: Math.floor(Math.random() * 30), // 0-29
+      missing_file_url: Math.floor(Math.random() * 10),    // 0-9
+      missing_software_association: Math.floor(Math.random() * 5), // 0-4
+    },
+    patches: {
+      total: Math.floor(Math.random() * 100) + 50, // 50-149
+      missing_description: Math.floor(Math.random() * 20),
+      missing_file_url: Math.floor(Math.random() * 5),
+      missing_version_association: Math.floor(Math.random() * 10),
+      stale_older_than_90_days: Math.floor(Math.random() * 15),
+    },
+    links: {
+      total: Math.floor(Math.random() * 150) + 70, // 70-219
+      missing_description: Math.floor(Math.random() * 25),
+    },
+    misc_files: {
+      total: Math.floor(Math.random() * 80) + 30, // 30-109
+      missing_description: Math.floor(Math.random() * 15),
+      missing_category_association: Math.floor(Math.random() * 5),
+    },
+    software_versions: {
+      total: Math.floor(Math.random() * 50) + 20, // 20-69
+      missing_download_link: Math.floor(Math.random() * 10),
+      missing_release_date: Math.floor(Math.random() * 5),
+      missing_changelog: Math.floor(Math.random() * 15),
+    },
+  };
+
+  // Actual API call would look like this:
+  /*
+  try {
+    const url = `${API_BASE_URL}/api/admin/stats/content-health`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { ...getAuthHeader() },
+    });
+    return handleApiError(response, 'Failed to fetch content health statistics');
+  } catch (error) {
+    console.error('Error fetching content health statistics:', error);
+    throw error;
+  }
+  */
+}
+// --- End Admin Content Health Statistics Function ---
+
 
 // --- Admin Software Version Management Functions ---
 

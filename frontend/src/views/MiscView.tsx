@@ -20,6 +20,17 @@ import { Download, FileText, CalendarDays, PlusCircle, Edit3, Trash2, Star } fro
 
 const API_BASE_URL = 'http://127.0.0.1:5000'; // Consider importing from a central config
 
+// New useMemo for data to be passed to table:
+const useMiscFilesToDisplay = (miscFiles: MiscFile[], showFavoritesOnly: boolean, isFavorited: (itemId: number, itemType: string) => boolean) => {
+  return useMemo(() => {
+    if (showFavoritesOnly) {
+      // The item type for misc files is 'misc_file'
+      return miscFiles.filter(file => isFavorited(file.id, 'misc_file'));
+    }
+    return miscFiles;
+  }, [miscFiles, showFavoritesOnly, isFavorited]); // Add dependencies
+};
+
 const MiscView: React.FC = () => {
   const { isAuthenticated, role } = useAuth();
   const { addFavoriteItem, removeFavoriteItem, isFavorited, isLoadingFavorites } = useFavorites(); // Consumed favorites context
@@ -461,17 +472,6 @@ const MiscView: React.FC = () => {
       )}
     </div>
   );
-};
-
-// New useMemo for data to be passed to table:
-const useMiscFilesToDisplay = (miscFiles: MiscFile[], showFavoritesOnly: boolean, isFavorited: (itemId: number, itemType: string) => boolean) => {
-  return useMemo(() => {
-    if (showFavoritesOnly) {
-      // The item type for misc files is 'misc_file'
-      return miscFiles.filter(file => isFavorited(file.id, 'misc_file'));
-    }
-    return miscFiles;
-  }, [miscFiles, showFavoritesOnly, isFavorited]); // Add dependencies
 };
 
 

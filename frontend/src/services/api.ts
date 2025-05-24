@@ -32,42 +32,6 @@ export interface User { // Already defined, ensure it's comprehensive
   created_at?: string; // Optional, if needed by UI from paginated response
 }
 
-// export interface DocumentType { // Placeholder, ensure this matches your actual DocumentType
-//   id: number;
-//   doc_name: string;
-//   software_name?: string;
-//   // ... other fields
-//   [key: string]: any; // Allow other fields if not fully defined here
-// }
-
-// export interface Patch { // Placeholder
-//   id: number;
-//   patch_name: string;
-//   software_name?: string;
-//   version_number?: string;
-//   // ... other fields
-//   [key: string]: any;
-// }
-
-// export interface Link { // Placeholder
-//   id: number;
-//   title: string;
-//   software_name?: string;
-//   version_name?: string;
-//   // ... other fields
-//   [key: string]: any;
-// }
-
-// export interface MiscFile { // Placeholder
-//   id: number;
-//   user_provided_title: string;
-//   original_filename: string;
-//   category_name?: string;
-//   // ... other fields
-//   [key: string]: any;
-// }
-
-
 export interface ChangePasswordPayload {
   current_password: string;
   new_password: string;
@@ -166,15 +130,137 @@ export interface AddAdminVersionPayload {
 export type EditAdminVersionPayload = Partial<AddAdminVersionPayload>;
 // --- End of Type Definitions ---
 
+// --- Interface for Dashboard Statistics ---
+
+// Helper type for daily trends
+export interface TrendItem {
+  date: string; // For daily
+  count: number;
+}
+
+// Helper type for weekly trends
+export interface WeeklyTrendItem {
+  week_start_date: string; // For weekly
+  count: number;
+}
+
+// Helper type for content health statistics per content type
+export interface ContentTypeHealthStats {
+  missing?: number; // For missing_descriptions
+  stale?: number;   // For stale_content
+  total: number;
+}
+
+export interface RecentActivityItem {
+  action_type: string;
+  username: string | null; // Username can be null for system actions or if user is deleted
+  timestamp: string; // ISO date string
+  details: any; // Details can be an object or string, using 'any' for flexibility
+}
+
+export interface RecentAdditionItem {
+  id: number; 
+  name: string;
+  type: string;
+  created_at: string; 
+}
+
+export interface PopularDownloadItem {
+  name: string;
+  type: string;
+  download_count: number;
+}
+
+export interface DocumentsPerSoftwareItem {
+  software_name: string;
+  document_count: number;
+}
+
+export interface DashboardStats {
+  total_users: number;
+  total_software_titles: number;
+  recent_activities: RecentActivityItem[];
+  recent_additions?: RecentAdditionItem[]; 
+  popular_downloads?: PopularDownloadItem[]; 
+  documents_per_software?: DocumentsPerSoftwareItem[];
+
+  // New properties
+  user_activity_trends?: { 
+    logins: {
+      daily: TrendItem[];
+      weekly: WeeklyTrendItem[];
+    };
+    uploads: {
+      daily: TrendItem[];
+      weekly: WeeklyTrendItem[];
+    };
+  };
+
+  total_storage_utilized_bytes?: number;
+
+  download_trends?: {
+    daily: TrendItem[];
+    weekly: WeeklyTrendItem[];
+  };
+
+  content_health?: {
+    missing_descriptions: {
+      documents: ContentTypeHealthStats;
+      patches: ContentTypeHealthStats;
+      links: ContentTypeHealthStats;
+      misc_categories: ContentTypeHealthStats;
+      software: ContentTypeHealthStats;
+      misc_files: ContentTypeHealthStats;
+    };
+    stale_content: {
+      documents: ContentTypeHealthStats;
+      patches: ContentTypeHealthStats;
+      links: ContentTypeHealthStats;
+      misc_files: ContentTypeHealthStats;
+      versions: ContentTypeHealthStats;
+      misc_categories: ContentTypeHealthStats; 
+    };
+  };
+}
+// --- End of Interface for Dashboard Statistics ---
+
+// --- Interface for System Health ---
+export interface SystemHealth {
+  api_status: string;
+  db_connection: string;
+}
+// --- End of Interface for System Health ---
+
+// --- Interfaces for Audit Log ---
+export interface AuditLogEntry {
+  id: number;
+  user_id: number | null;
+  username: string | null;
+  action_type: string;
+  target_table: string | null;
+  target_id: number | null;
+  details: any; // Can be JSON string or object
+  timestamp: string; // ISO date string
+}
+
+export interface AuditLogResponse {
+  logs: AuditLogEntry[];
+  page: number;
+  per_page: number;
+  total_logs: number;
+  total_pages: number;
+}
+// --- End of Interfaces for Audit Log ---
+
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
 // Helper to construct Authorization header
-const getAuthHeader = (): Record<string, string> => { // Explicitly type the return
+const getAuthHeader = (): Record<string, string> => { 
   const token = localStorage.getItem('authToken');
   if (token) {
     return { 'Authorization': `Bearer ${token}` };
   }
-  return {}; // Return an empty object if no token
+  return {}; 
 };
 
 // Generic error handler for API calls
@@ -184,16 +270,21 @@ const handleApiError = async (response: Response, defaultMessage: string) => {
     try {
       errorData = await response.json();
     } catch (e) {
-      // If response is not JSON, use status text
       throw new Error(`${defaultMessage}: ${response.status} ${response.statusText}`);
     }
-    // Use message from backend if available, otherwise default
     const message = errorData?.msg || `${defaultMessage}: ${response.status}`;
-    const error: any = new Error(message); // Create an error object
-    error.response = { data: errorData, status: response.status }; // Attach response data for more detailed error handling
+    const error: any = new Error(message); 
+    error.response = { data: errorData, status: response.status }; 
     throw error;
   }
-  return response.json(); // If response is ok, parse JSON
+
+  const responseText = await response.text(); 
+  try {
+    return JSON.parse(responseText); 
+  } catch (e) {
+    console.error('JSON parsing error for URL:', response.url, 'Received non-JSON response:', responseText);
+    throw new Error(`JSON parsing failed for URL: ${response.url}. Response: ${responseText.substring(0, 200)}...`);
+  }
 };
 
 // --- Basic Data Fetching ---
@@ -207,6 +298,51 @@ export async function fetchSoftware(): Promise<Software[]> {
     return await response.json();
   } catch (error) {
     console.error('Error fetching software:', error);
+    throw error;
+  }
+}
+
+// --- Admin System Health Function ---
+export async function fetchSystemHealth(): Promise<SystemHealth> {
+  try {
+    const url = `${API_BASE_URL}/api/admin/system-health`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { ...getAuthHeader() },
+    });
+    return handleApiError(response, 'Failed to fetch system health');
+  } catch (error) {
+    console.error('Error fetching system health:', error);
+    throw error;
+  }
+}
+
+// --- Audit Log Fetch Function ---
+export async function fetchAuditLogEntries(params: URLSearchParams): Promise<AuditLogResponse> {
+  try {
+    const url = `${API_BASE_URL}/api/admin/audit-logs?${params.toString()}`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { ...getAuthHeader() },
+    });
+    return handleApiError(response, 'Failed to fetch audit logs');
+  } catch (error) {
+    console.error('Error fetching audit logs:', error);
+    throw error;
+  }
+}
+
+// --- Admin Dashboard Statistics Function ---
+export async function fetchDashboardStats(): Promise<DashboardStats> {
+  try {
+    const url = `${API_BASE_URL}/api/admin/dashboard-stats`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { ...getAuthHeader() },
+    });
+    return handleApiError(response, 'Failed to fetch dashboard statistics');
+  } catch (error) {
+    console.error('Error fetching dashboard statistics:', error);
     throw error;
   }
 }
@@ -298,7 +434,11 @@ export async function fetchLinks(
   page?: number,
   perPage?: number,
   sortBy?: string,
-  sortOrder?: 'asc' | 'desc'
+  sortOrder?: 'asc' | 'desc',
+  // <<< --- ADD NEW PARAMETERS HERE (linkType, createdFrom, createdTo) --- >>>
+  linkType?: 'external' | 'uploaded' | string,
+  createdFrom?: string,
+  createdTo?: string
 ): Promise<PaginatedLinksResponse> {
   try {
     const params = new URLSearchParams();
@@ -308,6 +448,11 @@ export async function fetchLinks(
     if (perPage) params.append('per_page', perPage.toString());
     if (sortBy) params.append('sort_by', sortBy);
     if (sortOrder) params.append('sort_order', sortOrder);
+    
+    // <<< --- ADD LOGIC HERE TO APPEND NEW FILTER PARAMETERS --- >>>
+    if (linkType) params.append('link_type', linkType);
+    if (createdFrom) params.append('created_from', createdFrom);
+    if (createdTo) params.append('created_to', createdTo);
     
     const queryString = params.toString();
     const url = `${API_BASE_URL}/api/links${queryString ? `?${queryString}` : ''}`;
@@ -325,7 +470,12 @@ export async function fetchDocuments(
   page?: number,
   perPage?: number,
   sortBy?: string,
-  sortOrder?: 'asc' | 'desc'
+  sortOrder?: 'asc' | 'desc',
+  docType?: string, // New
+  createdFrom?: string, // New
+  createdTo?: string, // New
+  updatedFrom?: string, // New
+  updatedTo?: string // New
 ): Promise<PaginatedDocumentsResponse> {
   try {
     const params = new URLSearchParams();
@@ -334,6 +484,14 @@ export async function fetchDocuments(
     if (perPage) params.append('per_page', perPage.toString());
     if (sortBy) params.append('sort_by', sortBy);
     if (sortOrder) params.append('sort_order', sortOrder);
+
+    // <<< --- ADD LOGIC HERE TO APPEND NEW FILTER PARAMETERS --- >>>
+    if (docType) params.append('doc_type', docType);
+    if (createdFrom) params.append('created_from', createdFrom);
+    if (createdTo) params.append('created_to', createdTo);
+    if (updatedFrom) params.append('updated_from', updatedFrom);
+    if (updatedTo) params.append('updated_to', updatedTo);
+    // <<< --- END OF NEW LOGIC --- >>>
 
     const queryString = params.toString();
     const url = `${API_BASE_URL}/api/documents${queryString ? `?${queryString}` : ''}`;
@@ -351,7 +509,11 @@ export async function fetchPatches(
   page?: number,
   perPage?: number,
   sortBy?: string,
-  sortOrder?: 'asc' | 'desc'
+  sortOrder?: 'asc' | 'desc',
+  // <<< --- ADD NEW PARAMETERS HERE --- >>>
+  releaseFrom?: string,
+  releaseTo?: string,
+  patchedByDeveloper?: string
 ): Promise<PaginatedPatchesResponse> {
   try {
     const params = new URLSearchParams();
@@ -360,6 +522,11 @@ export async function fetchPatches(
     if (perPage) params.append('per_page', perPage.toString());
     if (sortBy) params.append('sort_by', sortBy);
     if (sortOrder) params.append('sort_order', sortOrder);
+
+    // <<< --- ADD LOGIC HERE TO APPEND NEW FILTER PARAMETERS --- >>>
+    if (releaseFrom) params.append('release_from', releaseFrom);
+    if (releaseTo) params.append('release_to', releaseTo);
+    if (patchedByDeveloper) params.append('patched_by_developer', patchedByDeveloper);
 
     const queryString = params.toString();
     const url = `${API_BASE_URL}/api/patches${queryString ? `?${queryString}` : ''}`;
@@ -385,7 +552,7 @@ export async function searchData(query: string): Promise<any[]> {
   }
 }
 
-export async function fetchVersionsForSoftware(softwareId: number): Promise<SoftwareVersion[]> { // Updated return type
+export async function fetchVersionsForSoftware(softwareId: number): Promise<SoftwareVersion[]> { 
   try {
     const response = await fetch(`${API_BASE_URL}/api/versions_for_software?software_id=${softwareId}`);
     return handleApiError(response, 'Failed to fetch versions for software');
@@ -422,8 +589,6 @@ export async function loginUser(credentials: AuthRequest): Promise<AuthResponse>
       },
       body: JSON.stringify(credentials),
     });
-    // The AuthResponse type expects access_token and username
-    // The backend /api/auth/login returns { access_token: "...", username: "..." }
     return handleApiError(response, 'Login failed');
   } catch (error) {
     console.error('Error during login:', error);
@@ -431,28 +596,27 @@ export async function loginUser(credentials: AuthRequest): Promise<AuthResponse>
   }
 }
 
-export async function fetchProtectedData(): Promise<any> { // Define a more specific return type
+export async function fetchProtectedData(): Promise<any> { 
   try {
-    const baseHeaders: Record<string, string> = { // Start with base headers
+    const baseHeaders: Record<string, string> = { 
       'Content-Type': 'application/json',
     };
 
-    const authHeader = getAuthHeader(); // Get auth header (which is Record<string, string>)
+    const authHeader = getAuthHeader(); 
 
-    // Combine them. The spread of authHeader will add Authorization if present.
     const headers = {
       ...baseHeaders,
-      ...authHeader, // Spread the auth header here
+      ...authHeader, 
     };
 
     const response = await fetch(`${API_BASE_URL}/api/protected`, {
       method: 'GET',
-      headers: headers, // Pass the combined headers object
+      headers: headers, 
     });
     return handleApiError(response, 'Failed to fetch protected data');
   } catch (error) {
     console.error('Error fetching protected data:', error);
-    throw error; // Re-throw to be caught by calling component
+    throw error; 
   }
 }
 
@@ -463,7 +627,7 @@ export async function addAdminDocumentWithUrl(payload: AddDocumentPayload): Prom
     const response = await fetch(`${API_BASE_URL}/api/admin/documents/add_with_url`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify({...payload, is_external_link: true }), // Explicitly set flag
+      body: JSON.stringify({...payload, is_external_link: true }), 
     });
     return handleApiError(response, 'Failed to add document with URL');
   } catch (error) { 
@@ -473,11 +637,10 @@ export async function addAdminDocumentWithUrl(payload: AddDocumentPayload): Prom
 }
 
 export async function uploadAdminDocumentFile(formData: FormData): Promise<DocumentType> {
-  // FormData should contain 'file' and other metadata fields like 'software_id', 'doc_name', etc.
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/documents/upload_file`, {
       method: 'POST',
-      headers: { ...getAuthHeader() }, // Content-Type is set by browser for FormData
+      headers: { ...getAuthHeader() }, 
       body: formData,
     });
     return handleApiError(response, 'Failed to upload document file');
@@ -502,8 +665,6 @@ export async function addAdminPatchWithUrl(payload: AddPatchPayloadFlexible): Pr
 }
 
 export async function uploadAdminPatchFile(formData: FormData): Promise<Patch> {
-  // FormData from AdminPatchEntryForm will contain:
-  // 'file', 'software_id', ( 'version_id' OR 'typed_version_string' ), 'patch_name', etc.
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/patches/upload_file`, {
       method: 'POST', headers: { ...getAuthHeader() }, body: formData,
@@ -526,8 +687,6 @@ export async function addAdminLinkWithUrl(payload: AddLinkPayloadFlexible): Prom
   } catch (error) { console.error('Error adding admin link with URL:', error); throw error; }
 }
 export async function uploadAdminLinkFile(formData: FormData): Promise<Link> {
-  // FormData from AdminLinkEntryForm will contain:
-  // 'file', 'software_id', ( 'version_id' OR 'typed_version_string' ), 'title', etc.
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/links/upload_file`, {
       method: 'POST', headers: { ...getAuthHeader() }, body: formData,
@@ -565,7 +724,6 @@ export async function addAdminMiscCategory(categoryData: AddCategoryPayload): Pr
 // --- Misc File API Functions ---
 
 export async function uploadAdminMiscFile(formData: FormData): Promise<MiscFile> {
-  // FormData should contain 'file', 'misc_category_id', 'user_provided_title', 'user_provided_description'
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/misc_files/upload`, {
       method: 'POST',
@@ -648,7 +806,7 @@ export async function editAdminPatchWithUrl(patchId: number, payload: EditPatchP
     const response = await fetch(`${API_BASE_URL}/api/admin/patches/${patchId}/edit_url`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify(backendPayload), // Send only changed fields if payload is constructed that way
+      body: JSON.stringify(backendPayload), 
     });
     return handleApiError(response, 'Failed to update patch with URL');
   } catch (error) { console.error('Error updating patch with URL:', error); throw error; }
@@ -656,7 +814,6 @@ export async function editAdminPatchWithUrl(patchId: number, payload: EditPatchP
 
 
 export async function editAdminPatchFile(patchId: number, formData: FormData): Promise<Patch> {
-  // FormData from AdminPatchEntryForm for edit will contain relevant fields
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/patches/${patchId}/edit_file`, {
       method: 'PUT', headers: { ...getAuthHeader() }, body: formData,
@@ -710,8 +867,6 @@ export async function deleteAdminLink(linkId: number): Promise<{ msg: string }> 
 
 // --- Admin Misc Category Edit/Delete Functions ---
 
-// Assuming EditCategoryPayload is similar to AddCategoryPayload or just { name?: string; description?: string }
-
 export async function editAdminMiscCategory(categoryId: number, payload: EditCategoryPayload): Promise<MiscCategory> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/misc_categories/${categoryId}/edit`, {
@@ -735,19 +890,12 @@ export async function deleteAdminMiscCategory(categoryId: number): Promise<{ msg
 
 
 // --- Admin Misc File Edit/Delete Functions ---
-
-// For editing a misc file, the payload might just be metadata.
-// File replacement is handled by `editAdminMiscFileWithNewUpload` if needed,
-// or the backend PUT /edit route for misc_files handles FormData which might include a new file.
-export interface EditMiscFilePayload { // For metadata-only updates via JSON
+export interface EditMiscFilePayload { 
   misc_category_id?: number;
   user_provided_title?: string;
   user_provided_description?: string;
 }
-// If you have a dedicated route for metadata-only JSON updates:
-// export async function editAdminMiscFileMetadata(fileId: number, payload: EditMiscFilePayload): Promise<MiscFile> { ... }
 
-// For editing misc file (metadata and/or replacing file via FormData)
 export async function editAdminMiscFile(fileId: number, formData: FormData): Promise<MiscFile> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/misc_files/${fileId}/edit`, {
@@ -767,6 +915,127 @@ export async function deleteAdminMiscFile(fileId: number): Promise<{ msg: string
     });
     return handleApiError(response, 'Failed to delete misc file');
   } catch (error) { console.error('Error deleting misc file:', error); throw error; }
+}
+
+// --- Favorites API Functions ---
+
+export type FavoriteItemType = 'document' | 'patch' | 'link' | 'misc_file' | 'software' | 'version';
+
+// Consider defining a specific return type for a favorite record, e.g., the favorite entry itself.
+// For now, using 'any' as per the example.
+export interface FavoriteRecord { 
+  id: number; // ID of the user_favorites table entry
+  user_id: number;
+  item_id: number;
+  item_type: FavoriteItemType;
+  created_at: string;
+}
+
+
+export async function addFavoriteApi(itemId: number, itemType: FavoriteItemType): Promise<FavoriteRecord> { // Changed 'any' to 'FavoriteRecord'
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/favorites`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeader(),
+      },
+      body: JSON.stringify({ item_id: itemId, item_type: itemType }),
+    });
+    return handleApiError(response, 'Failed to add favorite');
+  } catch (error) {
+    console.error('Error adding favorite:', error);
+    throw error;
+  }
+}
+
+export async function removeFavoriteApi(itemId: number, itemType: FavoriteItemType): Promise<{ msg: string }> { // Return type changed to { msg: string }
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/favorites/${itemType}/${itemId}`, {
+      method: 'DELETE',
+      headers: {
+        ...getAuthHeader(),
+      },
+    });
+    return handleApiError(response, 'Failed to remove favorite');
+  } catch (error) {
+    console.error('Error removing favorite:', error);
+    throw error;
+  }
+}
+
+export interface FavoriteStatusResponse {
+  is_favorite: boolean;
+  favorite_id?: number;
+  favorited_at?: string;
+}
+
+export async function getFavoriteStatusApi(itemId: number, itemType: FavoriteItemType): Promise<FavoriteStatusResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/favorites/status/${itemType}/${itemId}`, {
+      method: 'GET',
+      headers: {
+        ...getAuthHeader(),
+      },
+    });
+    return handleApiError(response, 'Failed to get favorite status');
+  } catch (error) {
+    console.error('Error getting favorite status:', error);
+    throw error;
+  }
+}
+
+// Define a more specific type for what a "favorited item" might look like in the response.
+// This will likely be a union of your existing types plus favorite_id and favorited_at.
+// For now, using 'any' as placeholder, but this should be refined.
+export interface DetailedFavoriteItem { // Placeholder - should be more specific
+  favorite_id: number;
+  item_id: number;
+  item_type: FavoriteItemType;
+  favorited_at: string;
+  name: string; // Common field
+  description?: string; // Common field
+  software_name?: string; // Contextual
+  software_id?: number; // Contextual
+  version_number?: string; // Contextual
+  version_id?: number; // Contextual
+  // Add other fields based on what the backend's UNION ALL query for favorites returns
+}
+
+
+export interface PaginatedFavoritesResponse { 
+  favorites: DetailedFavoriteItem[]; // Changed 'any[]' to 'DetailedFavoriteItem[]'
+  page: number;
+  per_page: number;
+  total_favorites: number;
+  total_pages: number;
+}
+
+export async function getUserFavoritesApi(
+  page?: number,
+  perPage?: number,
+  itemType?: FavoriteItemType
+): Promise<PaginatedFavoritesResponse> {
+  try {
+    const params = new URLSearchParams();
+    if (page) params.append('page', page.toString());
+    if (perPage) params.append('per_page', perPage.toString());
+    if (itemType) params.append('item_type', itemType);
+    
+    const queryString = params.toString();
+    const url = `${API_BASE_URL}/api/favorites${queryString ? `?${queryString}` : ''}`;
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        ...getAuthHeader(),
+      },
+    });
+    return handleApiError(response, 'Failed to fetch user favorites');
+  } catch (error) {
+    console.error('Error fetching user favorites:', error);
+    throw error;
+  }
 }
 
 // --- User Profile Management Functions ---
@@ -846,7 +1115,7 @@ export async function deactivateUser(userId: number): Promise<{ msg: string } | 
   try {
     const response = await fetch(`${API_BASE_URL}/api/superadmin/users/${userId}/deactivate`, {
       method: 'PUT',
-      headers: { ...getAuthHeader() }, // No body needed for deactivate
+      headers: { ...getAuthHeader() }, 
     });
     return handleApiError(response, 'Failed to deactivate user');
   } catch (error) {
@@ -859,10 +1128,8 @@ export async function activateUser(userId: number): Promise<{ msg: string } | Us
   try {
     const response = await fetch(`${API_BASE_URL}/api/superadmin/users/${userId}/activate`, {
       method: 'PUT',
-      headers: { ...getAuthHeader() }, // No body needed for activate
+      headers: { ...getAuthHeader() }, 
     });
-    // Assuming the backend for activateUser will return a similar response structure to deactivateUser
-    // or the updated user object.
     return handleApiError(response, 'Failed to activate user');
   } catch (error) {
     console.error('Error activating user:', error);

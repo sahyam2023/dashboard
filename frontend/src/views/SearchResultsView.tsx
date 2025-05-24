@@ -1,53 +1,272 @@
 import React, { useState, useEffect } from 'react';
-import { useOutletContext, useSearchParams, useNavigate } from 'react-router-dom';
-import { searchData } from '../services/api';
+import { useSearchParams, useNavigate, Link } from 'react-router-dom';
+import { Star } from 'lucide-react';
+import { 
+  searchData,
+  addFavoriteApi, // Added
+  removeFavoriteApi, // Added
+  getFavoriteStatusApi, // Added
+  FavoriteItemType // Added
+} from '../services/api';
+import { useAuth } from '../context/AuthContext'; // Added
 import LoadingState from '../components/LoadingState';
 import ErrorState from '../components/ErrorState';
+interface SearchResultItem {
+  id: number | string;
+  name?: string;
+  title?: string;
+  description?: string;
+  type: string;
+  software_name?: string;
+  software_id?: number | string; // For versions
+  url?: string; // For external links
+  is_external_link?: boolean; // For links
+  stored_filename?: string; // For uploaded files (links, misc_files)
+  is_favorited?: boolean; // Added
+  favorite_id?: number; // Added
+  // Add other fields that might appear in search results
+}
 
-interface OutletContextType {
-  searchTerm: string;
+interface CategorizedResults {
+  [key: string]: SearchResultItem[];
 }
 
 const SearchResultsView: React.FC = () => {
-  const { searchTerm } = useOutletContext<OutletContextType>();
+  const { isAuthenticated } = useAuth(); // Added
   const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
-  const query = searchParams.get('q') || searchTerm;
-  
-  const [results, setResults] = useState<any[]>([]);
+  const navigate = useNavigate(); 
+  const query = searchParams.get('q') || ''; 
+
+  const [categorizedResults, setCategorizedResults] = useState<CategorizedResults>({});
+  const [totalResults, setTotalResults] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null); // Added
 
-  // Sync URL with searchTerm when coming from layout search
+  // Favorite State for search results
+  const [favoritedItemsSearchResults, setFavoritedItemsSearchResults] = useState<Map<string, { favoriteId: number | undefined }>>(new Map());
+
   useEffect(() => {
-    // Only update URL if searchTerm exists and is different from current URL param
-    if (searchTerm && searchTerm !== searchParams.get('q')) {
-      navigate(`/search?q=${encodeURIComponent(searchTerm)}`, { replace: true });
+    if (!isAuthenticated) {
+      setFavoritedItemsSearchResults(new Map()); // Clear favorites on logout
     }
-  }, [searchTerm, searchParams, navigate]);
-
+  }, [isAuthenticated]);
+  
   useEffect(() => {
     if (!query) {
-      setResults([]);
+      setCategorizedResults({});
+      setTotalResults(0);
       return;
     }
 
     const fetchSearchResults = async () => {
       try {
         setIsLoading(true);
-        const data = await searchData(query);
-        setResults(data);
         setError(null);
+        const data: SearchResultItem[] = await searchData(query);
+        
+        // Group results by type
+        const groupedResults = data.reduce((acc, result) => {
+          const typeKey = result.type || 'unknown';
+          if (!acc[typeKey]) {
+            acc[typeKey] = [];
+          }
+          acc[typeKey].push(result);
+          return acc;
+        }, {} as CategorizedResults);
+        
+        setCategorizedResults(groupedResults);
+        setTotalResults(data.length);
+
+        // Initialize favoritedItemsSearchResults directly from search data
+        const newFavoritedItems = new Map<string, { favoriteId: number | undefined }>();
+        if (isAuthenticated && data && data.length > 0) {
+            for (const item of data) {
+                const uniqueKey = `${item.type}-${item.id}`;
+                if (item.favorite_id) { // Check if favorite_id exists and is truthy (not null/undefined)
+                    newFavoritedItems.set(uniqueKey, { favoriteId: item.favorite_id });
+                } else {
+                    newFavoritedItems.set(uniqueKey, { favoriteId: undefined });
+                }
+            }
+        }
+        setFavoritedItemsSearchResults(newFavoritedItems);
+
       } catch (err) {
         setError('Failed to fetch search results. Please try again later.');
         console.error(err);
+        setCategorizedResults({});
+        setTotalResults(0);
       } finally {
         setIsLoading(false);
       }
     };
 
     fetchSearchResults();
-  }, [query]);
+  }, [query, isAuthenticated]); // Added isAuthenticated as a dependency
+
+  const renderResultItem = (result: SearchResultItem, index: number) => {
+    const key = `${result.type}-${result.id}-${index}`;
+    let linkTo: string | undefined = undefined;
+    let isExternal = false;
+    let isDownload = false;
+    let downloadUrl: string | undefined = undefined;
+
+    switch (result.type) {
+      case 'document':
+        linkTo = `/documents?highlight=${result.id}`; // Or just /documents
+        break;
+      case 'patch':
+        linkTo = `/patches?highlight=${result.id}`; // Or just /patches
+        break;
+      case 'software':
+        linkTo = `/documents?software_id=${result.id}`;
+        break;
+      case 'version':
+        linkTo = `/patches?software_id=${result.software_id}`; // Future: &version=${result.name}
+        break;
+      case 'link':
+        if (result.is_external_link && result.url) {
+          linkTo = result.url;
+          isExternal = true;
+        } else if (result.stored_filename) {
+          // Assuming official_uploads for links, adjust if path varies
+          downloadUrl = `/official_uploads/links/${result.stored_filename}`;
+          isDownload = true;
+        }
+        break;
+      case 'misc_file':
+        if (result.stored_filename) {
+          downloadUrl = `/misc_uploads/${result.stored_filename}`;
+          isDownload = true;
+        }
+        break;
+      default:
+        // No specific link, just display info
+        break;
+    }
+
+    const title = result.title || result.name || 'Untitled';
+    const description = result.description ? (result.description.length > 150 ? result.description.substring(0, 147) + '...' : result.description) : 'No description available.';
+
+    const content = (
+      <>
+        <div className="flex justify-between items-start">
+          <h4 className="font-medium text-lg text-gray-900 mb-1 flex-grow">{title}</h4>
+          {isAuthenticated && ( 
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault(); // Prevent navigation for Link components
+                handleFavoriteToggle(result);
+              }}
+              className={`p-1 ${favoritedItemsSearchResults.get(`${result.type}-${result.id}`)?.favoriteId ? 'text-yellow-500' : 'text-gray-400'} hover:text-yellow-600 flex-shrink-0`}
+              title={favoritedItemsSearchResults.get(`${result.type}-${result.id}`)?.favoriteId ? "Remove from Favorites" : "Add to Favorites"}
+            >
+              <Star size={16} className={favoritedItemsSearchResults.get(`${result.type}-${result.id}`)?.favoriteId ? "fill-current" : ""} />
+            </button>
+          )}
+        </div>
+        <p className="text-xs text-gray-500 mb-1 uppercase tracking-wider">
+          Type: {result.type}
+          {result.type === 'version' && result.software_name && ` (for ${result.software_name})`}
+          {result.type !== 'version' && result.software_name && ` • Software: ${result.software_name}`}
+        </p>
+        <p className="text-gray-600 text-sm">{description}</p>
+      </>
+    );
+    
+    const commonClasses = "block bg-white rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow";
+
+    if (isExternal && linkTo) {
+      return (
+        <a href={linkTo} target="_blank" rel="noopener noreferrer" key={key} className={commonClasses}>
+          {content}
+        </a>
+      );
+    }
+    
+    if (isDownload && downloadUrl) {
+       return (
+        <a href={downloadUrl} key={key} className={commonClasses} download target="_blank" rel="noopener noreferrer">
+          {content}
+        </a>
+      );
+    }
+
+    if (linkTo) {
+      return (
+        <Link to={linkTo} key={key} className={commonClasses}>
+          {content}
+        </Link>
+      );
+    }
+
+    return (
+      <div key={key} className={commonClasses + " cursor-default"}>
+        {content}
+      </div>
+    );
+  };
+
+  const handleFavoriteToggle = async (item: SearchResultItem) => {
+    if (!isAuthenticated) {
+      setFeedbackMessage("Please log in to manage favorites.");
+      return;
+    }
+    const uniqueKey = `${item.type}-${item.id}`;
+    const itemIdAsNumber = typeof item.id === 'string' ? parseInt(item.id, 10) : item.id;
+
+    if (isNaN(itemIdAsNumber)) {
+      setFeedbackMessage("Invalid item ID for favoriting.");
+      return;
+    }
+
+    const currentStatus = favoritedItemsSearchResults.get(uniqueKey);
+    const isCurrentlyFavorited = !!currentStatus?.favoriteId;
+
+    const tempFavoritedItems = new Map(favoritedItemsSearchResults);
+    if (isCurrentlyFavorited) {
+      tempFavoritedItems.set(uniqueKey, { favoriteId: undefined });
+    } else {
+      tempFavoritedItems.set(uniqueKey, { favoriteId: -1 }); // Placeholder
+    }
+    setFavoritedItemsSearchResults(tempFavoritedItems);
+    setFeedbackMessage(null);
+
+
+    try {
+      if (isCurrentlyFavorited && typeof currentStatus?.favoriteId === 'number') {
+        await removeFavoriteApi(itemIdAsNumber, item.type as FavoriteItemType);
+        setFeedbackMessage(`"${item.name || item.title}" removed from favorites.`);
+        setFavoritedItemsSearchResults(prev => {
+          const newMap = new Map(prev);
+          newMap.set(uniqueKey, { favoriteId: undefined });
+          return newMap;
+        });
+      } else {
+        const newFavorite = await addFavoriteApi(itemIdAsNumber, item.type as FavoriteItemType);
+        setFavoritedItemsSearchResults(prev => {
+          const newMap = new Map(prev);
+          newMap.set(uniqueKey, { favoriteId: newFavorite.id });
+          return newMap;
+        });
+        setFeedbackMessage(`"${item.name || item.title}" added to favorites.`);
+      }
+    } catch (error: any) {
+      console.error("Failed to toggle favorite for search result:", error);
+      setFeedbackMessage(error?.response?.data?.msg || error.message || "Failed to update favorite status.");
+      setFavoritedItemsSearchResults(prev => {
+        const newMap = new Map(prev);
+        if (isCurrentlyFavorited) {
+          newMap.set(uniqueKey, { favoriteId: currentStatus?.favoriteId });
+        } else {
+          newMap.set(uniqueKey, { favoriteId: undefined });
+        }
+        return newMap;
+      });
+    }
+  };
 
   if (isLoading) {
     return <LoadingState message="Searching..." />;
@@ -56,10 +275,11 @@ const SearchResultsView: React.FC = () => {
   if (error) {
     return <ErrorState message={error} />;
   }
-
-  if (results.length === 0 && query) {
+  
+  if (totalResults === 0 && query) {
     return (
-      <div>
+      <div className="container mx-auto px-4 py-8">
+        {feedbackMessage && <div className="p-3 my-2 bg-blue-100 text-blue-700 rounded text-sm">{feedbackMessage}</div>}
         <div className="mb-6">
           <h2 className="text-2xl font-bold text-gray-800 mb-2">Search Results</h2>
           <p className="text-gray-600">
@@ -73,25 +293,39 @@ const SearchResultsView: React.FC = () => {
       </div>
     );
   }
+  
+  if (!query) {
+     return (
+      <div className="container mx-auto px-4 py-8">
+        {feedbackMessage && <div className="p-3 my-2 bg-blue-100 text-blue-700 rounded text-sm">{feedbackMessage}</div>}
+        <div className="mb-6">
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">Search</h2>
+          <p className="text-gray-600">Please enter a search term in the header to find results.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div>
+    <div className="container mx-auto px-4 py-8">
+      {feedbackMessage && <div className="p-3 my-2 bg-blue-100 text-blue-700 rounded text-sm">{feedbackMessage}</div>}
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-gray-800 mb-2">Search Results</h2>
         <p className="text-gray-600">
-          {results.length} results for "<span className="font-medium">{query}</span>"
+          Found {totalResults} result{totalResults !== 1 ? 's' : ''} for "<span className="font-medium">{query}</span>"
         </p>
       </div>
       
-      <div className="space-y-4">
-        {results.map((result, index) => (
-          <div key={index} className="bg-white rounded-lg shadow-sm p-6 hover:shadow-md transition-shadow">
-            <h3 className="font-medium text-lg text-gray-900 mb-1">{result.title || result.name}</h3>
-            <p className="text-sm text-gray-500 mb-2">{result.type} • {result.software_name}</p>
-            <p className="text-gray-600">{result.description}</p>
+      {Object.entries(categorizedResults).map(([type, items]) => (
+        items.length > 0 && (
+          <div key={type} className="mb-8"> 
+            <h3 className="text-xl font-semibold text-gray-700 mb-4 capitalize border-b pb-2">{type.replace('_', ' ')}s</h3> 
+            <div className="space-y-4">
+              {items.map((result, index) => renderResultItem(result, index))}
+            </div>
           </div>
-        ))}
-      </div>
+        )
+      ))}
     </div>
   );
 };

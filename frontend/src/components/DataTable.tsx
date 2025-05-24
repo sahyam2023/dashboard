@@ -1,5 +1,6 @@
 import React from 'react';
 import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import LoadingState from './LoadingState';
 
 // 1. Define/Update Props
 export interface ColumnDef<T> {
@@ -40,14 +41,7 @@ const DataTable = <T extends Record<string, any>>({
 }: DataTableProps<T>) => {
   if (isLoading) {
     return (
-      <div className="w-full flex justify-center items-center py-12">
-        <div className="animate-pulse flex flex-col w-full">
-          <div className="h-10 bg-gray-200 rounded mb-4"></div>
-          {[...Array(itemsPerPage || 5)].map((_, i) => ( // Use itemsPerPage for skeleton
-            <div key={i} className="h-16 bg-gray-100 rounded mb-2"></div>
-          ))}
-        </div>
-      </div>
+      <LoadingState type="table" count={itemsPerPage || 5} message="Loading entries..." />
     );
   }
 

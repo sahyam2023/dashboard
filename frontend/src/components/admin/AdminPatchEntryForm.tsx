@@ -41,6 +41,7 @@ interface PatchFormData {
   inputMode: InputMode;
   externalUrl?: string;
   selectedFile?: File | null | undefined;
+  patch_by_developer?: string; // Added
 }
 
 // Yup validation schema
@@ -72,6 +73,7 @@ const patchValidationSchema = yup.object().shape({
       otherwise: schema => schema.nullable(),
     }),
   description: yup.string().optional().max(2000, "Description cannot exceed 2000 characters.").nullable(),
+  patch_by_developer: yup.string().optional().max(255, "Patch developer name cannot exceed 255 characters.").nullable(), // Added
 });
 
 
@@ -99,6 +101,7 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
       inputMode: 'url',
       externalUrl: '',
       selectedFile: null,
+      patch_by_developer: '', // Added
     }
   });
 
@@ -157,6 +160,7 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
         description: patchToEdit.description || '',
         inputMode: patchToEdit.is_external_link ? 'url' : 'upload',
         externalUrl: patchToEdit.is_external_link ? patchToEdit.download_link : '',
+        patch_by_developer: patchToEdit.patch_by_developer || '', // Added
       };
 
       // Version pre-filling logic
@@ -201,6 +205,7 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
       inputMode: 'url',
       externalUrl: '',
       selectedFile: null,
+      patch_by_developer: '', // Added
     });
     setExistingFileName(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -243,6 +248,7 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
       patch_name: data.patchName.trim(),
       description: data.description?.trim() || undefined,
       release_date: data.releaseDate || undefined,
+      patch_by_developer: data.patch_by_developer?.trim() || undefined, // Added
     };
     if (finalVersionId) basePayload.version_id = finalVersionId;
     if (finalTypedVersionString) basePayload.typed_version_string = finalTypedVersionString;
@@ -270,6 +276,7 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
         formData.append('patch_name', data.patchName.trim());
         if (data.releaseDate) formData.append('release_date', data.releaseDate);
         if (data.description?.trim()) formData.append('description', data.description.trim());
+        if (data.patch_by_developer?.trim()) formData.append('patch_by_developer', data.patch_by_developer.trim()); // Added
         if (data.selectedFile) formData.append('file', data.selectedFile);
 
         if (isEditMode && patchToEdit) {
@@ -393,6 +400,17 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
             className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.releaseDate ? 'border-red-500' : ''}`}
         />
         {errors.releaseDate && <p className="mt-1 text-sm text-red-600">{errors.releaseDate.message}</p>}
+      </div>
+      <div>
+        <label htmlFor="patch_by_developer" className="block text-sm font-medium text-gray-700">Patch By Developer</label>
+        <input 
+            type="text" 
+            id="patch_by_developer" 
+            {...register("patch_by_developer")} 
+            disabled={isLoading} 
+            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.patch_by_developer ? 'border-red-500' : ''}`}
+        />
+        {errors.patch_by_developer && <p className="mt-1 text-sm text-red-600">{errors.patch_by_developer.message}</p>}
       </div>
       <div className="my-4">
         <span className="block text-sm font-medium text-gray-700 mb-2">Patch Source:</span>

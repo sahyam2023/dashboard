@@ -3,7 +3,8 @@ import os
 import uuid
 import sqlite3
 import json # Added for audit logging
-from datetime import datetime
+import re
+from datetime import datetime, timedelta # Added timedelta
 import math # Added for math.ceil
 from functools import wraps
 from flask import Flask, request, g, jsonify, send_from_directory
@@ -46,7 +47,7 @@ ALLOWED_EXTENSIONS = {
     'ppt', 'pptx', 'odp', # Presentations
     'iso', # Disc Images
     'log', 'json', 'xml', 'yaml', 'yml', 'ini', 'cfg', # Config/Data files
-    'py', 'js', 'java', 'c', 'cpp', 'h', 'cs', 'html', 'css', # Code files
+    'py', 'js', 'java', 'c', 'cpp', 'h', 'cs', 'html', 'css', 'ps1' # Code files
     # Add any other specific extensions you anticipate
 }
 app = Flask(__name__, instance_relative_config=True) # instance_relative_config=True is good practice
@@ -115,6 +116,28 @@ def create_user_in_db(username, password, email=None):
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+# --- Password Strength Helper ---
+def is_password_strong(password: str) -> tuple[bool, str]:
+    """
+    Checks if the password meets the strength criteria.
+    Returns: (True, "Password is strong") or (False, "error message").
+    """
+    if len(password) < 8:
+        return False, "Password must be at least 8 characters long."
+    if not re.search(r"[A-Z]", password):
+        return False, "Password must include at least one uppercase letter."
+    if not re.search(r"[a-z]", password):
+        return False, "Password must include at least one lowercase letter."
+    if not re.search(r"[0-9]", password):
+        return False, "Password must include at least one digit."
+    
+    # Consolidated message if multiple criteria are preferred to be listed at once
+    # For now, returning specific messages as per above.
+    # A general message could be:
+    # "Password must be at least 8 characters long, include an uppercase letter, a lowercase letter, and a digit."
+    
+    return True, "Password is strong"
+
 # --- Audit Log Helper ---
 def log_audit_action(action_type: str, target_table: str = None, target_id: int = None, details: dict = None, user_id: int = None, username: str = None):
     """
@@ -179,6 +202,69 @@ def log_audit_action(action_type: str, target_table: str = None, target_id: int 
     except Exception as e_general:
         # Catch any other unexpected errors
         app.logger.error(f"Audit log: General error logging action '{action_type}': {e_general}")
+
+# --- Download Log Helper ---
+def _log_download_activity(filename_to_serve: str, item_type: str, current_db: sqlite3.Connection):
+    """Logs download activity to the download_log table."""
+    try:
+        table_map = {
+            'document': {'table_name': 'documents', 'id_column': 'id'},
+            'patch': {'table_name': 'patches', 'id_column': 'id'},
+            'link_file': {'table_name': 'links', 'id_column': 'id'}, # Assuming 'links' table for files uploaded via "Links"
+            'misc_file': {'table_name': 'misc_files', 'id_column': 'id'}
+        }
+
+        if item_type not in table_map:
+            app.logger.error(f"Download log: Invalid item_type '{item_type}' for filename '{filename_to_serve}'.")
+            return
+
+        table_info = table_map[item_type]
+        table_name = table_info['table_name']
+        # id_column = table_info['id_column'] # Currently always 'id'
+
+        item_id = None
+        # Query to find the item_id based on stored_filename
+        # Note: For 'misc_files', the column is 'stored_filename'.
+        # For 'documents', 'patches', 'links', it's also 'stored_filename'.
+        query = f"SELECT id FROM {table_name} WHERE stored_filename = ?"
+        item_cursor = current_db.execute(query, (filename_to_serve,))
+        item_row = item_cursor.fetchone()
+
+        if item_row:
+            item_id = item_row['id']
+        else:
+            app.logger.error(f"Download log: Could not find item_id for filename '{filename_to_serve}' in table '{table_name}'.")
+            return # Cannot log if item not found
+
+        user_id_for_log = None
+        try:
+            # Try to get user_id from JWT. Optional=True means it won't raise error if JWT is missing/invalid.
+            verify_jwt_in_request(optional=True)
+            current_user_jwt_identity = get_jwt_identity()
+            if current_user_jwt_identity:
+                user_id_for_log = int(current_user_jwt_identity)
+        except ValueError:
+            app.logger.warning(f"Download log: Invalid user ID format in JWT for download of '{filename_to_serve}'.")
+        except Exception as e_jwt:
+            # Log other JWT related errors but don't fail download logging
+            app.logger.warning(f"Download log: Error processing JWT for download of '{filename_to_serve}': {e_jwt}")
+
+        ip_address = request.remote_addr
+
+        # Insert into download_log
+        current_db.execute("""
+            INSERT INTO download_log (file_id, file_type, user_id, ip_address, download_timestamp)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """, (item_id, item_type, user_id_for_log, ip_address))
+        current_db.commit()
+        app.logger.info(f"Download logged: File '{filename_to_serve}', Type '{item_type}', UserID '{user_id_for_log}', IP '{ip_address}'")
+
+    except sqlite3.Error as e_db:
+        app.logger.error(f"Download log: Database error for '{filename_to_serve}': {e_db}")
+        # Potentially rollback if the commit failed, though commit is for this specific transaction.
+        # current_db.rollback() # Only if part of a larger transaction that needs to be rolled back.
+    except Exception as e_general:
+        app.logger.error(f"Download log: General error for '{filename_to_serve}': {e_general}")
 
 # --- Authorization Decorator ---
 def admin_required(fn):
@@ -442,6 +528,12 @@ def register():
     username, password, email = data.get('username'), data.get('password'), data.get('email')
 
     if not username or not password: return jsonify(msg="Missing username or password"), 400
+
+    # Password strength check
+    is_strong, strength_msg = is_password_strong(password)
+    if not is_strong:
+        return jsonify(msg=strength_msg), 400
+
     if find_user_by_username(username): return jsonify(msg="Username already exists"), 409
     if email and find_user_by_email(email): return jsonify(msg="Email address already registered"), 409
 
@@ -535,6 +627,11 @@ def change_password():
 
     if not bcrypt.check_password_hash(user['password_hash'], current_password):
         return jsonify(msg="Incorrect current password."), 401
+
+    # Password strength check for the new password
+    is_strong, strength_msg = is_password_strong(new_password)
+    if not is_strong:
+        return jsonify(msg=strength_msg), 400
 
     hashed_new_password = bcrypt.generate_password_hash(new_password).decode('utf-8')
     
@@ -630,6 +727,13 @@ def get_all_documents_api():
     # Get existing filter parameters
     software_id_filter = request.args.get('software_id', type=int)
 
+    # Get new filter parameters
+    doc_type_filter = request.args.get('doc_type', type=str)
+    created_from_filter = request.args.get('created_from', type=str)
+    created_to_filter = request.args.get('created_to', type=str)
+    updated_from_filter = request.args.get('updated_from', type=str)
+    updated_to_filter = request.args.get('updated_to', type=str)
+
     if page <= 0:
         page = 1
     if per_page <= 0:
@@ -639,36 +743,79 @@ def get_all_documents_api():
     allowed_sort_by_map = {
         'id': 'd.id',
         'doc_name': 'd.doc_name',
-        'software_name': 's.name', # s.name is aliased as software_name in SELECT
+        'software_name': 's.name', 
         'doc_type': 'd.doc_type',
+        'uploaded_by_username': 'u.username', # Added for sorting
         'created_at': 'd.created_at',
         'updated_at': 'd.updated_at'
+        # patch_by_developer is not applicable to documents
     }
     
-    sort_by_column = allowed_sort_by_map.get(sort_by_param, 'd.doc_name') # Default to d.doc_name
+    sort_by_column = allowed_sort_by_map.get(sort_by_param, 'd.doc_name') 
 
     if sort_order not in ['asc', 'desc']:
         sort_order = 'asc'
 
     # Construct Base Query and Parameters for Filtering
-    base_query_select = "SELECT d.id, d.software_id, d.doc_name, d.description, d.doc_type, d.is_external_link, d.download_link, d.stored_filename, d.original_filename_ref, d.file_size, d.file_type, d.created_by_user_id, d.created_at, d.updated_by_user_id, d.updated_at, s.name as software_name"
-    base_query_from = "FROM documents d JOIN software s ON d.software_id = s.id"
+    base_query_select_fields = "d.id, d.software_id, d.doc_name, d.description, d.doc_type, d.is_external_link, d.download_link, d.stored_filename, d.original_filename_ref, d.file_size, d.file_type, d.created_by_user_id, u.username as uploaded_by_username, d.created_at, d.updated_by_user_id, upd_u.username as updated_by_username, d.updated_at, s.name as software_name"
+    base_query_from = "FROM documents d JOIN software s ON d.software_id = s.id LEFT JOIN users u ON d.created_by_user_id = u.id LEFT JOIN users upd_u ON d.updated_by_user_id = upd_u.id"
     
+    params = [] # Parameters for the WHERE clause
+    user_id_param_for_join = [] # Parameter for the JOIN clause (user_id for favorites)
+
+    # Attempt to get user_id for favorites
+    user_id = None
+    try:
+        verify_jwt_in_request(optional=True)
+        current_user_identity = get_jwt_identity()
+        if current_user_identity:
+            user_id = int(current_user_identity)
+    except Exception as e:
+        app.logger.error(f"Error getting user_id in get_all_documents_api: {e}")
+
+    if user_id:
+        base_query_select = f"SELECT {base_query_select_fields}, uf.id AS favorite_id"
+        base_query_from += " LEFT JOIN user_favorites uf ON d.id = uf.item_id AND uf.item_type = 'document' AND uf.user_id = ?"
+        user_id_param_for_join.append(user_id)
+    else:
+        base_query_select = f"SELECT {base_query_select_fields}, NULL AS favorite_id" # Ensure favorite_id column exists even if null
+
     filter_conditions = []
-    params = []
 
     if software_id_filter:
         filter_conditions.append("d.software_id = ?")
         params.append(software_id_filter)
+
+    if doc_type_filter:
+        filter_conditions.append("LOWER(d.doc_type) LIKE ?")
+        params.append(f"%{doc_type_filter.lower()}%")
+    
+    # Date range filters
+    # Note: No explicit date validation here as per instructions, relying on DB behavior.
+    # Consider adding a helper function for date validation (YYYY-MM-DD) for robustness.
+    if created_from_filter:
+        filter_conditions.append("date(d.created_at) >= date(?)")
+        params.append(created_from_filter)
+    if created_to_filter:
+        filter_conditions.append("date(d.created_at) <= date(?)")
+        params.append(created_to_filter)
+    if updated_from_filter:
+        filter_conditions.append("date(d.updated_at) >= date(?)")
+        params.append(updated_from_filter)
+    if updated_to_filter:
+        filter_conditions.append("date(d.updated_at) <= date(?)")
+        params.append(updated_to_filter)
     
     where_clause = ""
     if filter_conditions:
         where_clause = " WHERE " + " AND ".join(filter_conditions)
 
     # Database Query for Total Count
-    count_query = f"SELECT COUNT(d.id) as count {base_query_from}{where_clause}"
+    # For count_query, we don't need the favorite_id or the join to user_favorites, nor user_id_param_for_join
+    count_query_from_without_fav_join = "FROM documents d JOIN software s ON d.software_id = s.id LEFT JOIN users u ON d.created_by_user_id = u.id LEFT JOIN users upd_u ON d.updated_by_user_id = upd_u.id"
+    count_query = f"SELECT COUNT(d.id) as count {count_query_from_without_fav_join}{where_clause}"
     try:
-        total_documents_cursor = db.execute(count_query, tuple(params)) # Use tuple for params
+        total_documents_cursor = db.execute(count_query, tuple(params)) 
         total_documents = total_documents_cursor.fetchone()['count']
     except Exception as e:
         app.logger.error(f"Error fetching total document count: {e}")
@@ -683,17 +830,15 @@ def get_all_documents_api():
         offset = (page - 1) * per_page
     
     # Database Query for Paginated Documents
+    # Combine params for WHERE clause and the user_id for JOIN clause
+    final_params = tuple(params + user_id_param_for_join + [per_page, offset])
     final_query = f"{base_query_select} {base_query_from}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
     
-    # Add pagination params to the list of SQL parameters
-    paginated_params = list(params) # Create a copy
-    paginated_params.extend([per_page, offset])
-    
     try:
-        documents_cursor = db.execute(final_query, tuple(paginated_params)) # Use tuple for params
+        documents_cursor = db.execute(final_query, final_params)
         documents_list = [dict(row) for row in documents_cursor.fetchall()]
     except Exception as e:
-        app.logger.error(f"Error fetching paginated documents: {e}")
+        app.logger.error(f"Error fetching paginated documents: {e} with query {final_query} and params {final_params}")
         return jsonify(msg="Error fetching documents."), 500
 
     return jsonify({
@@ -717,6 +862,11 @@ def get_all_patches_api():
     # Get existing filter parameters
     software_id_filter = request.args.get('software_id', type=int)
 
+    # Get new filter parameters
+    release_from_filter = request.args.get('release_from', type=str)
+    release_to_filter = request.args.get('release_to', type=str)
+    patched_by_developer_filter = request.args.get('patched_by_developer', type=str)
+
     if page <= 0:
         page = 1
     if per_page <= 0:
@@ -729,32 +879,64 @@ def get_all_patches_api():
         'software_name': 's.name',
         'version_number': 'v.version_number',
         'release_date': 'p.release_date',
+        'patch_by_developer': 'p.patch_by_developer', # Retained
+        'uploaded_by_username': 'u.username', # Retained (creator)
         'created_at': 'p.created_at',
         'updated_at': 'p.updated_at'
+        # updated_by_username can be added if sorting by editor is needed
     }
     
-    sort_by_column = allowed_sort_by_map.get(sort_by_param, 'p.patch_name') # Default to p.patch_name
+    sort_by_column = allowed_sort_by_map.get(sort_by_param, 'p.patch_name') 
 
     if sort_order not in ['asc', 'desc']:
         sort_order = 'asc'
 
     # Construct Base Query and Parameters for Filtering
-    base_query_select = "SELECT p.id, p.version_id, p.patch_name, p.description, p.release_date, p.is_external_link, p.download_link, p.stored_filename, p.original_filename_ref, p.file_size, p.file_type, p.created_by_user_id, p.created_at, p.updated_by_user_id, p.updated_at, s.name as software_name, s.id as software_id, v.version_number"
-    base_query_from = "FROM patches p JOIN versions v ON p.version_id = v.id JOIN software s ON v.software_id = s.id"
+    base_query_select_fields = "p.id, p.version_id, p.patch_name, p.description, p.release_date, p.is_external_link, p.download_link, p.stored_filename, p.original_filename_ref, p.file_size, p.file_type, p.patch_by_developer, p.created_by_user_id, u.username as uploaded_by_username, p.created_at, p.updated_by_user_id, upd_u.username as updated_by_username, p.updated_at, s.name as software_name, s.id as software_id, v.version_number"
+    base_query_from = "FROM patches p JOIN versions v ON p.version_id = v.id JOIN software s ON v.software_id = s.id LEFT JOIN users u ON p.created_by_user_id = u.id LEFT JOIN users upd_u ON p.updated_by_user_id = upd_u.id"
     
+    params = [] 
+    user_id_param_for_join = []
+
+    user_id = None
+    try:
+        verify_jwt_in_request(optional=True)
+        current_user_identity = get_jwt_identity()
+        if current_user_identity:
+            user_id = int(current_user_identity)
+    except Exception as e:
+        app.logger.error(f"Error getting user_id in get_all_patches_api: {e}")
+
+    if user_id:
+        base_query_select = f"SELECT {base_query_select_fields}, uf.id AS favorite_id"
+        base_query_from += " LEFT JOIN user_favorites uf ON p.id = uf.item_id AND uf.item_type = 'patch' AND uf.user_id = ?"
+        user_id_param_for_join.append(user_id)
+    else:
+        base_query_select = f"SELECT {base_query_select_fields}, NULL AS favorite_id"
+
     filter_conditions = []
-    params = []
 
     if software_id_filter:
         filter_conditions.append("s.id = ?") # Filter by software_id from the software table
         params.append(software_id_filter)
+
+    if release_from_filter:
+        filter_conditions.append("date(p.release_date) >= date(?)")
+        params.append(release_from_filter)
+    if release_to_filter:
+        filter_conditions.append("date(p.release_date) <= date(?)")
+        params.append(release_to_filter)
+    if patched_by_developer_filter:
+        filter_conditions.append("LOWER(p.patch_by_developer) LIKE ?")
+        params.append(f"%{patched_by_developer_filter.lower()}%")
     
     where_clause = ""
     if filter_conditions:
         where_clause = " WHERE " + " AND ".join(filter_conditions)
 
     # Database Query for Total Count
-    count_query = f"SELECT COUNT(p.id) as count {base_query_from}{where_clause}"
+    count_query_from_without_fav_join = "FROM patches p JOIN versions v ON p.version_id = v.id JOIN software s ON v.software_id = s.id LEFT JOIN users u ON p.created_by_user_id = u.id LEFT JOIN users upd_u ON p.updated_by_user_id = upd_u.id"
+    count_query = f"SELECT COUNT(p.id) as count {count_query_from_without_fav_join}{where_clause}"
     try:
         total_patches_cursor = db.execute(count_query, tuple(params))
         total_patches = total_patches_cursor.fetchone()['count']
@@ -770,20 +952,14 @@ def get_all_patches_api():
         page = total_pages
         offset = (page - 1) * per_page
     
-    # Database Query for Paginated Patches
-    # Default sort order for patches as per original implementation if no sort_by is specified by user
-    # The original was: ORDER BY s.name, v.release_date DESC, v.version_number DESC, p.patch_name
-    # We will use the user-specified sort_by and sort_order. If not specified, it defaults to p.patch_name asc.
+    final_params = tuple(params + user_id_param_for_join + [per_page, offset])
     final_query = f"{base_query_select} {base_query_from}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
     
-    paginated_params = list(params)
-    paginated_params.extend([per_page, offset])
-    
     try:
-        patches_cursor = db.execute(final_query, tuple(paginated_params))
+        patches_cursor = db.execute(final_query, final_params)
         patches_list = [dict(row) for row in patches_cursor.fetchall()]
     except Exception as e:
-        app.logger.error(f"Error fetching paginated patches: {e}")
+        app.logger.error(f"Error fetching paginated patches: {e} with query {final_query} and params {final_params}")
         return jsonify(msg="Error fetching patches."), 500
 
     return jsonify({
@@ -808,6 +984,11 @@ def get_all_links_api():
     software_id_filter = request.args.get('software_id', type=int)
     version_id_filter = request.args.get('version_id', type=int)
 
+    # Get new filter parameters
+    link_type_filter = request.args.get('link_type', type=str)
+    created_from_filter = request.args.get('created_from', type=str)
+    created_to_filter = request.args.get('created_to', type=str)
+
     if page <= 0:
         page = 1
     if per_page <= 0:
@@ -818,22 +999,42 @@ def get_all_links_api():
         'id': 'l.id',
         'title': 'l.title',
         'software_name': 's.name',
-        'version_name': 'v.version_number', # Note: version_name in JSON, version_number in DB for v table
+        'version_name': 'v.version_number', 
+        'uploaded_by_username': 'u.username', # Added for sorting by creator
         'created_at': 'l.created_at',
         'updated_at': 'l.updated_at'
+        # patch_by_developer is not applicable to links
     }
     
-    sort_by_column = allowed_sort_by_map.get(sort_by_param, 'l.title') # Default to l.title
+    sort_by_column = allowed_sort_by_map.get(sort_by_param, 'l.title') 
 
     if sort_order not in ['asc', 'desc']:
         sort_order = 'asc'
 
     # Construct Base Query and Parameters for Filtering
-    base_query_select = "SELECT l.id, l.title, l.description, l.software_id, l.version_id, l.is_external_link, l.url, l.stored_filename, l.original_filename_ref, l.file_size, l.file_type, l.created_by_user_id, l.created_at, l.updated_by_user_id, l.updated_at, s.name as software_name, v.version_number as version_name"
-    base_query_from = "FROM links l JOIN software s ON l.software_id = s.id LEFT JOIN versions v ON l.version_id = v.id"
+    base_query_select_fields = "l.id, l.title, l.description, l.software_id, l.version_id, l.is_external_link, l.url, l.stored_filename, l.original_filename_ref, l.file_size, l.file_type, l.created_by_user_id, u.username as uploaded_by_username, l.created_at, l.updated_by_user_id, upd_u.username as updated_by_username, l.updated_at, s.name as software_name, v.version_number as version_name"
+    base_query_from = "FROM links l JOIN software s ON l.software_id = s.id LEFT JOIN versions v ON l.version_id = v.id LEFT JOIN users u ON l.created_by_user_id = u.id LEFT JOIN users upd_u ON l.updated_by_user_id = upd_u.id"
     
-    filter_conditions = []
     params = []
+    user_id_param_for_join = []
+
+    user_id = None
+    try:
+        verify_jwt_in_request(optional=True)
+        current_user_identity = get_jwt_identity()
+        if current_user_identity:
+            user_id = int(current_user_identity)
+    except Exception as e:
+        app.logger.error(f"Error getting user_id in get_all_links_api: {e}")
+
+    if user_id:
+        base_query_select = f"SELECT {base_query_select_fields}, uf.id AS favorite_id"
+        base_query_from += " LEFT JOIN user_favorites uf ON l.id = uf.item_id AND uf.item_type = 'link' AND uf.user_id = ?"
+        user_id_param_for_join.append(user_id)
+    else:
+        base_query_select = f"SELECT {base_query_select_fields}, NULL AS favorite_id"
+        
+    filter_conditions = []
 
     if software_id_filter:
         filter_conditions.append("l.software_id = ?")
@@ -841,13 +1042,28 @@ def get_all_links_api():
     if version_id_filter:
         filter_conditions.append("l.version_id = ?")
         params.append(version_id_filter)
+
+    if link_type_filter:
+        if link_type_filter.lower() == 'external':
+            filter_conditions.append("l.is_external_link = TRUE")
+        elif link_type_filter.lower() == 'uploaded':
+            filter_conditions.append("l.is_external_link = FALSE")
+            # For 'uploaded', no parameter is added to params for this specific condition
+    
+    if created_from_filter:
+        filter_conditions.append("date(l.created_at) >= date(?)")
+        params.append(created_from_filter)
+    if created_to_filter:
+        filter_conditions.append("date(l.created_at) <= date(?)")
+        params.append(created_to_filter)
     
     where_clause = ""
     if filter_conditions:
         where_clause = " WHERE " + " AND ".join(filter_conditions)
 
     # Database Query for Total Count
-    count_query = f"SELECT COUNT(l.id) as count {base_query_from}{where_clause}"
+    count_query_from_without_fav_join = "FROM links l JOIN software s ON l.software_id = s.id LEFT JOIN versions v ON l.version_id = v.id LEFT JOIN users u ON l.created_by_user_id = u.id LEFT JOIN users upd_u ON l.updated_by_user_id = upd_u.id"
+    count_query = f"SELECT COUNT(l.id) as count {count_query_from_without_fav_join}{where_clause}"
     try:
         total_links_cursor = db.execute(count_query, tuple(params))
         total_links = total_links_cursor.fetchone()['count']
@@ -863,19 +1079,14 @@ def get_all_links_api():
         page = total_pages
         offset = (page - 1) * per_page
     
-    # Database Query for Paginated Links
-    # Original sort: ORDER BY s.name, v.version_number, l.title
-    # Now using user-defined sort or default l.title
+    final_params = tuple(params + user_id_param_for_join + [per_page, offset])
     final_query = f"{base_query_select} {base_query_from}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
     
-    paginated_params = list(params)
-    paginated_params.extend([per_page, offset])
-    
     try:
-        links_cursor = db.execute(final_query, tuple(paginated_params))
+        links_cursor = db.execute(final_query, final_params)
         links_list = [dict(row) for row in links_cursor.fetchall()]
     except Exception as e:
-        app.logger.error(f"Error fetching paginated links: {e}")
+        app.logger.error(f"Error fetching paginated links: {e} with query {final_query} and params {final_params}")
         return jsonify(msg="Error fetching links."), 500
 
     return jsonify({
@@ -914,23 +1125,43 @@ def get_all_misc_files_api():
         'id': 'mf.id',
         'user_provided_title': 'mf.user_provided_title',
         'original_filename': 'mf.original_filename',
-        'category_name': 'mc.name', # mc.name is aliased as category_name in SELECT
+        'category_name': 'mc.name', 
+        'uploaded_by_username': 'u.username', # Added for sorting by creator
         'created_at': 'mf.created_at',
         'file_size': 'mf.file_size',
-        'updated_at': 'mf.updated_at' 
+        'updated_at': 'mf.updated_at'
+        # patch_by_developer is not applicable
     }
     
-    sort_by_column = allowed_sort_by_map.get(sort_by_param, 'mf.user_provided_title') # Default
+    sort_by_column = allowed_sort_by_map.get(sort_by_param, 'mf.user_provided_title')
 
     if sort_order not in ['asc', 'desc']:
         sort_order = 'asc'
 
     # Construct Base Query and Parameters for Filtering
-    base_query_select = "SELECT mf.id, mf.misc_category_id, mf.user_id, mf.user_provided_title, mf.user_provided_description, mf.original_filename, mf.stored_filename, mf.file_path, mf.file_type, mf.file_size, mf.created_by_user_id, mf.created_at, mf.updated_by_user_id, mf.updated_at, mc.name as category_name"
-    base_query_from = "FROM misc_files mf JOIN misc_categories mc ON mf.misc_category_id = mc.id"
+    base_query_select_fields = "mf.id, mf.misc_category_id, mf.user_id, mf.user_provided_title, mf.user_provided_description, mf.original_filename, mf.stored_filename, mf.file_path, mf.file_type, mf.file_size, mf.created_by_user_id, u.username as uploaded_by_username, mf.created_at, mf.updated_by_user_id, upd_u.username as updated_by_username, mf.updated_at, mc.name as category_name"
+    base_query_from = "FROM misc_files mf JOIN misc_categories mc ON mf.misc_category_id = mc.id LEFT JOIN users u ON mf.created_by_user_id = u.id LEFT JOIN users upd_u ON mf.updated_by_user_id = upd_u.id"
     
-    filter_conditions = []
     params = []
+    user_id_param_for_join = []
+
+    user_id = None
+    try:
+        verify_jwt_in_request(optional=True)
+        current_user_identity = get_jwt_identity()
+        if current_user_identity:
+            user_id = int(current_user_identity)
+    except Exception as e:
+        app.logger.error(f"Error getting user_id in get_all_misc_files_api: {e}")
+
+    if user_id:
+        base_query_select = f"SELECT {base_query_select_fields}, uf.id AS favorite_id"
+        base_query_from += " LEFT JOIN user_favorites uf ON mf.id = uf.item_id AND uf.item_type = 'misc_file' AND uf.user_id = ?"
+        user_id_param_for_join.append(user_id)
+    else:
+        base_query_select = f"SELECT {base_query_select_fields}, NULL AS favorite_id"
+
+    filter_conditions = []
 
     if category_id_filter:
         filter_conditions.append("mf.misc_category_id = ?")
@@ -941,7 +1172,8 @@ def get_all_misc_files_api():
         where_clause = " WHERE " + " AND ".join(filter_conditions)
 
     # Database Query for Total Count
-    count_query = f"SELECT COUNT(mf.id) as count {base_query_from}{where_clause}"
+    count_query_from_without_fav_join = "FROM misc_files mf JOIN misc_categories mc ON mf.misc_category_id = mc.id LEFT JOIN users u ON mf.created_by_user_id = u.id LEFT JOIN users upd_u ON mf.updated_by_user_id = upd_u.id"
+    count_query = f"SELECT COUNT(mf.id) as count {count_query_from_without_fav_join}{where_clause}"
     try:
         total_misc_files_cursor = db.execute(count_query, tuple(params))
         total_misc_files = total_misc_files_cursor.fetchone()['count']
@@ -957,19 +1189,14 @@ def get_all_misc_files_api():
         page = total_pages
         offset = (page - 1) * per_page
     
-    # Database Query for Paginated Misc Files
-    # Original sort: ORDER BY mc.name, mf.user_provided_title, mf.original_filename
-    # Now using user-defined sort or default mf.user_provided_title
+    final_params = tuple(params + user_id_param_for_join + [per_page, offset])
     final_query = f"{base_query_select} {base_query_from}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
     
-    paginated_params = list(params)
-    paginated_params.extend([per_page, offset])
-    
     try:
-        misc_files_cursor = db.execute(final_query, tuple(paginated_params))
+        misc_files_cursor = db.execute(final_query, final_params)
         misc_files_list = [dict(row) for row in misc_files_cursor.fetchall()]
     except Exception as e:
-        app.logger.error(f"Error fetching paginated misc_files: {e}")
+        app.logger.error(f"Error fetching paginated misc_files: {e} with query {final_query} and params {final_params}")
         return jsonify(msg="Error fetching misc_files."), 500
 
     return jsonify({
@@ -1003,7 +1230,7 @@ def _admin_handle_file_upload_and_db_insert(
     metadata_fields, required_form_fields, sql_insert_query, sql_params_tuple,
     resolved_fks: dict = None
 ):
-    current_user_id = int(get_jwt_identity())
+    current_user_id = int(get_jwt_identity()) # Ensure this is correctly used for created_by_user_id
     if resolved_fks is None:
         resolved_fks = {}
 
@@ -1018,13 +1245,17 @@ def _admin_handle_file_upload_and_db_insert(
         return jsonify(msg="No file selected"), 400
 
     form_data = {}
-    for field in metadata_fields:
+    for field in metadata_fields: # metadata_fields will be adjusted for 'patches' if needed
         form_data[field] = request.form.get(field)
     
+    # Special handling for patch_by_developer for 'patches' table
+    if table_name == 'patches':
+        form_data['patch_by_developer'] = request.form.get('patch_by_developer')
+
     for fk_name, fk_value in resolved_fks.items():
         form_data[fk_name] = fk_value
 
-    for req_field in required_form_fields:
+    for req_field in required_form_fields: # required_form_fields will be adjusted for 'patches'
         if req_field == 'file':
             if not uploaded_file_obj or not uploaded_file_obj.filename:
                 app.logger.warning(f"_admin_helper: Validation failed for 'file' requirement for table {table_name}.")
@@ -1089,34 +1320,38 @@ def _admin_handle_file_upload_and_db_insert(
             fetch_back_query = ""
             if table_name == 'patches':
                  fetch_back_query = """
-                    SELECT p.*, s.name as software_name, v.version_number
+                    SELECT p.*, s.name as software_name, v.version_number, u.username as uploaded_by_username, p.patch_by_developer
                     FROM patches p
                     JOIN versions v ON p.version_id = v.id
                     JOIN software s ON v.software_id = s.id
+                    JOIN users u ON p.created_by_user_id = u.id
                     WHERE p.id = ?"""
             elif table_name == 'links':
                  fetch_back_query = """
-                    SELECT l.*, s.name as software_name, v.version_number as version_name
+                    SELECT l.*, s.name as software_name, v.version_number as version_name, u.username as uploaded_by_username
                     FROM links l
                     JOIN software s ON l.software_id = s.id
                     LEFT JOIN versions v ON l.version_id = v.id
+                    JOIN users u ON l.created_by_user_id = u.id
                     WHERE l.id = ?"""
-            elif table_name == 'misc_files': # **** THIS WAS MISSING/REPLACED ****
+            elif table_name == 'misc_files':
                  fetch_back_query = """
-                    SELECT mf.*, mc.name as category_name
+                    SELECT mf.*, mc.name as category_name, u.username as uploaded_by_username
                     FROM misc_files mf
                     JOIN misc_categories mc ON mf.misc_category_id = mc.id
+                    JOIN users u ON mf.created_by_user_id = u.id
                     WHERE mf.id = ?"""
-            elif table_name == 'documents': # **** THIS WAS MISSING/REPLACED ****
+            elif table_name == 'documents':
                  fetch_back_query = """
-                    SELECT d.*, s.name as software_name
+                    SELECT d.*, s.name as software_name, u.username as uploaded_by_username
                     FROM documents d
                     JOIN software s ON d.software_id = s.id
+                    JOIN users u ON d.created_by_user_id = u.id
                     WHERE d.id = ?"""
             else:
                 # This default is a fallback, but ideally all tables handled by this helper
                 # should have specific fetch-back queries if they need joins.
-                app.logger.warning(f"_admin_helper: Using default fetch-back query for table {table_name}. No joins performed.")
+                app.logger.warning(f"_admin_helper: Using default fetch-back query for table {table_name} (no uploaded_by_username). No joins performed.")
                 fetch_back_query = f"SELECT * FROM {table_name} WHERE id = ?"
 
             app.logger.debug(f"_admin_helper: Attempting to fetch back from {table_name} with ID {new_id} using query: {fetch_back_query}")
@@ -1222,37 +1457,49 @@ def _admin_add_item_with_external_link(
         app.logger.warning(f"ADMIN_HELPER_LINK: Missing JSON data for table {table_name}")
         return jsonify(msg="Missing JSON data"), 400
 
-    form_data = {}
-    all_present = True
-    missing_fields_list = [] # For better error message
+    # Prepare form_data by extracting relevant fields from the JSON payload (data)
+    # This is crucial because sql_params_tuple refers to keys in form_data.
+    form_data = {} 
+    # Populate form_data with expected fields from data, including patch_by_developer if table is 'patches'
+    # This step ensures that 'patch_by_developer' (and other fields) are available if they are in sql_params_tuple.
+    for key in data: # Iterate over keys in the input JSON data
+        form_data[key] = data[key]
 
-    for field_name in sql_params_tuple: # Iterate through expected params to build form_data map
-        if field_name not in ['is_external_link', 'created_by_user_id', 'updated_by_user_id', 
-                               'stored_filename', 'original_filename_ref', 'file_size', 'file_type']: # System-set fields
-            form_data[field_name] = data.get(field_name)
+    # Ensure 'patch_by_developer' is in form_data if table_name is 'patches' and it's expected by sql_params_tuple
+    if table_name == 'patches' and 'patch_by_developer' not in form_data:
+        form_data['patch_by_developer'] = data.get('patch_by_developer') # defaults to None if not in data
+
+    all_present = True
+    missing_fields_list = []
 
     for req_field in required_fields:
-        if not form_data.get(req_field): # Check if the value is missing or falsy (e.g., empty string for text)
-            # Allow 0 for IDs if that's valid, but generally IDs are > 0
-            if isinstance(form_data.get(req_field), int) and form_data.get(req_field) == 0:
-                pass # Allow 0 if it's a valid ID in some context (though unusual for FKs)
-            else:
+        # Check against 'data' (original JSON payload) for required fields, not form_data
+        if data.get(req_field) is None or (isinstance(data.get(req_field), str) and str(data.get(req_field)).strip() == ""):
+            # Allow 0 for IDs if that's valid
+            if not (isinstance(data.get(req_field), int) and data.get(req_field) == 0):
                 all_present = False
                 missing_fields_list.append(req_field)
-
+    
     if not all_present:
         error_msg = f"Missing one or more required fields: {', '.join(missing_fields_list)}"
         app.logger.warning(f"ADMIN_HELPER_LINK: {error_msg} for table {table_name}. Data: {data}")
         return jsonify(msg=error_msg), 400
 
     # Convert IDs (example, adapt if more ID fields are used by different tables)
-    if 'software_id' in form_data and form_data['software_id'] is not None:
-        try: form_data['software_id'] = int(form_data['software_id'])
+    # Use 'data.get' for these conversions as form_data might not have them if they are not in sql_params_tuple
+    # software_id is usually a required_field, so it should be in 'data'
+    if 'software_id' in data and data.get('software_id') is not None:
+        try: 
+            # This conversion is for validation; the actual value used in SQL params comes from form_data
+            # which should already have the correct type if it came from JSON.
+            # However, if form_data['software_id'] is used later, ensure it's int.
+            form_data['software_id'] = int(data['software_id']) 
         except (ValueError, TypeError): return jsonify(msg="Invalid software_id format"), 400
-    if 'version_id' in form_data and form_data['version_id'] is not None:
-        try: form_data['version_id'] = int(form_data['version_id'])
+    
+    if 'version_id' in data and data.get('version_id') is not None:
+        try: 
+            form_data['version_id'] = int(data['version_id'])
         except (ValueError, TypeError): return jsonify(msg="Invalid version_id format"), 400
-    # Add similar conversions for other ID fields if necessary
 
 
     final_sql_params = []
@@ -1263,7 +1510,7 @@ def _admin_add_item_with_external_link(
             final_sql_params.append(current_user_id)
         elif param_name_in_tuple == 'updated_by_user_id': # Also set updated_by on creation
             final_sql_params.append(current_user_id)
-        elif param_name_in_tuple in form_data:
+        elif param_name_in_tuple in form_data: # Check form_data which now contains relevant items from data
             final_sql_params.append(form_data[param_name_in_tuple])
         else:
             # This handles optional fields that were not in required_fields AND not in form_data
@@ -1278,19 +1525,33 @@ def _admin_add_item_with_external_link(
         new_id = cursor.lastrowid
         app.logger.info(f"ADMIN_HELPER_LINK: Inserted into {table_name} with ID: {new_id}. Fetching back...")
 
-        # Fetch the newly created item to return it
-        new_item_row = db.execute(f"SELECT * FROM {table_name} WHERE id = ?", (new_id,)).fetchone()
+        # --- MODIFIED FETCH-BACK SECTION for _admin_add_item_with_external_link ---
+        fetch_back_query = ""
+        # Base select needs to be table-specific to use correct alias for created_by_user_id
+        if table_name == 'documents':
+            fetch_back_query = "SELECT d.*, u.username as uploaded_by_username FROM documents d JOIN users u ON d.created_by_user_id = u.id WHERE d.id = ?"
+        elif table_name == 'patches':
+            fetch_back_query = "SELECT p.*, u.username as uploaded_by_username, p.patch_by_developer FROM patches p JOIN users u ON p.created_by_user_id = u.id WHERE p.id = ?"
+        elif table_name == 'links':
+            fetch_back_query = "SELECT l.*, u.username as uploaded_by_username FROM links l JOIN users u ON l.created_by_user_id = u.id WHERE l.id = ?"
+        # misc_files are not typically added via external link, but if a case arises:
+        elif table_name == 'misc_files': 
+            fetch_back_query = "SELECT mf.*, u.username as uploaded_by_username FROM misc_files mf JOIN users u ON mf.created_by_user_id = u.id WHERE mf.id = ?"
+        else: # Fallback, though ideally all relevant tables are covered
+            app.logger.warning(f"ADMIN_HELPER_LINK: Using default fetch-back for {table_name} (no uploaded_by_username).")
+            fetch_back_query = f"SELECT * FROM {table_name} WHERE id = ?"
+
+        new_item_row = db.execute(fetch_back_query, (new_id,)).fetchone()
         
         if new_item_row:
             new_item = dict(new_item_row)
+            # If the table is 'patches', ensure 'patch_by_developer' is in the response if it was selected.
+            # The fetch_back_query for 'patches' now includes it.
             app.logger.info(f"ADMIN_HELPER_LINK: Successfully fetched back new item from {table_name}: {new_item}")
             return jsonify(new_item), 201
         else:
-            app.logger.error(f"ADMIN_HELPER_LINK: CRITICAL - Failed to fetch newly added item from {table_name} with ID: {new_id} immediately after commit.")
-            # Data IS in the DB. This part of your UI message is correct.
-            # The question is why it can't be fetched back immediately.
-            # Return a 207 Multi-Status: one part succeeded (insert), one part failed (fetch-back for immediate confirmation)
-            return jsonify(msg=f"Item added to {table_name} (ID: {new_id}) but could not be immediately retrieved for confirmation. Please refresh the list."), 207
+            app.logger.error(f"ADMIN_HELPER_LINK: CRITICAL - Failed to fetch newly added item from {table_name} with ID: {new_id} immediately after commit using query: {fetch_back_query}")
+            return jsonify(msg=f"Item added to {table_name} (ID: {new_id}) but could not be immediately retrieved with full details. Please refresh the list."), 207
 
     except sqlite3.IntegrityError as e:
         db.rollback() # Rollback on integrity error
@@ -1312,9 +1573,11 @@ def admin_add_document_with_url():
         required_fields=['software_id', 'doc_name', 'download_link'],
         sql_insert_query="""INSERT INTO documents (software_id, doc_name, download_link, description, doc_type,
                                                is_external_link, created_by_user_id, updated_by_user_id)
-                              VALUES (?, ?, ?, ?, ?, TRUE, ?, ?)""", # 8 params, is_external_link is TRUE
-        sql_params_tuple=('software_id', 'doc_name', 'download_link', 'description', 'doc_type',
-                           'created_by_user_id', 'updated_by_user_id') # removed is_external_link from tuple as it's hardcoded
+                              VALUES (?, ?, ?, ?, ?, TRUE, ?, ?)""", 
+        # sql_params_tuple should align with the VALUES placeholders, excluding is_external_link (hardcoded TRUE)
+        # created_by_user_id and updated_by_user_id are handled by the helper.
+        sql_params_tuple=('software_id', 'doc_name', 'download_link', 'description', 'doc_type', 
+                           'created_by_user_id', 'updated_by_user_id') 
     )
     if response[1] == 201: # Check if creation was successful
         new_doc_data = response[0].get_json()
@@ -1347,12 +1610,14 @@ def admin_upload_document_file():
         sql_insert_query="""INSERT INTO documents (software_id, doc_name, download_link, description, doc_type,
                                                is_external_link, stored_filename, original_filename_ref, file_size, file_type,
                                                created_by_user_id, updated_by_user_id)
-                              VALUES (?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)""",
+                              VALUES (?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)""", # 12 placeholders
         sql_params_tuple=(
-            'software_id', 'doc_name', 'download_link_or_url', 'description', 'doc_type',
-            'stored_filename', 'original_filename_ref', 'file_size', 'file_type',
-            'created_by_user_id', 'updated_by_user_id'
-        )
+            'software_id', 'doc_name', 'download_link_or_url', 'description', 'doc_type', # 5
+            # is_external_link is hardcoded FALSE
+            'stored_filename', 'original_filename_ref', 'file_size', 'file_type', # 4
+            'created_by_user_id', 'updated_by_user_id' # 2 -> Total 11 from tuple, matches placeholders if we exclude is_external_link
+        ) # Corrected: download_link_or_url is one param, is_external_link is hardcoded.
+          # created_by_user_id and updated_by_user_id are handled by the helper.
     )
     if response[1] == 201: # Check if creation was successful
         new_doc_data = response[0].get_json()
@@ -1415,20 +1680,26 @@ def admin_add_patch_with_url():
 
     # Update data payload for the helper
     data['version_id'] = final_version_id # This is now the resolved ID
+    # Ensure patch_by_developer is explicitly added to data from the JSON payload
+    # Ensure patch_by_developer is explicitly added to data from the JSON payload before calling helper
+    # The helper's logic for form_data population will pick this up if 'patch_by_developer' is in sql_params_tuple
+    data['patch_by_developer'] = data.get('patch_by_developer') # data is request.get_json()
     data.pop('software_id', None) # Clean up, helper doesn't need these if version_id is set
     data.pop('typed_version_string', None)
 
     response = _admin_add_item_with_external_link(
         table_name='patches',
-        data=data, # This data has already been modified to include final_version_id
-        required_fields=['version_id', 'patch_name', 'download_link'],
-        sql_insert_query="""INSERT INTO patches (version_id, patch_name, download_link, description, release_date,
-                                             is_external_link, created_by_user_id, updated_by_user_id)
-                              VALUES (?, ?, ?, ?, ?, TRUE, ?, ?)""",
+        data=data, # This data has already been modified to include final_version_id and patch_by_developer
+        required_fields=['version_id', 'patch_name', 'download_link'], # patch_by_developer is optional
+        sql_insert_query="""INSERT INTO patches (version_id, patch_name, download_link, description, release_date, patch_by_developer,
+                                               is_external_link, created_by_user_id, updated_by_user_id)
+                              VALUES (?, ?, ?, ?, ?, ?, TRUE, ?, ?)""", # 9 placeholders
         sql_params_tuple=(
-            'version_id', 'patch_name', 'download_link', 'description', 'release_date',
-            'created_by_user_id', 'updated_by_user_id'
-        )
+            'version_id', 'patch_name', 'download_link', 'description', 'release_date', 
+            'patch_by_developer', # This is now included
+            # is_external_link is hardcoded TRUE
+            'created_by_user_id', 'updated_by_user_id' # Handled by helper
+        ) # Tuple has 8 elements, matching the non-hardcoded placeholders.
     )
     if response[1] == 201: # Check if creation was successful
         new_patch_data = response[0].get_json()
@@ -1440,7 +1711,8 @@ def admin_add_patch_with_url():
                 'patch_name': new_patch_data.get('patch_name'), 
                 'url': new_patch_data.get('download_link'), 
                 'version_id': new_patch_data.get('version_id'),
-                'release_date': new_patch_data.get('release_date')
+                'release_date': new_patch_data.get('release_date'),
+                'patch_by_developer': new_patch_data.get('patch_by_developer') 
             }
         )
     return response
@@ -1480,22 +1752,30 @@ def admin_upload_patch_file():
     # Original form data for logging
     patch_name_val = request.form.get('patch_name')
     release_date_val = request.form.get('release_date')
+    patch_by_developer_val = request.form.get('patch_by_developer') 
+
+    # metadata_fields for _admin_handle_file_upload_and_db_insert should include 'patch_by_developer'
+    # The helper will then populate form_data['patch_by_developer'] from request.form
+    current_metadata_fields = ['patch_name', 'description', 'release_date', 'patch_by_developer']
 
     response = _admin_handle_file_upload_and_db_insert(
         table_name='patches',
         upload_folder_config_key='PATCH_UPLOAD_FOLDER',
         server_path_prefix='/official_uploads/patches',
-        metadata_fields=['patch_name', 'description', 'release_date'],
-        required_form_fields=['patch_name'],
-        sql_insert_query="""INSERT INTO patches (version_id, patch_name, download_link, description, release_date,
+        metadata_fields=current_metadata_fields, # Includes 'patch_by_developer'
+        required_form_fields=['patch_name'], # patch_by_developer is optional here for form validation
+        sql_insert_query="""INSERT INTO patches (version_id, patch_name, download_link, description, release_date, patch_by_developer,
                                              is_external_link, stored_filename, original_filename_ref, file_size, file_type,
                                              created_by_user_id, updated_by_user_id)
-                              VALUES (?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)""",
+                              VALUES (?, ?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)""", # 13 placeholders
         sql_params_tuple=(
-            'version_id', 'patch_name', 'download_link_or_url', 'description', 'release_date',
-            'stored_filename', 'original_filename_ref', 'file_size', 'file_type',
-            'created_by_user_id', 'updated_by_user_id'
-        ),
+            'version_id', # Resolved FK
+            'patch_name', 'download_link_or_url', 'description', 'release_date', 
+            'patch_by_developer', # Now correctly expected from form_data by the helper
+            # is_external_link is hardcoded FALSE
+            'stored_filename', 'original_filename_ref', 'file_size', 'file_type', # File details
+            'created_by_user_id', 'updated_by_user_id' # User details
+        ), # Tuple has 12 elements, matching non-hardcoded placeholders
         resolved_fks={'version_id': final_version_id}
     )
     if response[1] == 201: # Check if creation was successful
@@ -1508,7 +1788,8 @@ def admin_upload_patch_file():
                 'patch_name': patch_name_val,
                 'filename': new_patch_data.get('original_filename_ref'), 
                 'version_id': final_version_id, # Resolved version_id
-                'release_date': release_date_val
+                'release_date': release_date_val,
+                'patch_by_developer': patch_by_developer_val # Added
             }
         )
     return response
@@ -1569,7 +1850,7 @@ def admin_edit_document_url(document_id):
             SET software_id = ?, doc_name = ?, description = ?, doc_type = ?,
                 download_link = ?, is_external_link = TRUE, stored_filename = NULL,
                 original_filename_ref = NULL, file_size = NULL, file_type = NULL,
-                updated_by_user_id = ?
+                updated_by_user_id = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         """, (software_id, doc_name, description, doc_type, download_link,
               current_user_id, document_id))
@@ -1581,8 +1862,20 @@ def admin_edit_document_url(document_id):
         )
         db.commit()
         
-        updated_doc = db.execute("SELECT d.*, s.name as software_name FROM documents d JOIN software s ON d.software_id = s.id WHERE d.id = ?", (document_id,)).fetchone()
-        return jsonify(dict(updated_doc)), 200
+        updated_doc_row = db.execute("""
+            SELECT d.*, s.name as software_name, 
+                   cr_u.username as uploaded_by_username, upd_u.username as updated_by_username
+            FROM documents d 
+            JOIN software s ON d.software_id = s.id
+            LEFT JOIN users cr_u ON d.created_by_user_id = cr_u.id
+            LEFT JOIN users upd_u ON d.updated_by_user_id = upd_u.id
+            WHERE d.id = ?
+        """, (document_id,)).fetchone()
+        if updated_doc_row:
+            return jsonify(dict(updated_doc_row)), 200
+        else:
+            app.logger.error(f"Failed to fetch document with ID {document_id} after edit_url.")
+            return jsonify(msg="Document updated but failed to retrieve full details."), 500
     except sqlite3.IntegrityError as e:
         db.rollback()
         app.logger.error(f"Admin edit document URL DB IntegrityError: {e}")
@@ -1681,7 +1974,7 @@ def admin_edit_document_file(document_id):
             SET software_id = ?, doc_name = ?, description = ?, doc_type = ?,
                 download_link = ?, is_external_link = FALSE, stored_filename = ?,
                 original_filename_ref = ?, file_size = ?, file_type = ?,
-                updated_by_user_id = ?
+                updated_by_user_id = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         """, (software_id, doc_name, description, doc_type,
               new_download_link, new_stored_filename, new_original_filename,
@@ -1694,8 +1987,20 @@ def admin_edit_document_file(document_id):
         )
         db.commit()
         
-        updated_doc = db.execute("SELECT d.*, s.name as software_name FROM documents d JOIN software s ON d.software_id = s.id WHERE d.id = ?", (document_id,)).fetchone()
-        return jsonify(dict(updated_doc)), 200
+        updated_doc_row = db.execute("""
+            SELECT d.*, s.name as software_name, 
+                   cr_u.username as uploaded_by_username, upd_u.username as updated_by_username
+            FROM documents d 
+            JOIN software s ON d.software_id = s.id
+            LEFT JOIN users cr_u ON d.created_by_user_id = cr_u.id
+            LEFT JOIN users upd_u ON d.updated_by_user_id = upd_u.id
+            WHERE d.id = ?
+        """, (document_id,)).fetchone()
+        if updated_doc_row:
+            return jsonify(dict(updated_doc_row)), 200
+        else:
+            app.logger.error(f"Failed to fetch document with ID {document_id} after edit_file.")
+            return jsonify(msg="Document updated but failed to retrieve full details."), 500
     except sqlite3.IntegrityError as e:
         db.rollback()
         # If a new file was saved but DB failed, try to delete the newly saved file.
@@ -1795,13 +2100,15 @@ def admin_upload_link_file():
         sql_insert_query="""INSERT INTO links (software_id, version_id, title, url, description,
                                            is_external_link, stored_filename, original_filename_ref, file_size, file_type,
                                            created_by_user_id, updated_by_user_id)
-                              VALUES (?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)""", 
+                              VALUES (?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)""", # 12 placeholders
         sql_params_tuple=( 
-            'software_id', 'version_id', 'title', 'download_link_or_url', 'description',
-            'stored_filename', 'original_filename_ref', 'file_size', 'file_type',
-            'created_by_user_id', 'updated_by_user_id'
-        ),
-        resolved_fks={'version_id': final_version_id_for_db}
+            'software_id', 'version_id', # Resolved FKs
+            'title', 'download_link_or_url', 'description', # Basic info + URL placeholder
+            # is_external_link is hardcoded FALSE
+            'stored_filename', 'original_filename_ref', 'file_size', 'file_type', # File details
+            'created_by_user_id', 'updated_by_user_id' # User details
+        ), # Tuple has 11 elements, matching non-hardcoded placeholders
+        resolved_fks={'version_id': final_version_id_for_db, 'software_id': software_id} # Pass software_id as resolved FK
     )
     if response[1] == 201: # Check if creation was successful
         new_link_data = response[0].get_json()
@@ -1864,6 +2171,7 @@ def admin_edit_patch_url(patch_id_from_url): # Renamed to avoid conflict with va
     description = data.get('description', patch['description'])
     release_date = data.get('release_date', patch['release_date'])
     download_link = data.get('download_link', patch['download_link'])
+    patch_by_developer = data.get('patch_by_developer', patch['patch_by_developer']) 
 
     # Basic validation for required fields during edit
     if not patch_name or not download_link: # software_id/version handled above
@@ -1874,19 +2182,29 @@ def admin_edit_patch_url(patch_id_from_url): # Renamed to avoid conflict with va
 
     try:
         log_details = {
-            'updated_fields': ['version_id', 'patch_name', 'description', 'release_date', 'download_link', 'is_external_link'],
+            'updated_fields': [], # Will be populated based on actual changes
             'version_id': final_version_id,
             'patch_name': patch_name,
             'url': download_link,
             'release_date': release_date,
+            'patch_by_developer': patch_by_developer, # Ensure it's in the log
             'is_external_link': True
         }
+        # Populate updated_fields in log_details
+        if final_version_id != patch['version_id']: log_details['updated_fields'].append('version_id')
+        if patch_name != patch['patch_name']: log_details['updated_fields'].append('patch_name')
+        if description != patch['description']: log_details['updated_fields'].append('description') # Not explicitly in details, but good to track field changes
+        if release_date != patch['release_date']: log_details['updated_fields'].append('release_date')
+        if download_link != patch['download_link']: log_details['updated_fields'].append('download_link')
+        if patch_by_developer != patch['patch_by_developer']: log_details['updated_fields'].append('patch_by_developer')
+        if not patch['is_external_link']: log_details['updated_fields'].append('is_external_link') # Becoming external
+
         db.execute("""
             UPDATE patches SET version_id = ?, patch_name = ?, description = ?, release_date = ?,
-            download_link = ?, is_external_link = TRUE, stored_filename = NULL,
+            download_link = ?, patch_by_developer = ?, is_external_link = TRUE, stored_filename = NULL,
             original_filename_ref = NULL, file_size = NULL, file_type = NULL,
-            updated_by_user_id = ? WHERE id = ?""",
-            (final_version_id, patch_name, description, release_date, download_link,
+            updated_by_user_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
+            (final_version_id, patch_name, description, release_date, download_link, patch_by_developer,
              current_user_id, patch_id_from_url))
         log_audit_action(
             action_type='UPDATE_PATCH_URL',
@@ -1895,8 +2213,24 @@ def admin_edit_patch_url(patch_id_from_url): # Renamed to avoid conflict with va
             details=log_details
         )
         db.commit()
-        updated_item = db.execute("SELECT p.*, s.name as software_name, v.version_number FROM patches p JOIN versions v ON p.version_id = v.id JOIN software s ON v.software_id = s.id WHERE p.id = ?", (patch_id_from_url,)).fetchone()
-        return jsonify(dict(updated_item)), 200
+        # Fetch back with JOINs for consistent response, including created_by and updated_by usernames
+        updated_item_row = db.execute("""
+            SELECT p.*, s.name as software_name, v.version_number, 
+                   cr_u.username as uploaded_by_username, upd_u.username as updated_by_username
+            FROM patches p
+            JOIN versions v ON p.version_id = v.id
+            JOIN software s ON v.software_id = s.id
+            LEFT JOIN users cr_u ON p.created_by_user_id = cr_u.id
+            LEFT JOIN users upd_u ON p.updated_by_user_id = upd_u.id
+            WHERE p.id = ?""", (patch_id_from_url,)).fetchone()
+        
+        if updated_item_row:
+            return jsonify(dict(updated_item_row)), 200
+        else:
+            # This case should ideally not be reached if the update was successful.
+            app.logger.error(f"Failed to fetch patch with ID {patch_id_from_url} after edit_url.")
+            return jsonify(msg="Patch updated but failed to retrieve full details."), 500
+            
     except sqlite3.IntegrityError as e: db.rollback(); return jsonify(msg=f"DB error: {e}"), 409
     except Exception as e: db.rollback(); return jsonify(msg=f"Server error: {e}"), 500
 
@@ -1917,6 +2251,9 @@ def admin_edit_patch_file(patch_id):
     patch_name = request.form.get('patch_name', patch['patch_name'])
     description = request.form.get('description', patch['description'])
     release_date = request.form.get('release_date', patch['release_date'])
+    # Retrieve patch_by_developer from form, defaulting to existing if not provided in form
+    patch_by_developer = request.form.get('patch_by_developer', patch['patch_by_developer'])
+
 
     # Determine final version ID using the improved logic from second file
     final_version_id = patch['version_id']  # Default to current version
@@ -1983,10 +2320,11 @@ def admin_edit_patch_file(patch_id):
     try:
         action_type_log = 'UPDATE_PATCH_METADATA'
         log_details = {
-            'updated_fields': ['version_id', 'patch_name', 'description', 'release_date'],
+            'updated_fields': ['version_id', 'patch_name', 'description', 'release_date', 'patch_by_developer'],
             'version_id': final_version_id,
             'patch_name': patch_name,
-            'release_date': release_date
+            'release_date': release_date,
+            'patch_by_developer': patch_by_developer
         }
         if new_physical_file and new_physical_file.filename != '':
             action_type_log = 'UPDATE_PATCH_FILE'
@@ -1997,11 +2335,11 @@ def admin_edit_patch_file(patch_id):
 
         db.execute("""
             UPDATE patches SET version_id = ?, patch_name = ?, description = ?, release_date = ?,
-            download_link = ?, is_external_link = FALSE, stored_filename = ?,
-            original_filename_ref = ?, file_size = ?, file_type = ?, updated_by_user_id = ?
+            download_link = ?, patch_by_developer = ?, is_external_link = FALSE, stored_filename = ?,
+            original_filename_ref = ?, file_size = ?, file_type = ?, updated_by_user_id = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?""",
             (final_version_id, patch_name, description, release_date, new_download_link,
-             new_stored_filename, new_original_filename, new_file_size, new_file_type,
+             patch_by_developer, new_stored_filename, new_original_filename, new_file_size, new_file_type,
              current_user_id, patch_id))
         log_audit_action(
             action_type=action_type_log,
@@ -2010,15 +2348,26 @@ def admin_edit_patch_file(patch_id):
             details=log_details
         )
         db.commit()
-        updated_item = db.execute(
-            """SELECT p.*, s.name as software_name, v.version_number
+        # Fetch back with JOINs for consistent response, including created_by and updated_by usernames
+        updated_item_row = db.execute(
+            """SELECT p.*, s.name as software_name, v.version_number, 
+                      cr_u.username as uploaded_by_username, upd_u.username as updated_by_username
                FROM patches p 
                JOIN versions v ON p.version_id = v.id 
-               JOIN software s ON v.software_id = s.id 
+               JOIN software s ON v.software_id = s.id
+               LEFT JOIN users cr_u ON p.created_by_user_id = cr_u.id
+               LEFT JOIN users upd_u ON p.updated_by_user_id = upd_u.id
                WHERE p.id = ?""", 
             (patch_id,)
         ).fetchone()
-        return jsonify(dict(updated_item)), 200
+
+        if updated_item_row:
+            return jsonify(dict(updated_item_row)), 200
+        else:
+            # This case should ideally not be reached if the update was successful.
+            app.logger.error(f"Failed to fetch patch with ID {patch_id} after edit_file.")
+            return jsonify(msg="Patch updated but failed to retrieve full details."), 500
+            
     except sqlite3.IntegrityError as e:
         db.rollback()
         if file_save_path and os.path.exists(file_save_path):
@@ -2213,8 +2562,18 @@ def admin_edit_link_url(link_id_from_url):
             FROM links l
             JOIN software s ON l.software_id = s.id
             JOIN versions v ON l.version_id = v.id
+            LEFT JOIN users cr_u ON l.created_by_user_id = cr_u.id
+            LEFT JOIN users upd_u ON l.updated_by_user_id = upd_u.id
             WHERE l.id = ?""", (link_id_from_url,)).fetchone()
-        return jsonify(dict(updated_item_dict) if updated_item_dict else None), 200
+        
+        if updated_item_dict:
+            response_data = dict(updated_item_dict)
+            # Ensure uploaded_by_username (creator) and updated_by_username (editor) are distinct if needed
+            # The query aliases cr_u.username to uploaded_by_username and upd_u.username to updated_by_username
+            return jsonify(response_data), 200
+        else:
+            app.logger.error(f"Failed to fetch link with ID {link_id_from_url} after edit_url.")
+            return jsonify(msg="Link updated but failed to retrieve full details."), 500
     except sqlite3.IntegrityError as e:
         db.rollback()
         return jsonify(msg=f"Database integrity error: {e}"), 409
@@ -2359,8 +2718,15 @@ def admin_edit_link_file(link_id_from_url):
             FROM links l
             JOIN software s ON l.software_id = s.id
             JOIN versions v ON l.version_id = v.id
+            LEFT JOIN users cr_u ON l.created_by_user_id = cr_u.id
+            LEFT JOIN users upd_u ON l.updated_by_user_id = upd_u.id
             WHERE l.id = ?""", (link_id_from_url,)).fetchone()
-        return jsonify(dict(updated_item_dict) if updated_item_dict else None), 200
+
+        if updated_item_dict:
+            return jsonify(dict(updated_item_dict)), 200
+        else:
+            app.logger.error(f"Failed to fetch link with ID {link_id_from_url} after edit_file.")
+            return jsonify(msg="Link updated but failed to retrieve full details."), 500
     except sqlite3.IntegrityError as e:
         db.rollback()
         if file_actually_saved_path and os.path.exists(file_actually_saved_path): # Cleanup newly saved file on DB error
@@ -2427,7 +2793,7 @@ def admin_edit_misc_category(category_id):
         
         db.execute("""
             UPDATE misc_categories
-            SET name = ?, description = ?, updated_by_user_id = ?
+            SET name = ?, description = ?, updated_by_user_id = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         """, (name, description, current_user_id, category_id))
         log_audit_action(
@@ -2443,8 +2809,18 @@ def admin_edit_misc_category(category_id):
             }
         )
         db.commit()
-        updated_category = db.execute("SELECT * FROM misc_categories WHERE id = ?", (category_id,)).fetchone()
-        return jsonify(dict(updated_category)), 200
+        updated_category_row = db.execute("""
+            SELECT mc.*, cr_u.username as created_by_username, upd_u.username as updated_by_username
+            FROM misc_categories mc
+            LEFT JOIN users cr_u ON mc.created_by_user_id = cr_u.id
+            LEFT JOIN users upd_u ON mc.updated_by_user_id = upd_u.id
+            WHERE mc.id = ?
+        """, (category_id,)).fetchone()
+        if updated_category_row:
+            return jsonify(dict(updated_category_row)), 200
+        else:
+            app.logger.error(f"Failed to fetch misc_category with ID {category_id} after edit.")
+            return jsonify(msg="Misc category updated but failed to retrieve full details."), 500
     except sqlite3.IntegrityError as e: # Likely unique constraint on name
         db.rollback()
         return jsonify(msg=f"Database error: Category name '{name}' might already exist. {e}"), 409
@@ -2587,7 +2963,7 @@ def admin_edit_misc_file(file_id):
             UPDATE misc_files
             SET misc_category_id = ?, user_provided_title = ?, user_provided_description = ?,
                 original_filename = ?, stored_filename = ?, file_path = ?,
-                file_type = ?, file_size = ?, updated_by_user_id = ?
+                file_type = ?, file_size = ?, updated_by_user_id = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         """, (misc_category_id, user_provided_title, user_provided_description,
               new_original_filename, new_stored_filename, new_file_path,
@@ -2602,13 +2978,23 @@ def admin_edit_misc_file(file_id):
             )
         db.commit()
 
-        updated_file = db.execute("""
-            SELECT mf.*, mc.name as category_name
+        # Fetch back with JOINs for consistent response, including created_by (uploaded_by_username)
+        updated_file_row = db.execute("""
+            SELECT mf.*, mc.name as category_name, 
+                   cr_u.username as uploaded_by_username, upd_u.username as updated_by_username
             FROM misc_files mf
             JOIN misc_categories mc ON mf.misc_category_id = mc.id
+            LEFT JOIN users cr_u ON mf.created_by_user_id = cr_u.id
+            LEFT JOIN users upd_u ON mf.updated_by_user_id = upd_u.id
             WHERE mf.id = ?
         """, (file_id,)).fetchone()
-        return jsonify(dict(updated_file)), 200
+        
+        if updated_file_row:
+            return jsonify(dict(updated_file_row)), 200
+        else:
+            app.logger.error(f"Failed to fetch misc_file with ID {file_id} after edit.")
+            return jsonify(msg="Misc file updated but failed to retrieve full details."),500
+
     except sqlite3.IntegrityError as e: # e.g., unique constraint on (misc_category_id, user_provided_title) or (misc_category_id, original_filename)
         db.rollback()
         if current_file_save_path and os.path.exists(current_file_save_path): 
@@ -2641,7 +3027,7 @@ def admin_delete_misc_file(file_id):
             target_table='misc_files',
             target_id=file_id,
             details={
-                'deleted_title': misc_file_item.get('user_provided_title'), 
+                'deleted_title': misc_file_item['user_provided_title'], 
                 'stored_filename': misc_file_item['stored_filename'], 
                 'category_id': misc_file_item['misc_category_id']
             }
@@ -2735,11 +3121,12 @@ def admin_add_link_with_url():
         required_fields=['software_id', 'version_id', 'title', 'url'],
         sql_insert_query="""INSERT INTO links (software_id, version_id, title, url, description,
                                            is_external_link, created_by_user_id, updated_by_user_id)
-                              VALUES (?, ?, ?, ?, ?, TRUE, ?, ?)""",
+                              VALUES (?, ?, ?, ?, ?, TRUE, ?, ?)""", # 8 placeholders
         sql_params_tuple=(
             'software_id', 'version_id', 'title', 'url', 'description',
-            'created_by_user_id', 'updated_by_user_id'
-        )
+            # is_external_link is hardcoded TRUE
+            'created_by_user_id', 'updated_by_user_id' # Handled by helper
+        ) # Tuple has 7 elements, matching non-hardcoded placeholders
     )
     if response[1] == 201: # Check if creation was successful
         new_link_data = response[0].get_json()
@@ -2845,82 +3232,100 @@ def admin_create_version():
 @jwt_required()
 @admin_required
 def admin_list_versions():
-    db = get_db()
+    try: # Outer try block starts here
+        db = get_db()
 
-    # Get and validate query parameters
-    page = request.args.get('page', default=1, type=int)
-    per_page = request.args.get('per_page', default=10, type=int)
-    sort_by_param = request.args.get('sort_by', default='version_number', type=str)
-    sort_order = request.args.get('sort_order', default='asc', type=str).lower()
-    software_id_filter = request.args.get('software_id', type=int)
+        # Get and validate query parameters
+        # CORRECTED INDENTATION for all lines below
+        page = request.args.get('page', default=1, type=int)
+        per_page = request.args.get('per_page', default=10, type=int)
+        sort_by_param = request.args.get('sort_by', default='version_number', type=str)
+        sort_order = request.args.get('sort_order', default='asc', type=str).lower()
+        software_id_filter = request.args.get('software_id', type=int)
 
-    if page <= 0: page = 1
-    if per_page <= 0: per_page = 10
-    
-    allowed_sort_by_map = {
-        'id': 'v.id',
-        'software_name': 's.name',
-        'version_number': 'v.version_number',
-        'release_date': 'v.release_date',
-        'created_at': 'v.created_at',
-        'updated_at': 'v.updated_at'
-    }
-    sort_by_column = allowed_sort_by_map.get(sort_by_param, 'v.version_number')
+        if page <= 0: page = 1
+        if per_page <= 0: per_page = 10
+        if per_page > 100: per_page = 100 # Max per page limit
 
-    if sort_order not in ['asc', 'desc']:
-        sort_order = 'asc'
+        allowed_sort_by_map = {
+            'id': 'v.id',
+            'software_name': 's.name',
+            'version_number': 'v.version_number',
+            'release_date': 'v.release_date',
+        'patch_by_developer': 'p.patch_by_developer',
+        'uploaded_by_username': 'u.username',
+            'created_at': 'v.created_at',
+            'updated_at': 'v.updated_at'
+        }
+        sort_by_column = allowed_sort_by_map.get(sort_by_param, 'v.version_number')
 
-    # Construct Base Query and Parameters for Filtering
-    base_query_select = "SELECT v.id, v.software_id, v.version_number, v.release_date, v.main_download_link, v.changelog, v.known_bugs, v.created_by_user_id, v.created_at, v.updated_by_user_id, v.updated_at, s.name as software_name"
-    base_query_from = "FROM versions v JOIN software s ON v.software_id = s.id"
-    
-    filter_conditions = []
-    params = []
+        if sort_order not in ['asc', 'desc']:
+            sort_order = 'asc'
 
-    if software_id_filter:
-        filter_conditions.append("v.software_id = ?")
-        params.append(software_id_filter)
-    
-    where_clause = ""
-    if filter_conditions:
-        where_clause = " WHERE " + " AND ".join(filter_conditions)
+        # Construct Base Query and Parameters for Filtering
+        base_query_select = "SELECT v.id, v.software_id, v.version_number, v.release_date, v.main_download_link, v.changelog, v.known_bugs, v.created_by_user_id, v.created_at, v.updated_by_user_id, v.updated_at, s.name as software_name"
+        base_query_from = "FROM versions v JOIN software s ON v.software_id = s.id"
 
-    # Database Query for Total Count
-    count_query = f"SELECT COUNT(v.id) as count {base_query_from}{where_clause}"
-    try:
-        total_versions_cursor = db.execute(count_query, tuple(params))
-        total_versions = total_versions_cursor.fetchone()['count']
-    except Exception as e:
-        app.logger.error(f"Error fetching total version count: {e}")
-        return jsonify(msg="Error fetching version count."), 500
+        filter_conditions = []
+        params = []
 
-    total_pages = math.ceil(total_versions / per_page) if total_versions > 0 else 1
-    offset = (page - 1) * per_page
+        if software_id_filter is not None: # Check for None explicitly for integers
+            filter_conditions.append("v.software_id = ?")
+            params.append(software_id_filter)
 
-    if page > total_pages and total_versions > 0:
-        page = total_pages
+        where_clause = ""
+        if filter_conditions:
+            where_clause = " WHERE " + " AND ".join(filter_conditions)
+
+        # Database Query for Total Count
+        count_query = f"SELECT COUNT(v.id) as count {base_query_from}{where_clause}"
+        try:
+            total_versions_cursor = db.execute(count_query, tuple(params))
+            total_versions_result = total_versions_cursor.fetchone()
+            if total_versions_result is None:
+                app.logger.error("Failed to fetch total version count: query returned None.")
+                return jsonify(msg="Error fetching version count: No result from count query."), 500
+            total_versions = total_versions_result['count']
+        except sqlite3.Error as e: # Be specific with database errors if possible
+            app.logger.error(f"Database error fetching total version count: {e}")
+            return jsonify(msg=f"Database error fetching version count: {e}"), 500
+        except KeyError:
+            app.logger.error("Failed to fetch total version count: 'count' key missing.")
+            return jsonify(msg="Error fetching version count: Malformed count query result."), 500
+
+
+        total_pages = math.ceil(total_versions / per_page) if total_versions > 0 else 1
         offset = (page - 1) * per_page
-    
-    final_query = f"{base_query_select} {base_query_from}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
-    
-    paginated_params = list(params)
-    paginated_params.extend([per_page, offset])
-    
-    try:
-        versions_cursor = db.execute(final_query, tuple(paginated_params))
-        versions_list = [dict(row) for row in versions_cursor.fetchall()]
+
+        if page > total_pages and total_versions > 0:
+            page = total_pages
+            offset = (page - 1) * per_page
+
+        final_query = f"{base_query_select} {base_query_from}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
+
+        paginated_params = list(params) # Create a new list for these params
+        paginated_params.extend([per_page, offset])
+
+        try:
+            versions_cursor = db.execute(final_query, tuple(paginated_params))
+            versions_list = [dict(row) for row in versions_cursor.fetchall()]
+        except sqlite3.Error as e: # Be specific with database errors if possible
+            app.logger.error(f"Database error fetching paginated versions: {e}")
+            return jsonify(msg=f"Database error fetching versions: {e}"), 500
+
+        return jsonify({
+            "versions": versions_list,
+            "page": page,
+            "per_page": per_page,
+            "total_versions": total_versions,
+            "total_pages": total_pages
+        }), 200
+
+    # This except block now correctly corresponds to the outer try
     except Exception as e:
-        app.logger.error(f"Error fetching paginated versions: {e}")
-        return jsonify(msg="Error fetching versions."), 500
-
-    return jsonify({
-        "versions": versions_list,
-        "page": page,
-        "per_page": per_page,
-        "total_versions": total_versions,
-        "total_pages": total_pages
-    }), 200
-
+        app.logger.error(f"Unexpected error in admin_list_versions: {e}", exc_info=True)
+        return jsonify(error="Failed to retrieve software versions", details=str(e)), 500
+    
 @app.route('/api/admin/versions/<int:version_id>', methods=['GET'])
 @jwt_required()
 @admin_required
@@ -2994,7 +3399,7 @@ def admin_update_version(version_id):
             UPDATE versions
             SET software_id = ?, version_number = ?, release_date = ?, 
                 main_download_link = ?, changelog = ?, known_bugs = ?,
-                updated_by_user_id = ?
+                updated_by_user_id = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         """, (software_id, version_number, release_date, main_download_link, changelog, known_bugs,
               current_user_id, version_id))
@@ -3008,11 +3413,14 @@ def admin_update_version(version_id):
             )
         db.commit()
 
-        # Fetch the updated version with software_name
+        # Fetch the updated version with software_name, created_by_username, and updated_by_username
         updated_version_row = db.execute("""
-            SELECT v.*, s.name as software_name
+            SELECT v.*, s.name as software_name, 
+                   cr_u.username as created_by_username, upd_u.username as updated_by_username
             FROM versions v
             JOIN software s ON v.software_id = s.id
+            LEFT JOIN users cr_u ON v.created_by_user_id = cr_u.id
+            LEFT JOIN users upd_u ON v.updated_by_user_id = upd_u.id
             WHERE v.id = ?
         """, (version_id,)).fetchone()
 
@@ -3080,18 +3488,40 @@ def admin_delete_version(version_id):
 # --- File Serving Endpoints ---
 @app.route('/official_uploads/docs/<path:filename>')
 def serve_official_doc_file(filename):
+    try:
+        db_conn = get_db() # Get DB connection
+        _log_download_activity(filename, 'document', db_conn)
+    except Exception as e:
+        # Log any error from get_db() or the call itself, but do not prevent file serving
+        app.logger.error(f"Error during pre-download logging for doc '{filename}': {e}")
+    
     return send_from_directory(app.config['DOC_UPLOAD_FOLDER'], filename, as_attachment=True)
 
 @app.route('/official_uploads/patches/<path:filename>')
 def serve_official_patch_file(filename):
+    try:
+        db_conn = get_db()
+        _log_download_activity(filename, 'patch', db_conn)
+    except Exception as e:
+        app.logger.error(f"Error during pre-download logging for patch '{filename}': {e}")
     return send_from_directory(app.config['PATCH_UPLOAD_FOLDER'], filename, as_attachment=True)
 
 @app.route('/official_uploads/links/<path:filename>') # For files uploaded as "Links"
 def serve_official_link_file(filename):
+    try:
+        db_conn = get_db()
+        _log_download_activity(filename, 'link_file', db_conn) # 'link_file' as per previous definition
+    except Exception as e:
+        app.logger.error(f"Error during pre-download logging for link file '{filename}': {e}")
     return send_from_directory(app.config['LINK_UPLOAD_FOLDER'], filename, as_attachment=True)
 
 @app.route('/misc_uploads/<path:filename>')
 def serve_misc_file(filename):
+    try:
+        db_conn = get_db()
+        _log_download_activity(filename, 'misc_file', db_conn)
+    except Exception as e:
+        app.logger.error(f"Error during pre-download logging for misc file '{filename}': {e}")
     return send_from_directory(app.config['MISC_UPLOAD_FOLDER'], filename, as_attachment=True)
 
 # --- Search API (Keep as is, or enhance later) ---
@@ -3108,54 +3538,80 @@ def search_api():
     # Prepare the search term for LIKE queries
     like_query_term = f"%{query_term.lower()}%"
 
+    user_id = None
+    try:
+        verify_jwt_in_request(optional=True)
+        current_user_identity = get_jwt_identity()
+        if current_user_identity:
+            user_id = int(current_user_identity)
+    except Exception as e:
+        app.logger.error(f"Error getting user_id in search: {e}")
+
     # Documents
-    sql_documents = """
-        SELECT id, doc_name AS name, description, 'document' AS type
-        FROM documents
-        WHERE LOWER(doc_name) LIKE ? OR LOWER(description) LIKE ?
-    """
-    results.extend([dict(row) for row in db.execute(sql_documents, (like_query_term, like_query_term)).fetchall()])
+    sql_documents_select = "SELECT d.id, d.doc_name AS name, d.description, 'document' AS type"
+    sql_documents_from = "FROM documents d"
+    doc_params = [like_query_term, like_query_term]
+    if user_id:
+        sql_documents_select += ", uf.id AS favorite_id"
+        sql_documents_from += " LEFT JOIN user_favorites uf ON d.id = uf.item_id AND uf.item_type = 'document' AND uf.user_id = ?"
+        doc_params.append(user_id)
+    sql_documents = f"{sql_documents_select} {sql_documents_from} WHERE (LOWER(d.doc_name) LIKE ? OR LOWER(d.description) LIKE ?)"
+    results.extend([dict(row) for row in db.execute(sql_documents, tuple(doc_params)).fetchall()])
 
     # Patches
-    sql_patches = """
-        SELECT id, patch_name AS name, description, 'patch' AS type
-        FROM patches
-        WHERE LOWER(patch_name) LIKE ? OR LOWER(description) LIKE ?
-    """
-    results.extend([dict(row) for row in db.execute(sql_patches, (like_query_term, like_query_term)).fetchall()])
+    sql_patches_select = "SELECT p.id, p.patch_name AS name, p.description, 'patch' AS type"
+    sql_patches_from = "FROM patches p"
+    patch_params = [like_query_term, like_query_term]
+    if user_id:
+        sql_patches_select += ", uf.id AS favorite_id"
+        sql_patches_from += " LEFT JOIN user_favorites uf ON p.id = uf.item_id AND uf.item_type = 'patch' AND uf.user_id = ?"
+        patch_params.append(user_id)
+    sql_patches = f"{sql_patches_select} {sql_patches_from} WHERE (LOWER(p.patch_name) LIKE ? OR LOWER(p.description) LIKE ?)"
+    results.extend([dict(row) for row in db.execute(sql_patches, tuple(patch_params)).fetchall()])
 
     # Links
-    sql_links = """
-        SELECT id, title AS name, description, url, 'link' AS type
-        FROM links
-        WHERE LOWER(title) LIKE ? OR LOWER(description) LIKE ? OR LOWER(url) LIKE ?
-    """
-    results.extend([dict(row) for row in db.execute(sql_links, (like_query_term, like_query_term, like_query_term)).fetchall()])
+    sql_links_select = "SELECT l.id, l.title AS name, l.description, l.url, l.is_external_link, l.stored_filename, 'link' AS type" # Added is_external_link and stored_filename
+    sql_links_from = "FROM links l"
+    link_params = [like_query_term, like_query_term, like_query_term]
+    if user_id:
+        sql_links_select += ", uf.id AS favorite_id"
+        sql_links_from += " LEFT JOIN user_favorites uf ON l.id = uf.item_id AND uf.item_type = 'link' AND uf.user_id = ?"
+        link_params.append(user_id)
+    sql_links = f"{sql_links_select} {sql_links_from} WHERE (LOWER(l.title) LIKE ? OR LOWER(l.description) LIKE ? OR LOWER(l.url) LIKE ?)"
+    results.extend([dict(row) for row in db.execute(sql_links, tuple(link_params)).fetchall()])
 
     # Misc Files
-    sql_misc_files = """
-        SELECT id, user_provided_title AS name, original_filename, user_provided_description AS description, 'misc_file' AS type
-        FROM misc_files
-        WHERE LOWER(user_provided_title) LIKE ? OR LOWER(user_provided_description) LIKE ? OR LOWER(original_filename) LIKE ?
-    """
-    results.extend([dict(row) for row in db.execute(sql_misc_files, (like_query_term, like_query_term, like_query_term)).fetchall()])
+    sql_misc_files_select = "SELECT mf.id, mf.user_provided_title AS name, mf.original_filename, mf.user_provided_description AS description, mf.stored_filename, 'misc_file' AS type" # Added stored_filename
+    sql_misc_files_from = "FROM misc_files mf"
+    misc_params = [like_query_term, like_query_term, like_query_term]
+    if user_id:
+        sql_misc_files_select += ", uf.id AS favorite_id"
+        sql_misc_files_from += " LEFT JOIN user_favorites uf ON mf.id = uf.item_id AND uf.item_type = 'misc_file' AND uf.user_id = ?"
+        misc_params.append(user_id)
+    sql_misc_files = f"{sql_misc_files_select} {sql_misc_files_from} WHERE (LOWER(mf.user_provided_title) LIKE ? OR LOWER(mf.user_provided_description) LIKE ? OR LOWER(mf.original_filename) LIKE ?)"
+    results.extend([dict(row) for row in db.execute(sql_misc_files, tuple(misc_params)).fetchall()])
 
     # Software
-    sql_software = """
-        SELECT id, name, description, 'software' AS type
-        FROM software
-        WHERE LOWER(name) LIKE ? OR LOWER(description) LIKE ?
-    """
-    results.extend([dict(row) for row in db.execute(sql_software, (like_query_term, like_query_term)).fetchall()])
+    sql_software_select = "SELECT s.id, s.name, s.description, 'software' AS type"
+    sql_software_from = "FROM software s"
+    software_params = [like_query_term, like_query_term]
+    if user_id:
+        sql_software_select += ", uf.id AS favorite_id"
+        sql_software_from += " LEFT JOIN user_favorites uf ON s.id = uf.item_id AND uf.item_type = 'software' AND uf.user_id = ?"
+        software_params.append(user_id)
+    sql_software_query = f"{sql_software_select} {sql_software_from} WHERE (LOWER(s.name) LIKE ? OR LOWER(s.description) LIKE ?)"
+    results.extend([dict(row) for row in db.execute(sql_software_query, tuple(software_params)).fetchall()])
 
     # Versions
-    sql_versions = """
-        SELECT v.id, v.version_number AS name, v.changelog, v.known_bugs, v.software_id, s.name AS software_name, 'version' AS type
-        FROM versions v
-        JOIN software s ON v.software_id = s.id
-        WHERE LOWER(v.version_number) LIKE ? OR LOWER(v.changelog) LIKE ? OR LOWER(v.known_bugs) LIKE ?
-    """
-    results.extend([dict(row) for row in db.execute(sql_versions, (like_query_term, like_query_term, like_query_term)).fetchall()])
+    sql_versions_select = "SELECT v.id, v.version_number AS name, v.changelog, v.known_bugs, v.software_id, s.name AS software_name, 'version' AS type"
+    sql_versions_from = "FROM versions v JOIN software s ON v.software_id = s.id"
+    version_params = [like_query_term, like_query_term, like_query_term]
+    if user_id:
+        sql_versions_select += ", uf.id AS favorite_id"
+        sql_versions_from += " LEFT JOIN user_favorites uf ON v.id = uf.item_id AND uf.item_type = 'version' AND uf.user_id = ?"
+        version_params.append(user_id)
+    sql_versions_query = f"{sql_versions_select} {sql_versions_from} WHERE (LOWER(v.version_number) LIKE ? OR LOWER(v.changelog) LIKE ? OR LOWER(v.known_bugs) LIKE ?)"
+    results.extend([dict(row) for row in db.execute(sql_versions_query, tuple(version_params)).fetchall()])
 
     return jsonify(results)
 
@@ -3169,13 +3625,166 @@ def init_db_command():
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
 
+# --- User Favorites Endpoints ---
+ALLOWED_FAVORITE_ITEM_TYPES = ['document', 'patch', 'link', 'misc_file', 'software', 'version']
+
+@app.route('/api/favorites', methods=['POST'])
+@jwt_required()
+def add_user_favorite():
+    current_user_id_str = get_jwt_identity()
+    try:
+        user_id = int(current_user_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid user identity in token."), 400
+
+    data = request.get_json()
+    if not data:
+        return jsonify(msg="Missing JSON data"), 400
+
+    item_id = data.get('item_id')
+    item_type = data.get('item_type')
+
+    if not isinstance(item_id, int) or item_id <= 0:
+        return jsonify(msg="item_id (positive integer) is required."), 400
+    if not item_type or item_type not in ALLOWED_FAVORITE_ITEM_TYPES:
+        return jsonify(msg=f"item_type is required and must be one of: {', '.join(ALLOWED_FAVORITE_ITEM_TYPES)}."), 400
+
+    db = get_db()
+    
+    # Check if already favorited to prevent duplicate processing by add_favorite if it doesn't handle it.
+    # The current database.add_favorite returns None on IntegrityError (already exists).
+    existing_favorite = database.get_favorite_status(db, user_id, item_id, item_type)
+    if existing_favorite:
+        return jsonify(dict(existing_favorite)), 200 # Already exists, return current favorite info
+
+    favorite_id = database.add_favorite(db, user_id, item_id, item_type)
+
+    if favorite_id:
+        log_audit_action(
+            action_type='ADD_FAVORITE',
+            target_table='user_favorites',
+            target_id=favorite_id, # This is the ID of the entry in user_favorites table
+            details={'item_id': item_id, 'item_type': item_type}
+            # user_id and username are automatically picked up by log_audit_action from JWT
+        )
+        # Fetch the newly created favorite record to return it
+        new_favorite_record = database.get_favorite_status(db, user_id, item_id, item_type)
+        if new_favorite_record:
+            return jsonify(dict(new_favorite_record)), 201
+        else:
+            # This case should ideally not happen if add_favorite returned a valid ID
+            app.logger.error(f"Failed to fetch favorite record for user {user_id}, item {item_id}, type {item_type} after creation.")
+            return jsonify(msg="Favorite added but could not be retrieved."), 500
+    else:
+        # This could be due to an IntegrityError (already favorited and not handled above) or other DB error
+        # The database.add_favorite function prints specific errors.
+        return jsonify(msg="Failed to add favorite. It might already exist or a database error occurred."), 409 # 409 Conflict or 500
+
+@app.route('/api/favorites/<item_type>/<int:item_id>', methods=['DELETE'])
+@jwt_required()
+def remove_user_favorite(item_type, item_id):
+    current_user_id_str = get_jwt_identity()
+    try:
+        user_id = int(current_user_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid user identity in token."), 400
+
+    if item_type not in ALLOWED_FAVORITE_ITEM_TYPES:
+        return jsonify(msg=f"Invalid item_type. Must be one of: {', '.join(ALLOWED_FAVORITE_ITEM_TYPES)}."), 400
+    if item_id <= 0:
+         return jsonify(msg="item_id must be a positive integer."), 400
+
+
+    db = get_db()
+    # Optional: Check if the favorite exists before trying to delete, to provide more specific feedback.
+    # favorite_to_delete = database.get_favorite_status(db, user_id, item_id, item_type)
+    # if not favorite_to_delete:
+    #     return jsonify(msg="Favorite not found."), 404
+        
+    if database.remove_favorite(db, user_id, item_id, item_type):
+        log_audit_action(
+            action_type='REMOVE_FAVORITE',
+            target_table='user_favorites', # The table from which the record was removed
+            # target_id could be the ID of the user_favorites record if known, or just log item_id/item_type
+            details={'item_id': item_id, 'item_type': item_type}
+        )
+        return jsonify(msg="Favorite removed successfully."), 200 # Or 204 No Content
+    else:
+        return jsonify(msg="Failed to remove favorite. It might not exist or a database error occurred."), 404 # Or 500
+
+@app.route('/api/favorites', methods=['GET'])
+@jwt_required()
+def get_user_favorites_api():
+    current_user_id_str = get_jwt_identity()
+    try:
+        user_id = int(current_user_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid user identity in token."), 400
+
+    page = request.args.get('page', default=1, type=int)
+    per_page = request.args.get('per_page', default=10, type=int)
+    item_type_filter = request.args.get('item_type', default=None, type=str)
+
+    if page <= 0: page = 1
+    if per_page <= 0: per_page = 10
+    if per_page > 100: per_page = 100 # Max limit
+
+    if item_type_filter and item_type_filter not in ALLOWED_FAVORITE_ITEM_TYPES:
+        return jsonify(msg=f"Invalid item_type filter. Must be one of: {', '.join(ALLOWED_FAVORITE_ITEM_TYPES)}."), 400
+
+    db = get_db()
+    try:
+        items, total_count = database.get_user_favorites(db, user_id, page, per_page, item_type_filter)
+        
+        total_pages = math.ceil(total_count / per_page) if total_count > 0 else 1
+        
+        # Convert Row objects to dicts for JSON serialization
+        items_as_dicts = [dict(item) for item in items]
+
+        return jsonify({
+            "favorites": items_as_dicts,
+            "page": page,
+            "per_page": per_page,
+            "total_favorites": total_count,
+            "total_pages": total_pages
+        }), 200
+    except Exception as e:
+        app.logger.error(f"Error fetching user favorites for user {user_id}: {e}", exc_info=True)
+        return jsonify(msg="An error occurred while fetching favorites."), 500
+
+
+@app.route('/api/favorites/status/<item_type>/<int:item_id>', methods=['GET'])
+@jwt_required()
+def get_user_favorite_status_api(item_type, item_id):
+    current_user_id_str = get_jwt_identity()
+    try:
+        user_id = int(current_user_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid user identity in token."), 400
+
+    if item_type not in ALLOWED_FAVORITE_ITEM_TYPES:
+        return jsonify(msg=f"Invalid item_type. Must be one of: {', '.join(ALLOWED_FAVORITE_ITEM_TYPES)}."), 400
+    if item_id <= 0:
+         return jsonify(msg="item_id must be a positive integer."), 400
+
+    db = get_db()
+    favorite_record = database.get_favorite_status(db, user_id, item_id, item_type)
+
+    if favorite_record:
+        return jsonify({
+            "is_favorite": True,
+            "favorite_id": favorite_record['id'], # ID of the user_favorites record
+            "favorited_at": favorite_record['created_at']
+        }), 200
+    else:
+        return jsonify({"is_favorite": False, "favorite_id": None}), 200
 
 # --- Audit Log Viewer Endpoint (Admin) ---
 @app.route('/api/admin/audit-logs', methods=['GET'])
 @jwt_required()
 @admin_required
 def get_audit_logs():
-    try: # Outer try block starts here
+    try:
         db = get_db()
 
         # Pagination parameters
@@ -3287,5 +3896,395 @@ def get_audit_logs():
 
     # This is the except block for the outer try
     except Exception as e:
-        app.logger.error(f"Unexpected error in get_audit_logs: {e}", exc_info=True) # Log full traceback
-        return jsonify(msg="An unexpected error occurred while fetching audit logs."), 500
+        app.logger.error(f"Failed to retrieve audit logs: {e}", exc_info=True)
+        return jsonify(error="Failed to retrieve audit logs", details=str(e)), 500
+
+# --- Admin System Health Endpoint ---
+@app.route('/api/admin/system-health', methods=['GET'])
+@jwt_required()
+@admin_required
+def get_system_health():
+    db_status = "OK"
+    try:
+        # Attempt to get a database connection.
+        db = get_db()
+        # Perform a simple query to be absolutely sure the connection is usable.
+        db.execute("SELECT 1").fetchone()
+    except sqlite3.Error as e: # Catch SQLite specific errors
+        app.logger.error(f"System health DB check failed with sqlite3.Error: {e}")
+        db_status = f"Error: Could not connect to database. Details: {e}"
+    except Exception as e: # Catch any other unexpected errors during DB check
+        app.logger.error(f"System health DB check failed with unexpected error: {e}")
+        db_status = f"Error: Could not connect to database. Unexpected error: {e}"
+
+    return jsonify({
+        "api_status": "OK",
+        "db_connection": db_status
+    }), 200
+
+# --- Admin Dashboard Statistics Endpoint ---
+
+def get_daily_counts(db, action_types, days=7):
+    if not action_types:
+        return []
+    
+    placeholders = ','.join(['?'] * len(action_types))
+    query = f"""
+        WITH RECURSIVE dates(date) AS (
+          SELECT date('now', '-{days-1} days') -- Corrected to ensure 'days' includes today
+          UNION ALL
+          SELECT date(date, '+1 day')
+          FROM dates
+          WHERE date < date('now')
+        )
+        SELECT
+          d.date,
+          COALESCE(COUNT(al.id), 0) as count
+        FROM dates d
+        LEFT JOIN audit_logs al
+          ON date(al.timestamp) = d.date AND al.action_type IN ({placeholders})
+        GROUP BY d.date
+        ORDER BY d.date ASC;
+    """
+    params = list(action_types)
+    results = db.execute(query, params).fetchall()
+    return [dict(row) for row in results]
+
+def get_weekly_counts(db, action_types, weeks=4):
+    if not action_types:
+        return []
+
+    placeholders = ','.join(['?'] * len(action_types))
+    # Calculate the start date for the recursive CTE:
+    # (weeks-1)*7 days ago from today, then find the Sunday of that week.
+    # Example: for 4 weeks, this is 21 days ago.
+    start_date_offset = (weeks - 1) * 7
+    query = f"""
+        WITH RECURSIVE week_starts(week_start_date) AS (
+          SELECT date('now', 'weekday 0', '-{start_date_offset + 6} days') 
+          UNION ALL
+          SELECT date(week_start_date, '+7 days')
+          FROM week_starts
+          WHERE date(week_start_date, '+7 days') <= date('now', 'weekday 0', '+1 day') 
+        )
+        SELECT
+          w.week_start_date,
+          COALESCE(COUNT(al.id), 0) as count
+        FROM week_starts w
+        LEFT JOIN audit_logs al
+          ON date(al.timestamp, 'weekday 0', '-6 days') = w.week_start_date AND al.action_type IN ({placeholders})
+        GROUP BY w.week_start_date
+        ORDER BY w.week_start_date ASC;
+    """
+    # The recursive CTE for weeks needs to generate Sundays.
+    # If today is Sunday, 'weekday 0' gives today.
+    # If today is Monday, 'weekday 0' gives yesterday (Sunday).
+    # So, date('now', 'weekday 0', '-{X} days') is the correct way to get a past Sunday.
+    # For `weeks=4`: we want this week's Sunday, and 3 previous Sundays.
+    # `date('now', 'weekday 0')` is this week's Sunday.
+    # `date('now', 'weekday 0', '-7 days')` is last week's Sunday.
+    # `date('now', 'weekday 0', '-14 days')` is two weeks ago Sunday.
+    # `date('now', 'weekday 0', '-21 days')` is three weeks ago Sunday.
+    # So the initial SELECT for weeks should be `date('now', 'weekday 0', '-{(weeks-1)*7} days')`
+    # The condition `WHERE date(week_start_date, '+7 days') <= date('now', 'weekday 0', '+1 day')` seems a bit off.
+    # It should be `WHERE week_start_date < date('now', 'weekday 0')` if the initial date is correct.
+    # Or, more simply, limit the recursion count or ensure the last date is not beyond current week's Sunday.
+    # Let's adjust the initial select and the recursive condition.
+    # If weeks = 4, initial select: date('now', 'weekday 0', '-21 days')
+    # Loop while date(week_start_date, '+7 days') <= date('now', 'weekday 0')
+
+    # Corrected weekly query logic:
+    # Initial date: Sunday of the week (weeks-1) weeks ago.
+    # End date: Sunday of the current week.
+    initial_sunday_offset = (weeks - 1) * 7
+    query_corrected_weekly = f"""
+        WITH RECURSIVE week_dates(week_start_date) AS (
+          SELECT date('now', 'weekday 0', '-{initial_sunday_offset} days')
+          UNION ALL
+          SELECT date(week_start_date, '+7 days')
+          FROM week_dates
+          WHERE date(week_start_date, '+7 days') <= date('now', 'weekday 0')
+        )
+        SELECT
+          wd.week_start_date,
+          COALESCE(COUNT(al.id), 0) as count
+        FROM week_dates wd
+        LEFT JOIN audit_logs al
+          ON date(al.timestamp, 'weekday 0', '-6 days') = wd.week_start_date AND al.action_type IN ({placeholders})
+        GROUP BY wd.week_start_date
+        ORDER BY wd.week_start_date ASC;
+    """
+    # Check if the number of weeks generated is correct.
+    # If weeks = 1, initial_sunday_offset = 0. Dates: current Sunday. Correct.
+    # If weeks = 4, initial_sunday_offset = 21. Dates: Sun(-3w), Sun(-2w), Sun(-1w), Sun(current). Correct.
+
+    params = list(action_types)
+    results = db.execute(query_corrected_weekly, params).fetchall()
+    return [dict(row) for row in results]
+
+def get_daily_download_counts(db, days=7):
+    query = f"""
+        WITH RECURSIVE dates(date) AS (
+          SELECT date('now', '-{days-1} days')
+          UNION ALL
+          SELECT date(date, '+1 day')
+          FROM dates
+          WHERE date < date('now')
+        )
+        SELECT
+          d.date,
+          COALESCE(COUNT(dl.id), 0) as count
+        FROM dates d
+        LEFT JOIN download_log dl
+          ON date(dl.download_timestamp) = d.date
+        GROUP BY d.date
+        ORDER BY d.date ASC;
+    """
+    results = db.execute(query).fetchall()
+    return [dict(row) for row in results]
+
+def get_weekly_download_counts(db, weeks=4):
+    initial_sunday_offset = (weeks - 1) * 7
+    query = f"""
+        WITH RECURSIVE week_dates(week_start_date) AS (
+          SELECT date('now', 'weekday 0', '-{initial_sunday_offset} days')
+          UNION ALL
+          SELECT date(week_start_date, '+7 days')
+          FROM week_dates
+          WHERE date(week_start_date, '+7 days') <= date('now', 'weekday 0')
+        )
+        SELECT
+          wd.week_start_date,
+          COALESCE(COUNT(dl.id), 0) as count
+        FROM week_dates wd
+        LEFT JOIN download_log dl
+          ON date(dl.download_timestamp, 'weekday 0', '-6 days') = wd.week_start_date
+        GROUP BY wd.week_start_date
+        ORDER BY wd.week_start_date ASC;
+    """
+    results = db.execute(query).fetchall()
+    return [dict(row) for row in results]
+
+@app.route('/api/admin/dashboard-stats', methods=['GET'])
+@jwt_required()
+@admin_required
+def get_dashboard_stats():
+    db = get_db()
+    try:
+        # Total users
+        users_cursor = db.execute("SELECT COUNT(*) as count FROM users")
+        total_users = users_cursor.fetchone()['count']
+
+        # Total software titles
+        software_cursor = db.execute("SELECT COUNT(*) as count FROM software")
+        total_software_titles = software_cursor.fetchone()['count']
+
+        # Recent activities (audit logs)
+        audit_logs_cursor = db.execute(
+            "SELECT action_type, username, timestamp, details FROM audit_logs ORDER BY timestamp DESC LIMIT 5"
+        )
+        recent_activities = [dict(row) for row in audit_logs_cursor.fetchall()]
+
+        # 1. Recent Additions
+        recent_additions = []
+        # Documents
+        docs_cursor = db.execute("SELECT id, doc_name as name, created_at, 'Document' as type FROM documents ORDER BY created_at DESC LIMIT 5")
+        recent_additions.extend([dict(row) for row in docs_cursor.fetchall()])
+        # Patches
+        patches_cursor = db.execute("SELECT id, patch_name as name, created_at, 'Patch' as type FROM patches ORDER BY created_at DESC LIMIT 5")
+        recent_additions.extend([dict(row) for row in patches_cursor.fetchall()])
+        # Link Files (is_external_link = FALSE)
+        link_files_cursor = db.execute("SELECT id, title as name, created_at, 'Link File' as type FROM links WHERE is_external_link = FALSE ORDER BY created_at DESC LIMIT 5")
+        recent_additions.extend([dict(row) for row in link_files_cursor.fetchall()])
+        # Misc Files
+        misc_files_cursor = db.execute("SELECT id, COALESCE(user_provided_title, original_filename) as name, created_at, 'Misc File' as type FROM misc_files ORDER BY created_at DESC LIMIT 5")
+        recent_additions.extend([dict(row) for row in misc_files_cursor.fetchall()])
+        
+        recent_additions.sort(key=lambda x: x['created_at'], reverse=True)
+        top_recent_additions = recent_additions[:5]
+
+        # 2. Popular Downloads
+        popular_downloads_query = """
+            SELECT file_id, file_type, COUNT(*) as download_count
+            FROM download_log
+            GROUP BY file_id, file_type
+            ORDER BY download_count DESC
+            LIMIT 5
+        """
+        popular_downloads_raw = db.execute(popular_downloads_query).fetchall()
+        popular_downloads_detailed = []
+        for item in popular_downloads_raw:
+            name = "Unknown/Deleted Item"
+            if item['file_type'] == 'document':
+                res = db.execute("SELECT doc_name FROM documents WHERE id = ?", (item['file_id'],)).fetchone()
+                if res: name = res['doc_name']
+            elif item['file_type'] == 'patch':
+                res = db.execute("SELECT patch_name FROM patches WHERE id = ?", (item['file_id'],)).fetchone()
+                if res: name = res['patch_name']
+            elif item['file_type'] == 'link_file':
+                res = db.execute("SELECT title FROM links WHERE id = ?", (item['file_id'],)).fetchone()
+                if res: name = res['title']
+            elif item['file_type'] == 'misc_file':
+                res = db.execute("SELECT COALESCE(user_provided_title, original_filename) as name FROM misc_files WHERE id = ?", (item['file_id'],)).fetchone()
+                if res: name = res['name']
+            
+            popular_downloads_detailed.append({
+                "name": name,
+                "type": item['file_type'],
+                "download_count": item['download_count']
+            })
+
+        # 3. Documents per Software
+        docs_per_software_query = """
+            SELECT s.name as software_name, COUNT(d.id) as document_count
+            FROM software s
+            LEFT JOIN documents d ON s.id = d.software_id
+            GROUP BY s.id, s.name
+            ORDER BY s.name
+        """
+        docs_per_software_cursor = db.execute(docs_per_software_query)
+        documents_per_software = [dict(row) for row in docs_per_software_cursor.fetchall()]
+
+        # User Activity Trends
+        daily_logins = get_daily_counts(db, ['USER_LOGIN'], days=7)
+        weekly_logins = get_weekly_counts(db, ['USER_LOGIN'], weeks=4)
+
+        upload_action_types = [
+            'CREATE_DOCUMENT_FILE', 'CREATE_PATCH_FILE', 'CREATE_LINK_FILE', 'CREATE_MISC_FILE',
+            'UPDATE_DOCUMENT_FILE', 'UPDATE_PATCH_FILE', 'UPDATE_LINK_FILE', 'UPDATE_MISC_FILE_UPLOAD'
+        ]
+        daily_uploads = get_daily_counts(db, upload_action_types, days=7)
+        weekly_uploads = get_weekly_counts(db, upload_action_types, weeks=4)
+
+        user_activity_trends = {
+            "logins": {"daily": daily_logins, "weekly": weekly_logins},
+            "uploads": {"daily": daily_uploads, "weekly": weekly_uploads}
+        }
+
+        # Download Trends
+        daily_downloads = get_daily_download_counts(db, days=7)
+        weekly_downloads = get_weekly_download_counts(db, weeks=4)
+        download_trends = {
+            "daily": daily_downloads,
+            "weekly": weekly_downloads
+        }
+
+        # Calculate Total Storage Utilization
+        docs_size_cursor = db.execute("SELECT SUM(file_size) as total FROM documents WHERE is_external_link = FALSE AND stored_filename IS NOT NULL")
+        docs_size = (docs_size_cursor.fetchone()['total'] or 0) if docs_size_cursor else 0
+
+        patches_size_cursor = db.execute("SELECT SUM(file_size) as total FROM patches WHERE is_external_link = FALSE AND stored_filename IS NOT NULL")
+        patches_size = (patches_size_cursor.fetchone()['total'] or 0) if patches_size_cursor else 0
+
+        links_size_cursor = db.execute("SELECT SUM(file_size) as total FROM links WHERE is_external_link = FALSE AND stored_filename IS NOT NULL")
+        links_size = (links_size_cursor.fetchone()['total'] or 0) if links_size_cursor else 0
+        
+        misc_files_size_cursor = db.execute("SELECT SUM(file_size) as total FROM misc_files WHERE stored_filename IS NOT NULL")
+        misc_files_size = (misc_files_size_cursor.fetchone()['total'] or 0) if misc_files_size_cursor else 0
+
+        total_storage_utilized_bytes = docs_size + patches_size + links_size + misc_files_size
+
+        return jsonify(
+            total_users=total_users,
+            total_software_titles=total_software_titles,
+            recent_activities=recent_activities,
+            recent_additions=top_recent_additions,
+            popular_downloads=popular_downloads_detailed,
+            documents_per_software=documents_per_software,
+            user_activity_trends=user_activity_trends,
+            download_trends=download_trends, 
+            total_storage_utilized_bytes=total_storage_utilized_bytes
+        )
+
+        # Content Health Indicators
+        stale_threshold_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+        content_health = {
+            "missing_descriptions": {},
+            "stale_content": {}
+        }
+
+        # --- Missing Descriptions ---
+        # Documents
+        docs_missing_desc_cursor = db.execute("SELECT COUNT(*) as count FROM documents WHERE description IS NULL OR description = ''")
+        docs_missing_desc = (docs_missing_desc_cursor.fetchone()['count'] or 0) if docs_missing_desc_cursor else 0
+        docs_total_cursor = db.execute("SELECT COUNT(*) as count FROM documents")
+        docs_total = (docs_total_cursor.fetchone()['count'] or 0) if docs_total_cursor else 0
+        content_health['missing_descriptions']['documents'] = {'missing': docs_missing_desc, 'total': docs_total}
+
+        # Patches
+        patches_missing_desc_cursor = db.execute("SELECT COUNT(*) as count FROM patches WHERE description IS NULL OR description = ''")
+        patches_missing_desc = (patches_missing_desc_cursor.fetchone()['count'] or 0) if patches_missing_desc_cursor else 0
+        patches_total_cursor = db.execute("SELECT COUNT(*) as count FROM patches")
+        patches_total = (patches_total_cursor.fetchone()['count'] or 0) if patches_total_cursor else 0
+        content_health['missing_descriptions']['patches'] = {'missing': patches_missing_desc, 'total': patches_total}
+
+        # Links
+        links_missing_desc_cursor = db.execute("SELECT COUNT(*) as count FROM links WHERE description IS NULL OR description = ''")
+        links_missing_desc = (links_missing_desc_cursor.fetchone()['count'] or 0) if links_missing_desc_cursor else 0
+        links_total_cursor = db.execute("SELECT COUNT(*) as count FROM links")
+        links_total = (links_total_cursor.fetchone()['count'] or 0) if links_total_cursor else 0
+        content_health['missing_descriptions']['links'] = {'missing': links_missing_desc, 'total': links_total}
+
+        # Misc Categories
+        mc_missing_desc_cursor = db.execute("SELECT COUNT(*) as count FROM misc_categories WHERE description IS NULL OR description = ''")
+        mc_missing_desc = (mc_missing_desc_cursor.fetchone()['count'] or 0) if mc_missing_desc_cursor else 0
+        mc_total_cursor = db.execute("SELECT COUNT(*) as count FROM misc_categories")
+        mc_total = (mc_total_cursor.fetchone()['count'] or 0) if mc_total_cursor else 0
+        content_health['missing_descriptions']['misc_categories'] = {'missing': mc_missing_desc, 'total': mc_total}
+
+        # Software
+        sw_missing_desc_cursor = db.execute("SELECT COUNT(*) as count FROM software WHERE description IS NULL OR description = ''")
+        sw_missing_desc = (sw_missing_desc_cursor.fetchone()['count'] or 0) if sw_missing_desc_cursor else 0
+        # total_software_titles already fetched above
+        content_health['missing_descriptions']['software'] = {'missing': sw_missing_desc, 'total': total_software_titles}
+        
+        # Misc Files
+        mf_missing_desc_cursor = db.execute("SELECT COUNT(*) as count FROM misc_files WHERE user_provided_description IS NULL OR user_provided_description = ''")
+        mf_missing_desc = (mf_missing_desc_cursor.fetchone()['count'] or 0) if mf_missing_desc_cursor else 0
+        mf_total_cursor = db.execute("SELECT COUNT(*) as count FROM misc_files")
+        mf_total = (mf_total_cursor.fetchone()['count'] or 0) if mf_total_cursor else 0
+        content_health['missing_descriptions']['misc_files'] = {'missing': mf_missing_desc, 'total': mf_total}
+
+        # --- Stale Content ---
+        # Documents
+        docs_stale_cursor = db.execute("SELECT COUNT(*) as count FROM documents WHERE date(updated_at) < date(?)", (stale_threshold_date,))
+        docs_stale = (docs_stale_cursor.fetchone()['count'] or 0) if docs_stale_cursor else 0
+        content_health['stale_content']['documents'] = {'stale': docs_stale, 'total': docs_total}
+
+        # Patches
+        patches_stale_cursor = db.execute("SELECT COUNT(*) as count FROM patches WHERE date(updated_at) < date(?)", (stale_threshold_date,))
+        patches_stale = (patches_stale_cursor.fetchone()['count'] or 0) if patches_stale_cursor else 0
+        content_health['stale_content']['patches'] = {'stale': patches_stale, 'total': patches_total}
+
+        # Links
+        links_stale_cursor = db.execute("SELECT COUNT(*) as count FROM links WHERE date(updated_at) < date(?)", (stale_threshold_date,))
+        links_stale = (links_stale_cursor.fetchone()['count'] or 0) if links_stale_cursor else 0
+        content_health['stale_content']['links'] = {'stale': links_stale, 'total': links_total}
+        
+        # Misc Files
+        mf_stale_cursor = db.execute("SELECT COUNT(*) as count FROM misc_files WHERE date(updated_at) < date(?)", (stale_threshold_date,))
+        mf_stale = (mf_stale_cursor.fetchone()['count'] or 0) if mf_stale_cursor else 0
+        content_health['stale_content']['misc_files'] = {'stale': mf_stale, 'total': mf_total}
+
+        # Versions
+        versions_stale_cursor = db.execute("SELECT COUNT(*) as count FROM versions WHERE date(updated_at) < date(?)", (stale_threshold_date,))
+        versions_stale = (versions_stale_cursor.fetchone()['count'] or 0) if versions_stale_cursor else 0
+        versions_total_cursor = db.execute("SELECT COUNT(*) as count FROM versions")
+        versions_total = (versions_total_cursor.fetchone()['count'] or 0) if versions_total_cursor else 0
+        content_health['stale_content']['versions'] = {'stale': versions_stale, 'total': versions_total}
+        
+        # Misc Categories (Stale)
+        mc_stale_cursor = db.execute("SELECT COUNT(*) as count FROM misc_categories WHERE date(updated_at) < date(?)", (stale_threshold_date,))
+        mc_stale = (mc_stale_cursor.fetchone()['count'] or 0) if mc_stale_cursor else 0
+        content_health['stale_content']['misc_categories'] = {'stale': mc_stale, 'total': mc_total}
+
+
+        response_data.update({"content_health": content_health})
+        return jsonify(response_data), 200
+
+    except sqlite3.Error as e:
+        app.logger.error(f"Database error in get_dashboard_stats: {e}")
+        return jsonify(error="Database error", details=str(e)), 500
+    except Exception as e:
+        app.logger.error(f"Unexpected error in get_dashboard_stats: {e}", exc_info=True)
+        return jsonify(error="An unexpected error occurred", details=str(e)), 500

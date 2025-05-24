@@ -1,9 +1,18 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { ExternalLink, PlusCircle, Edit3, Trash2 } from 'lucide-react';
-import { fetchDocuments, fetchSoftware, deleteAdminDocument, PaginatedDocumentsResponse } from '../services/api'; // Import PaginatedDocumentsResponse
-import { Document as DocumentType, Software } from '../types'; // Ensure DocumentType matches the API response structure
-import DataTable, { ColumnDef } from '../components/DataTable'; // Import DataTable and ColumnDef
+import { ExternalLink, PlusCircle, Edit3, Trash2, Star } from 'lucide-react';
+import { 
+  fetchDocuments, 
+  fetchSoftware, 
+  deleteAdminDocument, 
+  PaginatedDocumentsResponse,
+  addFavoriteApi,
+  removeFavoriteApi,
+  getFavoriteStatusApi,
+  FavoriteItemType 
+} from '../services/api'; 
+import { Document as DocumentType, Software } from '../types'; 
+import DataTable, { ColumnDef } from '../components/DataTable'; 
 import FilterTabs from '../components/FilterTabs';
 import LoadingState from '../components/LoadingState'; // Can be replaced by DataTable's isLoading
 import ErrorState from '../components/ErrorState';
@@ -23,6 +32,13 @@ const DocumentsView: React.FC = () => {
   const [documents, setDocuments] = useState<DocumentType[]>([]);
   const [softwareList, setSoftwareList] = useState<Software[]>([]);
   const [selectedSoftwareId, setSelectedSoftwareId] = useState<number | null>(null); // Filter state
+
+  // Advanced Filter States
+  const [docTypeFilter, setDocTypeFilter] = useState<string>('');
+  const [createdFromFilter, setCreatedFromFilter] = useState<string>('');
+  const [createdToFilter, setCreatedToFilter] = useState<string>('');
+  const [updatedFromFilter, setUpdatedFromFilter] = useState<string>('');
+  const [updatedToFilter, setUpdatedToFilter] = useState<string>('');
   
   // Pagination State
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -46,31 +62,103 @@ const DocumentsView: React.FC = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
 
+  // Favorite State
+  const [favoritedItems, setFavoritedItems] = useState<Map<number, { favoriteId: number | undefined }>>(new Map());
 
-  const loadDocuments = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    // setFeedbackMessage(null); // Clear previous feedback
-    try {
-      const response: PaginatedDocumentsResponse = await fetchDocuments(
-        selectedSoftwareId === null ? undefined : selectedSoftwareId,
-        currentPage,
-        itemsPerPage,
-        sortBy,
-        sortOrder
-      );
-      setDocuments(response.documents);
-      setTotalPages(response.total_pages);
-      setTotalDocuments(response.total_documents);
-      setCurrentPage(response.page); // Ensure current page is updated from backend
-      setItemsPerPage(response.per_page); // Ensure items per page is updated from backend
-    } catch (err: any) {
-      setDocuments([]); // Add this line
-      setError(err.message || 'Failed to fetch documents. Please try again later.');
-    } finally {
-      setIsLoading(false);
+  // In DocumentsView.tsx
+
+const loadDocuments = useCallback(async () => {
+  setIsLoading(true);
+  setError(null);
+  // setFeedbackMessage(null); // Optional: Clear previous feedback if needed
+
+  try {
+    const response: PaginatedDocumentsResponse = await fetchDocuments(
+      selectedSoftwareId === null ? undefined : selectedSoftwareId,
+      currentPage,
+      itemsPerPage,
+      sortBy,
+      sortOrder,
+      docTypeFilter || undefined,
+      createdFromFilter || undefined,
+      createdToFilter || undefined,
+      updatedFromFilter || undefined,
+      updatedToFilter || undefined
+    );
+
+    setDocuments(response.documents);
+    setTotalPages(response.total_pages);
+    setTotalDocuments(response.total_documents);
+    setCurrentPage(response.page); // Ensure current page is updated from backend
+    setItemsPerPage(response.per_page); // Ensure items per page is updated from backend
+
+    // Initialize favoritedItems directly from fetched documents (SUCCESS PATH)
+    const newFavoritedItems = new Map<number, { favoriteId: number | undefined }>();
+    if (isAuthenticated && response.documents && response.documents.length > 0) {
+      for (const doc of response.documents) {
+        if (doc.favorite_id) {
+          newFavoritedItems.set(doc.id, { favoriteId: doc.favorite_id });
+        } else {
+          newFavoritedItems.set(doc.id, { favoriteId: undefined });
+        }
+      }
     }
-  }, [selectedSoftwareId, currentPage, itemsPerPage, sortBy, sortOrder]);
+    setFavoritedItems(newFavoritedItems);
+
+  } catch (err: any) { // This is the SINGLE, CORRECT catch block
+    console.error("Failed to load documents:", err); // Good practice to log the actual error
+    setDocuments([]); // Clear documents on error
+    setError(err.message || 'Failed to fetch documents. Please try again later.');
+    
+    // Reset pagination and other related states
+    setTotalPages(0);
+    setTotalDocuments(0);
+    // setCurrentPage(1); // Optionally reset to page 1
+    // setItemsPerPage(10); // Optionally reset per_page
+
+    // Clear favoritedItems as the document list is now empty or inconsistent
+    setFavoritedItems(new Map());
+  } finally {
+    setIsLoading(false);
+  }
+}, [
+  selectedSoftwareId,
+  currentPage,
+  itemsPerPage,
+  sortBy,
+  sortOrder,
+  docTypeFilter,
+  createdFromFilter,
+  createdToFilter,
+  updatedFromFilter,
+  updatedToFilter,
+  isAuthenticated
+]);
+  
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setFavoritedItems(new Map()); 
+    }
+    // loadDocuments will be called by the main useEffect watching `loadDocuments` itself.
+  }, [isAuthenticated]);
+
+  // REMOVED N+1 useEffect for getFavoriteStatusApi calls
+
+  // Handler for applying advanced filters
+  const handleApplyAdvancedFilters = () => {
+    setCurrentPage(1); // This will trigger loadDocuments due to dependency
+  };
+
+  // Handler for clearing advanced filters
+  const handleClearAdvancedFilters = () => {
+    setDocTypeFilter('');
+    setCreatedFromFilter('');
+    setCreatedToFilter('');
+    setUpdatedFromFilter('');
+    setUpdatedToFilter('');
+    // setSelectedSoftwareId(null); // Optional: Clear software tab filter as well
+    setCurrentPage(1); // This will trigger loadDocuments
+  };
 
   useEffect(() => {
     const loadSoftwareForFilters = async () => {
@@ -199,15 +287,31 @@ const DocumentsView: React.FC = () => {
         </a>
       )
     },
-    { key: 'created_at', header: 'Created At', sortable: true, render: (doc) => doc.created_at ? new Date(doc.created_at).toLocaleDateString() : '-' },
-    { key: 'updated_at', header: 'Updated At', sortable: true, render: (doc) => doc.updated_at ? new Date(doc.updated_at).toLocaleDateString() : '-' },
-    ...(isAuthenticated && (role === 'admin' || role === 'super_admin') ? [{
+    { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: (doc) => doc.uploaded_by_username || 'N/A' },
+    { key: 'updated_by_username', header: 'Updated By', sortable: false, render: (doc) => doc.updated_by_username || 'N/A' }, // Not typically sorted
+    { key: 'created_at', header: 'Created At', sortable: true, render: (doc) => doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-CA') : '-' },
+    { key: 'updated_at', header: 'Updated At', sortable: true, render: (doc) => doc.updated_at ? new Date(doc.updated_at).toLocaleDateString('en-CA') : '-' },
+    ...(isAuthenticated ? [{ // Changed condition to isAuthenticated for favorite button
       key: 'actions' as keyof DocumentType | 'actions', // Type assertion for actions
       header: 'Actions',
       render: (document: DocumentType) => (
         <div className="flex space-x-2">
-          <button onClick={(e) => { e.stopPropagation(); openEditForm(document);}} className="p-1 text-blue-600 hover:text-blue-800" title="Edit Document"><Edit3 size={16} /></button>
-          <button onClick={(e) => { e.stopPropagation(); openDeleteConfirm(document);}} className="p-1 text-red-600 hover:text-red-800" title="Delete Document"><Trash2 size={16} /></button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleFavoriteToggle(document, 'document' as FavoriteItemType);
+            }}
+            className={`p-1 ${favoritedItems.get(document.id)?.favoriteId ? 'text-yellow-500' : 'text-gray-400'} hover:text-yellow-600`}
+            title={favoritedItems.get(document.id)?.favoriteId ? "Remove from Favorites" : "Add to Favorites"}
+          >
+            <Star size={16} className={favoritedItems.get(document.id)?.favoriteId ? "fill-current" : ""} />
+          </button>
+          {(role === 'admin' || role === 'super_admin') && (
+            <>
+              <button onClick={(e) => { e.stopPropagation(); openEditForm(document);}} className="p-1 text-blue-600 hover:text-blue-800" title="Edit Document"><Edit3 size={16} /></button>
+              <button onClick={(e) => { e.stopPropagation(); openDeleteConfirm(document);}} className="p-1 text-red-600 hover:text-red-800" title="Delete Document"><Trash2 size={16} /></button>
+            </>
+          )}
         </div>
       ),
     }] : [])
@@ -229,6 +333,63 @@ const DocumentsView: React.FC = () => {
       );
     }
     return null;
+  };
+
+  const handleFavoriteToggle = async (item: DocumentType, itemType: FavoriteItemType) => {
+    if (!isAuthenticated) {
+      setFeedbackMessage("Please log in to manage favorites.");
+      return;
+    }
+
+    const currentStatus = favoritedItems.get(item.id);
+    const isCurrentlyFavorited = !!currentStatus?.favoriteId;
+    
+    // Optimistic UI update
+    const tempFavoritedItems = new Map(favoritedItems);
+    if (isCurrentlyFavorited) {
+      tempFavoritedItems.set(item.id, { favoriteId: undefined });
+    } else {
+      // For optimistic add, we don't have the real favorite_id yet.
+      // We can use a placeholder or handle it by refetching status.
+      // Here, we'll just mark it as favorited and update with real ID later.
+      tempFavoritedItems.set(item.id, { favoriteId: -1 }); // Placeholder for "favorited"
+    }
+    setFavoritedItems(tempFavoritedItems);
+    setFeedbackMessage(null); // Clear previous messages
+
+    try {
+      if (isCurrentlyFavorited && typeof currentStatus?.favoriteId === 'number') {
+        await removeFavoriteApi(item.id, itemType);
+        setFeedbackMessage(`"${item.doc_name}" removed from favorites.`);
+        // UI already updated optimistically for removal, confirm by ensuring it's undefined
+        setFavoritedItems(prev => {
+            const newMap = new Map(prev);
+            newMap.set(item.id, { favoriteId: undefined });
+            return newMap;
+        });
+      } else {
+        const newFavorite = await addFavoriteApi(item.id, itemType);
+        setFavoritedItems(prev => {
+          const newMap = new Map(prev);
+          newMap.set(item.id, { favoriteId: newFavorite.id }); // Update with real ID
+          return newMap;
+        });
+        setFeedbackMessage(`"${item.doc_name}" added to favorites.`);
+      }
+    } catch (error: any) {
+      console.error("Failed to toggle favorite:", error);
+      setFeedbackMessage(error?.response?.data?.msg || error.message || "Failed to update favorite status.");
+      // Revert optimistic update
+      setFavoritedItems(prev => {
+        const newMap = new Map(prev);
+        if (isCurrentlyFavorited) { // Failed to remove, so it's still favorited (revert to original state)
+            newMap.set(item.id, { favoriteId: currentStatus?.favoriteId });
+        } else { // Failed to add, so it's not favorited
+            newMap.set(item.id, { favoriteId: undefined });
+        }
+        return newMap;
+      });
+    }
   };
 
   return (
@@ -259,6 +420,59 @@ const DocumentsView: React.FC = () => {
           onSelectFilter={handleFilterChange}
         />
       )}
+
+      {/* Advanced Filter UI */}
+      <div className="my-4 p-4 border rounded-md bg-gray-50 space-y-4 md:space-y-0 md:flex md:flex-wrap md:items-end md:gap-4">
+        {/* Document Type Filter */}
+        <div className="flex flex-col">
+          <label htmlFor="docTypeFilterInput" className="text-sm font-medium text-gray-700 mb-1">Document Type</label>
+          <input
+            id="docTypeFilterInput"
+            type="text"
+            value={docTypeFilter}
+            onChange={(e) => setDocTypeFilter(e.target.value)}
+            placeholder="e.g., Manual, Guide"
+            className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+          />
+        </div>
+
+        {/* Created At Filter */}
+        <div className="flex flex-col">
+          <label className="text-sm font-medium text-gray-700 mb-1">Created Between</label>
+          <div className="flex items-center gap-2">
+            <input type="date" value={createdFromFilter} onChange={(e) => setCreatedFromFilter(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" />
+            <span className="text-gray-500">and</span>
+            <input type="date" value={createdToFilter} onChange={(e) => setCreatedToFilter(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" />
+          </div>
+        </div>
+        
+        {/* Updated At Filter */}
+        <div className="flex flex-col">
+          <label className="text-sm font-medium text-gray-700 mb-1">Updated Between</label>
+          <div className="flex items-center gap-2">
+            <input type="date" value={updatedFromFilter} onChange={(e) => setUpdatedFromFilter(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" />
+            <span className="text-gray-500">and</span>
+            <input type="date" value={updatedToFilter} onChange={(e) => setUpdatedToFilter(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" />
+          </div>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="flex items-end gap-2 pt-5"> {/* pt-5 to align with labels if inputs are taller */}
+          <button
+            onClick={handleApplyAdvancedFilters}
+            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 text-sm"
+          >
+            Apply Filters
+          </button>
+          <button
+            onClick={handleClearAdvancedFilters}
+            className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 text-sm"
+          >
+            Clear Filters
+          </button>
+        </div>
+      </div>
+
 
       {error && documents.length === 0 && !isLoading ? (
         <ErrorState message={error} onRetry={loadDocuments} />

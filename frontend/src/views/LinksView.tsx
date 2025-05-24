@@ -6,7 +6,11 @@ import {
   fetchSoftware,
   fetchVersionsForSoftware, // For version dropdown
   deleteAdminLink,
-  PaginatedLinksResponse // Import PaginatedLinksResponse
+  PaginatedLinksResponse, // Import PaginatedLinksResponse
+  addFavoriteApi, // Added
+  removeFavoriteApi, // Added
+  getFavoriteStatusApi, // Added
+  FavoriteItemType // Added
 } from '../services/api';
 import {
   Link as LinkType,
@@ -21,7 +25,7 @@ import ErrorState from '../components/ErrorState';
 import { useAuth } from '../context/AuthContext';
 import AdminLinkEntryForm from '../components/admin/AdminLinkEntryForm';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
-import { PlusCircle, Edit3, Trash2, ExternalLink } from 'lucide-react';
+import { PlusCircle, Edit3, Trash2, ExternalLink, Star } from 'lucide-react'; // Added Star
 
 interface OutletContextType {
   searchTerm: string;
@@ -39,6 +43,11 @@ const LinksView: React.FC = () => {
   // Filter State
   const [activeSoftwareId, setActiveSoftwareId] = useState<number | null>(null);
   const [activeVersionId, setActiveVersionId] = useState<number | null>(null);
+
+  // Advanced Filter States
+  const [linkTypeFilter, setLinkTypeFilter] = useState<string>('');
+  const [createdFromFilter, setCreatedFromFilter] = useState<string>('');
+  const [createdToFilter, setCreatedToFilter] = useState<string>('');
   
   // Pagination State
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -62,31 +71,100 @@ const LinksView: React.FC = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
 
+  // Favorite State
+  const [favoritedItems, setFavoritedItems] = useState<Map<number, { favoriteId: number | undefined }>>(new Map());
+
   const loadLinks = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const response: PaginatedLinksResponse = await fetchLinks(
-        activeSoftwareId || undefined,
-        activeVersionId || undefined,
-        currentPage,
-        itemsPerPage,
-        sortBy,
-        sortOrder
-      );
-      setLinks(response.links);
-      setTotalPages(response.total_pages);
-      setTotalLinks(response.total_links);
-      setCurrentPage(response.page);
-      setItemsPerPage(response.per_page);
-    } catch (err: any) {
-      setLinks([]); // Add this line
-      setError(err.message || 'Failed to fetch links.');
-      console.error("Error fetching links:", err);
-    } finally {
-      setIsLoading(false);
+  setIsLoading(true);
+  setError(null);
+  // setFeedbackMessage(null); // Optional: Clear previous feedback if needed
+
+  try {
+    const response: PaginatedLinksResponse = await fetchLinks(
+      activeSoftwareId || undefined,
+      activeVersionId || undefined,
+      currentPage,
+      itemsPerPage,
+      sortBy,
+      sortOrder,
+      linkTypeFilter || undefined,
+      createdFromFilter || undefined,
+      createdToFilter || undefined
+    );
+
+    setLinks(response.links);
+    setTotalPages(response.total_pages);
+    setTotalLinks(response.total_links);
+    setCurrentPage(response.page);
+    setItemsPerPage(response.per_page);
+
+    // Initialize favoritedItems directly from fetched links (SUCCESS PATH)
+    const newFavoritedItems = new Map<number, { favoriteId: number | undefined }>();
+    if (isAuthenticated && response.links && response.links.length > 0) {
+      for (const link of response.links) {
+        if (link.favorite_id) {
+          newFavoritedItems.set(link.id, { favoriteId: link.favorite_id });
+        } else {
+          newFavoritedItems.set(link.id, { favoriteId: undefined });
+        }
+      }
     }
-  }, [activeSoftwareId, activeVersionId, currentPage, itemsPerPage, sortBy, sortOrder]);
+    setFavoritedItems(newFavoritedItems);
+
+  } catch (err: any) { // This is the SINGLE, CORRECT catch block
+    console.error("Failed to load links:", err);
+    setLinks([]);
+    setError(err.message || 'Failed to fetch links. Please try again later.');
+
+    // Reset pagination and other related states
+    setTotalPages(0);
+    setTotalLinks(0);
+    // setCurrentPage(1); // Optionally reset to page 1
+    // setItemsPerPage(10); // Optionally reset per_page
+
+    // Clear favoritedItems as the link list is now empty or inconsistent
+    setFavoritedItems(new Map());
+  } finally {
+    setIsLoading(false);
+  }
+}, [
+  activeSoftwareId,
+  activeVersionId,
+  currentPage,
+  itemsPerPage,
+  sortBy,
+  sortOrder,
+  linkTypeFilter,
+  createdFromFilter,
+  createdToFilter,
+  isAuthenticated
+]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setFavoritedItems(new Map()); 
+    }
+    // loadLinks will be called by the main useEffect watching `loadLinks` itself.
+  }, [isAuthenticated]);
+
+  // REMOVED N+1 useEffect for getFavoriteStatusApi calls
+
+  // Handler for applying advanced filters
+  const handleApplyAdvancedFilters = () => {
+    setCurrentPage(1); // This will trigger loadLinks due to dependency
+  };
+
+  // Handler for clearing advanced filters
+  const handleClearAdvancedFilters = () => {
+    setLinkTypeFilter('');
+    setCreatedFromFilter('');
+    setCreatedToFilter('');
+    // Consider if activeSoftwareId and activeVersionId should be cleared here too.
+    // For now, only clearing new advanced filters as per instruction.
+    // setActiveSoftwareId(null); 
+    // setActiveVersionId(null);
+    setCurrentPage(1); // This will trigger loadLinks
+  };
 
   useEffect(() => {
     const loadSoftwareAndInitialLinks = async () => {
@@ -217,7 +295,7 @@ const LinksView: React.FC = () => {
       link.title.toLowerCase().includes(lowerSearchTerm) ||
       (link.description || '').toLowerCase().includes(lowerSearchTerm) ||
       (link.software_name || '').toLowerCase().includes(lowerSearchTerm) ||
-      (link.version_name || '').toLowerCase().includes(lowerSearchTerm)
+      (link.version_number || '').toLowerCase().includes(lowerSearchTerm)
     );
   }, [links, searchTerm]);
 
@@ -247,18 +325,86 @@ const LinksView: React.FC = () => {
         </a>
       ) 
     },
-    { key: 'created_at', header: 'Created At', sortable: true, render: (link) => link.created_at ? new Date(link.created_at).toLocaleDateString() : '-' },
-    ...(isAuthenticated && (role === 'admin' || role === 'super_admin') ? [{
+    { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: (link) => link.uploaded_by_username || 'N/A' },
+    { key: 'updated_by_username', header: 'Updated By', sortable: false, render: (link) => link.updated_by_username || 'N/A' },
+    { key: 'created_at', header: 'Created At', sortable: true, render: (link) => link.created_at ? new Date(link.created_at).toLocaleDateString('en-CA') : '-' },
+    { key: 'updated_at', header: 'Updated At', sortable: true, render: (link) => link.updated_at ? new Date(link.updated_at).toLocaleDateString('en-CA') : '-' },
+    ...(isAuthenticated ? [{ // Changed condition to isAuthenticated for favorite button
       key: 'actions' as keyof LinkType | 'actions',
       header: 'Actions',
       render: (link: LinkType) => (
         <div className="flex space-x-2">
-          <button onClick={(e) => { e.stopPropagation(); openEditForm(link);}} className="p-1 text-blue-600 hover:text-blue-800" title="Edit Link"><Edit3 size={16} /></button>
-          <button onClick={(e) => { e.stopPropagation(); openDeleteConfirm(link);}} className="p-1 text-red-600 hover:text-red-800" title="Delete Link"><Trash2 size={16} /></button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleFavoriteToggle(link, 'link' as FavoriteItemType);
+            }}
+            className={`p-1 ${favoritedItems.get(link.id)?.favoriteId ? 'text-yellow-500' : 'text-gray-400'} hover:text-yellow-600`}
+            title={favoritedItems.get(link.id)?.favoriteId ? "Remove from Favorites" : "Add to Favorites"}
+          >
+            <Star size={16} className={favoritedItems.get(link.id)?.favoriteId ? "fill-current" : ""} />
+          </button>
+          {(role === 'admin' || role === 'super_admin') && (
+            <>
+              <button onClick={(e) => { e.stopPropagation(); openEditForm(link);}} className="p-1 text-blue-600 hover:text-blue-800" title="Edit Link"><Edit3 size={16} /></button>
+              <button onClick={(e) => { e.stopPropagation(); openDeleteConfirm(link);}} className="p-1 text-red-600 hover:text-red-800" title="Delete Link"><Trash2 size={16} /></button>
+            </>
+          )}
         </div>
       ),
     }] : [])
   ];
+
+  const handleFavoriteToggle = async (item: LinkType, itemType: FavoriteItemType) => {
+    if (!isAuthenticated) {
+      setFeedbackMessage("Please log in to manage favorites.");
+      return;
+    }
+
+    const currentStatus = favoritedItems.get(item.id);
+    const isCurrentlyFavorited = !!currentStatus?.favoriteId;
+    
+    const tempFavoritedItems = new Map(favoritedItems);
+    if (isCurrentlyFavorited) {
+      tempFavoritedItems.set(item.id, { favoriteId: undefined });
+    } else {
+      tempFavoritedItems.set(item.id, { favoriteId: -1 }); // Placeholder
+    }
+    setFavoritedItems(tempFavoritedItems);
+    setFeedbackMessage(null);
+
+    try {
+      if (isCurrentlyFavorited && typeof currentStatus?.favoriteId === 'number') {
+        await removeFavoriteApi(item.id, itemType);
+        setFeedbackMessage(`"${item.title}" removed from favorites.`);
+        setFavoritedItems(prev => {
+            const newMap = new Map(prev);
+            newMap.set(item.id, { favoriteId: undefined });
+            return newMap;
+        });
+      } else {
+        const newFavorite = await addFavoriteApi(item.id, itemType);
+        setFavoritedItems(prev => {
+          const newMap = new Map(prev);
+          newMap.set(item.id, { favoriteId: newFavorite.id });
+          return newMap;
+        });
+        setFeedbackMessage(`"${item.title}" added to favorites.`);
+      }
+    } catch (error: any) {
+      console.error("Failed to toggle favorite:", error);
+      setFeedbackMessage(error?.response?.data?.msg || error.message || "Failed to update favorite status.");
+      setFavoritedItems(prev => {
+        const newMap = new Map(prev);
+        if (isCurrentlyFavorited) {
+            newMap.set(item.id, { favoriteId: currentStatus?.favoriteId });
+        } else {
+            newMap.set(item.id, { favoriteId: undefined });
+        }
+        return newMap;
+      });
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -319,6 +465,61 @@ const LinksView: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Advanced Filter UI */}
+      <div className="my-4 p-4 border rounded-md bg-gray-50 space-y-4 md:space-y-0 md:flex md:flex-wrap md:items-end md:gap-4">
+        {/* Link Type Filter */}
+        <div className="flex flex-col">
+          <label htmlFor="linkTypeFilterSelect" className="text-sm font-medium text-gray-700 mb-1">Link Type</label>
+          <select
+            id="linkTypeFilterSelect"
+            value={linkTypeFilter}
+            onChange={(e) => setLinkTypeFilter(e.target.value)}
+            className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+          >
+            <option value="">All</option>
+            <option value="external">External</option>
+            <option value="uploaded">Uploaded File</option>
+          </select>
+        </div>
+
+        {/* Created At Filter */}
+        <div className="flex flex-col">
+          <label className="text-sm font-medium text-gray-700 mb-1">Created Between</label>
+          <div className="flex items-center gap-2">
+            <input 
+              type="date" 
+              value={createdFromFilter} 
+              onChange={(e) => setCreatedFromFilter(e.target.value)} 
+              className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" 
+            />
+            <span className="text-gray-500">and</span>
+            <input 
+              type="date" 
+              value={createdToFilter} 
+              onChange={(e) => setCreatedToFilter(e.target.value)} 
+              className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" 
+            />
+          </div>
+        </div>
+        
+        {/* Action Buttons */}
+        <div className="flex items-end gap-2 pt-5"> {/* pt-5 to align with labels if inputs are taller */}
+          <button
+            onClick={handleApplyAdvancedFilters}
+            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 text-sm"
+          >
+            Apply Filters
+          </button>
+          <button
+            onClick={handleClearAdvancedFilters}
+            className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 text-sm"
+          >
+            Clear Filters
+          </button>
+        </div>
+      </div>
+
 
       {error && links.length === 0 && !isLoading ? (
         <ErrorState message={error} onRetry={loadLinks} />

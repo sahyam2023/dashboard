@@ -8,10 +8,11 @@ import {
   MoreHorizontal,
   UploadCloud as UploadIcon, // <-- Import an icon for Upload
   Settings as SettingsIcon, // Icon for "Manage Versions"
-  // LogIn as LogInIcon, // Keep if you want login/register here, but usually in Header
-  // UserPlus as RegisterIcon // Keep if you want login/register here
+  Star as StarIcon // Added for Favorites
+  // LogIn as LogInIcon, 
+  // UserPlus as RegisterIcon 
 } from 'lucide-react';
-import { useAuth } from '../context/AuthContext'; // <-- Import useAuth hook
+import { useAuth } from '../context/AuthContext'; 
 
 interface SidebarProps {
   collapsed: boolean;
@@ -55,6 +56,12 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       path: '/misc',
       label: 'Misc',
       icon: (isCollapsed) => <MoreHorizontal size={isCollapsed ? 24 : 20} />,
+    },
+    {
+      path: '/favorites',
+      label: 'Favorites',
+      icon: (isCollapsed) => <StarIcon size={isCollapsed ? 24 : 20} />,
+      requiresAuth: true,
     },
     // Admin-specific links
     {

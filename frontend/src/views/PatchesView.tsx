@@ -1,10 +1,19 @@
 // src/views/PatchesView.tsx
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { ExternalLink, PlusCircle, Edit3, Trash2 } from 'lucide-react';
-import { fetchPatches, fetchSoftware, deleteAdminPatch, PaginatedPatchesResponse } from '../services/api'; // Import PaginatedPatchesResponse
+import { ExternalLink, PlusCircle, Edit3, Trash2, Star } from 'lucide-react';
+import { 
+  fetchPatches, 
+  fetchSoftware, 
+  deleteAdminPatch, 
+  PaginatedPatchesResponse,
+  addFavoriteApi, // Added
+  removeFavoriteApi, // Added
+  getFavoriteStatusApi, // Added
+  FavoriteItemType // Added
+} from '../services/api';
 import { Patch as PatchType, Software } from '../types';
-import DataTable, { ColumnDef } from '../components/DataTable'; // Import DataTable and ColumnDef
+import DataTable, { ColumnDef } from '../components/DataTable';
 import FilterTabs from '../components/FilterTabs';
 import LoadingState from '../components/LoadingState'; // Can be replaced by DataTable's isLoading
 import ErrorState from '../components/ErrorState';
@@ -24,6 +33,11 @@ const PatchesView: React.FC = () => {
   const [patches, setPatches] = useState<PatchType[]>([]);
   const [softwareList, setSoftwareList] = useState<Software[]>([]);
   const [selectedSoftwareId, setSelectedSoftwareId] = useState<number | null>(null); // Filter state
+
+  // Advanced Filter States
+  const [releaseFromFilter, setReleaseFromFilter] = useState<string>('');
+  const [releaseToFilter, setReleaseToFilter] = useState<string>('');
+  const [patchedByDeveloperFilter, setPatchedByDeveloperFilter] = useState<string>('');
   
   // Pagination State
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -47,30 +61,96 @@ const PatchesView: React.FC = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
 
+  // Favorite State
+  const [favoritedItems, setFavoritedItems] = useState<Map<number, { favoriteId: number | undefined }>>(new Map());
+
   const loadPatches = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    // setFeedbackMessage(null); // Clear previous feedback
-    try {
-      const response: PaginatedPatchesResponse = await fetchPatches(
-        selectedSoftwareId === null ? undefined : selectedSoftwareId,
-        currentPage,
-        itemsPerPage,
-        sortBy,
-        sortOrder
-      );
-      setPatches(response.patches);
-      setTotalPages(response.total_pages);
-      setTotalPatches(response.total_patches);
-      setCurrentPage(response.page); 
-      setItemsPerPage(response.per_page);
-    } catch (err: any) {
-      setPatches([]); // Add this line
-      setError(err.message || 'Failed to fetch patches.');
-    } finally {
-      setIsLoading(false);
+  setIsLoading(true);
+  setError(null);
+  // setFeedbackMessage(null); // Optional: Clear previous feedback if needed
+
+  try {
+    const response: PaginatedPatchesResponse = await fetchPatches(
+      selectedSoftwareId === null ? undefined : selectedSoftwareId,
+      currentPage,
+      itemsPerPage,
+      sortBy,
+      sortOrder,
+      releaseFromFilter || undefined,
+      releaseToFilter || undefined,
+      patchedByDeveloperFilter || undefined
+    );
+
+    setPatches(response.patches);
+    setTotalPages(response.total_pages);
+    setTotalPatches(response.total_patches);
+    setCurrentPage(response.page);
+    setItemsPerPage(response.per_page);
+
+    // Initialize favoritedItems directly from fetched patches (SUCCESS PATH)
+    const newFavoritedItems = new Map<number, { favoriteId: number | undefined }>();
+    if (isAuthenticated && response.patches && response.patches.length > 0) {
+      for (const patch of response.patches) {
+        if (patch.favorite_id) {
+          newFavoritedItems.set(patch.id, { favoriteId: patch.favorite_id });
+        } else {
+          newFavoritedItems.set(patch.id, { favoriteId: undefined });
+        }
+      }
     }
-  }, [selectedSoftwareId, currentPage, itemsPerPage, sortBy, sortOrder]);
+    setFavoritedItems(newFavoritedItems);
+
+  } catch (err: any) { // This is the SINGLE, CORRECT catch block
+    console.error("Failed to load patches:", err);
+    setPatches([]);
+    setError(err.message || 'Failed to fetch patches. Please try again later.');
+
+    // Reset pagination and other related states
+    setTotalPages(0);
+    setTotalPatches(0);
+    // setCurrentPage(1); // Optionally reset to page 1
+    // setItemsPerPage(10); // Optionally reset per_page
+
+    // Clear favoritedItems as the patch list is now empty or inconsistent
+    setFavoritedItems(new Map());
+  } finally {
+    setIsLoading(false);
+  }
+}, [
+  selectedSoftwareId,
+  currentPage,
+  itemsPerPage,
+  sortBy,
+  sortOrder,
+  releaseFromFilter,
+  releaseToFilter,
+  patchedByDeveloperFilter,
+  isAuthenticated
+]);
+ // Added isAuthenticated
+  
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setFavoritedItems(new Map()); 
+    }
+    // loadPatches will be called by the main useEffect watching `loadPatches` itself.
+  }, [isAuthenticated]);
+
+  // REMOVED N+1 useEffect for getFavoriteStatusApi calls
+
+  // Handler for applying advanced filters
+  const handleApplyAdvancedFilters = () => {
+    setCurrentPage(1); // This will trigger loadPatches due to dependency
+  };
+
+  // Handler for clearing advanced filters
+  const handleClearAdvancedFilters = () => {
+    setReleaseFromFilter('');
+    setReleaseToFilter('');
+    setPatchedByDeveloperFilter('');
+    // setSelectedSoftwareId(null); // Optional: Clear software tab filter as well
+    setCurrentPage(1); // This will trigger loadPatches
+  };
 
   useEffect(() => {
     const loadSoftwareForFilters = async () => {
@@ -185,6 +265,7 @@ const PatchesView: React.FC = () => {
     { key: 'patch_name', header: 'Patch Name', sortable: true },
     { key: 'software_name', header: 'Software', sortable: true },
     { key: 'version_number', header: 'Version', sortable: true },
+    { key: 'patch_by_developer', header: 'Patch Developer', sortable: true, render: (patch) => patch.patch_by_developer || '-' },
     { key: 'description', header: 'Description', render: (patch: PatchType) => (
         <span className="text-sm text-gray-600 block max-w-xs truncate" title={patch.description || ''}>
           {patch.description || '-'}
@@ -207,18 +288,86 @@ const PatchesView: React.FC = () => {
         </a>
       )
     },
+    { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: (patch) => patch.uploaded_by_username || 'N/A' },
+    { key: 'updated_by_username', header: 'Updated By', sortable: false, render: (patch) => patch.updated_by_username || 'N/A' }, // Not typically sorted
     { key: 'created_at', header: 'Created At', sortable: true, render: (patch) => formatDate(patch.created_at) },
-    ...(isAuthenticated && (role === 'admin' || role === 'super_admin') ? [{
+    { key: 'updated_at', header: 'Updated At', sortable: true, render: (patch) => formatDate(patch.updated_at) },
+    ...(isAuthenticated ? [{ // Changed condition to isAuthenticated for favorite button
       key: 'actions' as keyof PatchType | 'actions',
       header: 'Actions',
       render: (patch: PatchType) => (
         <div className="flex space-x-2">
-          <button onClick={(e) => { e.stopPropagation(); openEditForm(patch);}} className="p-1 text-blue-600 hover:text-blue-800" title="Edit Patch"><Edit3 size={16} /></button>
-          <button onClick={(e) => { e.stopPropagation(); openDeleteConfirm(patch);}} className="p-1 text-red-600 hover:text-red-800" title="Delete Patch"><Trash2 size={16} /></button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleFavoriteToggle(patch, 'patch' as FavoriteItemType);
+            }}
+            className={`p-1 ${favoritedItems.get(patch.id)?.favoriteId ? 'text-yellow-500' : 'text-gray-400'} hover:text-yellow-600`}
+            title={favoritedItems.get(patch.id)?.favoriteId ? "Remove from Favorites" : "Add to Favorites"}
+          >
+            <Star size={16} className={favoritedItems.get(patch.id)?.favoriteId ? "fill-current" : ""} />
+          </button>
+          {(role === 'admin' || role === 'super_admin') && (
+            <>
+              <button onClick={(e) => { e.stopPropagation(); openEditForm(patch);}} className="p-1 text-blue-600 hover:text-blue-800" title="Edit Patch"><Edit3 size={16} /></button>
+              <button onClick={(e) => { e.stopPropagation(); openDeleteConfirm(patch);}} className="p-1 text-red-600 hover:text-red-800" title="Delete Patch"><Trash2 size={16} /></button>
+            </>
+          )}
         </div>
       ),
     }] : [])
   ];
+
+  const handleFavoriteToggle = async (item: PatchType, itemType: FavoriteItemType) => {
+    if (!isAuthenticated) {
+      setFeedbackMessage("Please log in to manage favorites.");
+      return;
+    }
+
+    const currentStatus = favoritedItems.get(item.id);
+    const isCurrentlyFavorited = !!currentStatus?.favoriteId;
+    
+    const tempFavoritedItems = new Map(favoritedItems);
+    if (isCurrentlyFavorited) {
+      tempFavoritedItems.set(item.id, { favoriteId: undefined });
+    } else {
+      tempFavoritedItems.set(item.id, { favoriteId: -1 }); // Placeholder
+    }
+    setFavoritedItems(tempFavoritedItems);
+    setFeedbackMessage(null);
+
+    try {
+      if (isCurrentlyFavorited && typeof currentStatus?.favoriteId === 'number') {
+        await removeFavoriteApi(item.id, itemType);
+        setFeedbackMessage(`"${item.patch_name}" removed from favorites.`);
+        setFavoritedItems(prev => {
+            const newMap = new Map(prev);
+            newMap.set(item.id, { favoriteId: undefined });
+            return newMap;
+        });
+      } else {
+        const newFavorite = await addFavoriteApi(item.id, itemType);
+        setFavoritedItems(prev => {
+          const newMap = new Map(prev);
+          newMap.set(item.id, { favoriteId: newFavorite.id });
+          return newMap;
+        });
+        setFeedbackMessage(`"${item.patch_name}" added to favorites.`);
+      }
+    } catch (error: any) {
+      console.error("Failed to toggle favorite:", error);
+      setFeedbackMessage(error?.response?.data?.msg || error.message || "Failed to update favorite status.");
+      setFavoritedItems(prev => {
+        const newMap = new Map(prev);
+        if (isCurrentlyFavorited) {
+            newMap.set(item.id, { favoriteId: currentStatus?.favoriteId });
+        } else {
+            newMap.set(item.id, { favoriteId: undefined });
+        }
+        return newMap;
+      });
+    }
+  };
   
   return (
     <div className="space-y-6">
@@ -258,6 +407,48 @@ const PatchesView: React.FC = () => {
           onSelectFilter={handleFilterChange}
         />
       )}
+
+      {/* Advanced Filter UI */}
+      <div className="my-4 p-4 border rounded-md bg-gray-50 space-y-4 md:space-y-0 md:flex md:flex-wrap md:items-end md:gap-4">
+        {/* Patched By Developer Filter */}
+        <div className="flex flex-col">
+          <label htmlFor="patchedByDeveloperFilterInput" className="text-sm font-medium text-gray-700 mb-1">Developer</label>
+          <input
+            id="patchedByDeveloperFilterInput"
+            type="text"
+            value={patchedByDeveloperFilter}
+            onChange={(e) => setPatchedByDeveloperFilter(e.target.value)}
+            placeholder="e.g., John Doe"
+            className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+          />
+        </div>
+
+        {/* Release Date Filter */}
+        <div className="flex flex-col">
+          <label className="text-sm font-medium text-gray-700 mb-1">Released Between</label>
+          <div className="flex items-center gap-2">
+            <input type="date" value={releaseFromFilter} onChange={(e) => setReleaseFromFilter(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" />
+            <span className="text-gray-500">and</span>
+            <input type="date" value={releaseToFilter} onChange={(e) => setReleaseToFilter(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" />
+          </div>
+        </div>
+        
+        {/* Action Buttons */}
+        <div className="flex items-end gap-2 pt-5"> {/* pt-5 to align with labels if inputs are taller */}
+          <button
+            onClick={handleApplyAdvancedFilters}
+            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 text-sm"
+          >
+            Apply Filters
+          </button>
+          <button
+            onClick={handleClearAdvancedFilters}
+            className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 text-sm"
+          >
+            Clear Filters
+          </button>
+        </div>
+      </div>
 
       {error && patches.length === 0 && !isLoading ? (
         <ErrorState message={error} onRetry={loadPatches} />

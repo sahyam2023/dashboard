@@ -13,28 +13,29 @@ interface HeaderProps {
 const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch }) => {
   const [searchValue, setSearchValue] = useState('');
   const [isFocused, setIsFocused] = useState(false);
-  const { isAuthenticated, username, role, logout } = useAuth(); // <-- Corrected: userRole to role
+  const { isAuthenticated, username, role, logout, openAuthModal } = useAuth(); // <-- Added openAuthModal
   const navigate = useNavigate(); // <-- Hook for navigation
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSearch(searchValue);
-    // Optional: Navigate to search results page if search term is not empty
-    // if (searchValue.trim()) {
-    //   navigate(`/search?q=${encodeURIComponent(searchValue.trim())}`);
-    // }
+    // REMOVE: onSearch(searchValue); 
+    if (searchValue.trim()) {
+      navigate(`/search?q=${encodeURIComponent(searchValue.trim())}`);
+    }
   };
 
   const clearSearch = () => {
     setSearchValue('');
-    onSearch('');
+    // REMOVE: onSearch('');
     // Optional: Navigate away from search results if currently there
-    // if (location.pathname === '/search') navigate('/documents');
+    // This depends on desired UX, for now, just clear the input.
+    // if (location.pathname === '/search') navigate('/documents'); 
   };
 
   const handleLogout = () => {
     logout(); // Call logout from auth context
-    navigate('/login'); // Redirect to login page after logout
+    navigate('/'); // 
+ // Redirect to login page after logout
   };
 
   return (
@@ -130,29 +131,22 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
             </>
           ) : (
             <>
-              {/* Login Link */}
-              <Link
-                to="/login"
+              {/* Login / Sign Up Button */}
+              <button
+                onClick={() => openAuthModal('login')}
                 className="hidden sm:inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors"
               >
                  <LogIn size={16} className="mr-1.5" />
-                Sign in
-              </Link>
-              {/* Register Link (Optional, maybe less prominent) */}
-               <Link
-                to="/register"
-                className="inline-flex items-center px-3 py-1.5 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-colors"
-              >
-                Register
-              </Link>
-              {/* Mobile Login Icon Link */}
-              <Link
-                to="/login"
+                Login / Sign Up
+              </button>
+              {/* Mobile Login / Sign Up Icon Button */}
+              <button
+                onClick={() => openAuthModal('login')}
                 className="sm:hidden p-2 rounded-md text-gray-500 hover:text-gray-700 hover:bg-gray-100"
-                aria-label="Sign in"
+                aria-label="Login / Sign Up"
               >
                 <LogIn size={20} />
-              </Link>
+              </button>
             </>
           )}
         </div>

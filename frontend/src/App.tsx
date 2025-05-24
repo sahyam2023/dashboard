@@ -9,6 +9,7 @@ import MiscView from './views/MiscView';
 import SearchResultsView from './views/SearchResultsView';
 import LoginPage from './views/LoginPage';
 import RegisterPage from './views/RegisterPage';
+import FavoritesView from './views/FavoritesView'; // Added FavoritesView
 
 // Optional: You might create this later for better route protection
 // import ProtectedRoute from './components/ProtectedRoute';
@@ -19,9 +20,11 @@ import AdminDashboardPage from './views/AdminDashboardPage';
 import AdminVersionsPage from './views/AdminVersionsPage'; // Import the new AdminVersionsPage
 import AuditLogViewer from './components/admin/AuditLogViewer'; 
 import { useAuth } from './context/AuthContext'; 
+import AuthModal from './components/shared/AuthModal'; // Import AuthModal
 
 function App() {
   const auth = useAuth(); // Get auth context
+  const { isAuthModalOpen, closeAuthModal, authModalView } = useAuth(); // Get modal state and functions
 
   return (
     <BrowserRouter>
@@ -39,6 +42,7 @@ function App() {
           <Route path="misc" element={<MiscView />} />
           <Route path="search" element={<SearchResultsView />} />
           <Route path="profile" element={<UserProfilePage />} />
+          <Route path="favorites" element={<FavoritesView />} /> {/* Added Favorites Route */}
           
           {/* Admin and Super Admin Routes */}
           <Route 
@@ -97,6 +101,12 @@ function App() {
         {/* Optional: Catch-all for any unmatched routes */}
         {/* <Route path="*" element={<Navigate to="/" />} /> */}
       </Routes>
+      {/* Render AuthModal globally */}
+      <AuthModal 
+        isOpen={isAuthModalOpen} 
+        onClose={closeAuthModal} 
+        initialView={authModalView} 
+      />
     </BrowserRouter>
   );
 }

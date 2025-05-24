@@ -10,7 +10,8 @@ const UserProfilePage: React.FC = () => {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
-  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null); // General password change errors
+  const [newPasswordError, setNewPasswordError] = useState<string>(''); // For new password strength
   const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null);
 
   // State for Update Email form
@@ -23,10 +24,42 @@ const UserProfilePage: React.FC = () => {
     return <Navigate to="/login" replace />;
   }
 
+  const validatePassword = (pwd: string): string => {
+    if (pwd.length < 8) {
+      return "Password must be at least 8 characters long.";
+    }
+    if (!/[A-Z]/.test(pwd)) {
+      return "Password must include at least one uppercase letter.";
+    }
+    if (!/[a-z]/.test(pwd)) {
+      return "Password must include at least one lowercase letter.";
+    }
+    if (!/[0-9]/.test(pwd)) {
+      return "Password must include at least one digit.";
+    }
+    return ""; // Empty string means password is valid
+  };
+
+  const handleNewPasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newPwd = e.target.value;
+    setNewPassword(newPwd);
+    const validationError = validatePassword(newPwd);
+    setNewPasswordError(validationError);
+  };
+
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
-    setPasswordError(null);
+    setPasswordError(null); // Clear general errors
     setPasswordSuccess(null);
+    
+    // Validate new password strength first
+    const currentNewPasswordError = validatePassword(newPassword);
+    if (currentNewPasswordError) {
+      setNewPasswordError(currentNewPasswordError);
+      return; // Prevent submission
+    } else {
+      setNewPasswordError(''); // Clear specific new password error if valid
+    }
 
     if (!currentPassword || !newPassword || !confirmNewPassword) {
       setPasswordError('All password fields are required.');
@@ -43,8 +76,15 @@ const UserProfilePage: React.FC = () => {
       setCurrentPassword('');
       setNewPassword('');
       setConfirmNewPassword('');
+      setNewPasswordError(''); // Clear strength error on success
     } catch (error: any) {
-      setPasswordError(error.message || 'Failed to change password.');
+      // Check if the backend error is about password strength
+      const backendMsg = error.message?.toLowerCase() || '';
+      if (backendMsg.includes("password must") || backendMsg.includes("password should")) {
+        setNewPasswordError(error.message); // Show backend strength error for new password
+      } else {
+        setPasswordError(error.message || 'Failed to change password.');
+      }
     }
   };
 
@@ -104,9 +144,12 @@ const UserProfilePage: React.FC = () => {
                 type="password"
                 id="newPassword"
                 value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
+                onChange={handleNewPasswordChange} // Use new handler
                 className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
               />
+              {newPasswordError && (
+                <p className="mt-2 text-sm text-red-600">{newPasswordError}</p>
+              )}
             </div>
             <div className="mb-6">
               <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="confirmNewPassword">

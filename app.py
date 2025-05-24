@@ -3175,95 +3175,98 @@ if __name__ == '__main__':
 @jwt_required()
 @admin_required
 def get_audit_logs():
-    try:
+    try: # Outer try block starts here
         db = get_db()
 
         # Pagination parameters
         page = request.args.get('page', default=1, type=int)
-        per_page = request.args.get('per_page', default=10, type=int)
+        per_page = request.args.get('per_page', default=10, type=int) # CORRECTED INDENTATION
 
         # Sorting parameters
         sort_by = request.args.get('sort_by', default='timestamp', type=str)
-    sort_order = request.args.get('sort_order', default='desc', type=str).lower()
+        sort_order = request.args.get('sort_order', default='desc', type=str).lower()
 
-    # Filtering parameters
-    filter_user_id = request.args.get('user_id', type=int)
-    filter_username = request.args.get('username', type=str)
-    filter_action_type = request.args.get('action_type', type=str)
-    filter_target_table = request.args.get('target_table', type=str)
-    filter_date_from = request.args.get('date_from', type=str) # Expected format: YYYY-MM-DD
-    filter_date_to = request.args.get('date_to', type=str)     # Expected format: YYYY-MM-DD
+        # Filtering parameters
+        filter_user_id = request.args.get('user_id', type=int)
+        filter_username = request.args.get('username', type=str)
+        filter_action_type = request.args.get('action_type', type=str)
+        filter_target_table = request.args.get('target_table', type=str)
+        filter_date_from = request.args.get('date_from', type=str) # Expected format: YYYY-MM-DD
+        filter_date_to = request.args.get('date_to', type=str)     # Expected format: YYYY-MM-DD
 
-    # Validate parameters
-    if page <= 0: page = 1
-    if per_page <= 0: per_page = 10
-    if per_page > 100: per_page = 100 # Max per page
+        # Validate parameters
+        if page <= 0: page = 1
+        if per_page <= 0: per_page = 10
+        if per_page > 100: per_page = 100 # Max per page
 
-    allowed_sort_by = ['id', 'user_id', 'username', 'action_type', 'target_table', 'target_id', 'timestamp']
-    if sort_by not in allowed_sort_by:
-        sort_by = 'timestamp'
-    if sort_order not in ['asc', 'desc']:
-        sort_order = 'desc'
+        allowed_sort_by = ['id', 'user_id', 'username', 'action_type', 'target_table', 'target_id', 'timestamp']
+        if sort_by not in allowed_sort_by:
+            sort_by = 'timestamp'
+        if sort_order not in ['asc', 'desc']:
+            sort_order = 'desc'
 
-    # Build query
-    query_params = []
-    where_clauses = []
+        # Build query
+        query_params = []
+        where_clauses = []
 
-    base_query = "SELECT id, user_id, username, action_type, target_table, target_id, details, timestamp FROM audit_logs"
-    count_query = "SELECT COUNT(*) as count FROM audit_logs"
+        base_query = "SELECT id, user_id, username, action_type, target_table, target_id, details, timestamp FROM audit_logs"
+        count_query = "SELECT COUNT(*) as count FROM audit_logs"
 
-    if filter_user_id is not None:
-        where_clauses.append("user_id = ?")
-        query_params.append(filter_user_id)
-    if filter_username:
-        where_clauses.append("LOWER(username) LIKE ?")
-        query_params.append(f"%{filter_username.lower()}%")
-    if filter_action_type:
-        where_clauses.append("action_type = ?")
-        query_params.append(filter_action_type)
-    if filter_target_table:
-        where_clauses.append("target_table = ?")
-        query_params.append(filter_target_table)
-    if filter_date_from:
+        if filter_user_id is not None:
+            where_clauses.append("user_id = ?")
+            query_params.append(filter_user_id)
+        if filter_username:
+            where_clauses.append("LOWER(username) LIKE ?")
+            query_params.append(f"%{filter_username.lower()}%")
+        if filter_action_type:
+            where_clauses.append("action_type = ?")
+            query_params.append(filter_action_type)
+        if filter_target_table:
+            where_clauses.append("target_table = ?")
+            query_params.append(filter_target_table)
+        if filter_date_from:
+            try:
+                datetime.strptime(filter_date_from, '%Y-%m-%d')
+                where_clauses.append("date(timestamp) >= date(?)")
+                query_params.append(filter_date_from)
+            except ValueError:
+                return jsonify(msg="Invalid date_from format. Expected YYYY-MM-DD."), 400
+        if filter_date_to:
+            try:
+                datetime.strptime(filter_date_to, '%Y-%m-%d')
+                where_clauses.append("date(timestamp) <= date(?)")
+                query_params.append(filter_date_to)
+            except ValueError:
+                return jsonify(msg="Invalid date_to format. Expected YYYY-MM-DD."), 400
+
+        if where_clauses:
+            conditions = " AND ".join(where_clauses)
+            base_query += f" WHERE {conditions}"
+            count_query += f" WHERE {conditions}"
+
+        # Get total count
         try:
-            # Validate date format
-            datetime.strptime(filter_date_from, '%Y-%m-%d')
-            where_clauses.append("date(timestamp) >= date(?)") # Use date() for comparison
-            query_params.append(filter_date_from)
-        except ValueError:
-            return jsonify(msg="Invalid date_from format. Expected YYYY-MM-DD."), 400
-    if filter_date_to:
-        try:
-            # Validate date format
-            datetime.strptime(filter_date_to, '%Y-%m-%d')
-            where_clauses.append("date(timestamp) <= date(?)") # Use date() for comparison
-            query_params.append(filter_date_to)
-        except ValueError:
-            return jsonify(msg="Invalid date_to format. Expected YYYY-MM-DD."), 400
+            total_logs_cursor = db.execute(count_query, tuple(query_params))
+            total_logs_result = total_logs_cursor.fetchone()
+            if total_logs_result is None: # Defensive check
+                app.logger.error("Failed to fetch audit log count: query returned None.")
+                return jsonify(msg="Error fetching audit log count: No result from count query."), 500
+            total_logs = total_logs_result['count']
+        except sqlite3.Error as e:
+            app.logger.error(f"Database error fetching audit log count: {e}")
+            return jsonify(msg=f"Database error fetching audit log count: {e}"), 500
+        except KeyError: # If 'count' key is missing from the result
+            app.logger.error("Failed to fetch audit log count: 'count' key missing from result.")
+            return jsonify(msg="Error fetching audit log count: Malformed count query result."), 500
 
-    if where_clauses:
-        conditions = " AND ".join(where_clauses)
-        base_query += f" WHERE {conditions}"
-        count_query += f" WHERE {conditions}"
 
-    # Get total count
-    try:
-        total_logs_cursor = db.execute(count_query, tuple(query_params))
-        total_logs = total_logs_cursor.fetchone()['count']
-    except sqlite3.Error as e:
-        app.logger.error(f"Error fetching audit log count: {e}")
-        return jsonify(msg=f"Error fetching audit log count: {e}"), 500
-
-    total_pages = math.ceil(total_logs / per_page) if total_logs > 0 else 1
-    offset = (page - 1) * per_page
-
-    # Ensure page is not out of bounds after calculating total_pages
-    if page > total_pages and total_logs > 0:
-        page = total_pages
+        total_pages = math.ceil(total_logs / per_page) if total_logs > 0 else 1
         offset = (page - 1) * per_page
-    
-        # Add sorting and pagination to the main query
-        # It's crucial that sort_by is from the allowlist to prevent SQL injection
+
+        if page > total_pages and total_logs > 0:
+            page = total_pages
+            offset = (page - 1) * per_page
+        
         base_query += f" ORDER BY {sort_by} {sort_order.upper()} LIMIT ? OFFSET ?"
         query_params.extend([per_page, offset])
 
@@ -3271,8 +3274,8 @@ def get_audit_logs():
             logs_cursor = db.execute(base_query, tuple(query_params))
             logs_list = [dict(row) for row in logs_cursor.fetchall()]
         except sqlite3.Error as e:
-            app.logger.error(f"Error fetching audit logs: {e}")
-            return jsonify(msg=f"Error fetching audit logs: {e}"), 500
+            app.logger.error(f"Database error fetching audit logs: {e}")
+            return jsonify(msg=f"Database error fetching audit logs: {e}"), 500
 
         return jsonify({
             "logs": logs_list,
@@ -3281,6 +3284,8 @@ def get_audit_logs():
             "total_logs": total_logs,
             "total_pages": total_pages
         }), 200
+
+    # This is the except block for the outer try
     except Exception as e:
-        app.logger.error(f"Unexpected error in get_audit_logs: {e}")
+        app.logger.error(f"Unexpected error in get_audit_logs: {e}", exc_info=True) # Log full traceback
         return jsonify(msg="An unexpected error occurred while fetching audit logs."), 500

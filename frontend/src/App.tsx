@@ -15,9 +15,10 @@ import RegisterPage from './views/RegisterPage';
 import UserProfilePage from './views/UserProfilePage'; // Import UserProfilePage
 import SuperAdminDashboard from './views/SuperAdminDashboard'; // Import SuperAdminDashboard
 import AdminLayout from './components/admin/AdminLayout'; // Import AdminLayout
-import AdminDashboardPage from './views/AdminDashboardPage'; // Was AdminVersionsPage
-import AuditLogViewer from './components/admin/AuditLogViewer'; // Import AuditLogViewer
-import { useAuth } from './context/AuthContext'; // Import useAuth
+import AdminDashboardPage from './views/AdminDashboardPage'; 
+import AdminVersionsPage from './views/AdminVersionsPage'; // Import the new AdminVersionsPage
+import AuditLogViewer from './components/admin/AuditLogViewer'; 
+import { useAuth } from './context/AuthContext'; 
 
 function App() {
   const auth = useAuth(); // Get auth context
@@ -54,10 +55,20 @@ function App() {
           {/* Admin Routes with AdminLayout */}
           <Route path="/admin" element={<AdminLayout />}>
             <Route 
-              path="dashboard" // Changed from "versions"
+              path="dashboard" 
               element={
                 auth.isAuthenticated && (auth.role === 'admin' || auth.role === 'super_admin') ? (
-                  <AdminDashboardPage /> // Changed from AdminVersionsPage
+                  <AdminDashboardPage /> 
+                ) : (
+                  <Navigate to="/login" replace />
+                )
+              }
+            />
+             <Route 
+              path="versions" // This is the route for the actual versions management page
+              element={
+                auth.isAuthenticated && (auth.role === 'admin' || auth.role === 'super_admin') ? (
+                  <AdminVersionsPage /> // Use the new AdminVersionsPage
                 ) : (
                   <Navigate to="/login" replace />
                 )

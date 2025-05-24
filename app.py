@@ -47,7 +47,7 @@ ALLOWED_EXTENSIONS = {
     'ppt', 'pptx', 'odp', # Presentations
     'iso', # Disc Images
     'log', 'json', 'xml', 'yaml', 'yml', 'ini', 'cfg', # Config/Data files
-    'py', 'js', 'java', 'c', 'cpp', 'h', 'cs', 'html', 'css', # Code files
+    'py', 'js', 'java', 'c', 'cpp', 'h', 'cs', 'html', 'css', 'ps1' # Code files
     # Add any other specific extensions you anticipate
 }
 app = Flask(__name__, instance_relative_config=True) # instance_relative_config=True is good practice

@@ -34,7 +34,8 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
 
   const handleLogout = () => {
     logout(); // Call logout from auth context
-    navigate('/login'); // Redirect to login page after logout
+    navigate('/'); // 
+ // Redirect to login page after logout
   };
 
   return (
@@ -130,26 +131,19 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
             </>
           ) : (
             <>
-              {/* Login Button */}
+              {/* Login / Sign Up Button */}
               <button
                 onClick={() => openAuthModal('login')}
                 className="hidden sm:inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors"
               >
                  <LogIn size={16} className="mr-1.5" />
-                Sign in
+                Login / Sign Up
               </button>
-              {/* Register Button */}
-               <button
-                onClick={() => openAuthModal('register')}
-                className="inline-flex items-center px-3 py-1.5 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-colors"
-              >
-                Register
-              </button>
-              {/* Mobile Login Icon Button */}
+              {/* Mobile Login / Sign Up Icon Button */}
               <button
                 onClick={() => openAuthModal('login')}
                 className="sm:hidden p-2 rounded-md text-gray-500 hover:text-gray-700 hover:bg-gray-100"
-                aria-label="Sign in"
+                aria-label="Login / Sign Up"
               >
                 <LogIn size={20} />
               </button>

@@ -201,39 +201,39 @@ const AdminDashboardPage: React.FC = () => {
   };
 
   const chartBaseOptions = {
-    responsive: true,
-    maintainAspectRatio: false, // Important for sizing within Paper
-    plugins: {
-      legend: {
-        position: 'top' as const,
-      },
-      title: {
-        display: false,
-        text: ''
-      },
-      tooltip: {
-        callbacks: {
-            label: function(context: any) {
-                let label = context.dataset.label || '';
-                if (label) {
-                    label += ': ';
-                }
-                if (context.parsed.y !== null) { // For Bar/Line chart
-                    label += context.parsed.y;
-                } else if (context.parsed !== null && context.chart.config.type === 'pie') { // For Pie chart
-                    label += context.parsed;
-                }
-                return label;
-            }
+      responsive: true,
+      maintainAspectRatio: false, // Important for sizing within Paper
+      plugins: {
+        legend: {
+          position: 'top' as const,
+        },
+        tooltip: {
+          callbacks: {
+              label: function(context: any) {
+                  let label = context.dataset.label || '';
+                  if (label) {
+                      label += ': ';
+                  }
+                  if (context.parsed.y !== null) { // For Bar/Line chart
+                      label += context.parsed.y;
+                  } else if (context.parsed !== null && context.chart.config.type === 'pie') { // For Pie chart
+                      label += context.parsed;
+                  }
+                  return label;
+              }
+          }
+        },
+        title: {
+          display: false,
+          text: '',
         }
+      },
+      scales: { // Common scale options, can be overridden
+          y: {
+              beginAtZero: true
+          }
       }
-    },
-    scales: { // Common scale options, can be overridden
-        y: {
-            beginAtZero: true
-        }
-    }
-  };
+    };
 
   const dailyLoginData = {
     labels: dashboardStats?.user_activity_trends?.logins?.daily?.map(item => item.date) || [],

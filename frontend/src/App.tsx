@@ -19,9 +19,11 @@ import AdminDashboardPage from './views/AdminDashboardPage';
 import AdminVersionsPage from './views/AdminVersionsPage'; // Import the new AdminVersionsPage
 import AuditLogViewer from './components/admin/AuditLogViewer'; 
 import { useAuth } from './context/AuthContext'; 
+import AuthModal from './components/shared/AuthModal'; // Import AuthModal
 
 function App() {
   const auth = useAuth(); // Get auth context
+  const { isAuthModalOpen, closeAuthModal, authModalView } = useAuth(); // Get modal state and functions
 
   return (
     <BrowserRouter>
@@ -97,6 +99,12 @@ function App() {
         {/* Optional: Catch-all for any unmatched routes */}
         {/* <Route path="*" element={<Navigate to="/" />} /> */}
       </Routes>
+      {/* Render AuthModal globally */}
+      <AuthModal 
+        isOpen={isAuthModalOpen} 
+        onClose={closeAuthModal} 
+        initialView={authModalView} 
+      />
     </BrowserRouter>
   );
 }

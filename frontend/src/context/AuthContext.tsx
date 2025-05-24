@@ -9,6 +9,11 @@ interface AuthContextType {
   login: (token: string, username: string, role: string) => void;
   logout: () => void;
   isLoading: boolean;
+  // New properties for Auth Modal
+  isAuthModalOpen: boolean;
+  authModalView: 'login' | 'register';
+  openAuthModal: (view: 'login' | 'register') => void;
+  closeAuthModal: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -18,6 +23,11 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   const [username, setUsername] = useState<string | null>(localStorage.getItem('username'));
   const [role, setRole] = useState<string | null>(localStorage.getItem('userRole'));
   const [isLoading, setIsLoading] = useState<boolean>(true); // To check initial token validity
+  
+  // New state for Auth Modal
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [authModalView, setAuthModalView] = useState<'login' | 'register'>('login');
+
 
   useEffect(() => {
     // Optional: Add a check here to validate the token with the backend on initial load
@@ -45,8 +55,31 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     setRole(null); // <-- CLEAR ROLE
   };
 
+  // New functions for Auth Modal
+  const openAuthModal = (view: 'login' | 'register') => {
+    setAuthModalView(view);
+    setIsAuthModalOpen(true);
+  };
+
+  const closeAuthModal = () => {
+    setIsAuthModalOpen(false);
+  };
+
   return (
-    <AuthContext.Provider value={{ token, username, role, isAuthenticated: !!token, login, logout, isLoading }}> {/* ADD ROLE TO VALUE */}
+    <AuthContext.Provider value={{ 
+      token, 
+      username, 
+      role, 
+      isAuthenticated: !!token, 
+      login, 
+      logout, 
+      isLoading,
+      // Provide modal state and functions
+      isAuthModalOpen,
+      authModalView,
+      openAuthModal,
+      closeAuthModal
+    }}>
       {children}
     </AuthContext.Provider>
   );

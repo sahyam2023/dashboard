@@ -80,6 +80,8 @@ const initialLayoutLg: LayoutItem[] = [
   { i: WIDGET_KEYS.QUICK_LINKS,          x: 0, y: 5, w: 12, h: 4, minH: 4, minW: 2 },
 ];
 
+
+
 const AdminDashboardPage: React.FC = () => {
   const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
   const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
@@ -110,7 +112,6 @@ const AdminDashboardPage: React.FC = () => {
     { id: WIDGET_KEYS.STALE_CONTENT, name: "Stale Content", defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.STALE_CONTENT)!, component: (props: WidgetComponentProps) => ( <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}> <Typography variant="h6" gutterBottom>Content: Stale Items (Older than 1 year)</Typography> {props.loadingStats && isInitialLoad ? <CircularProgress /> : props.renderHealthStatsList(props.dashboardStats?.content_health?.stale_content, 'stale')} </Paper> ) },
     { id: WIDGET_KEYS.QUICK_LINKS, name: "Quick Links", defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.QUICK_LINKS)!, component: (props: WidgetComponentProps) => ( <Paper sx={{ p: 2, height: '100%' }}> <Typography variant="h6" gutterBottom>Quick Links</Typography> <List dense> <ListItemButton component={RouterLink} to="/admin/versions"><ListItemText primary="Manage Versions" /></ListItemButton> <ListItemButton component={RouterLink} to="/admin/audit-logs"><ListItemText primary="View Audit Logs" /></ListItemButton> <ListItemButton component={RouterLink} to="/superadmin"><ListItemText primary="Manage Users (Super Admin)" /></ListItemButton> </List> </Paper> ) },
   ], [isInitialLoad]); // Added isInitialLoad to dependency array for widget components
-  
 
 
   // Helper function for clamping
@@ -154,39 +155,30 @@ const AdminDashboardPage: React.FC = () => {
   };
   
 
-    const formatDate = (dateString: string) => {
-    let processedTimestamp = dateString;
-    // Check if the string is in the expected 'YYYY-MM-DD HH:MM:SS' format and lacks timezone info
-    if (dateString && dateString.length === 19 && dateString.charAt(10) === ' ' && !dateString.endsWith('Z')) {
-      processedTimestamp = dateString.replace(' ', 'T') + 'Z';
-    }
-    // Add more sophisticated checks or a date library if other timestamp formats are expected from the backend.
-    // For now, this specifically targets the SQLite CURRENT_TIMESTAMP string format when it represents UTC.
-
-    const dateObj = new Date(processedTimestamp);
-
+  const formatDate = (dateString: string) => {
+    // dateString is now expected to be in ISO 8601 UTC format (e.g., "YYYY-MM-DDTHH:MM:SSZ")
+    
+    const dateObj = new Date(dateString);
+  
     // Enhanced console log for debugging
     console.log(
-      `formatDate Debug:
-      Original dateString: "${dateString}"
-      Processed timestamp for new Date(): "${processedTimestamp}"
+      `formatDate Debug (post-schema change):
+      Original dateString (expected ISO8601 UTC): "${dateString}"
       Created Date object:`, dateObj, `
       dateObj.toString(): "${dateObj.toString()}"
       dateObj.toISOString(): "${dateObj.toISOString()}"
       dateObj.toLocaleString('en-US', { hour12: false }): "${dateObj.toLocaleString('en-US', { hour12: false })}" 
       dateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }): "${dateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}"`
     );
-
+  
     return dateObj.toLocaleDateString('en-US', {
       year: 'numeric', month: 'short', day: 'numeric',
       hour: '2-digit', minute: '2-digit',
-      // No timeZone option here, so it defaults to user's local time for display
-      // Forcing hour12: true just to be consistent with typical AM/PM displays if that's intended
       hour12: true 
     });
   };
 
-  // Debounce function
+
 
   const loadData = useCallback(async () => {
     if (isInitialLoad) {
@@ -246,6 +238,7 @@ const AdminDashboardPage: React.FC = () => {
         let lgLayoutForWidgetConfigs: RglLayout[];
 
         if (userLayoutFromApi && Object.keys(userLayoutFromApi).length > 0) {
+          console.log('Fetched user layout from API (raw):', JSON.stringify(userLayoutFromApi));
           const processedApiLayouts: RglLayouts = {};
           for (const breakpointKey in userLayoutFromApi) {
             processedApiLayouts[breakpointKey] = userLayoutFromApi[breakpointKey].map(item => {
@@ -254,34 +247,18 @@ const AdminDashboardPage: React.FC = () => {
               return clampLayoutItem({ ...item, i: item.i || `unknown-${Math.random()}` }, definition?.defaultLayout);
             });
           }
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-          setCurrentLayouts(rglLayouts);
-        } else {
-          // Apply initialLayoutLg if no user preferences
-          const defaultLayouts: RglLayouts = { lg: initialLayoutLg.map(l => ({...l})) };
-          setCurrentLayouts(defaultLayouts);
-=======
+          console.log('Fetched user layout from API (clamped):', JSON.stringify(processedApiLayouts));
           finalLayoutsToSet = processedApiLayouts;
           // Use 'lg' from processed for widgetConfigs, or default if 'lg' is missing
           lgLayoutForWidgetConfigs = processedApiLayouts.lg || initialLayoutLg.map(l => ({...l}));
         } else {
-=======
-          finalLayoutsToSet = processedApiLayouts;
-          // Use 'lg' from processed for widgetConfigs, or default if 'lg' is missing
-          lgLayoutForWidgetConfigs = processedApiLayouts.lg || initialLayoutLg.map(l => ({...l}));
-        } else {
->>>>>>> Stashed changes
           // Using default layout for all breakpoints defined in ResponsiveGridLayout's cols prop
           // For simplicity, we often define initialLayoutLg and let RGL derive smaller breakpoints.
           // If you have specific initial layouts for other breakpoints, define them here.
           const defaultLayoutsForAllBreakpoints: RglLayouts = { lg: initialLayoutLg.map(l => ({...l})) };
+          console.log('Using default layout for all breakpoints:', JSON.stringify(defaultLayoutsForAllBreakpoints));
           finalLayoutsToSet = defaultLayoutsForAllBreakpoints;
           lgLayoutForWidgetConfigs = defaultLayoutsForAllBreakpoints.lg;
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
         }
         
         setCurrentLayouts(finalLayoutsToSet);
@@ -313,13 +290,6 @@ const AdminDashboardPage: React.FC = () => {
       } catch (error) {
         showErrorToast("Failed to load dashboard layout. Using default.");
         console.error("Failed to load dashboard layout:", error);
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-        const defaultLayouts: RglLayouts = { lg: initialLayoutLg.map(l => ({...l})) };
-        setCurrentLayouts(defaultLayouts);
-=======
-=======
->>>>>>> Stashed changes
         const defaultLgLayout = initialLayoutLg.map(l => ({...l}));
         setCurrentLayouts({ lg: defaultLgLayout }); // Set currentLayouts to default 'lg'
         
@@ -330,10 +300,6 @@ const AdminDashboardPage: React.FC = () => {
             return { ...config, layout: { ...(definition?.defaultLayout || initialLayoutLg.find(l => l.i === config.id)!) } };
           })
         );
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
       } finally {
         setIsLoadingLayout(false);
         setInitialLayoutFetched(true);
@@ -345,6 +311,7 @@ const AdminDashboardPage: React.FC = () => {
 
 
   
+
   const [widgetConfigs, setWidgetConfigs] = useState<WidgetConfig[]>(() => {
     const defaultsFromDefs = WIDGET_DEFINITIONS_ARRAY.map(def => ({ id: def.id, name: def.name, layout: { ...def.defaultLayout, i: def.id }, visible: true, component: def.component }));
     const savedConfigStr = localStorage.getItem(WIDGET_CONFIG_STORAGE_KEY);
@@ -433,6 +400,7 @@ const AdminDashboardPage: React.FC = () => {
 
   const handleLayoutChange = (newLayout: RglLayout[], allLayouts: RglLayouts) => {
     if (initialLayoutFetched) { 
+      console.log('Layout changed (handleLayoutChange):', JSON.stringify(allLayouts));
       setCurrentLayouts(allLayouts);
       if (isEditMode) {
         setHasUnsavedChanges(true);
@@ -441,23 +409,13 @@ const AdminDashboardPage: React.FC = () => {
   };
 
   const handleDragOrResizeStop = () => {
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-    if (isEditMode && currentLayouts) { // Only save if in edit mode and layouts are available
-        debouncedSaveLayout(currentLayouts);
-=======
-=======
->>>>>>> Stashed changes
     // Now that debouncedSaveLayout is removed, this function might not be strictly necessary
     // unless other logic needs to run on drag/resize stop.
     // If setHasUnsavedChanges is handled by onLayoutChange, this could potentially be removed
     // from onDragStop and onResizeStop props of ResponsiveGridLayout.
     // For now, let's assume onLayoutChange is sufficient.
     if (isEditMode && currentLayouts) {
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
+        // console.log('Drag or Resize Stop'); // Optional: for debugging drag/resize events
     }
   };
 
@@ -492,9 +450,12 @@ const AdminDashboardPage: React.FC = () => {
       }
     }
     
+    console.log('Attempting to save layout (handleSaveLayout, fully clamped):', JSON.stringify(fullyClampedLayouts));
     try {
       await saveUserDashboardLayout(fullyClampedLayouts); // Save the fully clamped layout
-      showSuccessToast("Dashboard layout saved successfully!", { autoClose: 2000 });      
+      showSuccessToast("Dashboard layout saved successfully!", { autoClose: 2000 });
+      console.log('Layout save API call successful (frontend).');
+      
       setCurrentLayouts(fullyClampedLayouts); // Reflect the exact saved state in UI
 
       // Update widgetConfigs based on the 'lg' breakpoint of the saved (and clamped) layout
@@ -530,24 +491,6 @@ const AdminDashboardPage: React.FC = () => {
 
   const handleToggleEditMode = () => {
     const newEditMode = !isEditMode;
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-    setIsEditMode(newEditMode);
-    if (!newEditMode && currentLayouts) { // Exiting edit mode
-      // Convert RglLayouts to ApiLayoutObject for saving
-      const apiLayouts: ApiLayoutObject = {};
-      for (const breakpointKey in currentLayouts) {
-        apiLayouts[breakpointKey] = currentLayouts[breakpointKey].map(item => ({
-          i: item.i, x: item.x, y: item.y, w: item.w, h: item.h,
-          static: item.static, isDraggable: item.isDraggable, isResizable: item.isResizable,
-        }));
-      }
-      saveUserDashboardLayout(apiLayouts)
-        .then(() => showSuccessToast("Layout saved!", { autoClose: 2000 }))
-        .catch(() => showErrorToast("Failed to save layout."));
-=======
-=======
->>>>>>> Stashed changes
     if (!newEditMode && hasUnsavedChanges) { 
       const revertedLgLayoutFromWidgetConfigs = widgetConfigs.map(wc => wc.layout);
       setCurrentLayouts({ lg: revertedLgLayoutFromWidgetConfigs }); 
@@ -555,10 +498,6 @@ const AdminDashboardPage: React.FC = () => {
       // This effectively reverts to the last saved state for 'lg', 
       // and other breakpoints adjust accordingly.
       showSuccessToast("Unsaved layout changes were discarded.", { autoClose: 2000 });
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
     }
     setIsEditMode(newEditMode);
     setHasUnsavedChanges(false); 
@@ -579,8 +518,6 @@ const AdminDashboardPage: React.FC = () => {
         <Typography variant="h4" gutterBottom component="div" sx={{ color: 'primary.main', mb: 0 }}>Admin Dashboard</Typography>
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <Button variant="outlined" onClick={() => setIsSettingsModalOpen(true)} sx={{ mr: 2 }}>Customize Widgets</Button>
-<<<<<<< Updated upstream
-=======
           
           {isEditMode && (
             <Button
@@ -594,7 +531,6 @@ const AdminDashboardPage: React.FC = () => {
             </Button>
           )}
 
->>>>>>> Stashed changes
           <FormControlLabel control={<Switch checked={isEditMode} onChange={handleToggleEditMode} />} label="Edit Mode" />
         </Box>
       </Box>

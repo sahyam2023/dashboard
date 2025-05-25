@@ -255,6 +255,7 @@ const AdminDashboardPage: React.FC = () => {
             });
           }
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
           setCurrentLayouts(rglLayouts);
         } else {
           // Apply initialLayoutLg if no user preferences
@@ -265,12 +266,21 @@ const AdminDashboardPage: React.FC = () => {
           // Use 'lg' from processed for widgetConfigs, or default if 'lg' is missing
           lgLayoutForWidgetConfigs = processedApiLayouts.lg || initialLayoutLg.map(l => ({...l}));
         } else {
+=======
+          finalLayoutsToSet = processedApiLayouts;
+          // Use 'lg' from processed for widgetConfigs, or default if 'lg' is missing
+          lgLayoutForWidgetConfigs = processedApiLayouts.lg || initialLayoutLg.map(l => ({...l}));
+        } else {
+>>>>>>> Stashed changes
           // Using default layout for all breakpoints defined in ResponsiveGridLayout's cols prop
           // For simplicity, we often define initialLayoutLg and let RGL derive smaller breakpoints.
           // If you have specific initial layouts for other breakpoints, define them here.
           const defaultLayoutsForAllBreakpoints: RglLayouts = { lg: initialLayoutLg.map(l => ({...l})) };
           finalLayoutsToSet = defaultLayoutsForAllBreakpoints;
           lgLayoutForWidgetConfigs = defaultLayoutsForAllBreakpoints.lg;
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
         }
         
@@ -304,9 +314,12 @@ const AdminDashboardPage: React.FC = () => {
         showErrorToast("Failed to load dashboard layout. Using default.");
         console.error("Failed to load dashboard layout:", error);
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
         const defaultLayouts: RglLayouts = { lg: initialLayoutLg.map(l => ({...l})) };
         setCurrentLayouts(defaultLayouts);
 =======
+=======
+>>>>>>> Stashed changes
         const defaultLgLayout = initialLayoutLg.map(l => ({...l}));
         setCurrentLayouts({ lg: defaultLgLayout }); // Set currentLayouts to default 'lg'
         
@@ -317,6 +330,9 @@ const AdminDashboardPage: React.FC = () => {
             return { ...config, layout: { ...(definition?.defaultLayout || initialLayoutLg.find(l => l.i === config.id)!) } };
           })
         );
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
       } finally {
         setIsLoadingLayout(false);
@@ -426,15 +442,21 @@ const AdminDashboardPage: React.FC = () => {
 
   const handleDragOrResizeStop = () => {
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
     if (isEditMode && currentLayouts) { // Only save if in edit mode and layouts are available
         debouncedSaveLayout(currentLayouts);
 =======
+=======
+>>>>>>> Stashed changes
     // Now that debouncedSaveLayout is removed, this function might not be strictly necessary
     // unless other logic needs to run on drag/resize stop.
     // If setHasUnsavedChanges is handled by onLayoutChange, this could potentially be removed
     // from onDragStop and onResizeStop props of ResponsiveGridLayout.
     // For now, let's assume onLayoutChange is sufficient.
     if (isEditMode && currentLayouts) {
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
     }
   };
@@ -509,6 +531,7 @@ const AdminDashboardPage: React.FC = () => {
   const handleToggleEditMode = () => {
     const newEditMode = !isEditMode;
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
     setIsEditMode(newEditMode);
     if (!newEditMode && currentLayouts) { // Exiting edit mode
       // Convert RglLayouts to ApiLayoutObject for saving
@@ -523,6 +546,8 @@ const AdminDashboardPage: React.FC = () => {
         .then(() => showSuccessToast("Layout saved!", { autoClose: 2000 }))
         .catch(() => showErrorToast("Failed to save layout."));
 =======
+=======
+>>>>>>> Stashed changes
     if (!newEditMode && hasUnsavedChanges) { 
       const revertedLgLayoutFromWidgetConfigs = widgetConfigs.map(wc => wc.layout);
       setCurrentLayouts({ lg: revertedLgLayoutFromWidgetConfigs }); 
@@ -530,6 +555,9 @@ const AdminDashboardPage: React.FC = () => {
       // This effectively reverts to the last saved state for 'lg', 
       // and other breakpoints adjust accordingly.
       showSuccessToast("Unsaved layout changes were discarded.", { autoClose: 2000 });
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
     }
     setIsEditMode(newEditMode);

@@ -18,13 +18,13 @@ import {
 } from '../types';
 import DataTable, { ColumnDef } from '../components/DataTable';
 import FilterTabs from '../components/FilterTabs';
-import LoadingState from '../components/LoadingState'; // Keep for initial load
+import LoadingState from '../components/LoadingState'; 
 import ErrorState from '../components/ErrorState';
 import { useAuth } from '../context/AuthContext';
 import AdminLinkEntryForm from '../components/admin/AdminLinkEntryForm';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
-import { PlusCircle, Edit3, Trash2, ExternalLink, Star } from 'lucide-react';
-import { showErrorToast } from '../utils/toastUtils'; // Import toast utility
+import { PlusCircle, Edit3, Trash2, ExternalLink, Star, Filter, ChevronUp } from 'lucide-react'; // Added Filter, ChevronUp
+import { showErrorToast } from '../utils/toastUtils'; 
 
 interface OutletContextType {
   searchTerm: string;
@@ -54,35 +54,30 @@ const LinksView: React.FC = () => {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null); // For initial load error
-  const [isInitialLoad, setIsInitialLoad] = useState(true); // Track initial load
+  const [error, setError] = useState<string | null>(null); 
+  const [isInitialLoad, setIsInitialLoad] = useState(true); 
 
   const [showAddOrEditForm, setShowAddOrEditForm] = useState(false);
   const [editingLink, setEditingLink] = useState<LinkType | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [linkToDelete, setLinkToDelete] = useState<LinkType | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null); // For non-error feedback
+  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
 
   const [favoritedItems, setFavoritedItems] = useState<Map<number, { favoriteId: number | undefined }>>(new Map());
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false); // State for filter toggle
 
   const loadLinks = useCallback(async () => {
     setIsLoading(true);
     if (isInitialLoad) {
-      setError(null); // Clear main error only on initial load attempt
+      setError(null); 
     }
 
     try {
       const response: PaginatedLinksResponse = await fetchLinks(
-        activeSoftwareId || undefined,
-        activeVersionId || undefined,
-        currentPage,
-        itemsPerPage,
-        sortBy,
-        sortOrder,
-        linkTypeFilter || undefined,
-        createdFromFilter || undefined,
-        createdToFilter || undefined
+        activeSoftwareId || undefined, activeVersionId || undefined,
+        currentPage, itemsPerPage, sortBy, sortOrder,
+        linkTypeFilter || undefined, createdFromFilter || undefined, createdToFilter || undefined
       );
 
       setLinks(response.links);
@@ -94,29 +89,22 @@ const LinksView: React.FC = () => {
       const newFavoritedItems = new Map<number, { favoriteId: number | undefined }>();
       if (isAuthenticated && response.links && response.links.length > 0) {
         for (const link of response.links) {
-          if (link.favorite_id) {
-            newFavoritedItems.set(link.id, { favoriteId: link.favorite_id });
-          } else {
-            newFavoritedItems.set(link.id, { favoriteId: undefined });
-          }
+          if (link.favorite_id) { newFavoritedItems.set(link.id, { favoriteId: link.favorite_id }); } 
+          else { newFavoritedItems.set(link.id, { favoriteId: undefined }); }
         }
       }
       setFavoritedItems(newFavoritedItems);
 
       if (isInitialLoad) {
-        setIsInitialLoad(false); // Mark initial load as complete
+        setIsInitialLoad(false); 
       }
     } catch (err: any) {
       console.error("Failed to load links:", err);
       const errorMessage = err.response?.data?.msg || err.message || 'Failed to fetch links.';
       if (isInitialLoad) {
-        setError(errorMessage); // Set error for ErrorState component display
-        setLinks([]); // Clear data on initial load error
-        setTotalPages(0);
-        setTotalLinks(0);
-        setFavoritedItems(new Map());
+        setError(errorMessage); setLinks([]); setTotalPages(0); setTotalLinks(0); setFavoritedItems(new Map());
       } else {
-        showErrorToast(errorMessage); // Show toast for non-initial load errors, keep stale data
+        showErrorToast(errorMessage); 
       }
     } finally {
       setIsLoading(false);
@@ -124,33 +112,25 @@ const LinksView: React.FC = () => {
   }, [
     activeSoftwareId, activeVersionId, currentPage, itemsPerPage, sortBy, sortOrder,
     linkTypeFilter, createdFromFilter, createdToFilter,
-    isAuthenticated, isInitialLoad // Added isInitialLoad to dependencies
+    isAuthenticated, isInitialLoad
   ]);
 
-  useEffect(() => {
-    if (!isAuthenticated) {
-      setFavoritedItems(new Map()); 
-    }
-  }, [isAuthenticated]);
+  useEffect(() => { if (!isAuthenticated) { setFavoritedItems(new Map()); } }, [isAuthenticated]);
 
   useEffect(() => {
     const loadSoftwareAndInitialLinks = async () => {
-      // setIsLoading(true); // isLoading is managed by loadLinks now
       try {
         const softwareData = await fetchSoftware();
         setSoftwareList(softwareData);
       } catch (err: any) {
         console.error("Failed to load software for filters", err);
-        // Use toast for this non-critical error as filter tabs might still work or be empty
         showErrorToast(err.response?.data?.msg || "Failed to load software filters.");
       }
     };
     loadSoftwareAndInitialLinks();
   }, []);
   
-  useEffect(() => {
-    loadLinks();
-  }, [loadLinks]);
+  useEffect(() => { loadLinks(); }, [loadLinks]);
 
   useEffect(() => {
     if (activeSoftwareId) {
@@ -168,29 +148,28 @@ const LinksView: React.FC = () => {
     } else {
       setVersionList([]);
     }
-  }, [activeSoftwareId, softwareList]); // Added softwareList to ensure name is available for toast
+  }, [activeSoftwareId, softwareList]);
 
-  const handleSoftwareFilterChange = (softwareId: number | null) => { setActiveSoftwareId(softwareId); setActiveVersionId(null); setCurrentPage(1); };
+  const handleSoftwareFilterChange = (softwareId: number | null) => { setActiveSoftwareId(softwareId); setActiveVersionId(null); setCurrentPage(1); setIsInitialLoad(true);};
   const handleVersionFilterChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     const versionId = event.target.value ? parseInt(event.target.value, 10) : null;
-    setActiveVersionId(versionId);
-    setCurrentPage(1);
+    setActiveVersionId(versionId); setCurrentPage(1); setIsInitialLoad(true);
   };
   const handlePageChange = (newPage: number) => { setCurrentPage(newPage); };
   const handleSort = (columnKey: string) => {
     if (sortBy === columnKey) { setSortOrder(prevOrder => (prevOrder === 'asc' ? 'desc' : 'asc')); } 
     else { setSortBy(columnKey); setSortOrder('asc'); }
-    setCurrentPage(1);
+    setCurrentPage(1); setIsInitialLoad(true);
   };
-  const handleApplyAdvancedFilters = () => { setCurrentPage(1); };
+  const handleApplyAdvancedFilters = () => { setCurrentPage(1); setIsInitialLoad(true);};
   const handleClearAdvancedFilters = () => {
     setLinkTypeFilter(''); setCreatedFromFilter(''); setCreatedToFilter('');
-    setCurrentPage(1);
+    setCurrentPage(1); setIsInitialLoad(true);
   };
   
   const handleOperationSuccess = (message: string) => {
     setShowAddOrEditForm(false); setEditingLink(null);
-    setFeedbackMessage(message); // This could be a success toast too
+    setFeedbackMessage(message); 
     loadLinks();
   };
   
@@ -203,11 +182,9 @@ const LinksView: React.FC = () => {
   const handleDeleteConfirm = async () => {
     if (!linkToDelete) return;
     setIsDeleting(true);
-    // setError(null); // Use toast for this specific action's error
     try {
       await deleteAdminLink(linkToDelete.id);
-      // setFeedbackMessage(`Link "${linkToDelete.title}" deleted successfully.`); // Use toast
-      showErrorToast(`Link "${linkToDelete.title}" deleted successfully.`, {theme: 'light'}); // Example of success as light-themed error toast
+      showErrorToast(`Link "${linkToDelete.title}" deleted successfully.`, {theme: 'light'});
       closeDeleteConfirm();
       if (links.length === 1 && currentPage > 1) { setCurrentPage(currentPage - 1); } 
       else { loadLinks(); }
@@ -264,23 +241,23 @@ const LinksView: React.FC = () => {
     if (isCurrentlyFavorited) { tempFavoritedItems.set(item.id, { favoriteId: undefined }); } 
     else { tempFavoritedItems.set(item.id, { favoriteId: -1 }); }
     setFavoritedItems(tempFavoritedItems);
-    setFeedbackMessage(null); // Clear any persistent non-toast feedback
+    setFeedbackMessage(null); 
 
     try {
       if (isCurrentlyFavorited && typeof currentStatus?.favoriteId === 'number') {
         await removeFavoriteApi(item.id, itemType);
-        showErrorToast(`"${item.title}" removed from favorites.`, {theme: 'light'}); // Using light error toast for this
+        showErrorToast(`"${item.title}" removed from favorites.`, {theme: 'light'});
         setFavoritedItems(prev => { const newMap = new Map(prev); newMap.set(item.id, { favoriteId: undefined }); return newMap; });
       } else {
         const newFavorite = await addFavoriteApi(item.id, itemType);
-        showErrorToast(`"${item.title}" added to favorites.`, {theme: 'light'}); // Using light error toast for this
+        showErrorToast(`"${item.title}" added to favorites.`, {theme: 'light'});
         setFavoritedItems(prev => { const newMap = new Map(prev); newMap.set(item.id, { favoriteId: newFavorite.id }); return newMap; });
       }
     } catch (error: any) {
       showErrorToast(error?.response?.data?.msg || error.message || "Failed to update favorite status.");
-      setFavoritedItems(prev => { // Revert optimistic update
+      setFavoritedItems(prev => { 
         const newMap = new Map(prev);
-        if (isCurrentlyFavorited) { newMap.set(item.id, { favoriteId: currentStatus?.favoriteId }); } 
+        if (isCurrentlyFavorited) { newMap.set(item.id, { favoriteId: currentStatus?.favoriteId });} 
         else { newMap.set(item.id, { favoriteId: undefined }); }
         return newMap;
       });
@@ -318,54 +295,46 @@ const LinksView: React.FC = () => {
           </div>
         )}
       </div>
-
-      <div className="my-4 p-4 border rounded-md bg-gray-50 space-y-4 md:space-y-0 md:flex md:flex-wrap md:items-end md:gap-4">
-        <div className="flex flex-col">
-          <label htmlFor="linkTypeFilterSelect" className="text-sm font-medium text-gray-700 mb-1">Link Type</label>
-          <select id="linkTypeFilterSelect" value={linkTypeFilter} onChange={(e) => setLinkTypeFilter(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
-            <option value="">All</option> <option value="external">External</option> <option value="uploaded">Uploaded File</option>
-          </select>
-        </div>
-        <div className="flex flex-col">
-          <label className="text-sm font-medium text-gray-700 mb-1">Created Between</label>
-          <div className="flex items-center gap-2">
-            <input type="date" value={createdFromFilter} onChange={(e) => setCreatedFromFilter(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" />
-            <span className="text-gray-500">and</span>
-            <input type="date" value={createdToFilter} onChange={(e) => setCreatedToFilter(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" />
-          </div>
-        </div>
-        <div className="flex items-end gap-2 pt-5">
-          <button onClick={handleApplyAdvancedFilters} className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 text-sm">Apply Filters</button>
-          <button onClick={handleClearAdvancedFilters} className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 text-sm">Clear Filters</button>
-        </div>
+      
+      <div className="my-4">
+        <button
+          onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+          className="flex items-center px-4 py-2 bg-gray-200 text-gray-700 hover:bg-gray-300 rounded-md text-sm font-medium"
+        >
+          {showAdvancedFilters ? ( <><ChevronUp size={18} className="mr-2" /> Hide Advanced Filters</> ) : ( <><Filter size={18} className="mr-2" /> Show Advanced Filters</> )}
+        </button>
       </div>
 
-      {isInitialLoad && isLoading ? (
-        <LoadingState />
-      ) : error && isInitialLoad && links.length === 0 ? (
-        <ErrorState message={error} onRetry={loadLinks} />
-      ) : (
+      {showAdvancedFilters && (
+        <div className="my-4 p-4 border rounded-md bg-gray-50 space-y-4 md:space-y-0 md:flex md:flex-wrap md:items-end md:gap-4">
+          <div className="flex flex-col">
+            <label htmlFor="linkTypeFilterSelect" className="text-sm font-medium text-gray-700 mb-1">Link Type</label>
+            <select id="linkTypeFilterSelect" value={linkTypeFilter} onChange={(e) => setLinkTypeFilter(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+              <option value="">All</option> <option value="external">External</option> <option value="uploaded">Uploaded File</option>
+            </select>
+          </div>
+          <div className="flex flex-col">
+            <label className="text-sm font-medium text-gray-700 mb-1">Created Between</label>
+            <div className="flex items-center gap-2">
+              <input type="date" value={createdFromFilter} onChange={(e) => setCreatedFromFilter(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" />
+              <span className="text-gray-500">and</span>
+              <input type="date" value={createdToFilter} onChange={(e) => setCreatedToFilter(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" />
+            </div>
+          </div>
+          <div className="flex items-end gap-2 pt-5">
+            <button onClick={handleApplyAdvancedFilters} className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 text-sm">Apply Filters</button>
+            <button onClick={handleClearAdvancedFilters} className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 text-sm">Clear Filters</button>
+          </div>
+        </div>
+      )}
+
+      {isInitialLoad && isLoading ? ( <LoadingState /> ) : error && isInitialLoad && links.length === 0 ? ( <ErrorState message={error} onRetry={loadLinks} /> ) : (
         <>
-          <DataTable
-            columns={columns}
-            data={filteredLinksBySearch}
-            rowClassName="group" // Added group class for row hover effect
-            isLoading={isLoading && !isInitialLoad} // Show DataTable's internal loading only for non-initial loads
-            currentPage={currentPage}
-            totalPages={totalPages}
-            onPageChange={handlePageChange}
-            itemsPerPage={itemsPerPage}
-            totalItems={totalLinks}
-            sortColumn={sortBy}
-            sortOrder={sortOrder}
-            onSort={handleSort}
-          />
+          <DataTable columns={columns} data={filteredLinksBySearch} rowClassName="group" isLoading={isLoading && !isInitialLoad} currentPage={currentPage} totalPages={totalPages} onPageChange={handlePageChange} itemsPerPage={itemsPerPage} totalItems={totalLinks} sortColumn={sortBy} sortOrder={sortOrder} onSort={handleSort} />
         </>
       )}
 
-      {showDeleteConfirm && linkToDelete && (
-        <ConfirmationModal isOpen={showDeleteConfirm} title="Delete Link" message={`Are you sure you want to delete the link "${linkToDelete.title}"? This action cannot be undone.`} onConfirm={handleDeleteConfirm} onCancel={closeDeleteConfirm} isConfirming={isDeleting} confirmButtonText="Delete" confirmButtonVariant="danger" />
-      )}
+      {showDeleteConfirm && linkToDelete && ( <ConfirmationModal isOpen={showDeleteConfirm} title="Delete Link" message={`Are you sure you want to delete the link "${linkToDelete.title}"? This action cannot be undone.`} onConfirm={handleDeleteConfirm} onCancel={closeDeleteConfirm} isConfirming={isDeleting} confirmButtonText="Delete" confirmButtonVariant="danger" /> )}
     </div>
   );
 };

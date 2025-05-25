@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS users (
     email TEXT UNIQUE,
     role TEXT DEFAULT 'user' NOT NULL,
     is_active BOOLEAN DEFAULT TRUE NOT NULL,
-    password_reset_required BOOLEAN DEFAULT FALSE NOT NULL, -- Added this line
+    password_reset_required BOOLEAN DEFAULT FALSE NOT NULL,
+    dashboard_layout_prefs TEXT DEFAULT NULL, -- User's preferred dashboard layout
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_users_username ON users (username);

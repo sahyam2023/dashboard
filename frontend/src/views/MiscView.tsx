@@ -18,8 +18,8 @@ import LoadingState from '../components/LoadingState';
 import AdminUploadToMiscForm from '../components/admin/AdminUploadToMiscForm';
 import AdminMiscCategoryForm from '../components/admin/AdminMiscCategoryForm';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
-import { Download, FileText, CalendarDays, PlusCircle, Edit3, Trash2, Star } from 'lucide-react';
-import { showErrorToast, showSuccessToast } from '../utils/toastUtils'; // Import toast utilities
+import { Download, FileText, CalendarDays, PlusCircle, Edit3, Trash2, Star, Filter, ChevronUp } from 'lucide-react'; // Added Filter, ChevronUp
+import { showErrorToast, showSuccessToast } from '../utils/toastUtils'; 
 
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
@@ -28,12 +28,12 @@ const MiscView: React.FC = () => {
 
   const [categories, setCategories] = useState<MiscCategory[]>([]);
   const [isLoadingCategories, setIsLoadingCategories] = useState(true);
-  const [errorCategories, setErrorCategories] = useState<string | null>(null); // For category list errors
+  const [errorCategories, setErrorCategories] = useState<string | null>(null);
   
   const [miscFiles, setMiscFiles] = useState<MiscFile[]>([]);
   const [isLoadingFiles, setIsLoadingFiles] = useState(true);
-  const [errorFiles, setErrorFiles] = useState<string | null>(null); // For file list initial load error
-  const [isInitialFilesLoad, setIsInitialFilesLoad] = useState(true); // Track initial load for files
+  const [errorFiles, setErrorFiles] = useState<string | null>(null);
+  const [isInitialFilesLoad, setIsInitialFilesLoad] = useState(true);
   
   const [activeCategoryId, setActiveCategoryId] = useState<number | null>(null);
 
@@ -51,14 +51,13 @@ const MiscView: React.FC = () => {
   const [categoryToDelete, setCategoryToDelete] = useState<MiscCategory | null>(null);
   const [showDeleteCategoryConfirm, setShowDeleteCategoryConfirm] = useState(false);
   const [isDeletingCategory, setIsDeletingCategory] = useState(false);
-  // Removed deleteCategoryError, will use toast
   const [fileToDelete, setFileToDelete] = useState<MiscFile | null>(null);
   const [showDeleteFileConfirm, setShowDeleteFileConfirm] = useState(false);
   const [isDeletingFile, setIsDeletingFile] = useState(false);
-  // Removed deleteFileError, will use toast
-  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null); // For non-error feedback from forms
+  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
 
   const [favoritedItems, setFavoritedItems] = useState<Map<number, { favoriteId: number | undefined }>>(new Map());
+  const [showCategoryFilter, setShowCategoryFilter] = useState(false); // State for category filter toggle, default to false
 
   const loadMiscCategories = useCallback(async () => {
     setIsLoadingCategories(true);
@@ -69,23 +68,19 @@ const MiscView: React.FC = () => {
     } catch (err: any) {
       setCategories([]);
       const catErrorMessage = err.response?.data?.msg || err.message || 'Failed to load misc categories.';
-      setErrorCategories(catErrorMessage); // Set error for category list display
-      showErrorToast(catErrorMessage); // Also show a toast for this, as it affects filtering
+      setErrorCategories(catErrorMessage); 
+      showErrorToast(catErrorMessage); 
       console.error("Error loading misc categories:", err);
     } finally {
       setIsLoadingCategories(false);
     }
   }, []);
 
-  useEffect(() => {
-    loadMiscCategories();
-  }, [loadMiscCategories]);
+  useEffect(() => { loadMiscCategories(); }, [loadMiscCategories]);
 
   const loadMiscFiles = useCallback(async () => {
     setIsLoadingFiles(true);
-    if (isInitialFilesLoad) {
-      setErrorFiles(null); // Clear main error only on initial file load attempt
-    }
+    if (isInitialFilesLoad) { setErrorFiles(null); }
 
     try {
       const response: PaginatedMiscFilesResponse = await fetchMiscFiles(
@@ -106,49 +101,36 @@ const MiscView: React.FC = () => {
       }
       setFavoritedItems(newFavoritedItems);
 
-      if (isInitialFilesLoad) {
-        setIsInitialFilesLoad(false); // Mark initial file load as complete
-      }
+      if (isInitialFilesLoad) { setIsInitialFilesLoad(false); }
     } catch (err: any) {
       console.error("Failed to load miscellaneous files:", err);
       const filesErrorMessage = err.response?.data?.msg || err.message || 'Failed to fetch miscellaneous files.';
       if (isInitialFilesLoad) {
-        setErrorFiles(filesErrorMessage); // Set error for ErrorState component display for files
-        setMiscFiles([]); // Clear files data on initial load error
-        setTotalPages(0);
-        setTotalMiscFiles(0);
-        setFavoritedItems(new Map());
+        setErrorFiles(filesErrorMessage); setMiscFiles([]); setTotalPages(0); setTotalMiscFiles(0); setFavoritedItems(new Map());
       } else {
-        showErrorToast(filesErrorMessage); // Show toast for non-initial file load errors, keep stale data
+        showErrorToast(filesErrorMessage); 
       }
     } finally {
       setIsLoadingFiles(false);
     }
   }, [
     activeCategoryId, currentPage, itemsPerPage, sortBy, sortOrder, 
-    isAuthenticated, isInitialFilesLoad // Added isInitialFilesLoad
+    isAuthenticated, isInitialFilesLoad
   ]);
 
-  useEffect(() => {
-    loadMiscFiles();
-  }, [loadMiscFiles]);
-
-  useEffect(() => {
-    if (!isAuthenticated) { setFavoritedItems(new Map()); }
-  }, [isAuthenticated]);
+  useEffect(() => { loadMiscFiles(); }, [loadMiscFiles]);
+  useEffect(() => { if (!isAuthenticated) { setFavoritedItems(new Map()); } }, [isAuthenticated]);
 
   const handleCategoryFilterChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     const categoryId = event.target.value ? parseInt(event.target.value, 10) : null;
-    setActiveCategoryId(categoryId);
-    setCurrentPage(1);
-    setIsInitialFilesLoad(true); // Treat category change as an initial load for files of that category
+    setActiveCategoryId(categoryId); setCurrentPage(1); setIsInitialFilesLoad(true); 
   };
 
   const handlePageChange = (newPage: number) => { setCurrentPage(newPage); };
   const handleSort = (columnKey: string) => {
     if (sortBy === columnKey) { setSortOrder(prevOrder => (prevOrder === 'asc' ? 'desc' : 'asc')); } 
     else { setSortBy(columnKey); setSortOrder('asc'); }
-    setCurrentPage(1);
+    setCurrentPage(1); setIsInitialFilesLoad(true); // Re-fetch on sort with initial load true
   };
 
   const handleMiscFileUploadSuccess = (uploadedFile: MiscFile) => {
@@ -168,9 +150,7 @@ const MiscView: React.FC = () => {
   const formatFileSize = (bytes: number | null | undefined): string => {
     if (bytes === null || typeof bytes === 'undefined') return 'N/A';
     if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    const k = 1024; const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB']; const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
@@ -178,9 +158,7 @@ const MiscView: React.FC = () => {
   const handleOpenEditCategoryForm = (category: MiscCategory) => { setEditingCategory(category); setShowCategoryForm(true); setFeedbackMessage(null);};
   const handleCloseCategoryForm = () => { setEditingCategory(null); setShowCategoryForm(false); };
   const handleCategoryOperationSuccess = (message: string) => {
-    setShowCategoryForm(false); setEditingCategory(null);
-    showSuccessToast(message);
-    loadMiscCategories(); 
+    setShowCategoryForm(false); setEditingCategory(null); showSuccessToast(message); loadMiscCategories(); 
   };
   const handleOpenDeleteCategoryConfirm = (category: MiscCategory) => { setCategoryToDelete(category); setShowDeleteCategoryConfirm(true); setFeedbackMessage(null); };
   const handleCloseDeleteCategoryConfirm = () => { setCategoryToDelete(null); setShowDeleteCategoryConfirm(false);};
@@ -191,21 +169,13 @@ const MiscView: React.FC = () => {
     try {
       await deleteAdminMiscCategory(categoryToDelete.id);
       showSuccessToast(`Category "${categoryToDelete.name}" deleted successfully.`);
-      handleCloseDeleteCategoryConfirm();
-      loadMiscCategories();
-      if (activeCategoryId === categoryToDelete.id) {
-        setActiveCategoryId(null); // Will trigger loadMiscFiles due to activeCategoryId change
-        setIsInitialFilesLoad(true); // Ensure it's treated as initial load for "All Categories"
-      }
+      handleCloseDeleteCategoryConfirm(); loadMiscCategories();
+      if (activeCategoryId === categoryToDelete.id) { setActiveCategoryId(null); setIsInitialFilesLoad(true); }
     } catch (err: any) {
       const errorMsg = err.response?.data?.msg || err.message || "Failed to delete category.";
-      showErrorToast(errorMsg); // Show toast for delete error
-      // If the error message indicates it cannot be deleted due to files, keep modal open with message
-      if (errorMsg.includes("Cannot delete category") || errorMsg.includes("contains files")) {
-         // The modal now uses deleteCategoryError state which is not set here.
-         // To show in modal, you'd set a state that modal reads. For now, toast is primary.
-      } else {
-        handleCloseDeleteCategoryConfirm(); // Close modal for other errors
+      showErrorToast(errorMsg); 
+      if (!errorMsg.includes("Cannot delete category") && !errorMsg.includes("contains files")) {
+        handleCloseDeleteCategoryConfirm(); 
       }
     } finally {
       setIsDeletingCategory(false);
@@ -226,7 +196,7 @@ const MiscView: React.FC = () => {
       else { loadMiscFiles(); }
     } catch (err: any) {
       showErrorToast(err.response?.data?.msg || err.message || "Failed to delete file.");
-      handleCloseDeleteFileConfirm(); // Close modal on error
+      handleCloseDeleteFileConfirm(); 
     } finally {
       setIsDeletingFile(false);
     }
@@ -265,7 +235,6 @@ const MiscView: React.FC = () => {
     if (isCurrentlyFavorited) { tempFavoritedItems.set(item.id, { favoriteId: undefined }); } 
     else { tempFavoritedItems.set(item.id, { favoriteId: -1 }); }
     setFavoritedItems(tempFavoritedItems);
-    // setFeedbackMessage(null); // Using toasts for favorite feedback
 
     try {
       if (isCurrentlyFavorited && typeof currentStatus?.favoriteId === 'number') {
@@ -279,7 +248,7 @@ const MiscView: React.FC = () => {
       }
     } catch (error: any) {
       showErrorToast(error?.response?.data?.msg || error.message || "Failed to update favorite status.");
-      setFavoritedItems(prev => { // Revert optimistic update
+      setFavoritedItems(prev => { 
         const newMap = new Map(prev);
         if (isCurrentlyFavorited) { newMap.set(item.id, { favoriteId: currentStatus?.favoriteId });} 
         else { newMap.set(item.id, { favoriteId: undefined }); }
@@ -304,18 +273,18 @@ const MiscView: React.FC = () => {
         )}
       </div>
 
-      {feedbackMessage && <div className="p-3 my-2 bg-green-100 text-green-700 rounded text-sm">{feedbackMessage}</div>} {/* Kept for form success, can be replaced by success toasts */}
+      {feedbackMessage && <div className="p-3 my-2 bg-green-100 text-green-700 rounded text-sm">{feedbackMessage}</div>}
 
       {showCategoryForm && isAuthenticated && (role === 'admin' || role === 'super_admin') && (
         <div className="my-4 p-4 bg-gray-50 rounded-lg shadow">
-          <AdminMiscCategoryForm categoryToEdit={editingCategory} onSuccess={(msg) => handleCategoryOperationSuccess(msg)} onCancel={handleCloseCategoryForm} />
+          <AdminMiscCategoryForm
+            categoryToEdit={editingCategory}
+            onSuccess={(category: MiscCategory) => handleCategoryOperationSuccess(`Category "${category.name}" saved successfully.`)}
+            onCancel={handleCloseCategoryForm}
+          />
         </div>
       )}
-      {showGeneralUploadForm && isAuthenticated && (role === 'admin' || role === 'super_admin') && (
-        <div className="my-4 p-4 bg-gray-50 rounded-lg shadow">
-          <AdminUploadToMiscForm onUploadSuccess={handleMiscFileUploadSuccess} />
-        </div>
-      )}
+      {showGeneralUploadForm && isAuthenticated && (role === 'admin' || role === 'super_admin') && ( <div className="my-4 p-4 bg-gray-50 rounded-lg shadow"> <AdminUploadToMiscForm onUploadSuccess={handleMiscFileUploadSuccess} /> </div> )}
       
       {isAuthenticated && (role === 'admin' || role === 'super_admin') && (
         <div className="my-8 p-4 border border-gray-200 rounded-lg shadow">
@@ -348,43 +317,31 @@ const MiscView: React.FC = () => {
       )}
 
       <div className="my-4">
-        <label htmlFor="category-filter" className="block text-sm font-medium text-gray-700 mb-1">Filter by Category:</label>
-        <select id="category-filter" value={activeCategoryId === null ? '' : activeCategoryId} onChange={handleCategoryFilterChange} className="block w-full sm:w-1/3 pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md shadow-sm" disabled={isLoadingCategories || categories.length === 0}>
-          <option value="">All Categories</option>
-          {categories.map(category => ( <option key={category.id} value={category.id}>{category.name}</option> ))}
-        </select>
-        {/* Error for category filter loading is now handled by toast and conditional ErrorState for category list */}
+        <button
+          onClick={() => setShowCategoryFilter(!showCategoryFilter)}
+          className="flex items-center px-4 py-2 bg-gray-200 text-gray-700 hover:bg-gray-300 rounded-md text-sm font-medium mb-2"
+        >
+          {showCategoryFilter ? ( <><ChevronUp size={18} className="mr-2" /> Hide Category Filter</> ) : ( <><Filter size={18} className="mr-2" /> Show Category Filter</> )}
+        </button>
+        {showCategoryFilter && (
+          <>
+            <label htmlFor="category-filter" className="block text-sm font-medium text-gray-700 mb-1">Filter by Category:</label>
+            <select id="category-filter" value={activeCategoryId === null ? '' : activeCategoryId} onChange={handleCategoryFilterChange} className="block w-full sm:w-1/3 pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md shadow-sm" disabled={isLoadingCategories || categories.length === 0}>
+              <option value="">All Categories</option>
+              {categories.map(category => ( <option key={category.id} value={category.id}>{category.name}</option> ))}
+            </select>
+          </>
+        )}
       </div>
 
-      {isInitialFilesLoad && isLoadingFiles ? (
-        <LoadingState />
-      ) : errorFiles && isInitialFilesLoad && miscFiles.length === 0 ? (
-        <ErrorState message={errorFiles} onRetry={loadMiscFiles} />
-      ) : (
+      {isInitialFilesLoad && isLoadingFiles ? ( <LoadingState /> ) : errorFiles && isInitialFilesLoad && miscFiles.length === 0 ? ( <ErrorState message={errorFiles} onRetry={loadMiscFiles} /> ) : (
         <>
-          <DataTable
-            columns={columns}
-            data={miscFiles}
-            rowClassName="group" // Added group class for row hover effect
-            isLoading={isLoadingFiles && !isInitialFilesLoad}
-            currentPage={currentPage}
-            totalPages={totalPages}
-            onPageChange={handlePageChange}
-            itemsPerPage={itemsPerPage}
-            totalItems={totalMiscFiles}
-            sortColumn={sortBy}
-            sortOrder={sortOrder}
-            onSort={handleSort}
-          />
+          <DataTable columns={columns} data={miscFiles} rowClassName="group" isLoading={isLoadingFiles && !isInitialFilesLoad} currentPage={currentPage} totalPages={totalPages} onPageChange={handlePageChange} itemsPerPage={itemsPerPage} totalItems={totalMiscFiles} sortColumn={sortBy} sortOrder={sortOrder} onSort={handleSort} />
         </>
       )}
 
-      {showDeleteCategoryConfirm && categoryToDelete && (
-        <ConfirmationModal isOpen={showDeleteCategoryConfirm} title="Delete Category" message={`Are you sure you want to delete the category "${categoryToDelete.name}"? This action cannot be undone.`} onConfirm={handleDeleteCategoryConfirm} onCancel={handleCloseDeleteCategoryConfirm} isConfirming={isDeletingCategory} confirmButtonText={"Delete"} confirmButtonVariant="danger" />
-      )}
-      {showDeleteFileConfirm && fileToDelete && (
-        <ConfirmationModal isOpen={showDeleteFileConfirm} title="Delete File" message={`Are you sure you want to delete the file "${fileToDelete.user_provided_title || fileToDelete.original_filename}"?`} onConfirm={handleDeleteFileConfirm} onCancel={handleCloseDeleteFileConfirm} isConfirming={isDeletingFile} confirmButtonText="Delete" confirmButtonVariant="danger" />
-      )}
+      {showDeleteCategoryConfirm && categoryToDelete && ( <ConfirmationModal isOpen={showDeleteCategoryConfirm} title="Delete Category" message={`Are you sure you want to delete the category "${categoryToDelete.name}"? This action cannot be undone.`} onConfirm={handleDeleteCategoryConfirm} onCancel={handleCloseDeleteCategoryConfirm} isConfirming={isDeletingCategory} confirmButtonText={"Delete"} confirmButtonVariant="danger" /> )}
+      {showDeleteFileConfirm && fileToDelete && ( <ConfirmationModal isOpen={showDeleteFileConfirm} title="Delete File" message={`Are you sure you want to delete the file "${fileToDelete.user_provided_title || fileToDelete.original_filename}"?`} onConfirm={handleDeleteFileConfirm} onCancel={handleCloseDeleteFileConfirm} isConfirming={isDeletingFile} confirmButtonText="Delete" confirmButtonVariant="danger" /> )}
     </div>
   );
 };

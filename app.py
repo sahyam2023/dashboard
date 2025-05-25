@@ -1096,6 +1096,77 @@ def update_email():
         app.logger.error(f"Error updating email for user {current_user_id}: {e}")
         return jsonify(msg="Failed to update email due to a server error."), 500
 
+# --- User Dashboard Layout Preferences Endpoints ---
+@app.route('/api/user/dashboard-layout', methods=['GET'])
+@jwt_required()
+def get_dashboard_layout():
+    current_user_id_str = get_jwt_identity()
+    try:
+        user_id = int(current_user_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid user identity in token."), 400
+
+    db = get_db()
+    user_prefs_row = db.execute("SELECT dashboard_layout_prefs FROM users WHERE id = ?", (user_id,)).fetchone()
+
+    if user_prefs_row and user_prefs_row['dashboard_layout_prefs']:
+        try:
+            layout_prefs = json.loads(user_prefs_row['dashboard_layout_prefs'])
+            return jsonify(layout_prefs), 200
+        except json.JSONDecodeError:
+            app.logger.error(f"Failed to parse dashboard_layout_prefs for user {user_id}. Data: {user_prefs_row['dashboard_layout_prefs']}")
+            # Return a default or empty layout if parsing fails, or an error
+            return jsonify(msg="Error parsing layout preferences."), 500 # Or return default: {}
+    else:
+        # No preferences set, return empty object (or a default layout)
+        return jsonify({}), 200
+
+@app.route('/api/user/dashboard-layout', methods=['PUT'])
+@jwt_required()
+def update_dashboard_layout():
+    current_user_id_str = get_jwt_identity()
+    try:
+        user_id = int(current_user_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid user identity in token."), 400
+
+    new_layout_prefs = request.get_json()
+    if new_layout_prefs is None: # Check if request body is valid JSON or empty
+        return jsonify(msg="Invalid or missing JSON data in request body."), 400
+
+    try:
+        # Validate if it's a dictionary (JSON object) as expected for layout prefs
+        if not isinstance(new_layout_prefs, dict):
+            return jsonify(msg="Layout preferences must be a valid JSON object."), 400
+            
+        layout_prefs_json_string = json.dumps(new_layout_prefs)
+    except TypeError:
+        return jsonify(msg="Failed to serialize layout preferences to JSON string."), 500 # Should not happen if new_layout_prefs is from get_json() and is a dict
+
+    db = get_db()
+    try:
+        # Fetch old preferences for logging if needed, or just log the fact of update
+        # For brevity, we'll log that an update occurred without logging the old/new content of prefs.
+        db.execute("UPDATE users SET dashboard_layout_prefs = ? WHERE id = ?", (layout_prefs_json_string, user_id))
+        log_audit_action(
+            action_type='UPDATE_DASHBOARD_LAYOUT',
+            target_table='users', # Or a more specific target like 'user_preferences' if it were a separate table
+            target_id=user_id,
+            details={'message': 'User dashboard layout preferences updated.'}
+            # Not logging the full layout JSON in audit details for brevity and potential size.
+            # Could log a hash or summary if needed.
+        )
+        db.commit()
+        return jsonify(msg="Dashboard layout preferences updated successfully."), 200
+    except sqlite3.Error as e:
+        db.rollback()
+        app.logger.error(f"Database error updating dashboard_layout_prefs for user {user_id}: {e}")
+        return jsonify(msg="Failed to update dashboard layout preferences due to a database error."), 500
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"Unexpected error updating dashboard_layout_prefs for user {user_id}: {e}")
+        return jsonify(msg="An unexpected server error occurred."), 500
+
 # --- Public GET Endpoints (Read-only data for dashboard) ---
 @app.route('/api/software', methods=['GET'])
 def get_all_software_api():

@@ -328,6 +328,51 @@ export async function fetchSoftware(): Promise<Software[]> {
   }
 }
 
+// --- User Dashboard Layout Preferences API Functions ---
+// Simplified layout type for API communication.
+// `react-grid-layout` uses `Layout[]` which is `Array<Layout>`
+// where Layout is {i: string, x: number, y: number, w: number, h: number, ...otherProps}
+export interface LayoutItem {
+  i: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  static?: boolean;
+  isDraggable?: boolean;
+  isResizable?: boolean;
+  // Add other properties if your backend expects/stores them
+}
+export type LayoutObject = Record<string, LayoutItem[]>; // e.g., { lg: LayoutItem[], md: LayoutItem[], ... }
+
+export async function getUserDashboardLayout(): Promise<LayoutObject> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/user/dashboard-layout`, {
+      method: 'GET',
+      headers: { ...getAuthHeader() },
+    });
+    // Assuming handleApiError correctly parses and returns the JSON object
+    return handleApiError(response, 'Failed to fetch dashboard layout');
+  } catch (error) {
+    console.error('Error fetching dashboard layout:', error);
+    throw error; // Re-throw to be caught by the calling component
+  }
+}
+
+export async function saveUserDashboardLayout(layout: LayoutObject): Promise<{ msg: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/user/dashboard-layout`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify(layout),
+    });
+    return handleApiError(response, 'Failed to save dashboard layout');
+  } catch (error) {
+    console.error('Error saving dashboard layout:', error);
+    throw error; // Re-throw to be caught by the calling component
+  }
+}
+
 // --- Super Admin Database Management Functions ---
 
 export interface BackupResponse {

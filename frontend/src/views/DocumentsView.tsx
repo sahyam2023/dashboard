@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { ExternalLink, PlusCircle, Edit3, Trash2, Star } from 'lucide-react';
+import { ExternalLink, PlusCircle, Edit3, Trash2, Star, Filter, ChevronUp } from 'lucide-react';
 import { 
   fetchDocuments, 
   fetchSoftware, 
@@ -19,6 +19,7 @@ import ErrorState from '../components/ErrorState';
 import { useAuth } from '../context/AuthContext';
 import AdminDocumentEntryForm from '../components/admin/AdminDocumentEntryForm';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
+import { showErrorToast } from '../utils/toastUtils';
 
 interface OutletContextType {
   searchTerm: string;
@@ -65,6 +66,7 @@ const DocumentsView: React.FC = () => {
 
   // Favorite State
   const [favoritedItems, setFavoritedItems] = useState<Map<number, { favoriteId: number | undefined }>>(new Map());
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false); // State for filter toggle
 
   // In DocumentsView.tsx
 
@@ -429,10 +431,29 @@ const loadDocuments = useCallback(async () => {
         />
       )}
 
-      {/* Advanced Filter UI */}
-      <div className="my-4 p-4 border rounded-md bg-gray-50 space-y-4 md:space-y-0 md:flex md:flex-wrap md:items-end md:gap-4">
-        {/* Document Type Filter */}
-        <div className="flex flex-col">
+      {/* Toggle Button for Advanced Filters */}
+      <div className="mb-4">
+        <button
+          onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+          className="flex items-center px-4 py-2 bg-gray-200 text-gray-700 hover:bg-gray-300 rounded-md text-sm font-medium"
+        >
+          {showAdvancedFilters ? (
+            <>
+              <ChevronUp size={18} className="mr-2" /> Hide Advanced Filters
+            </>
+          ) : (
+            <>
+              <Filter size={18} className="mr-2" /> Show Advanced Filters
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Advanced Filter UI - Conditionally Rendered */}
+      {showAdvancedFilters && (
+        <div className="my-4 p-4 border rounded-md bg-gray-50 space-y-4 md:space-y-0 md:flex md:flex-wrap md:items-end md:gap-4">
+          {/* Document Type Filter */}
+          <div className="flex flex-col">
           <label htmlFor="docTypeFilterInput" className="text-sm font-medium text-gray-700 mb-1">Document Type</label>
           <input
             id="docTypeFilterInput"
@@ -480,11 +501,12 @@ const loadDocuments = useCallback(async () => {
           </button>
         </div>
       </div>
+      )} 
 
 
       {isInitialLoad && isLoading ? ( // Show LoadingState only on initial load
         <LoadingState />
-      ) : error && isInitialLoad ? ( // Show ErrorState only on initial load error
+      ) : error && isInitialLoad && documents.length === 0 ? ( // Ensure ErrorState shows only if no data and initial error
         <ErrorState message={error} onRetry={loadDocuments} />
       ) : (
         <>

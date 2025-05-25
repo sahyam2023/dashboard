@@ -2,13 +2,14 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react'; // Add
 import { Link as RouterLink } from 'react-router-dom';
 import {
   fetchDashboardStats, DashboardStats, RecentActivityItem, SystemHealth,
-  fetchSystemHealth
+  fetchSystemHealth,
+  getUserDashboardLayout, saveUserDashboardLayout, LayoutObject as ApiLayoutObject // Renamed to avoid conflict
 } from '../services/api';
 import {
   Box, CircularProgress, Typography, Paper, List, ListItem, ListItemText, Alert, Link, ListItemButton, Button, Modal, FormControlLabel, Checkbox,
   Switch
 } from '@mui/material';
-import { Responsive, WidthProvider } from 'react-grid-layout';
+import { Responsive, WidthProvider, Layouts as RglLayouts, Layout as RglLayout } from 'react-grid-layout'; // Import RGL types
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import { Bar, Pie, Line } from 'react-chartjs-2';
@@ -88,9 +89,25 @@ const AdminDashboardPage: React.FC = () => {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState<boolean>(false);
+  const [currentLayouts, setCurrentLayouts] = useState<RglLayouts | null>(null); // For react-grid-layout
+  const [isLoadingLayout, setIsLoadingLayout] = useState<boolean>(true);
+  const [initialLayoutFetched, setInitialLayoutFetched] = useState<boolean>(false);
+
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+
+  // Debounce function
+  const debounce = <F extends (...args: any[]) => any>(func: F, waitFor: number) => {
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    return (...args: Parameters<F>): Promise<ReturnType<F>> =>
+      new Promise(resolve => {
+        if (timeout) {
+          clearTimeout(timeout);
+        }
+        timeout = setTimeout(() => resolve(func(...args)), waitFor);
+      });
   };
 
   const loadData = useCallback(async () => {
@@ -141,10 +158,44 @@ const AdminDashboardPage: React.FC = () => {
     loadData();
   }, [loadData]);
 
+  // Fetch and apply layout preferences
+  useEffect(() => {
+    const fetchLayout = async () => {
+      setIsLoadingLayout(true);
+      try {
+        const userLayout = await getUserDashboardLayout();
+        if (userLayout && Object.keys(userLayout).length > 0) {
+          // Convert ApiLayoutObject to RglLayouts
+          const rglLayouts: RglLayouts = {};
+          for (const breakpointKey in userLayout) {
+            rglLayouts[breakpointKey] = userLayout[breakpointKey].map(item => ({
+              ...item, // Spread all properties from ApiLayoutItem
+            }));
+          }
+          setCurrentLayouts(rglLayouts);
+        } else {
+          // Apply initialLayoutLg if no user preferences
+          const defaultLayouts: RglLayouts = { lg: initialLayoutLg.map(l => ({...l})) };
+          setCurrentLayouts(defaultLayouts);
+        }
+      } catch (error) {
+        showErrorToast("Failed to load dashboard layout. Using default.");
+        console.error("Failed to load dashboard layout:", error);
+        const defaultLayouts: RglLayouts = { lg: initialLayoutLg.map(l => ({...l})) };
+        setCurrentLayouts(defaultLayouts);
+      } finally {
+        setIsLoadingLayout(false);
+        setInitialLayoutFetched(true);
+      }
+    };
+    fetchLayout();
+  }, []);
+
+
   const WIDGET_DEFINITIONS_ARRAY = useMemo(() => [
-    { id: WIDGET_KEYS.SYSTEM_HEALTH, name: "System Health", defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.SYSTEM_HEALTH)!, component: (props: WidgetComponentProps) => ( <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%', minHeight: '100%' }}> <Typography component="h2" variant="h6" color="primary" gutterBottom>System Health</Typography> {props.loadingHealth && isInitialLoad ? <CircularProgress size={24} /> : props.systemHealth ? ( <> <Typography component="p" variant="body1" sx={{ mb: 1 }}>API Status: <Typography component="span" sx={{ fontWeight: 'bold', color: props.systemHealth.api_status === 'OK' ? 'success.main' : 'error.main' }}>{` ${props.systemHealth.api_status}`}</Typography></Typography> <Typography component="p" variant="body1">Database Connection: <Typography component="span" sx={{ fontWeight: 'bold', color: props.systemHealth.db_connection === 'OK' ? 'success.main' : 'error.main' }}>{` ${props.systemHealth.db_connection}`}</Typography></Typography> </> ) : <Typography component="p" variant="body1">System health data unavailable.</Typography>} </Paper> ) },
-    { id: WIDGET_KEYS.TOTAL_STORAGE, name: "Total Storage", defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.TOTAL_STORAGE)!, component: (props: WidgetComponentProps) => ( <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'center' }}> <Typography component="h2" variant="h6" color="primary" gutterBottom>Total Storage Utilized</Typography> {props.loadingStats && isInitialLoad ? <CircularProgress size={24} /> : <Typography component="p" variant="h4">{props.formatBytes(props.dashboardStats?.total_storage_utilized_bytes)}</Typography>} </Paper> ) },
-    { id: WIDGET_KEYS.TOTAL_USERS, name: "Total Users", defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.TOTAL_USERS)!, component: (props: WidgetComponentProps) => ( <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'center' }}> <Typography component="h2" variant="h6" color="primary" gutterBottom>Total Users</Typography> {props.loadingStats && isInitialLoad ? <CircularProgress size={24} /> : <Typography component="p" variant="h4">{props.dashboardStats?.total_users ?? 'N/A'}</Typography>} </Paper> ) },
+    { id: WIDGET_KEYS.SYSTEM_HEALTH, name: "System Health", defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.SYSTEM_HEALTH)!, component: (props: WidgetComponentProps) => ( <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%', minHeight: '100%' }}> <Typography component="h2" variant="h6" color="primary" gutterBottom>System Health</Typography> {props.loadingHealth && (isInitialLoad || !props.systemHealth) ? <CircularProgress size={24} /> : props.systemHealth ? ( <> <Typography component="p" variant="body1" sx={{ mb: 1 }}>API Status: <Typography component="span" sx={{ fontWeight: 'bold', color: props.systemHealth.api_status === 'OK' ? 'success.main' : 'error.main' }}>{` ${props.systemHealth.api_status}`}</Typography></Typography> <Typography component="p" variant="body1">Database Connection: <Typography component="span" sx={{ fontWeight: 'bold', color: props.systemHealth.db_connection === 'OK' ? 'success.main' : 'error.main' }}>{` ${props.systemHealth.db_connection}`}</Typography></Typography> </> ) : <Typography component="p" variant="body1">System health data unavailable.</Typography>} </Paper> ) },
+    { id: WIDGET_KEYS.TOTAL_STORAGE, name: "Total Storage", defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.TOTAL_STORAGE)!, component: (props: WidgetComponentProps) => ( <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'center' }}> <Typography component="h2" variant="h6" color="primary" gutterBottom>Total Storage Utilized</Typography> {props.loadingStats && (isInitialLoad || !props.dashboardStats) ? <CircularProgress size={24} /> : <Typography component="p" variant="h4">{props.formatBytes(props.dashboardStats?.total_storage_utilized_bytes)}</Typography>} </Paper> ) },
+    { id: WIDGET_KEYS.TOTAL_USERS, name: "Total Users", defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.TOTAL_USERS)!, component: (props: WidgetComponentProps) => ( <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'center' }}> <Typography component="h2" variant="h6" color="primary" gutterBottom>Total Users</Typography> {props.loadingStats && (isInitialLoad || !props.dashboardStats) ? <CircularProgress size={24} /> : <Typography component="p" variant="h4">{props.dashboardStats?.total_users ?? 'N/A'}</Typography>} </Paper> ) },
     { id: WIDGET_KEYS.TOTAL_SOFTWARE, name: "Total Software", defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.TOTAL_SOFTWARE)!, component: (props: WidgetComponentProps) => ( <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'center' }}> <Typography component="h2" variant="h6" color="primary" gutterBottom>Total Software Titles</Typography> {props.loadingStats && isInitialLoad ? <CircularProgress size={24} /> : <Typography component="p" variant="h4">{props.dashboardStats?.total_software_titles ?? 'N/A'}</Typography>} </Paper> ) },
     { id: WIDGET_KEYS.DOWNLOAD_TRENDS, name: "Download Trends", defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.DOWNLOAD_TRENDS)!, component: (props: WidgetComponentProps) => ( <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}> <Typography variant="h6" gutterBottom>Daily Downloads (Last 7 Days)</Typography> {props.loadingStats && isInitialLoad ? <CircularProgress /> : props.dashboardStats?.download_trends?.daily?.length ? (<Box sx={{ flexGrow: 1, height: 'calc(100% - 48px)'}}><Line data={props.dailyDownloadData} options={{...props.chartBaseOptions, plugins: {...props.chartBaseOptions.plugins, title: {...props.chartBaseOptions.plugins.title, display: true, text: 'Daily Downloads (Last 7 Days)'}}}} /></Box>) : (<Typography sx={{textAlign: 'center', mt: 4}}>No download trend data available.</Typography>)} </Paper> ) },
     { id: WIDGET_KEYS.LOGIN_TRENDS, name: "Login Trends", defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.LOGIN_TRENDS)!, component: (props: WidgetComponentProps) => ( <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}> <Typography variant="h6" gutterBottom>Daily Logins (Last 7 Days)</Typography> {props.loadingStats && isInitialLoad ? <CircularProgress /> : props.dashboardStats?.user_activity_trends?.logins?.daily?.length ? (<Box sx={{ flexGrow: 1, height: 'calc(100% - 48px)'}}><Line data={props.dailyLoginData} options={{...props.chartBaseOptions, plugins: {...props.chartBaseOptions.plugins, title: {...props.chartBaseOptions.plugins.title, display: true, text: 'Daily Logins (Last 7 Days)'}}}} /></Box>) : (<Typography sx={{textAlign: 'center', mt: 4}}>No login trend data available.</Typography>)} </Paper> ) },
@@ -178,6 +229,37 @@ const AdminDashboardPage: React.FC = () => {
     const simplifiedConfigs = widgetConfigs.map(wc => ({ id: wc.id, layout: { i: wc.layout.i, x: wc.layout.x, y: wc.layout.y, w: wc.layout.w, h: wc.layout.h }, visible: wc.visible }));
     localStorage.setItem(WIDGET_CONFIG_STORAGE_KEY, JSON.stringify(simplifiedConfigs));
   }, [widgetConfigs]);
+
+
+  // Debounced save function
+  const debouncedSaveLayout = useCallback(
+    debounce(async (newLayouts: RglLayouts) => {
+      try {
+        // Convert RglLayouts to ApiLayoutObject
+        const apiLayouts: ApiLayoutObject = {};
+        for (const breakpointKey in newLayouts) {
+          apiLayouts[breakpointKey] = newLayouts[breakpointKey].map(item => ({
+            i: item.i,
+            x: item.x,
+            y: item.y,
+            w: item.w,
+            h: item.h,
+            static: item.static,
+            isDraggable: item.isDraggable,
+            isResizable: item.isResizable,
+            // Add other properties if needed
+          }));
+        }
+        await saveUserDashboardLayout(apiLayouts);
+        showErrorToast("Dashboard layout saved!", {type: 'success', autoClose: 2000});
+      } catch (error) {
+        showErrorToast("Failed to save dashboard layout.");
+        console.error("Failed to save dashboard layout:", error);
+      }
+    }, 1000), // 1 second debounce
+    [] // No dependencies, so the debounced function is created once
+  );
+
 
   const documentsPerSoftwareChartData = useMemo(() => ({
     labels: dashboardStats?.documents_per_software?.map(item => item.software_name) || [],
@@ -214,20 +296,49 @@ const AdminDashboardPage: React.FC = () => {
     return ( <List dense sx={{ maxHeight: 300, overflow: 'auto' }}> {Object.entries(healthData).map(([key, stats]) => { const count = dataType === 'missing' ? stats.missing : stats.stale; const percentage = stats.total > 0 && count !== undefined ? ((count / stats.total) * 100).toFixed(1) : '0.0'; const displayName = key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' '); const itemText = `${displayName}: ${count ?? 0} / ${stats.total} (${percentage}%)`; return ( <ListItem key={key} divider><ListItemText primary={itemText} /></ListItem> ); })} </List> );
   }, [loadingStats, isInitialLoad]);
 
-  const handleLayoutChange = (_currentLayout: ReactGridLayout.Layout[], allLayouts: ReactGridLayout.Layouts) => {
-    const currentLgLayout = allLayouts.lg;
-    if (currentLgLayout) { setWidgetConfigs(prevConfigs => prevConfigs.map(config => { const layoutItem = currentLgLayout.find(l => l.i === config.id); return layoutItem ? { ...config, layout: { ...config.layout, x: layoutItem.x, y: layoutItem.y, w: layoutItem.w, h: layoutItem.h } } : config; }));}
+  const handleLayoutChange = (newLayout: RglLayout[], allLayouts: RglLayouts) => {
+    if (initialLayoutFetched && isEditMode) { // Only save if initial layout is fetched and in edit mode
+      setCurrentLayouts(allLayouts); // Update state with all breakpoint layouts
+      debouncedSaveLayout(allLayouts);
+    } else if (initialLayoutFetched && !isEditMode) {
+      // If not in edit mode, but layout change occurs (e.g. window resize), update state but don't save.
+      setCurrentLayouts(allLayouts);
+    }
   };
 
   const handleWidgetVisibilityChange = (widgetId: string, isVisible: boolean) => {
-    setWidgetConfigs(prevConfigs => prevConfigs.map(config => config.id === widgetId ? { ...config, visible: isVisible } : config ));
+    setWidgetConfigs(prevConfigs =>
+      prevConfigs.map(config =>
+        config.id === widgetId ? { ...config, visible: isVisible } : config
+      )
+    );
+    // Visibility changes are saved via the main localStorage useEffect for widgetConfigs
+  };
+  
+  const handleToggleEditMode = () => {
+    const newEditMode = !isEditMode;
+    setIsEditMode(newEditMode);
+    if (!newEditMode && currentLayouts) { // Exiting edit mode
+      // Convert RglLayouts to ApiLayoutObject for saving
+      const apiLayouts: ApiLayoutObject = {};
+      for (const breakpointKey in currentLayouts) {
+        apiLayouts[breakpointKey] = currentLayouts[breakpointKey].map(item => ({
+          i: item.i, x: item.x, y: item.y, w: item.w, h: item.h,
+          static: item.static, isDraggable: item.isDraggable, isResizable: item.isResizable,
+        }));
+      }
+      saveUserDashboardLayout(apiLayouts)
+        .then(() => showErrorToast("Layout saved!", {type: 'success', autoClose: 2000}))
+        .catch(() => showErrorToast("Failed to save layout."));
+    }
   };
 
-  if (isInitialLoad && (loadingStats || loadingHealth)) {
+
+  if (isLoadingLayout || (isInitialLoad && (loadingStats || loadingHealth))) {
     return <LoadingState message="Loading Dashboard Data..." />;
   }
 
-  if (isInitialLoad && error) {
+  if (isInitialLoad && error && !isLoadingLayout) { // Ensure layout loading is also finished
     return <ErrorState message={error} onRetry={loadData} />;
   }
   
@@ -237,7 +348,7 @@ const AdminDashboardPage: React.FC = () => {
         <Typography variant="h4" gutterBottom component="div" sx={{ color: 'primary.main', mb: 0 }}>Admin Dashboard</Typography>
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <Button variant="outlined" onClick={() => setIsSettingsModalOpen(true)} sx={{ mr: 2 }}>Customize Widgets</Button>
-          <FormControlLabel control={<Switch checked={isEditMode} onChange={(e) => setIsEditMode(e.target.checked)} />} label="Edit Mode" />
+          <FormControlLabel control={<Switch checked={isEditMode} onChange={handleToggleEditMode} />} label="Edit Mode" />
         </Box>
       </Box>
 
@@ -252,13 +363,29 @@ const AdminDashboardPage: React.FC = () => {
       </Modal>
 
       {/* Non-initial load errors are handled by toasts, no global error alert here unless it's an initial load error (handled above) */}
-
-      <ResponsiveGridLayout className="layout" layouts={{ lg: widgetConfigs.filter(w => w.visible).map(w => w.layout) }} cols={{ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }} rowHeight={30} isDraggable={isEditMode} isResizable={isEditMode} measureBeforeMount={false} useCSSTransforms={true} onLayoutChange={handleLayoutChange}>
-        {widgetConfigs.filter(w => w.visible).map(widget => {
-          const widgetProps: WidgetComponentProps = { dashboardStats, systemHealth, loadingStats, loadingHealth, formatBytes, formatDate, chartBaseOptions, documentsPerSoftwareChartData, popularDownloadsChartData, dailyLoginData, dailyUploadData, dailyDownloadData, renderHealthStatsList };
-          return ( <div key={widget.id} style={{ pointerEvents: 'auto', height: '100%' }}>{widget.component(widgetProps)}</div> );
-        })}
-      </ResponsiveGridLayout>
+      
+      {initialLayoutFetched && currentLayouts && ( // Ensure currentLayouts is not null before rendering RGL
+        <ResponsiveGridLayout 
+          className="layout" 
+          layouts={currentLayouts} // Use state for layouts
+          cols={{ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }} 
+          rowHeight={30} 
+          isDraggable={isEditMode} 
+          isResizable={isEditMode} 
+          measureBeforeMount={false} 
+          useCSSTransforms={true} 
+          onLayoutChange={handleLayoutChange}
+          compactType="vertical" // Recommended for predictability
+        >
+          {widgetConfigs.filter(w => w.visible).map(widget => {
+            const widgetProps: WidgetComponentProps = { dashboardStats, systemHealth, loadingStats, loadingHealth, formatBytes, formatDate, chartBaseOptions, documentsPerSoftwareChartData, popularDownloadsChartData, dailyLoginData, dailyUploadData, dailyDownloadData, renderHealthStatsList };
+            // Ensure each grid item has a layout defined in currentLayouts.
+            // RGL might create default layouts if items are missing, but it's better to manage explicitly.
+            // The layout for visibility is derived from widgetConfigs, but positions from currentLayouts.
+            return ( <div key={widget.id} data-grid={currentLayouts?.lg?.find(l => l.i === widget.id) || widget.layout} style={{ pointerEvents: 'auto', height: '100%' }}>{widget.component(widgetProps)}</div> );
+          })}
+        </ResponsiveGridLayout>
+      )}
     </Box>
   );
 };

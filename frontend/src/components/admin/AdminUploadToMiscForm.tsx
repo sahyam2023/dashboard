@@ -129,7 +129,7 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
   };
 
   const onSubmit: SubmitHandler<MiscUploadFormData> = async (data) => {
-    if (!isAuthenticated || !['admin', 'super_admin'].includes(role)) { 
+    if (!isAuthenticated || !role || !['admin', 'super_admin'].includes(role)) { 
       toast.error('Not authorized.'); 
       return; 
     }
@@ -176,7 +176,7 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
     toast.error("Please correct the errors highlighted in the form.");
   };
   
-  if (!isAuthenticated || !['admin', 'super_admin'].includes(role)) {
+  if (!isAuthenticated || !role || !['admin', 'super_admin'].includes(role)) {
       return null;
   }
 

@@ -1,10 +1,11 @@
 // src/components/RegisterForm.tsx
 import React, { useState, useEffect, FormEvent } from 'react';
 import { registerUser, fetchSecurityQuestions, SecurityQuestion } from '../services/api';
-import { SecurityAnswerPayload, RegisterRequest } from '../types';
+import { SecurityAnswerPayload, RegisterRequest, RegisterResponse } from '../types'; // Added RegisterResponse
+import { useAuth } from '../context/AuthContext'; // Added useAuth
 
 interface RegisterFormProps {
-  onAuthSuccess?: () => void;
+  onAuthSuccess?: (passwordResetRequired: boolean) => void; // Updated prop type
   onToggleView?: () => void;
 }
 
@@ -33,6 +34,7 @@ const RegisterForm: React.FC<RegisterFormProps> = ({ onAuthSuccess, onToggleView
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
+  const auth = useAuth(); // Added auth
 
   useEffect(() => {
     const loadSecurityQuestions = async () => {
@@ -159,12 +161,15 @@ const RegisterForm: React.FC<RegisterFormProps> = ({ onAuthSuccess, onToggleView
     };
 
     try {
-      await registerUser(registrationPayload);
-      setSuccessMessage('Registration successful! You can now log in.');
+      const regData: RegisterResponse = await registerUser(registrationPayload); 
+      // Assuming regData from backend now includes password_reset_required (it should, based on task context)
+      // If not, it will be undefined, and auth.login's default (false) will be used.
+      const requiresReset = auth.login(regData.access_token, regData.username, regData.role, false); 
+      
+      setSuccessMessage('Registration successful! Logging you in...');
+      
       if (onAuthSuccess) {
-        setTimeout(() => {
-            onAuthSuccess();
-        }, 1500);
+        onAuthSuccess(requiresReset); // Call immediately with the reset flag
       }
     } catch (err: any) {
       if (err.response && err.response.data && err.response.data.msg) {

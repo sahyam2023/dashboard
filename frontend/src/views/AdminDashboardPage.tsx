@@ -1,15 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
-import { 
+import {
   fetchDashboardStats, DashboardStats, RecentActivityItem, PopularDownloadItem, DocumentsPerSoftwareItem, RecentAdditionItem,
-  fetchSystemHealth, SystemHealth // Import new items
+  fetchSystemHealth, SystemHealth
 } from '../services/api';
-import { Box, CircularProgress, Typography, Paper, List, ListItem, ListItemText, Divider, Alert, Link, ListItemButton, Button, Modal, FormControlLabel, Checkbox } from '@mui/material'; // MUI components
-// import { Grid } from '@mui/material'; // No longer using MUI Grid for main layout
+import {
+  Box, CircularProgress, Typography, Paper, List, ListItem, ListItemText, Divider, Alert, Link, ListItemButton, Button, Modal, FormControlLabel, Checkbox,
+  Switch // <-- Added Switch import
+} from '@mui/material';
 import { Responsive, WidthProvider } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
-import { Bar, Pie, Line } from 'react-chartjs-2'; // Import chart components
+import { Bar, Pie, Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -19,9 +21,9 @@ import {
   Title,
   Tooltip,
   Legend,
-  PointElement, // Added for Line charts
-  LineElement   // Added for Line charts
-} from 'chart.js'; // Import Chart.js modules
+  PointElement,
+  LineElement
+} from 'chart.js';
 
 // Register Chart.js components
 ChartJS.register(
@@ -59,9 +61,9 @@ const WIDGET_KEYS = {
 
 
 // Helper function for formatting bytes
-function formatBytes(bytes?: number | null, decimals = 2) { 
+function formatBytes(bytes?: number | null, decimals = 2) {
   if (bytes === 0) return '0 Bytes';
-  if (!bytes) return 'N/A'; 
+  if (!bytes) return 'N/A';
   const k = 1024;
   const dm = decimals < 0 ? 0 : decimals;
   const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
@@ -77,6 +79,7 @@ const AdminDashboardPage: React.FC = () => {
   const [statsError, setStatsError] = useState<string | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isEditMode, setIsEditMode] = useState<boolean>(false); // <-- State for Edit Mode
 
   // --- Types for react-grid-layout configuration ---
   interface LayoutItem {
@@ -102,7 +105,7 @@ const AdminDashboardPage: React.FC = () => {
     loadingHealth: boolean;
     formatBytes: (bytes?: number | null, decimals?: number) => string;
     formatDate: (dateString: string) => string;
-    chartBaseOptions: any; 
+    chartBaseOptions: any;
     documentsPerSoftwareChartData: any;
     popularDownloadsChartData: any;
     dailyLoginData: any;
@@ -118,7 +121,7 @@ const AdminDashboardPage: React.FC = () => {
     visible: boolean;
     component: (props: WidgetComponentProps) => React.ReactNode; // Widget is now a functional component
   }
-  
+
   // Initial layout definition for the 'lg' breakpoint (12 columns)
   const initialLayoutLg: LayoutItem[] = [
     // Row 1: Stat Cards (y=0)
@@ -190,13 +193,12 @@ const AdminDashboardPage: React.FC = () => {
   }, []);
 
   // === MOVED HOOKS SECTION START ===
-  // Ensure WIDGET_DEFINITIONS_ARRAY (useMemo) is here
   const WIDGET_DEFINITIONS_ARRAY: Array<{
     id: string;
     name: string;
-    component: (props: WidgetComponentProps) => React.ReactNode; // Updated component type
+    component: (props: WidgetComponentProps) => React.ReactNode;
     defaultLayout: LayoutItem;
-  }> = React.useMemo(() => [ // Use useMemo to avoid re-creating on every render
+  }> = React.useMemo(() => [
     {
       id: WIDGET_KEYS.SYSTEM_HEALTH,
       name: "System Health",
@@ -306,7 +308,7 @@ const AdminDashboardPage: React.FC = () => {
       name: "Documents per Software",
       defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.DOCS_PER_SOFTWARE)!,
       component: (props: WidgetComponentProps) => (
-        <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}> 
+        <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
           <Typography variant="h6" gutterBottom>Documents per Software</Typography>
           {props.loadingStats ? <CircularProgress /> : props.dashboardStats?.documents_per_software?.length ? (<Box sx={{ flexGrow: 1, height: 'calc(100% - 48px)'}}><Bar data={props.documentsPerSoftwareChartData} options={{...props.chartBaseOptions, plugins: {...props.chartBaseOptions.plugins, title: {...props.chartBaseOptions.plugins.title, display: true, text: 'Documents per Software'}}}} /></Box>) : (<Typography sx={{textAlign: 'center', mt: 4}}>No document data available for chart.</Typography>)}
         </Paper>
@@ -317,7 +319,7 @@ const AdminDashboardPage: React.FC = () => {
       name: "Popular Downloads",
       defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.POPULAR_DOWNLOADS)!,
       component: (props: WidgetComponentProps) => (
-        <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}> 
+        <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
           <Typography variant="h6" gutterBottom>Popular Downloads (Top 5)</Typography>
           {props.loadingStats ? <CircularProgress /> : props.dashboardStats?.popular_downloads?.length ? (<Box sx={{ flexGrow: 1, height: 'calc(100% - 48px)'}}><Pie data={props.popularDownloadsChartData} options={{...props.chartBaseOptions, plugins: {...props.chartBaseOptions.plugins, title: {...props.chartBaseOptions.plugins.title, display: true, text: 'Popular Downloads'}}}} /></Box>) : (<Typography sx={{textAlign: 'center', mt: 4}}>No download data available for chart.</Typography>)}
         </Paper>
@@ -361,9 +363,8 @@ const AdminDashboardPage: React.FC = () => {
       )
     },
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], []); // Dependency array must be empty
+  ], []);
 
-  // Ensure widgetConfigs (useState) is here
   const [widgetConfigs, setWidgetConfigs] = useState<WidgetConfig[]>(() => {
     const defaultsFromDefs = WIDGET_DEFINITIONS_ARRAY.map(def => ({
       id: def.id,
@@ -372,7 +373,6 @@ const AdminDashboardPage: React.FC = () => {
       visible: true,
       component: def.component
     }));
-    // ... rest of widgetConfigs initialization logic, including localStorage load ...
     const savedConfigStr = localStorage.getItem(WIDGET_CONFIG_STORAGE_KEY);
     if (savedConfigStr) {
       try {
@@ -388,22 +388,20 @@ const AdminDashboardPage: React.FC = () => {
               visible: savedState.visible !== undefined ? savedState.visible : config.visible,
             };
           }
-          return config; 
+          return config;
         });
       } catch (e) {
         console.error("Error parsing saved widget config:", e);
       }
     }
-    return defaultsFromDefs; // Or the result after checking localStorage
+    return defaultsFromDefs;
   });
   // === MOVED HOOKS SECTION END ===
-  
-  // Subsequent useEffect hook (e.g., for saving widgetConfigs to localStorage)
-  // This useEffect depends on widgetConfigs, so it should come after widgetConfigs is defined.
+
   useEffect(() => {
     const simplifiedConfigs = widgetConfigs.map(wc => ({
       id: wc.id,
-      layout: { 
+      layout: {
         i: wc.layout.i,
         x: wc.layout.x,
         y: wc.layout.y,
@@ -422,7 +420,7 @@ const AdminDashboardPage: React.FC = () => {
       {
         label: 'Documents per Software',
         data: dashboardStats?.documents_per_software?.map(item => item.document_count) || [],
-        backgroundColor: 'rgba(54, 162, 235, 0.6)', // Blue
+        backgroundColor: 'rgba(54, 162, 235, 0.6)',
         borderColor: 'rgba(54, 162, 235, 1)',
         borderWidth: 1,
       },
@@ -435,12 +433,12 @@ const AdminDashboardPage: React.FC = () => {
       {
         label: 'Popular Downloads',
         data: dashboardStats?.popular_downloads?.map(item => item.download_count) || [],
-        backgroundColor: [ // Array of colors for Pie chart segments
-          'rgba(255, 99, 132, 0.6)',  // Red
-          'rgba(75, 192, 192, 0.6)',  // Green
-          'rgba(255, 205, 86, 0.6)',  // Yellow
-          'rgba(201, 203, 207, 0.6)', // Grey
-          'rgba(153, 102, 255, 0.6)', // Purple
+        backgroundColor: [
+          'rgba(255, 99, 132, 0.6)',
+          'rgba(75, 192, 192, 0.6)',
+          'rgba(255, 205, 86, 0.6)',
+          'rgba(201, 203, 207, 0.6)',
+          'rgba(153, 102, 255, 0.6)',
         ],
         borderColor: [
           'rgba(255, 99, 132, 1)',
@@ -456,7 +454,7 @@ const AdminDashboardPage: React.FC = () => {
 
   const chartBaseOptions = {
       responsive: true,
-      maintainAspectRatio: false, // Important for sizing within Paper
+      maintainAspectRatio: false,
       plugins: {
         legend: {
           position: 'top' as const,
@@ -468,9 +466,9 @@ const AdminDashboardPage: React.FC = () => {
                   if (label) {
                       label += ': ';
                   }
-                  if (context.parsed.y !== null) { // For Bar/Line chart
+                  if (context.parsed.y !== null) {
                       label += context.parsed.y;
-                  } else if (context.parsed !== null && context.chart.config.type === 'pie') { // For Pie chart
+                  } else if (context.parsed !== null && context.chart.config.type === 'pie') {
                       label += context.parsed;
                   }
                   return label;
@@ -482,7 +480,7 @@ const AdminDashboardPage: React.FC = () => {
           text: '',
         }
       },
-      scales: { // Common scale options, can be overridden
+      scales: {
           y: {
               beginAtZero: true
           }
@@ -522,27 +520,26 @@ const AdminDashboardPage: React.FC = () => {
         label: 'Downloads',
         data: dashboardStats?.download_trends?.daily?.map(item => item.count) || [],
         fill: false,
-        borderColor: 'rgb(75, 192, 75)', // Green color for downloads
+        borderColor: 'rgb(75, 192, 75)',
         tension: 0.1,
       },
     ],
   };
-  
+
   if (loadingStats || loadingHealth) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="calc(100vh - 64px)"> {/* Adjust height based on AppBar/Header */}
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="calc(100vh - 64px)">
         <CircularProgress />
         <Typography sx={{ ml: 2 }}>Loading Dashboard Data...</Typography>
       </Box>
     );
   }
 
-  // Helper to render content health statistics lists
   const renderHealthStatsList = (
     healthData: { [key: string]: { missing?: number; stale?: number; total: number } } | undefined,
     dataType: 'missing' | 'stale'
   ) => {
-    if (loadingStats) return <CircularProgress />; 
+    if (loadingStats) return <CircularProgress />;
     if (!healthData || Object.keys(healthData).length === 0) {
       return <Typography sx={{ textAlign: 'center', mt: 2 }}>No data available.</Typography>;
     }
@@ -554,7 +551,7 @@ const AdminDashboardPage: React.FC = () => {
           const percentage = stats.total > 0 && count !== undefined ? ((count / stats.total) * 100).toFixed(1) : '0.0';
           const displayName = key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ');
           const itemText = `${displayName}: ${count ?? 0} / ${stats.total} (${percentage}%)`;
-          
+
           return (
             <ListItem key={key} divider>
               <ListItemText primary={itemText} />
@@ -584,16 +581,23 @@ const AdminDashboardPage: React.FC = () => {
       )
     );
   };
-  
+
   return (
-    <Box sx={{ flexGrow: 1, p: 3, backgroundColor: 'grey.100' }}> 
+    <Box sx={{ flexGrow: 1, p: 3, backgroundColor: 'grey.100' }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-        <Typography variant="h4" gutterBottom component="div" sx={{ color: 'primary.main', mb: 0 }}> 
+        <Typography variant="h4" gutterBottom component="div" sx={{ color: 'primary.main', mb: 0 }}>
           Admin Dashboard
         </Typography>
-        <Button variant="outlined" onClick={() => setIsSettingsModalOpen(true)}>
-          Customize Widgets
-        </Button>
+        {/* Group controls on the right */}
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <Button variant="outlined" onClick={() => setIsSettingsModalOpen(true)} sx={{ mr: 2 }}>
+            Customize Widgets
+          </Button>
+          <FormControlLabel
+            control={<Switch checked={isEditMode} onChange={(e) => setIsEditMode(e.target.checked)} />}
+            label="Edit Mode"
+          />
+        </Box>
       </Box>
 
       <Modal
@@ -636,20 +640,22 @@ const AdminDashboardPage: React.FC = () => {
 
       {statsError && <Alert severity="error" sx={{ mb: 2 }}>Error loading dashboard statistics: {statsError}</Alert>}
       {healthError && <Alert severity="error" sx={{ mb: 2 }}>Error loading system health: {healthError}</Alert>}
-      
+
       <ResponsiveGridLayout
         className="layout"
         layouts={{ lg: widgetConfigs.filter(w => w.visible).map(w => w.layout) }}
         cols={{ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }}
         rowHeight={30}
-        isDraggable={true}
-        isResizable={true}
+        isDraggable={isEditMode} // <-- Conditionally draggable
+        isResizable={isEditMode} // <-- Conditionally resizable
         measureBeforeMount={false}
         useCSSTransforms={true}
         onLayoutChange={handleLayoutChange}
+        // To improve clickability when isDraggable={true}, you might consider draggableCancel.
+        // However, the primary goal is achieved by making widgets non-draggable when not in edit mode.
+        // draggableCancel=".MuiButtonBase-root, a, input, select, textarea" // Example if needed
       >
         {widgetConfigs.filter(w => w.visible).map(widget => {
-          // Prepare props for each widget instance
           const widgetProps: WidgetComponentProps = {
             dashboardStats,
             systemHealth,
@@ -666,7 +672,7 @@ const AdminDashboardPage: React.FC = () => {
             renderHealthStatsList
           };
           return (
-            <div key={widget.id}>
+            <div key={widget.id} style={{ pointerEvents: 'auto', height: '100%' }}>
               {widget.component(widgetProps)}
             </div>
           );

@@ -72,6 +72,7 @@ app.config['DOC_UPLOAD_FOLDER'] = DOC_UPLOAD_FOLDER
 app.config['PATCH_UPLOAD_FOLDER'] = PATCH_UPLOAD_FOLDER
 app.config['LINK_UPLOAD_FOLDER'] = LINK_UPLOAD_FOLDER
 app.config['MISC_UPLOAD_FOLDER'] = MISC_UPLOAD_FOLDER
+app.config['INSTANCE_FOLDER_PATH'] = INSTANCE_FOLDER_PATH # Added for DB backup
 
 bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
@@ -106,10 +107,10 @@ def close_db(exception):
         db.close()
 
 def find_user_by_id(user_id):
-    return get_db().execute("SELECT id, username, password_hash, email, role, is_active, created_at FROM users WHERE id = ?", (user_id,)).fetchone()
+    return get_db().execute("SELECT id, username, password_hash, email, role, is_active, created_at, password_reset_required FROM users WHERE id = ?", (user_id,)).fetchone()
 
 def find_user_by_username(username):
-    return get_db().execute("SELECT id, username, password_hash, email, role, is_active, created_at FROM users WHERE username = ?", (username,)).fetchone()
+    return get_db().execute("SELECT id, username, password_hash, email, role, is_active, created_at, password_reset_required FROM users WHERE username = ?", (username,)).fetchone()
 
 def find_user_by_email(email):
     if not email or not email.strip(): return None
@@ -896,7 +897,15 @@ def register():
                 user_id=user_id, 
                 username=username
             )
-            return jsonify(msg="User created successfully", user_id=user_id, role=assigned_role), 201
+            # Generate access token for automatic login
+            access_token = create_access_token(identity=str(user_id))
+            return jsonify(
+                msg="User created successfully", 
+                user_id=user_id, 
+                role=assigned_role,
+                access_token=access_token,
+                username=username
+            ), 201
         except sqlite3.IntegrityError as e:
             # This might happen if somehow (user_id, question_id) is duplicated despite prior validation,
             # or if a question_id is invalid and not caught by optional check.
@@ -947,11 +956,21 @@ def login():
             username=user['username'] # Explicitly pass logged-in user's username
         )
         # Include password_reset_required flag in the response
+        raw_password_reset_flag = None
+        raw_password_reset_flag_type = None
+        if 'password_reset_required' in user.keys():
+            raw_password_reset_flag = user['password_reset_required']
+            raw_password_reset_flag_type = type(user['password_reset_required']).__name__
+        app.logger.debug(f"[Login Debug] Raw user['password_reset_required']: {raw_password_reset_flag}")
+        app.logger.debug(f"[Login Debug] Type of user['password_reset_required']: {raw_password_reset_flag_type}")
+        password_reset_required = user['password_reset_required'] if 'password_reset_required' in user.keys() and user['password_reset_required'] is not None else False
+        app.logger.debug(f"[Login Debug] Calculated password_reset_required for JSON response: {password_reset_required}")
+        app.logger.debug(f"[Login Debug] Type of calculated password_reset_required for JSON response: {type(password_reset_required).__name__}")
         return jsonify(
             access_token=access_token, 
             username=user['username'], 
             role=user['role'],
-            password_reset_required=user['password_reset_required'] # Added this line
+            password_reset_required=password_reset_required
         ), 200
     
     # Log failed login attempt (bad username or password)
@@ -4200,12 +4219,7 @@ def restore_database():
 
         return jsonify(msg="Database restore failed.", error=str(e)), 500
 
-# --- Main Execution ---
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
 
-# --- User Favorites Endpoints ---
-ALLOWED_FAVORITE_ITEM_TYPES = ['document', 'patch', 'link', 'misc_file', 'software', 'version']
 
 @app.route('/api/favorites', methods=['POST'])
 @jwt_required()
@@ -4830,3 +4844,10 @@ def get_dashboard_stats():
     except Exception as e:
         app.logger.error(f"Unexpected error in get_dashboard_stats: {e}", exc_info=True)
         return jsonify(error="An unexpected error occurred", details=str(e)), 500
+
+# --- Main Execution ---
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
+
+# --- User Favorites Endpoints ---
+ALLOWED_FAVORITE_ITEM_TYPES = ['document', 'patch', 'link', 'misc_file', 'software', 'version']

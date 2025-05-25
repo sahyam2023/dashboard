@@ -29,6 +29,7 @@ interface NavItemConfig {
 
 const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
   const { isAuthenticated, role } = useAuth(); // <-- Get authentication status and role
+  type RoleType = 'admin' | 'super_admin' | 'user';
 
   const navItems: NavItemConfig[] = [
     {
@@ -65,7 +66,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
     },
     // Admin-specific links
     {
-      path: '/admin/versions',
+      path: '/admin/dashboard',
       label: 'Management',
       icon: (isCollapsed) => <SettingsIcon size={isCollapsed ? 24 : 20} />,
       requiresAuth: true,
@@ -88,7 +89,10 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
     if (item.requiresAuth && !isAuthenticated) {
       return false; // Hide if requires auth and user is not authenticated
     }
-    if (item.roles && (!isAuthenticated || (role && !item.roles.includes(role)))) {
+    if (
+      item.roles !== undefined &&
+      (!isAuthenticated || (role && !item.roles.includes(role as RoleType)))
+    ) {
       // Hide if item has role requirements, and user is not authenticated,
       // or user's role is not in the allowed roles for the item.
       return false;

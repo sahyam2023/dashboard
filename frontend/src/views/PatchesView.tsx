@@ -244,7 +244,7 @@ const PatchesView: React.FC = () => {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-start sm:items-center mb-6 flex-col sm:flex-row">
-        <div> <h2 className="text-2xl font-bold text-gray-800">Patches</h2> <p className="text-gray-600 mt-1">Browse and download software patches</p> </div>
+        <div> <h2 className="text-2xl font-bold text-gray-800 dark:text-white">Patches</h2> <p className="text-gray-600 mt-1 dark:text-gray-300">Browse and download software patches</p> </div>
         {isAuthenticated && (role === 'admin' || role === 'super_admin') && (
           <button onClick={showAddOrEditForm && !editingPatch ? closeAdminForm : openAddForm} className="mt-4 sm:mt-0 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
             <PlusCircle size={18} className="mr-2" /> {showAddOrEditForm && !editingPatch ? 'Cancel Add Patch' : 'Add New Patch'}

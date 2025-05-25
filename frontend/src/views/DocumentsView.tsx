@@ -428,8 +428,8 @@ useEffect(() => {
     <div className="space-y-6">
       <div className="flex justify-between items-start sm:items-center mb-6 flex-col sm:flex-row">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800">Documents</h2>
-          <p className="text-gray-600 mt-1">Browse and download documentation</p>
+          <h2 className="text-2xl font-bold text-gray-800 dark:text-white">Documents</h2>
+          <p className="text-gray-600 mt-1 dark:text-gray-300">Browse and download documentation</p>
         </div>
         {isAuthenticated && (role === 'admin' || role === 'super_admin') && !editingDocument && (
           <button

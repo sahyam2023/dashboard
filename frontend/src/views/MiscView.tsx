@@ -261,7 +261,7 @@ const MiscView: React.FC = () => {
   return (
     <div className="space-y-8">
       <div className="flex justify-between items-start sm:items-center mb-6 flex-col sm:flex-row">
-        <div> <h2 className="text-2xl font-bold text-gray-800">Miscellaneous Files</h2> <p className="text-gray-600 mt-1">Browse and download categorized miscellaneous files.</p> </div>
+        <div> <h2 className="text-2xl font-bold text-gray-800 dark:text-white">Miscellaneous Files</h2> <p className="text-gray-600 mt-1 dark:text-gray-300">Browse and download categorized miscellaneous files.</p> </div>
          {isAuthenticated && (role === 'admin' || role === 'super_admin') && (
             <div className="flex space-x-3 mt-4 sm:mt-0">
                  <button onClick={() => {setShowCategoryForm(prev => !prev); setEditingCategory(null); setShowGeneralUploadForm(false); setFeedbackMessage(null);}} className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">

@@ -4,6 +4,7 @@ import uuid
 import sqlite3
 import json # Added for audit logging
 import re
+from database import init_db
 from datetime import datetime, timedelta, timezone # Added timedelta and timezone
 import math # Added for math.ceil
 import secrets # Added for secure token generation
@@ -4916,8 +4917,32 @@ def get_dashboard_stats():
         app.logger.error(f"Unexpected error in get_dashboard_stats: {e}", exc_info=True)
         return jsonify(error="An unexpected error occurred", details=str(e)), 500
 
-# --- Main Execution ---
+# # --- Main Execution ---
+# if __name__ == '__main__':
+#     app.run(host='0.0.0.0', port=5000, debug=True)
+
 if __name__ == '__main__':
+    db_path = app.config.get('DATABASE')
+    if not db_path:
+        print("ERROR: DATABASE configuration not found in app.config. Cannot initialize DB.")
+    else:
+        db_dir = os.path.dirname(db_path)
+        if db_dir and not os.path.exists(db_dir): # Check if db_dir is not empty
+            try:
+                os.makedirs(db_dir, exist_ok=True)
+                print(f"Created instance directory: {db_dir}")
+            except OSError as e:
+                print(f"Error creating instance directory {db_dir}: {e}")
+        if not os.path.exists(db_path):
+            print(f"Database file not found at {db_path}. Initializing database...")
+            try:
+                init_db(db_path)
+                print(f"Database initialized successfully at {db_path}.")
+            except Exception as e:
+                print(f"An error occurred during database initialization: {e}")
+        else:
+            print(f"Database file already exists at {db_path}. Skipping initialization.")
+
     app.run(host='0.0.0.0', port=5000, debug=True)
 
 # --- User Favorites Endpoints ---

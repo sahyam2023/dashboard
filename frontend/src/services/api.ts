@@ -264,25 +264,51 @@ const getAuthHeader = (): Record<string, string> => {
 };
 
 // Generic error handler for API calls
-const handleApiError = async (response: Response, defaultMessage: string) => {
+const handleApiError = async (response: Response, defaultMessage: string, isLoginAttempt: boolean = false) => {
   if (!response.ok) {
     let errorData;
     try {
       errorData = await response.json();
     } catch (e) {
-      throw new Error(`${defaultMessage}: ${response.status} ${response.statusText}`);
+      // If parsing errorData fails, use a generic message
+      errorData = { msg: `${defaultMessage}: ${response.status} ${response.statusText}` };
     }
+
+    // Check for 401 Unauthorized and if a token was likely used (i.e., not a login attempt itself)
+    if (response.status === 401 && !isLoginAttempt && localStorage.getItem('authToken')) {
+      // Dispatch a custom event for token expiration
+      // This event should be listened to by AuthContext to handle logout and redirect
+      document.dispatchEvent(new CustomEvent('tokenExpired'));
+      
+      // We don't throw an error here because the event handler will navigate away.
+      // Returning a promise that never resolves can prevent further processing in the calling function.
+      // Or, ensure calling functions are robust to this. For now, we'll let it proceed to throw,
+      // but the navigation should ideally prevent component errors.
+      // A more robust solution might involve a dedicated error type that calling code can ignore.
+      // For now, we throw to ensure the calling code's catch block is triggered if it needs to cleanup,
+      // but the UI should be redirected by the event.
+      const message = errorData?.msg || `Session expired or unauthorized: ${response.status}`;
+      const error: any = new Error(message);
+      error.response = { data: errorData, status: response.status };
+      error.isTokenExpirationError = true; // Custom flag
+      throw error;
+    }
+
     const message = errorData?.msg || `${defaultMessage}: ${response.status}`;
-    const error: any = new Error(message); 
-    error.response = { data: errorData, status: response.status }; 
+    const error: any = new Error(message);
+    error.response = { data: errorData, status: response.status };
     throw error;
   }
 
-  const responseText = await response.text(); 
+  const responseText = await response.text();
   try {
-    return JSON.parse(responseText); 
+    return JSON.parse(responseText);
   } catch (e) {
-    console.error('JSON parsing error for URL:', response.url, 'Received non-JSON response:', responseText);
+    // Handle cases where response is OK but not JSON (e.g., a 204 No Content)
+    if (responseText.trim() === '' && (response.status === 204 || response.status === 201 && response.headers.get('Content-Length') === '0')) {
+      return null; // Or an appropriate representation for no content
+    }
+    console.error('JSON parsing error for URL:', response.url, 'Status:', response.status, 'Received non-JSON response:', responseText);
     throw new Error(`JSON parsing failed for URL: ${response.url}. Response: ${responseText.substring(0, 200)}...`);
   }
 };
@@ -664,30 +690,14 @@ export async function loginUser(credentials: AuthRequest): Promise<AuthResponseT
       body: JSON.stringify(credentials),
     });
 
-    const data = await response.json(); // Always parse JSON first
-
-    if (!response.ok) {
-      // For non-ok responses, data might contain { msg: "error message" }
-      const errorMsg = data.msg || `Login failed with status: ${response.status}`;
-      // console.error('API Error in loginUser:', errorMsg, 'Full response data:', data);
-      
-      const error: any = new Error(errorMsg);
-      error.response = { data: data, status: response.status }; 
-      throw error;
-    }
-    
-    // If response is ok, data should be AuthResponse
-    return data as AuthResponseTypeFromTypes; 
+    // For login, we pass `isLoginAttempt = true` to handleApiError
+    // This prevents the global 401 "token expired" handler from triggering for failed login attempts.
+    return handleApiError(response, 'Login failed', true) as Promise<AuthResponseTypeFromTypes>;
 
   } catch (error: any) {
-    // console.error('Error during loginUser:', error.message, 'Full error object:', error);
-    if (error.response && error.response.data && error.response.data.msg) {
-      throw new Error(error.response.data.msg);
-    } else if (error.message) {
-      throw new Error(error.message);
-    } else {
-      throw new Error('An unknown error occurred during login.');
-    }
+    // Re-throw the error to be caught by the component, which will show a toast
+    // The error object should already be structured by handleApiError
+    throw error;
   }
 }
 

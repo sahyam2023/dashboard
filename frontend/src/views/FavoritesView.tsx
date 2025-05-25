@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Star, FileText, Puzzle, Link2 as LinkIcon, Archive as FileArchive, Package, Tag } from 'lucide-react'; // Using Link2 for LinkIcon to avoid conflict
+import { Star, FileText, Puzzle, Link2 as LinkIcon, Archive as FileArchive, Package, Tag } from 'lucide-react';
 import {
   getUserFavoritesApi,
   PaginatedFavoritesResponse,
@@ -8,27 +8,28 @@ import {
   FavoriteItemType,
   addFavoriteApi,
   removeFavoriteApi,
-  getFavoriteStatusApi, // To initialize favorite states correctly if needed, though primary data comes from getUserFavoritesApi
 } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import LoadingState from '../components/LoadingState';
 import ErrorState from '../components/ErrorState';
+import { showErrorToast, showSuccessToast } from '../utils/toastUtils'; // Import toast utilities
 
 const FavoritesView: React.FC = () => {
-  const { isAuthenticated, isLoading } = useAuth(); // Use isLoading directly
+  const { isAuthenticated, isLoading: isAuthLoading } = useAuth(); // Renamed to avoid conflict
   const [favorites, setFavorites] = useState<DetailedFavoriteItem[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(true); 
-  const [error, setError] = useState<string | null>(null);
-  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null); // For initial load error
+  // Removed feedbackMessage, will use toasts for feedback
 
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
   const [totalFavorites, setTotalFavorites] = useState(0);
-  const [itemsPerPage, setItemsPerPage] = useState(10); // Or your default
+  const [itemsPerPage, setItemsPerPage] = useState(10);
 
-  // This state will primarily be used to manage the filled/unfilled star for items on this page
-  // It's populated by the `is_favorited` and `favorite_id` coming directly from the `DetailedFavoriteItem`
-  const [favoritedItems, setFavoritedItems] = useState<Map<string, { favoriteId: number | undefined }>>(new Map());
+  const [isInitialLoad, setIsInitialLoad] = useState(true); // Track initial load
+
+  // This map is primarily for UI state of the star icon if needed, but data comes from `favorites` list
+  const [favoritedItemsMap, setFavoritedItemsMap] = useState<Map<string, { favoriteId: number | undefined }>>(new Map());
 
   const mapItemTypeToIcon = (itemType: FavoriteItemType) => {
     switch (itemType) {
@@ -44,143 +45,122 @@ const FavoritesView: React.FC = () => {
   
   const getItemPageLink = (item: DetailedFavoriteItem): string => {
     switch (item.item_type) {
-      case 'document':
-        return `/documents?highlight=${item.item_id}&software_id=${item.software_id || ''}`;
-      case 'patch':
-        return `/patches?highlight=${item.item_id}&software_id=${item.software_id || ''}&version_id=${item.version_id || ''}`;
+      case 'document': return `/documents?highlight=${item.item_id}&software_id=${item.software_id || ''}`;
+      case 'patch': return `/patches?highlight=${item.item_id}&software_id=${item.software_id || ''}&version_id=${item.version_id || ''}`;
       case 'link':
-         // For external links, the item.name might be the URL, or a specific field if available
-         // If it's an uploaded file link, construct path similar to other file types
-        if (item.name && (item.name.startsWith('http://') || item.name.startsWith('https://'))) { // Assuming 'name' holds URL for external links for now
-            return item.name;
-        }
-        // Fallback for internal links or if name is not a URL
+        if (item.name && (item.name.startsWith('http://') || item.name.startsWith('https://'))) { return item.name; }
         return `/links?highlight=${item.item_id}&software_id=${item.software_id || ''}&version_id=${item.version_id || ''}`;
-      case 'misc_file':
-        return `/misc?highlight=${item.item_id}`; // Assuming a general misc view or specific category view
-      case 'software':
-        return `/documents?software_id=${item.item_id}`; // Example: link to documents of that software
-      case 'version':
-        return `/patches?software_id=${item.software_id || ''}&version_id=${item.item_id}`; // Example: link to patches of that version
-      default:
-        return '#';
+      case 'misc_file': return `/misc?highlight=${item.item_id}`;
+      case 'software': return `/documents?software_id=${item.item_id}`;
+      case 'version': return `/patches?software_id=${item.software_id || ''}&version_id=${item.item_id}`;
+      default: return '#';
     }
   };
 
-
   const loadFavorites = useCallback(async () => {
-  if (!isAuthenticated) {
-    setIsLoadingData(false); // Correct: use local state setter
-    setError("Please log in to view your favorites.");
-    setFavorites([]);
-    setFavoritedItems(new Map()); // Clear favorites if not authenticated
-    setTotalPages(0);
-    setTotalFavorites(0);
-    return;
-  }
+    if (!isAuthenticated) {
+      setIsLoadingData(false);
+      setError("Please log in to view your favorites.");
+      setFavorites([]);
+      setFavoritedItemsMap(new Map());
+      setTotalPages(0);
+      setTotalFavorites(0);
+      if (isInitialLoad) setIsInitialLoad(false);
+      return;
+    }
 
-  setIsLoadingData(true); // Correct: use local state setter
-  setError(null);
-  setFeedbackMessage(null);
+    setIsLoadingData(true);
+    if (isInitialLoad) {
+      setError(null); // Clear main error only on initial load attempt
+    }
 
-  try {
-    const response: PaginatedFavoritesResponse = await getUserFavoritesApi(currentPage, itemsPerPage);
-    setFavorites(response.favorites);
-    setTotalPages(response.total_pages);
-    setTotalFavorites(response.total_favorites);
-    // setCurrentPage(response.page); // If API provides these, update them
-    // setItemsPerPage(response.per_page); 
+    try {
+      const response: PaginatedFavoritesResponse = await getUserFavoritesApi(currentPage, itemsPerPage);
+      setFavorites(response.favorites);
+      setTotalPages(response.total_pages);
+      setTotalFavorites(response.total_favorites);
+      
+      const newFavoritedItemsMap = new Map<string, { favoriteId: number | undefined }>();
+      response.favorites.forEach(fav => {
+        newFavoritedItemsMap.set(`${fav.item_type}-${fav.item_id}`, { favoriteId: fav.favorite_id });
+      });
+      setFavoritedItemsMap(newFavoritedItemsMap);
 
-    const newFavoritedItems = new Map<string, { favoriteId: number | undefined }>();
-    response.favorites.forEach(fav => {
-      newFavoritedItems.set(`${fav.item_type}-${fav.item_id}`, { favoriteId: fav.favorite_id });
-    });
-    setFavoritedItems(newFavoritedItems);
-
-  } catch (err: any) {
-    console.error("Failed to load favorites:", err);
-    setError(err.message || 'Failed to fetch favorites.');
-    setFavorites([]);
-    setFavoritedItems(new Map()); // Clear favorites on error
-    setTotalPages(0);
-    setTotalFavorites(0);
-  } finally {
-    setIsLoadingData(false); // Correct: use local state setter
-  }
-// Add `setIsLoadingData` to dependencies if your linter complains, though it's stable from useState
-}, [isAuthenticated, currentPage, itemsPerPage /*, setIsLoadingData */ ]);
+      if (isInitialLoad) {
+        setIsInitialLoad(false); // Mark initial load as complete
+      }
+    } catch (err: any) {
+      console.error("Failed to load favorites:", err);
+      const errorMessage = err.response?.data?.msg || err.message || 'Failed to fetch favorites.';
+      if (isInitialLoad) {
+        setError(errorMessage); // Set error for ErrorState component display
+        setFavorites([]);
+        setFavoritedItemsMap(new Map());
+        setTotalPages(0);
+        setTotalFavorites(0);
+      } else {
+        showErrorToast(errorMessage); // Show toast for non-initial load errors, keep stale data
+      }
+    } finally {
+      setIsLoadingData(false);
+      if (isInitialLoad) setIsInitialLoad(false); // Ensure initial load is false even on error
+    }
+  }, [isAuthenticated, currentPage, itemsPerPage, isInitialLoad]);
 
   useEffect(() => {
-    if (!isLoading) { // Use isLoading from context
+    if (!isAuthLoading) { 
         loadFavorites();
     }
-  }, [loadFavorites, isLoading]); // Dependency is now isLoading
+  }, [loadFavorites, isAuthLoading]);
 
   const handleFavoriteToggle = async (item: DetailedFavoriteItem) => {
     if (!isAuthenticated) {
-      setFeedbackMessage("Please log in to manage favorites.");
+      showErrorToast("Please log in to manage favorites.");
       return;
     }
 
     const uniqueKey = `${item.item_type}-${item.item_id}`;
-    const currentStatus = favoritedItems.get(uniqueKey);
-    const isCurrentlyFavorited = !!currentStatus?.favoriteId;
-
-    // Optimistic UI update: Remove from list immediately if un-favoriting
-    if (isCurrentlyFavorited) {
-      setFavorites(prevFavorites => prevFavorites.filter(fav => fav.favorite_id !== currentStatus.favoriteId));
-      setFavoritedItems(prevMap => {
-        const newMap = new Map(prevMap);
-        newMap.set(uniqueKey, { favoriteId: undefined });
-        return newMap;
-      });
-    } else {
-      // For adding, we'd typically re-fetch or add to list, but this page only shows existing favorites.
-      // So, adding back is less of a concern here unless the item was incorrectly removed optimistically.
-      // For now, if an item is re-favorited (which shouldn't happen from this page if it's already gone),
-      // we'll just update the map. The item won't reappear unless the list is reloaded.
-       setFavoritedItems(prevMap => {
-        const newMap = new Map(prevMap);
-        newMap.set(uniqueKey, { favoriteId: -1 }); // Placeholder, will be updated by actual ID
-        return newMap;
-      });
-    }
-    setFeedbackMessage(null);
+    // Since this page only shows favorited items, toggling always means un-favoriting.
+    // Optimistic UI update: Remove from list immediately.
+    setFavorites(prevFavorites => prevFavorites.filter(fav => fav.favorite_id !== item.favorite_id));
+    setFavoritedItemsMap(prevMap => {
+      const newMap = new Map(prevMap);
+      newMap.delete(uniqueKey); // Remove from map
+      return newMap;
+    });
 
     try {
-      if (isCurrentlyFavorited && typeof currentStatus?.favoriteId === 'number') {
-        await removeFavoriteApi(item.item_id, item.item_type);
-        setFeedbackMessage(`"${item.name}" removed from favorites.`);
-        // State already updated optimistically. Optionally, re-fetch to confirm.
-        // loadFavorites(); // Or just ensure local state is consistent
-      } else {
-        // This case (adding a favorite) should ideally not be triggered from the favorites page
-        // if an item is only shown when it *is* a favorite.
-        // However, if it's possible due to some UI inconsistency:
-        const newFavoriteEntry = await addFavoriteApi(item.item_id, item.item_type);
-        setFavoritedItems(prevMap => {
-            const newMap = new Map(prevMap);
-            newMap.set(uniqueKey, { favoriteId: newFavoriteEntry.id });
-            return newMap;
-        });
-        setFeedbackMessage(`"${item.name}" added to favorites.`);
-        // Item might not be in the list if it was removed optimistically and re-added.
-        // A full reload might be best here if adding is a possible action.
-        loadFavorites();
+      await removeFavoriteApi(item.item_id, item.item_type);
+      showSuccessToast(`"${item.name}" removed from favorites.`);
+      // Optionally, reload to ensure pagination and total counts are accurate,
+      // though optimistic removal often feels faster.
+      // If totalFavorites is important to update immediately:
+      setTotalFavorites(prev => prev -1); 
+      if (favorites.length === 1 && currentPage > 1) { // If last item on a page (not first page)
+        setCurrentPage(prev => prev - 1); // This will trigger loadFavorites
+      } else if (favorites.length === 1 && currentPage === 1) {
+        // If last item on first page, list will be empty after removal.
+        // loadFavorites will be triggered if currentPage doesn't change but items are 0
+        // No specific action here, data will be empty or loadFavorites will run
       }
+      // If not the last item, the optimistic removal is usually sufficient.
+      // Consider if totalPages needs adjustment or if loadFavorites should always run.
+      // For simplicity, if many items are removed, a full reload via loadFavorites might be better.
+      // loadFavorites(); // Uncomment if strict data consistency is preferred over optimistic UI.
+      
     } catch (error: any) {
-      console.error("Failed to toggle favorite:", error);
-      setFeedbackMessage(error?.response?.data?.msg || error.message || "Failed to update favorite status.");
-      // Revert optimistic update
-      loadFavorites(); // Re-fetch to get consistent state
+      showErrorToast(error?.response?.data?.msg || error.message || "Failed to update favorite status.");
+      // Revert optimistic update by reloading
+      loadFavorites(); 
     }
   };
 
-  if (isLoading || isLoadingData) { // Use isLoading from context and local isLoadingData
+  // Display loading state only during initial auth check or initial data fetch
+  if (isAuthLoading || (isInitialLoad && isLoadingData)) {
     return <LoadingState message="Loading favorites..." />;
   }
 
-  if (!isAuthenticated) {
+  if (!isAuthenticated && !isAuthLoading) { // Ensure auth check is complete
     return (
       <div className="text-center py-10">
         <p className="text-lg text-gray-600">Please <Link to="/login" className="text-blue-600 hover:underline">log in</Link> to view your favorites.</p>
@@ -188,7 +168,8 @@ const FavoritesView: React.FC = () => {
     );
   }
   
-  if (error) {
+  // Display error state only on initial load failure
+  if (error && isInitialLoad && favorites.length === 0) {
     return <ErrorState message={error} onRetry={loadFavorites} />;
   }
 
@@ -199,13 +180,7 @@ const FavoritesView: React.FC = () => {
         <h1 className="text-3xl font-bold text-gray-800">My Favorites</h1>
       </div>
 
-      {feedbackMessage && (
-        <div className={`p-3 my-2 rounded text-sm ${feedbackMessage.includes("removed") || feedbackMessage.includes("Failed") ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
-          {feedbackMessage}
-        </div>
-      )}
-
-      {favorites.length === 0 ? (
+      {favorites.length === 0 && !isLoadingData ? ( // Ensure not loading before showing "no favorites"
         <div className="text-center py-10">
           <Star size={48} className="mx-auto text-gray-400 mb-4" />
           <p className="text-xl text-gray-600">You haven't favorited any items yet.</p>
@@ -238,34 +213,23 @@ const FavoritesView: React.FC = () => {
               </div>
               <button
                 onClick={() => handleFavoriteToggle(item)}
-                className={`p-2 rounded-full ${favoritedItems.get(`${item.item_type}-${item.item_id}`)?.favoriteId ? 'text-yellow-500' : 'text-gray-400'} hover:text-yellow-600 focus:outline-none`}
-                title={favoritedItems.get(`${item.item_type}-${item.item_id}`)?.favoriteId ? "Remove from Favorites" : "Add to Favorites (should not happen here)"}
+                className="p-2 rounded-full text-yellow-500 hover:text-yellow-600 focus:outline-none"
+                title="Remove from Favorites"
               >
-                <Star size={20} className={favoritedItems.get(`${item.item_type}-${item.item_id}`)?.favoriteId ? "fill-current" : ""} />
+                <Star size={20} className="fill-current" />
               </button>
             </div>
           ))}
         </div>
       )}
 
-      {/* Pagination Controls */}
       {totalPages > 1 && (
         <div className="flex justify-between items-center mt-8">
-          <button
-            onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-            disabled={currentPage === 1}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 disabled:opacity-50"
-          >
+          <button onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))} disabled={currentPage === 1 || isLoadingData} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 disabled:opacity-50">
             Previous
           </button>
-          <span className="text-sm text-gray-700">
-            Page {currentPage} of {totalPages} (Total: {totalFavorites} items)
-          </span>
-          <button
-            onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-            disabled={currentPage === totalPages}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 disabled:opacity-50"
-          >
+          <span className="text-sm text-gray-700"> Page {currentPage} of {totalPages} (Total: {totalFavorites} items) </span>
+          <button onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))} disabled={currentPage === totalPages || isLoadingData} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 disabled:opacity-50">
             Next
           </button>
         </div>

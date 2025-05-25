@@ -51,7 +51,7 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
             <Menu size={24} />
           </button>
           {/* Link title back to dashboard home */}
-          <Link to="/" className="text-xl font-semibold text-gray-800 hidden sm:block">
+          <Link to="/" className="text-2xl font-bold text-indigo-600 hover:text-indigo-700 transition-colors hidden sm:block">
             Dashboard
           </Link>
         </div>
@@ -93,28 +93,32 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
         <div className="flex items-center space-x-3 sm:space-x-4">
           {isAuthenticated ? (
             <>
+              {/* Welcome Message */}
+              <span className="hidden sm:inline text-gray-700 font-medium">
+                Welcome, {username}!
+              </span>
               {/* User Profile Link */}
               <Link
                 to="/profile"
-                className="hidden sm:flex items-center text-sm font-medium text-gray-700 hover:text-blue-600"
+                className="hidden sm:flex items-center text-sm font-medium text-gray-700 hover:text-indigo-600"
                 title="User Profile"
               >
-                <User size={16} className="mr-1.5 text-gray-500" />
-                {username}
+                <User size={18} className="mr-1.5 text-gray-500" />
+                <span className="hidden lg:inline">{username}</span> {/* Show full username on larger screens */}
               </Link>
               {/* Mobile User Profile Icon Link */}
               <Link
                 to="/profile"
-                className="sm:hidden p-2 rounded-md text-gray-500 hover:text-blue-600 hover:bg-blue-50"
+                className="sm:hidden p-2 rounded-md text-gray-500 hover:text-indigo-600 hover:bg-indigo-50"
                 aria-label="User Profile"
               >
-                <User size={20} />
+                <User size={22} />
               </Link>
               {/* Super Admin Link */}
-              {role === 'super_admin' && ( // <-- Corrected: userRole to role
+              {role === 'super_admin' && ( 
                 <Link
                   to="/superadmin"
-                  className="px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 hidden sm:inline-flex items-center"
+                  className="px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 hidden md:inline-flex items-center"
                   title="Super Admin Dashboard"
                 >
                   Super Admin

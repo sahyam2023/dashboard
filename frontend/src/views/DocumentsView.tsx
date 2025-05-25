@@ -52,7 +52,8 @@ const DocumentsView: React.FC = () => {
 
   // Loading and Error State
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null); // For initial load error or critical errors
+  const [isInitialLoad, setIsInitialLoad] = useState(true); // New state for initial load tracking
 
   // UI State for Forms and Modals
   const [showAddDocumentForm, setShowAddDocumentForm] = useState(false);
@@ -69,7 +70,10 @@ const DocumentsView: React.FC = () => {
 
 const loadDocuments = useCallback(async () => {
   setIsLoading(true);
-  setError(null);
+  if (isInitialLoad) { // Only clear main error if it's an initial load attempt
+    setError(null);
+  }
+  // Do not clear setError for non-initial loads, as we want to show stale data with a toast.
   // setFeedbackMessage(null); // Optional: Clear previous feedback if needed
 
   try {
@@ -104,20 +108,24 @@ const loadDocuments = useCallback(async () => {
       }
     }
     setFavoritedItems(newFavoritedItems);
+    if (isInitialLoad) {
+      setIsInitialLoad(false); // Mark initial load as complete
+    }
 
-  } catch (err: any) { // This is the SINGLE, CORRECT catch block
-    console.error("Failed to load documents:", err); // Good practice to log the actual error
-    setDocuments([]); // Clear documents on error
-    setError(err.message || 'Failed to fetch documents. Please try again later.');
-    
-    // Reset pagination and other related states
-    setTotalPages(0);
-    setTotalDocuments(0);
-    // setCurrentPage(1); // Optionally reset to page 1
-    // setItemsPerPage(10); // Optionally reset per_page
-
-    // Clear favoritedItems as the document list is now empty or inconsistent
-    setFavoritedItems(new Map());
+  } catch (err: any) {
+    console.error("Failed to load documents:", err);
+    const errorMessage = err.message || 'Failed to fetch documents. Please try again later.';
+    if (isInitialLoad) {
+      setError(errorMessage); // Set error for ErrorState component display
+      setDocuments([]); // Clear documents on initial load error
+      setTotalPages(0);
+      setTotalDocuments(0);
+      setFavoritedItems(new Map());
+    } else {
+      // For non-initial loads, show a toast and keep stale data
+      showErrorToast(err.response?.data?.msg || "Failed to update documents. Previous data shown.");
+      // Do not clear documents or reset pagination here
+    }
   } finally {
     setIsLoading(false);
   }
@@ -292,10 +300,10 @@ const loadDocuments = useCallback(async () => {
     { key: 'created_at', header: 'Created At', sortable: true, render: (doc) => doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-CA') : '-' },
     { key: 'updated_at', header: 'Updated At', sortable: true, render: (doc) => doc.updated_at ? new Date(doc.updated_at).toLocaleDateString('en-CA') : '-' },
     ...(isAuthenticated ? [{ // Changed condition to isAuthenticated for favorite button
-      key: 'actions' as keyof DocumentType | 'actions', // Type assertion for actions
+      key: 'actions' as keyof DocumentType | 'actions',
       header: 'Actions',
       render: (document: DocumentType) => (
-        <div className="flex space-x-2">
+        <div className="flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -474,15 +482,17 @@ const loadDocuments = useCallback(async () => {
       </div>
 
 
-      {error && documents.length === 0 && !isLoading ? (
+      {isInitialLoad && isLoading ? ( // Show LoadingState only on initial load
+        <LoadingState />
+      ) : error && isInitialLoad ? ( // Show ErrorState only on initial load error
         <ErrorState message={error} onRetry={loadDocuments} />
       ) : (
         <>
-          {/* Show inline error if some data is present but an update failed (e.g., after an action) */}
-          {error && documents.length > 0 && <div className="p-3 my-2 bg-red-100 text-red-700 rounded text-sm">{error}</div>}
+          {/* Toasts will handle non-initial load errors. No specific inline error display needed here. */}
           <DataTable
             columns={columns}
-            data={filteredDocumentsBySearch} // Pass client-side searched data
+            data={filteredDocumentsBySearch}
+            rowClassName="group" // Added group class for row hover effect
             isLoading={isLoading}
             currentPage={currentPage}
             totalPages={totalPages}

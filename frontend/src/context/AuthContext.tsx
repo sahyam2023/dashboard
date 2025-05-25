@@ -58,13 +58,32 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   // Forced Password Reset State
   const [isPasswordResetRequired, setIsPasswordResetRequired] = useState<boolean>(false);
 
-
+  //isLoading is set to false once the effect has run
   useEffect(() => {
+    // Event listener for token expiration
+    const handleTokenExpired = () => {
+      // Check if already logged out to prevent multiple redirects or toast messages
+      // This check relies on the current state of `token` which might not be updated immediately
+      // if multiple `tokenExpired` events fire rapidly.
+      // A more robust solution might involve a flag like `isLoggingOut`.
+      if (localStorage.getItem('authToken')) { // Check localStorage directly for more immediate state
+        logout(); // Perform logout actions
+        // No navigate here, App.tsx will handle redirect to /login if not authenticated
+        // showErrorToast("Your session has expired. Please login again."); // Toast is now handled in App.tsx
+      }
+    };
+
+    document.addEventListener('tokenExpired', handleTokenExpired);
+    
     // Optional: Add a check here to validate the token with the backend on initial load
     // For simplicity, we'll just trust localStorage for now.
     // If token exists, assume logged in. A backend check would be more secure.
-    setIsLoading(false);
-  }, []);
+    setIsLoading(false); // Set loading to false after setup
+
+    return () => {
+      document.removeEventListener('tokenExpired', handleTokenExpired);
+    };
+  }, []); // Empty dependency array ensures this runs once on mount and unmount
 
 
   const login = (newToken: string, newUsername: string, newRole: string, passwordResetRequired: boolean = false) => {

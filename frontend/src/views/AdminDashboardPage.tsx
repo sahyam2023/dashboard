@@ -304,7 +304,7 @@ const AdminDashboardPage: React.FC = () => {
 
   const handleDragOrResizeStop = () => {
     if (isEditMode && currentLayouts) { // Only save if in edit mode and layouts are available
-        debouncedSaveLayout(currentLayouts);
+        // debouncedSaveLayout(currentLayouts); // Removed automatic save
     }
   };
 
@@ -321,17 +321,17 @@ const AdminDashboardPage: React.FC = () => {
     const newEditMode = !isEditMode;
     setIsEditMode(newEditMode);
     if (!newEditMode && currentLayouts) { // Exiting edit mode
-      // Convert RglLayouts to ApiLayoutObject for saving
-      const apiLayouts: ApiLayoutObject = {};
-      for (const breakpointKey in currentLayouts) {
-        apiLayouts[breakpointKey] = currentLayouts[breakpointKey].map(item => ({
-          i: item.i, x: item.x, y: item.y, w: item.w, h: item.h,
-          static: item.static, isDraggable: item.isDraggable, isResizable: item.isResizable,
-        }));
-      }
-      saveUserDashboardLayout(apiLayouts)
-        .then(() => showSuccessToast("Layout saved!", { autoClose: 2000 }))
-        .catch(() => showErrorToast("Failed to save layout."));
+      // Convert RglLayouts to ApiLayoutObject for saving - REMOVED as part of removing auto-save
+      // const apiLayouts: ApiLayoutObject = {};
+      // for (const breakpointKey in currentLayouts) {
+      //   apiLayouts[breakpointKey] = currentLayouts[breakpointKey].map(item => ({
+      //     i: item.i, x: item.x, y: item.y, w: item.w, h: item.h,
+      //     static: item.static, isDraggable: item.isDraggable, isResizable: item.isResizable,
+      //   }));
+      // }
+      // saveUserDashboardLayout(apiLayouts) // Removed automatic save
+      //   .then(() => showSuccessToast("Layout saved!", { autoClose: 2000 }))
+      //   .catch(() => showErrorToast("Failed to save layout."));
     }
   };
 
@@ -350,6 +350,35 @@ const AdminDashboardPage: React.FC = () => {
         <Typography variant="h4" gutterBottom component="div" sx={{ color: 'primary.main', mb: 0 }}>Admin Dashboard</Typography>
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <Button variant="outlined" onClick={() => setIsSettingsModalOpen(true)} sx={{ mr: 2 }}>Customize Widgets</Button>
+          
+          {/* NEW "Save Layout" BUTTON - Add it here */}
+          {isEditMode && (
+            <Button
+              variant="contained"
+              color="primary"
+              onClick={() => {
+                if (currentLayouts) {
+                  const apiLayouts: ApiLayoutObject = {};
+                  for (const breakpointKey in currentLayouts) {
+                    apiLayouts[breakpointKey] = currentLayouts[breakpointKey].map(item => ({
+                      i: item.i, x: item.x, y: item.y, w: item.w, h: item.h,
+                      static: item.static, isDraggable: item.isDraggable, isResizable: item.isResizable,
+                    }));
+                  }
+                  saveUserDashboardLayout(apiLayouts)
+                    .then(() => showSuccessToast("Dashboard layout saved successfully!", { autoClose: 2000 }))
+                    .catch(() => showErrorToast("Failed to save dashboard layout."));
+                } else {
+                  showErrorToast("No layout data to save.");
+                }
+              }}
+              sx={{ mr: 2 }} 
+            >
+              Save Layout
+            </Button>
+          )}
+          {/* END OF NEW BUTTON */}
+
           <FormControlLabel control={<Switch checked={isEditMode} onChange={handleToggleEditMode} />} label="Edit Mode" />
         </Box>
       </Box>

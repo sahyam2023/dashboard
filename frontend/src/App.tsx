@@ -30,7 +30,7 @@ const AuditLogViewer = lazy(() => import('./components/admin/AuditLogViewer')); 
 
 import { useAuth } from './context/AuthContext'; 
 import AuthModal from './components/shared/AuthModal'; 
-import SessionTimeoutWarningModal from './components/shared/SessionTimeoutWarningModal'; 
+// import SessionTimeoutWarningModal from './components/shared/SessionTimeoutWarningModal'; // Removed import
 
 
 // We need to wrap the main logic in a component that can use useLocation
@@ -44,6 +44,7 @@ function AppContent() {
     isGlobalAccessGranted, 
     isAuthenticated, // Use this from auth context
     isPasswordResetRequired, // Use this from auth context
+    isLoading, // Added isLoading
     logout // Destructure logout to use in event handler
   } = auth;
 
@@ -67,6 +68,10 @@ function AppContent() {
     };
   }, [auth.isAuthenticated, auth]); // Depend on isAuthenticated and the auth object (which includes logout)
 
+  // NEW: Add this loading check
+  if (auth.isLoading) {
+    return <LoadingState message="Authenticating..." />;
+  }
 
   if (!isGlobalAccessGranted) {
     // If global access is not granted, only show the GlobalLoginPage
@@ -155,7 +160,7 @@ function AppContent() {
         onClose={closeAuthModal} 
         initialView={authModalView} 
       />
-      <SessionTimeoutWarningModal /> {/* Add Session Timeout Warning Modal here */}
+      {/* <SessionTimeoutWarningModal /> */} {/* Removed Session Timeout Warning Modal here */}
     </>
   );
 }

@@ -23,8 +23,9 @@ import ErrorState from '../components/ErrorState';
 import { useAuth } from '../context/AuthContext';
 import AdminLinkEntryForm from '../components/admin/AdminLinkEntryForm';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
-import { PlusCircle, Edit3, Trash2, ExternalLink, Star, Filter, ChevronUp } from 'lucide-react'; // Added Filter, ChevronUp
-import { showErrorToast } from '../utils/toastUtils'; 
+import { PlusCircle, Edit3, Trash2, ExternalLink, Star, Filter, ChevronUp, Link as LinkIcon } from 'lucide-react'; // Added Filter, ChevronUp, LinkIcon
+import { Box, Typography } from '@mui/material'; // Added Box and Typography
+import { showErrorToast, showSuccessToast } from '../utils/toastUtils'; 
 
 interface OutletContextType {
   searchTerm: string;
@@ -184,7 +185,7 @@ const LinksView: React.FC = () => {
     setIsDeleting(true);
     try {
       await deleteAdminLink(linkToDelete.id);
-      showErrorToast(`Link "${linkToDelete.title}" deleted successfully.`, {theme: 'light'});
+      showSuccessToast(`Link "${linkToDelete.title}" deleted successfully.`);
       closeDeleteConfirm();
       if (links.length === 1 && currentPage > 1) { setCurrentPage(currentPage - 1); } 
       else { loadLinks(); }
@@ -246,11 +247,11 @@ const LinksView: React.FC = () => {
     try {
       if (isCurrentlyFavorited && typeof currentStatus?.favoriteId === 'number') {
         await removeFavoriteApi(item.id, itemType);
-        showErrorToast(`"${item.title}" removed from favorites.`, {theme: 'light'});
+        showSuccessToast(`"${item.title}" removed from favorites.`);
         setFavoritedItems(prev => { const newMap = new Map(prev); newMap.set(item.id, { favoriteId: undefined }); return newMap; });
       } else {
         const newFavorite = await addFavoriteApi(item.id, itemType);
-        showErrorToast(`"${item.title}" added to favorites.`, {theme: 'light'});
+        showSuccessToast(`"${item.title}" added to favorites.`);
         setFavoritedItems(prev => { const newMap = new Map(prev); newMap.set(item.id, { favoriteId: newFavorite.id }); return newMap; });
       }
     } catch (error: any) {
@@ -328,7 +329,14 @@ const LinksView: React.FC = () => {
         </div>
       )}
 
-      {isInitialLoad && isLoading ? ( <LoadingState /> ) : error && isInitialLoad && links.length === 0 ? ( <ErrorState message={error} onRetry={loadLinks} /> ) : (
+      {isInitialLoad && isLoading ? ( <LoadingState /> ) : error && isInitialLoad && links.length === 0 ? ( <ErrorState message={error} onRetry={loadLinks} /> ) : !isLoading && filteredLinksBySearch.length === 0 ? (
+        <Box sx={{ textAlign: 'center', mt: 4, p: 3 }}>
+          <LinkIcon size={60} className="text-gray-400 dark:text-gray-500 mb-4" />
+          <Typography variant="h6" color="text.secondary">
+            No links found.
+          </Typography>
+        </Box>
+      ) : (
         <>
           <DataTable columns={columns} data={filteredLinksBySearch} rowClassName="group" isLoading={isLoading && !isInitialLoad} currentPage={currentPage} totalPages={totalPages} onPageChange={handlePageChange} itemsPerPage={itemsPerPage} totalItems={totalLinks} sortColumn={sortBy} sortOrder={sortOrder} onSort={handleSort} />
         </>

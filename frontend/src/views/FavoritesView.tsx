@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { Star, FileText, Puzzle, Link2 as LinkIcon, Archive as FileArchive, Package, Tag } from 'lucide-react';
+import { Box, Typography } from '@mui/material'; // Added Box and Typography
 import {
   getUserFavoritesApi,
   PaginatedFavoritesResponse,
@@ -177,15 +178,22 @@ const FavoritesView: React.FC = () => {
     <div className="container mx-auto px-4 py-8 space-y-6">
       <div className="flex items-center space-x-3 mb-6">
         <Star size={32} className="text-yellow-500" />
-        <h1 className="text-3xl font-bold text-gray-800">My Favorites</h1>
+        {/* Using Typography for h1 for theme consistency, though direct h1 is also fine */}
+        <Typography variant="h4" component="h1" sx={{ fontWeight: 'bold', color: 'text.primary' }}> 
+          My Favorites
+        </Typography>
       </div>
 
-      {favorites.length === 0 && !isLoadingData ? ( // Ensure not loading before showing "no favorites"
-        <div className="text-center py-10">
-          <Star size={48} className="mx-auto text-gray-400 mb-4" />
-          <p className="text-xl text-gray-600">You haven't favorited any items yet.</p>
-          <p className="text-sm text-gray-500 mt-2">Start exploring and mark your favorites by clicking the star icon!</p>
-        </div>
+      {favorites.length === 0 && !isLoadingData ? (
+        <Box sx={{ textAlign: 'center', py: 10 }}>
+          <Star size={60} className="text-gray-400 dark:text-gray-500 mb-4" /> {/* Adjusted icon size and color */}
+          <Typography variant="h6" color="text.secondary" sx={{ mb: 1 }}>
+            You haven't favorited any items yet.
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Start exploring and mark your favorites by clicking the star icon!
+          </Typography>
+        </Box>
       ) : (
         <div className="space-y-4">
           {favorites.map(item => (

@@ -3,6 +3,8 @@ import React, { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import Header from './Header';
 import Sidebar from './Sidebar';
+import Breadcrumbs from './Breadcrumbs'; // Import the new component
+import Footer from './Footer'; // Import the new Footer component
 
 const Layout: React.FC = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -20,7 +22,7 @@ const Layout: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col min-h-screen bg-gray-50">
+    <div className="flex flex-col min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
       <Header 
         toggleSidebar={toggleSidebar} 
         isCollapsed={sidebarCollapsed}
@@ -34,10 +36,12 @@ const Layout: React.FC = () => {
           }`}
         >
           <div className="container mx-auto">
+            <Breadcrumbs /> {/* Add Breadcrumbs here */}
             <Outlet context={{ searchTerm }} />
           </div>
         </main>
       </div>
+      <Footer /> {/* Add Footer here */}
     </div>
   );
 };

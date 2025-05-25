@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
-import { Star } from 'lucide-react';
+import { Star, SearchX as SearchXIcon } from 'lucide-react'; // Added SearchXIcon
+import { Box, Typography } from '@mui/material'; // Added Box and Typography
 import { 
   searchData,
   addFavoriteApi, // Added
@@ -278,19 +279,19 @@ const SearchResultsView: React.FC = () => {
   
   if (totalResults === 0 && query) {
     return (
-      <div className="container mx-auto px-4 py-8">
-        {feedbackMessage && <div className="p-3 my-2 bg-blue-100 text-blue-700 rounded text-sm">{feedbackMessage}</div>}
-        <div className="mb-6">
-          <h2 className="text-2xl font-bold text-gray-800 mb-2">Search Results</h2>
-          <p className="text-gray-600">
-            No results found for "<span className="font-medium">{query}</span>"
-          </p>
-        </div>
-        
-        <div className="bg-white rounded-lg shadow-sm p-6 text-center">
-          <p className="text-gray-500">Try different keywords or check back later.</p>
-        </div>
-      </div>
+      <Box className="container mx-auto px-4 py-8" sx={{ textAlign: 'center', mt: 4, p: 3 }}>
+        {/* feedbackMessage can be integrated if needed, or rely on toasts */}
+        <Typography variant="h5" component="h2" sx={{ mb: 2, color: 'text.primary' }}>
+          Search Results
+        </Typography>
+        <SearchXIcon size={60} className="text-gray-400 dark:text-gray-500 mb-4 mx-auto" />
+        <Typography variant="h6" color="text.secondary" sx={{ mb: 1 }}>
+          No results found for "<Typography component="span" sx={{ fontWeight: 'medium', color: 'text.primary' }}>{query}</Typography>"
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          Try different keywords or check back later.
+        </Typography>
+      </Box>
     );
   }
   
@@ -310,16 +311,20 @@ const SearchResultsView: React.FC = () => {
     <div className="container mx-auto px-4 py-8">
       {feedbackMessage && <div className="p-3 my-2 bg-blue-100 text-blue-700 rounded text-sm">{feedbackMessage}</div>}
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-gray-800 mb-2">Search Results</h2>
-        <p className="text-gray-600">
-          Found {totalResults} result{totalResults !== 1 ? 's' : ''} for "<span className="font-medium">{query}</span>"
-        </p>
+        <Typography variant="h5" component="h2" sx={{ mb: 1, color: 'text.primary' }}>
+          Search Results
+        </Typography>
+        <Typography color="text.secondary">
+          Found {totalResults} result{totalResults !== 1 ? 's' : ''} for "<Typography component="span" sx={{ fontWeight: 'medium', color: 'text.primary' }}>{query}</Typography>"
+        </Typography>
       </div>
       
       {Object.entries(categorizedResults).map(([type, items]) => (
         items.length > 0 && (
           <div key={type} className="mb-8"> 
-            <h3 className="text-xl font-semibold text-gray-700 mb-4 capitalize border-b pb-2">{type.replace('_', ' ')}s</h3> 
+            <Typography variant="h6" component="h3" sx={{ mb: 2, textTransform: 'capitalize', borderBottom: 1, borderColor: 'divider', pb: 1, color: 'text.primary' }}>
+              {type.replace('_', ' ')}s
+            </Typography>
             <div className="space-y-4">
               {items.map((result, index) => renderResultItem(result, index))}
             </div>

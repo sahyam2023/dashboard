@@ -1,7 +1,8 @@
 // src/views/PatchesView.tsx
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { ExternalLink, PlusCircle, Edit3, Trash2, Star, Filter, ChevronUp } from 'lucide-react'; // Added Filter, ChevronUp
+import { ExternalLink, PlusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Package as PackageIcon } from 'lucide-react'; // Added Filter, ChevronUp, PackageIcon
+import { Box, Typography } from '@mui/material'; // Added Box and Typography
 import { 
   fetchPatches, 
   fetchSoftware, 
@@ -19,7 +20,7 @@ import ErrorState from '../components/ErrorState';
 import { useAuth } from '../context/AuthContext';
 import AdminPatchEntryForm from '../components/admin/AdminPatchEntryForm';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
-import { showErrorToast } from '../utils/toastUtils'; 
+import { showErrorToast, showSuccessToast } from '../utils/toastUtils'; 
 
 interface OutletContextType {
   searchTerm: string;
@@ -222,11 +223,11 @@ const PatchesView: React.FC = () => {
     try {
       if (isCurrentlyFavorited && typeof currentStatus?.favoriteId === 'number') {
         await removeFavoriteApi(item.id, itemType);
-        showErrorToast(`"${item.patch_name}" removed from favorites.`, {theme: 'light', autoClose: 3000});
+        showSuccessToast(`"${item.patch_name}" removed from favorites.`);
         setFavoritedItems(prev => { const newMap = new Map(prev); newMap.set(item.id, { favoriteId: undefined }); return newMap; });
       } else {
         const newFavorite = await addFavoriteApi(item.id, itemType);
-        showErrorToast(`"${item.patch_name}" added to favorites.`, {theme: 'light', autoClose: 3000});
+        showSuccessToast(`"${item.patch_name}" added to favorites.`);
         setFavoritedItems(prev => { const newMap = new Map(prev); newMap.set(item.id, { favoriteId: newFavorite.id }); return newMap; });
       }
     } catch (error: any) {
@@ -274,7 +275,14 @@ const PatchesView: React.FC = () => {
         </div>
       )}
 
-      {isInitialLoad && isLoading ? ( <LoadingState /> ) : error && isInitialLoad && patches.length === 0 ? ( <ErrorState message={error} onRetry={loadPatches} /> ) : (
+      {isInitialLoad && isLoading ? ( <LoadingState /> ) : error && isInitialLoad && patches.length === 0 ? ( <ErrorState message={error} onRetry={loadPatches} /> ) : !isLoading && filteredPatchesBySearch.length === 0 ? (
+        <Box sx={{ textAlign: 'center', mt: 4, p: 3 }}>
+          <PackageIcon size={60} className="text-gray-400 dark:text-gray-500 mb-4" />
+          <Typography variant="h6" color="text.secondary">
+            No patches found.
+          </Typography>
+        </Box>
+      ) : (
          <>
         <DataTable columns={columns} data={filteredPatchesBySearch} rowClassName="group" isLoading={isLoading && !isInitialLoad} currentPage={currentPage} totalPages={totalPages} onPageChange={handlePageChange} itemsPerPage={itemsPerPage} totalItems={totalPatches} sortColumn={sortBy} sortOrder={sortOrder} onSort={handleSort} />
         </>

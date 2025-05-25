@@ -3,7 +3,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useForm, Controller, SubmitHandler, FieldErrors } from 'react-hook-form';
 import * as yup from 'yup';
 import { yupResolver } from '@hookform/resolvers/yup';
-import { toast } from 'react-toastify';
+// import { toast } from 'react-toastify'; // Replaced with utils
+import { showSuccessToast, showErrorToast } from '../../utils/toastUtils'; // Added utils
 import { Software, Document as DocumentType, AddDocumentPayload, EditDocumentPayload } from '../../types'; // Added EditDocumentPayload
 import {
   fetchSoftware,
@@ -101,7 +102,7 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
       setIsFetchingSoftware(true);
       fetchSoftware()
         .then(setSoftwareList)
-        .catch(() => toast.error('Failed to load software list.'))
+        .catch(() => showErrorToast('Failed to load software list.')) // Changed to showErrorToast
         .finally(() => setIsFetchingSoftware(false));
     }
   }, [isAuthenticated, role]);
@@ -207,7 +208,7 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
         }
       }
 
-      toast.success(`Document "${resultDocument.doc_name}" ${isEditMode ? 'updated' : 'added'} successfully!`);
+      showSuccessToast(`Document "${resultDocument.doc_name}" ${isEditMode ? 'updated' : 'added'} successfully!`); // Changed to showSuccessToast
       if (!isEditMode) resetFormDefaults(true);
       
       if (isEditMode && onDocumentUpdated) onDocumentUpdated(resultDocument);
@@ -215,7 +216,7 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
 
     } catch (err: any) {
       const message = err.response?.data?.msg || err.message || `Failed to ${isEditMode ? 'update' : 'add'} document.`;
-      toast.error(message);
+      showErrorToast(message); // Changed to showErrorToast
     } finally {
       setIsLoading(false);
     }
@@ -223,7 +224,7 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
   
   const onFormError = (formErrors: FieldErrors<DocumentFormData>) => {
     console.error("Form validation errors:", formErrors);
-    toast.error("Please correct the errors highlighted in the form.");
+    showErrorToast("Please correct the errors highlighted in the form."); // Changed to showErrorToast
   };
 
   const documentTypes = ["Guide", "Manual", "API Reference", "Datasheet", "Whitepaper", "Specification", "Other"];

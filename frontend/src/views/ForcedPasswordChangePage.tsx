@@ -1,9 +1,11 @@
 import React, { useState, FormEvent } from 'react';
+import React, { useState, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { changePassword, ChangePasswordPayload } from '../services/api';
 import { Box, TextField, Button, Typography, Container, Alert, Paper, IconButton, InputAdornment } from '@mui/material';
 import { Visibility, VisibilityOff } from '@mui/icons-material';
+import { showSuccessToast, showErrorToast } from '../utils/toastUtils'; // Added toast imports
 
 const ForcedPasswordChangePage: React.FC = () => {
   const [currentPassword, setCurrentPassword] = useState<string>('');
@@ -53,18 +55,22 @@ const ForcedPasswordChangePage: React.FC = () => {
 
     try {
       const response = await changePassword(payload);
-      setSuccessMessage(response.msg || "Password changed successfully. Redirecting...");
+      const successMsg = response.msg || "Password changed successfully. You can now login with your new password.";
+      setSuccessMessage(successMsg); // Keep existing Alert logic
+      showSuccessToast(successMsg); // Add toast
       auth.clearPasswordResetRequiredFlag(); // Clear the flag in context
       setTimeout(() => {
-        navigate('/documents'); // Redirect to a default page
-      }, 2000);
+        auth.logout(); // Logout the user to force re-login with new password
+        navigate('/login'); // Redirect to login page
+      }, 2500); // Slightly longer timeout to allow toast visibility
     } catch (err: any) {
       const errMsg = err.response?.data?.msg || err.message || "Failed to change password.";
       if (errMsg.toLowerCase().includes("password")) {
-        setPasswordValidationError(errMsg);
+        setPasswordValidationError(errMsg); // Keep specific password field error
       } else {
-        setError(errMsg);
+        setError(errMsg); // Keep general error Alert
       }
+      showErrorToast(errMsg); // Add toast for all errors
     } finally {
       setIsLoading(false);
     }

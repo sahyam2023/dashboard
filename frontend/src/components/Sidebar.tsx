@@ -102,9 +102,10 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
 
   return (
     <aside
-      className={`fixed left-0 top-16 h-[calc(100vh-4rem)] bg-white border-r border-gray-200 transition-all duration-300 ease-in-out ${
+      aria-label="Main sidebar" // Added aria-label
+      className={`fixed left-0 top-16 h-[calc(100vh-4rem)] bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 transition-all duration-300 ease-in-out ${
         collapsed ? 'w-20' : 'w-64'
-      } overflow-y-auto z-20`} // Added overflow-y-auto and z-index
+      } overflow-y-auto z-20 focus:outline-none`} // Added focus:outline-none as it's not meant to be directly focused
     >
       <nav className="h-full flex flex-col py-4">
         <div className="space-y-1 px-3">
@@ -112,16 +113,18 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
             <NavLink
               key={item.path}
               to={item.path}
+              aria-label={item.label} // Added aria-label for better accessibility
               className={({ isActive }) =>
-                `flex items-center px-3 py-3 text-sm sm:text-base rounded-md transition-colors group ${ // Added group for potential icon hover effects
+                `flex items-center px-3 py-3 text-sm sm:text-base rounded-md transition-colors group focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-500 dark:focus:ring-blue-400 ${ // Added focus states
                   isActive
-                    ? 'bg-blue-50 text-blue-700 font-medium' // Active state styling
-                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900' // Default and hover
+                    ? 'bg-blue-100 dark:bg-blue-700 text-blue-700 dark:text-blue-50 font-medium' // Active state styling
+                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100' // Default and hover
                 }`
               }
-              title={collapsed ? item.label : undefined} // Show tooltip when collapsed
+              title={collapsed ? item.label : undefined} // Show tooltip when collapsed, good for visual users
             >
-              <span className={`${collapsed ? 'mx-auto' : 'mr-3'} text-gray-500 group-hover:text-gray-700 ${ ({isActive}: {isActive:boolean}) => isActive && 'text-blue-600'}`}> {/* Icon styling */}
+              {/* Updated icon span for dark mode compatibility, conditional active class needs care */}
+              <span className={`${collapsed ? 'mx-auto' : 'mr-3'} text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300 ${ ({isActive}: {isActive:boolean}) => isActive ? 'text-blue-600 dark:text-blue-300' : ''}`}>
                 {item.icon(collapsed)}
               </span>
               {!collapsed && <span className="truncate">{item.label}</span>}

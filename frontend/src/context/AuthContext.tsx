@@ -1,38 +1,57 @@
 // src/context/AuthContext.tsx
 import React, { createContext, useState, useContext, useEffect, ReactNode } from 'react';
+import { showErrorToast, showSuccessToast } from '../utils/toastUtils'; // For session refresh feedback
+
+interface TokenData {
+  token: string;
+  expiresAt: number; // Timestamp in milliseconds
+  username: string;
+  role: string;
+}
 
 interface AuthContextType {
-  token: string | null;
-  username: string | null;
-  role: string | null;
+  tokenData: TokenData | null; // Changed from token: string | null
+  username: string | null; // Kept for quick access, though also in tokenData
+  role: string | null; // Kept for quick access, though also in tokenData
   isAuthenticated: boolean;
-  login: (token: string, username: string, role: string, password_reset_required?: boolean) => boolean; // Returns boolean
-  logout: () => void;
+  login: (token: string, username: string, role: string, expiresInSeconds: number, password_reset_required?: boolean) => boolean; // Added expiresInSeconds
+  logout: (showSessionExpiredToast?: boolean) => void; // Added optional param
   isLoading: boolean;
-  // New properties for Auth Modal
   isAuthModalOpen: boolean;
   authModalView: 'login' | 'register';
   openAuthModal: (view: 'login' | 'register') => void;
   closeAuthModal: () => void;
-  // For Global Access
   isGlobalAccessGranted: boolean;
   grantGlobalAccess: () => void;
   revokeGlobalAccess: () => void; 
-  // For Forced Password Reset
   isPasswordResetRequired: boolean;
   clearPasswordResetRequiredFlag: () => void;
+  // Session Timeout Warning
+  isSessionWarningModalOpen: boolean;
+  setSessionWarningModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  sessionWarningCountdown: number;
+  refreshSession: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const PLACEHOLDER_SESSION_DURATION_SECONDS = 15 * 60; // 15 minutes
+const WARNING_THRESHOLD_SECONDS = 2 * 60; // Show warning 2 minutes before expiry
+
 export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
-  const [token, setToken] = useState<string | null>(localStorage.getItem('authToken'));
-  const [username, setUsername] = useState<string | null>(localStorage.getItem('username'));
-  const [role, setRole] = useState<string | null>(localStorage.getItem('userRole'));
+  // const [token, setToken] = useState<string | null>(localStorage.getItem('authToken')); // Replaced by tokenData
+  const [tokenData, setTokenData] = useState<TokenData | null>(null);
+  const [username, setUsername] = useState<string | null>(localStorage.getItem('username')); // Still useful for quick display
+  const [role, setRole] = useState<string | null>(localStorage.getItem('userRole')); // Still useful for quick display
   const [isLoading, setIsLoading] = useState<boolean>(true); 
   
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [authModalView, setAuthModalView] = useState<'login' | 'register'>('login');
+
+  // Session Timeout Warning State
+  const [isSessionWarningModalOpen, setSessionWarningModalOpen] = useState(false);
+  const [sessionWarningCountdown, setSessionWarningCountdown] = useState(WARNING_THRESHOLD_SECONDS);
+
 
   // Helper function for initializing global access state
   const initialGlobalAccess = () => {
@@ -44,7 +63,6 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
       if (Date.now() - timestamp < twoHoursInMs) {
         return true;
       } else {
-        // Expired
         localStorage.removeItem('globalAccessFlag');
         localStorage.removeItem('globalAccessTimestamp');
         return false;
@@ -54,61 +72,125 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   };
 
   const [isGlobalAccessGranted, setIsGlobalAccessGranted] = useState<boolean>(initialGlobalAccess);
-
-  // Forced Password Reset State
   const [isPasswordResetRequired, setIsPasswordResetRequired] = useState<boolean>(false);
 
-  //isLoading is set to false once the effect has run
   useEffect(() => {
-    // Event listener for token expiration
-    const handleTokenExpired = () => {
-      // Check if already logged out to prevent multiple redirects or toast messages
-      // This check relies on the current state of `token` which might not be updated immediately
-      // if multiple `tokenExpired` events fire rapidly.
-      // A more robust solution might involve a flag like `isLoggingOut`.
-      if (localStorage.getItem('authToken')) { // Check localStorage directly for more immediate state
-        logout(); // Perform logout actions
-        // No navigate here, App.tsx will handle redirect to /login if not authenticated
-        // showErrorToast("Your session has expired. Please login again."); // Toast is now handled in App.tsx
+    const storedTokenDataString = localStorage.getItem('tokenData');
+    if (storedTokenDataString) {
+      try {
+        const parsedTokenData: TokenData = JSON.parse(storedTokenDataString);
+        if (parsedTokenData.expiresAt > Date.now()) {
+          setTokenData(parsedTokenData);
+          setUsername(parsedTokenData.username); // Keep username/role in sync
+          setRole(parsedTokenData.role);
+        } else {
+          localStorage.removeItem('tokenData'); // Expired
+          localStorage.removeItem('username');
+          localStorage.removeItem('userRole');
+        }
+      } catch (error) {
+        console.error("Failed to parse tokenData from localStorage", error);
+        localStorage.removeItem('tokenData');
+        localStorage.removeItem('username');
+        localStorage.removeItem('userRole');
       }
-    };
+    }
+    setIsLoading(false);
+  }, []);
 
-    document.addEventListener('tokenExpired', handleTokenExpired);
+
+  useEffect(() => {
+    if (!tokenData) {
+      setSessionWarningModalOpen(false);
+      return;
+    }
+
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const timeLeftSeconds = Math.floor((tokenData.expiresAt - now) / 1000);
+
+      if (timeLeftSeconds <= 0) {
+        clearInterval(interval);
+        logout(true); // Pass true to indicate session expired naturally for potential specific toast
+        return;
+      }
+
+      if (timeLeftSeconds <= WARNING_THRESHOLD_SECONDS) {
+        if (!isSessionWarningModalOpen) setSessionWarningModalOpen(true);
+        setSessionWarningCountdown(timeLeftSeconds);
+      } else {
+        // If modal was open but session was refreshed (time > threshold), close it.
+        if (isSessionWarningModalOpen) setSessionWarningModalOpen(false);
+      }
+    }, 1000); // Check every second
+
+    return () => clearInterval(interval);
+  }, [tokenData, isSessionWarningModalOpen]); // Added isSessionWarningModalOpen to dependencies
+
+  const login = (newToken: string, newUsername: string, newRole: string, expiresInSeconds: number, passwordResetRequired: boolean = false) => {
+    const expiresAt = Date.now() + expiresInSeconds * 1000;
+    const newTokenData: TokenData = { token: newToken, expiresAt, username: newUsername, role: newRole };
     
-    // Optional: Add a check here to validate the token with the backend on initial load
-    // For simplicity, we'll just trust localStorage for now.
-    // If token exists, assume logged in. A backend check would be more secure.
-    setIsLoading(false); // Set loading to false after setup
+    localStorage.setItem('tokenData', JSON.stringify(newTokenData));
+    localStorage.setItem('username', newUsername); // For simpler access elsewhere if needed
+    localStorage.setItem('userRole', newRole);     // For simpler access elsewhere if needed
 
-    return () => {
-      document.removeEventListener('tokenExpired', handleTokenExpired);
-    };
-  }, []); // Empty dependency array ensures this runs once on mount and unmount
-
-
-  const login = (newToken: string, newUsername: string, newRole: string, passwordResetRequired: boolean = false) => {
-    localStorage.setItem('authToken', newToken);
-    localStorage.setItem('username', newUsername);
-    localStorage.setItem('userRole', newRole);
-    setToken(newToken);
+    setTokenData(newTokenData);
     setUsername(newUsername);
     setRole(newRole);
     setIsPasswordResetRequired(passwordResetRequired);
-    return passwordResetRequired; // Return the flag
+    setSessionWarningModalOpen(false); // Ensure warning modal is closed on new login
+    return passwordResetRequired;
   };
 
-  const logout = () => {
-    localStorage.removeItem('authToken');
+  const logout = (sessionExpiredDueToTimeout: boolean = false) => {
+    localStorage.removeItem('tokenData');
     localStorage.removeItem('username');
     localStorage.removeItem('userRole');
-    setToken(null);
+    setTokenData(null);
     setUsername(null);
     setRole(null);
-    setIsPasswordResetRequired(false); // Clear flag on logout
-    // Also revoke global access on regular logout for full security,
-    // or manage separately if global access should persist across user sessions.
-    // For now, let's assume global access is also session-bound or needs re-entry.
-    // revokeGlobalAccess(); // Removed as per requirement
+    setIsPasswordResetRequired(false);
+    setSessionWarningModalOpen(false); // Close warning modal on logout
+    
+    if (sessionExpiredDueToTimeout) {
+        // Dispatch the event so App.tsx can show the toast.
+        document.dispatchEvent(new CustomEvent('tokenExpired'));
+    }
+  };
+  
+  const refreshSession = async () => {
+    try {
+      // --- Placeholder for actual API call ---
+      // const response = await someApiService.post('/auth/refresh'); 
+      // const { token: refreshedToken, expiresInSeconds: newExpiresInSeconds } = response.data;
+      // --- End Placeholder ---
+
+      // Simulating a successful refresh for now:
+      await new Promise(resolve => setTimeout(resolve, 500)); // Simulate network delay
+      const refreshedToken = `refreshed-${tokenData?.token}-${Date.now()}`; // Dummy new token
+      const newExpiresInSeconds = PLACEHOLDER_SESSION_DURATION_SECONDS; // Reset to full duration
+
+      const newExpiresAt = Date.now() + newExpiresInSeconds * 1000;
+      if (tokenData) {
+        const newRefreshedTokenData: TokenData = { 
+          ...tokenData, 
+          token: refreshedToken, 
+          expiresAt: newExpiresAt 
+        };
+        setTokenData(newRefreshedTokenData);
+        localStorage.setItem('tokenData', JSON.stringify(newRefreshedTokenData));
+        setSessionWarningModalOpen(false);
+        showSuccessToast('Session extended successfully!');
+      } else {
+        throw new Error("No active session to refresh.");
+      }
+    } catch (error) {
+      console.error("Failed to refresh session:", error);
+      showErrorToast('Failed to extend session. Please log out and log back in.');
+      // Optionally, force logout here if refresh fails critically
+      // logout(true); 
+    }
   };
 
   const clearPasswordResetRequiredFlag = () => {

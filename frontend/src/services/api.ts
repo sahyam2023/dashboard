@@ -643,14 +643,18 @@ export async function registerUser(userData: RegisterRequest): Promise<RegisterR
       },
       body: JSON.stringify(userData),
     });
-    return handleApiError(response, 'Registration failed');
+    // Ensure the response is correctly typed and handled, especially if handleApiError
+    // already parses JSON and might not return the full structure needed.
+    // If handleApiError returns parsed JSON, this should work.
+    const data: RegisterResponse = await handleApiError(response, 'Registration failed');
+    return data; 
   } catch (error) {
     console.error('Error during registration:', error);
     throw error;
   }
 }
 
-export async function loginUser(credentials: AuthRequest): Promise<AuthResponse> {
+export async function loginUser(credentials: AuthRequest): Promise<AuthResponseTypeFromTypes> { // Use imported AuthResponse
   try {
     const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
       method: 'POST',
@@ -659,10 +663,31 @@ export async function loginUser(credentials: AuthRequest): Promise<AuthResponse>
       },
       body: JSON.stringify(credentials),
     });
-    return handleApiError(response, 'Login failed');
-  } catch (error) {
-    console.error('Error during login:', error);
-    throw error;
+
+    const data = await response.json(); // Always parse JSON first
+
+    if (!response.ok) {
+      // For non-ok responses, data might contain { msg: "error message" }
+      const errorMsg = data.msg || `Login failed with status: ${response.status}`;
+      // console.error('API Error in loginUser:', errorMsg, 'Full response data:', data);
+      
+      const error: any = new Error(errorMsg);
+      error.response = { data: data, status: response.status }; 
+      throw error;
+    }
+    
+    // If response is ok, data should be AuthResponse
+    return data as AuthResponseTypeFromTypes; 
+
+  } catch (error: any) {
+    // console.error('Error during loginUser:', error.message, 'Full error object:', error);
+    if (error.response && error.response.data && error.response.data.msg) {
+      throw new Error(error.response.data.msg);
+    } else if (error.message) {
+      throw new Error(error.message);
+    } else {
+      throw new Error('An unknown error occurred during login.');
+    }
   }
 }
 

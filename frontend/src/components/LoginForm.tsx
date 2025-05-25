@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { loginUser } from '../services/api';
 
 interface LoginFormProps {
-  onAuthSuccess?: () => void;
+  onAuthSuccess?: (passwordResetRequired: boolean) => void; // Updated prop type
   onToggleView?: () => void;
 }
 
@@ -28,8 +28,8 @@ const LoginForm: React.FC<LoginFormProps> = ({ onAuthSuccess, onToggleView }) =>
 
     try {
       const data = await loginUser({ username, password }); 
-      auth.login(data.access_token, data.username, data.role); 
-      onAuthSuccess?.(); 
+      const requiresReset = auth.login(data.access_token, data.username, data.role, data.password_reset_required); 
+      onAuthSuccess?.(requiresReset); 
     } catch (err: any) {
       if (err.response && err.response.data && err.response.data.msg) {
         setError(err.response.data.msg);

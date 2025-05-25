@@ -142,7 +142,10 @@ export interface AuthResponse {
 
 export interface RegisterResponse {
   msg: string;
-  user_id?: number;
+  user_id: number; // Made non-optional as per backend successful response
+  role: string; // Added
+  access_token: string; // Added
+  username: string; // Added
 }
 
 // --- Admin Payload Base for Items with Flexible Version Handling ---

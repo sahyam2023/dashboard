@@ -39,6 +39,11 @@ function AppContent() {
     isPasswordResetRequired // Use this from auth context
   } = auth;
 
+  // Add these logs:
+  console.log('[AppContent Debug] isAuthenticated:', isAuthenticated);
+  console.log('[AppContent Debug] isPasswordResetRequired:', isPasswordResetRequired);
+  console.log('[AppContent Debug] location.pathname:', location.pathname);
+
   if (!isGlobalAccessGranted) {
     // If global access is not granted, only show the GlobalLoginPage
     // The <Routes> and <Route path="*"> ensure it's the only thing rendered.
@@ -47,6 +52,7 @@ function AppContent() {
 
   // If authenticated and password reset is required, and not already on the reset page
   if (isAuthenticated && isPasswordResetRequired && location.pathname !== "/force-change-password") {
+    console.log('[AppContent Debug] Redirecting to /force-change-password'); // Log the redirection attempt
     return <Navigate to="/force-change-password" replace />;
   }
 

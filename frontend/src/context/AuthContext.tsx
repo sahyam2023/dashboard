@@ -6,7 +6,7 @@ interface AuthContextType {
   username: string | null;
   role: string | null;
   isAuthenticated: boolean;
-  login: (token: string, username: string, role: string, password_reset_required?: boolean) => void; // Added password_reset_required
+  login: (token: string, username: string, role: string, password_reset_required?: boolean) => boolean; // Returns boolean
   logout: () => void;
   isLoading: boolean;
   // New properties for Auth Modal
@@ -34,9 +34,26 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [authModalView, setAuthModalView] = useState<'login' | 'register'>('login');
 
-  const [isGlobalAccessGranted, setIsGlobalAccessGranted] = useState<boolean>(
-    () => localStorage.getItem('isGlobalAccessGranted') === 'true'
-  );
+  // Helper function for initializing global access state
+  const initialGlobalAccess = () => {
+    const twoHoursInMs = 2 * 60 * 60 * 1000;
+    const flag = localStorage.getItem('globalAccessFlag');
+    const timestampStr = localStorage.getItem('globalAccessTimestamp');
+    if (flag === 'true' && timestampStr) {
+      const timestamp = parseInt(timestampStr, 10);
+      if (Date.now() - timestamp < twoHoursInMs) {
+        return true;
+      } else {
+        // Expired
+        localStorage.removeItem('globalAccessFlag');
+        localStorage.removeItem('globalAccessTimestamp');
+        return false;
+      }
+    }
+    return false;
+  };
+
+  const [isGlobalAccessGranted, setIsGlobalAccessGranted] = useState<boolean>(initialGlobalAccess);
 
   // Forced Password Reset State
   const [isPasswordResetRequired, setIsPasswordResetRequired] = useState<boolean>(false);
@@ -57,7 +74,8 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     setToken(newToken);
     setUsername(newUsername);
     setRole(newRole);
-    setIsPasswordResetRequired(passwordResetRequired); // Set based on login response
+    setIsPasswordResetRequired(passwordResetRequired);
+    return passwordResetRequired; // Return the flag
   };
 
   const logout = () => {
@@ -71,7 +89,7 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     // Also revoke global access on regular logout for full security,
     // or manage separately if global access should persist across user sessions.
     // For now, let's assume global access is also session-bound or needs re-entry.
-    revokeGlobalAccess();
+    // revokeGlobalAccess(); // Removed as per requirement
   };
 
   const clearPasswordResetRequiredFlag = () => {
@@ -80,12 +98,14 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
 
   // Global Access Functions
   const grantGlobalAccess = () => {
-    localStorage.setItem('isGlobalAccessGranted', 'true');
+    localStorage.setItem('globalAccessFlag', 'true');
+    localStorage.setItem('globalAccessTimestamp', Date.now().toString());
     setIsGlobalAccessGranted(true);
   };
 
   const revokeGlobalAccess = () => {
-    localStorage.removeItem('isGlobalAccessGranted');
+    localStorage.removeItem('globalAccessFlag');
+    localStorage.removeItem('globalAccessTimestamp');
     setIsGlobalAccessGranted(false);
   };
 

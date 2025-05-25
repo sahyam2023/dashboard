@@ -6,6 +6,9 @@ import { deleteAdminVersion, fetchSoftware } from '../services/api';
 import ConfirmationModal from '../components/shared/ConfirmationModal'; 
 import Modal from '../components/shared/Modal'; 
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils'; // Import toast utilities
+import { Box, Typography } from '@mui/material'; // Added
+import { Tags as TagsIcon } from 'lucide-react'; // Added
+
 // No need for LoadingState/ErrorState here as table handles its own, and errors are toasts
 
 const AdminVersionsPage: React.FC = () => {
@@ -17,18 +20,27 @@ const AdminVersionsPage: React.FC = () => {
 
   // Software list for filter dropdown
   const [softwareList, setSoftwareList] = useState<Software[]>([]);
+  const [isLoadingSoftwareList, setIsLoadingSoftwareList] = useState(true); // Added
+  const [errorLoadingSoftwareList, setErrorLoadingSoftwareList] = useState<string | null>(null); // Added
   const [selectedSoftwareFilter, setSelectedSoftwareFilter] = useState<number | null>(null);
   // No explicit isInitialLoad or error state for the table itself, as AdminVersionsTable handles its loading/error state.
   // Errors from actions (delete, add, edit) will be handled by toasts.
 
   useEffect(() => {
     const loadSoftware = async () => {
+      setIsLoadingSoftwareList(true);
+      setErrorLoadingSoftwareList(null);
       try {
         const data = await fetchSoftware();
         setSoftwareList(data);
       } catch (error: any) {
         console.error("Failed to load software list for filtering:", error);
-        showErrorToast(error.response?.data?.msg || "Failed to load software list for filtering.");
+        const errMsg = error.response?.data?.msg || "Failed to load software list for filtering.";
+        showErrorToast(errMsg);
+        setErrorLoadingSoftwareList(errMsg); // Set error state
+        setSoftwareList([]); // Ensure list is empty on error
+      } finally {
+        setIsLoadingSoftwareList(false);
       }
     };
     loadSoftware();
@@ -96,9 +108,9 @@ const AdminVersionsPage: React.FC = () => {
           Add New Version
         </button>
         
-        {softwareList.length > 0 && (
+        { !isLoadingSoftwareList && !errorLoadingSoftwareList && softwareList.length > 0 && (
           <div className="w-1/4">
-            <label htmlFor="softwareFilter" className="block text-sm font-medium text-gray-700">Filter by Software:</label>
+            <label htmlFor="softwareFilter" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Filter by Software:</label>
             <select
               id="softwareFilter"
               value={selectedSoftwareFilter || ''}
@@ -120,13 +132,41 @@ const AdminVersionsPage: React.FC = () => {
       {/* AdminVersionsTable will handle its own loading and error states internally,
           or display "no data" if the fetch returns empty. Errors during fetch
           within AdminVersionsTable should use toasts if they are non-initial. */}
-      <AdminVersionsTable
-        onEdit={handleOpenEditForm}
-        onDelete={handleDeleteRequest}
-        refreshKey={refreshKey}
-        softwareIdFilter={selectedSoftwareFilter}
-        // The table itself should manage its initial load error state and subsequent toast-based errors
-      />
+      {/* Conditional rendering for table or empty state for software list itself */}
+      {isLoadingSoftwareList ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', p: 3, mt: 2, backgroundColor: 'background.paper', borderRadius: 1, boxShadow: 1 }}>
+          <Typography color="text.secondary">Loading software list for filtering...</Typography>
+        </Box>
+      ) : errorLoadingSoftwareList ? (
+         <Box sx={{ textAlign: 'center', mt: 4, p: 3, border: '1px dashed', borderColor: 'error.main', borderRadius: 1 }}>
+            <TagsIcon size={60} className="text-red-500 mb-4 mx-auto" />
+            <Typography variant="h6" color="error.main" sx={{ mb: 1 }}>
+              Could not load software list.
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              {errorLoadingSoftwareList} Please try refreshing the page or contact support.
+            </Typography>
+          </Box>
+      ) : softwareList.length === 0 ? (
+        <Box sx={{ textAlign: 'center', mt: 4, p: 3, border: '1px dashed', borderColor: 'divider', borderRadius: 1 }}>
+          <TagsIcon size={60} className="text-gray-400 dark:text-gray-500 mb-4 mx-auto" />
+          <Typography variant="h6" color="text.secondary" sx={{ mb: 1 }}>
+            No software found.
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Add software first to manage their versions.
+          </Typography>
+        </Box>
+      ) : (
+        <AdminVersionsTable
+          onEdit={handleOpenEditForm}
+          onDelete={handleDeleteRequest}
+          refreshKey={refreshKey}
+          softwareIdFilter={selectedSoftwareFilter}
+          // The table itself should manage its initial load error state and subsequent toast-based errors
+          // And its own "no versions for this software" message
+        />
+      )}
 
       {isFormModalOpen && (
         <Modal 

@@ -18,7 +18,8 @@ import LoadingState from '../components/LoadingState';
 import AdminUploadToMiscForm from '../components/admin/AdminUploadToMiscForm';
 import AdminMiscCategoryForm from '../components/admin/AdminMiscCategoryForm';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
-import { Download, FileText, CalendarDays, PlusCircle, Edit3, Trash2, Star, Filter, ChevronUp } from 'lucide-react'; // Added Filter, ChevronUp
+import { Download, FileText, CalendarDays, PlusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Archive as ArchiveIcon } from 'lucide-react'; // Added Filter, ChevronUp, ArchiveIcon
+import { Box, Typography } from '@mui/material'; // Added Box and Typography
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils'; 
 
 const API_BASE_URL = 'http://127.0.0.1:5000';
@@ -334,7 +335,14 @@ const MiscView: React.FC = () => {
         )}
       </div>
 
-      {isInitialFilesLoad && isLoadingFiles ? ( <LoadingState /> ) : errorFiles && isInitialFilesLoad && miscFiles.length === 0 ? ( <ErrorState message={errorFiles} onRetry={loadMiscFiles} /> ) : (
+      {isInitialFilesLoad && isLoadingFiles ? ( <LoadingState /> ) : errorFiles && isInitialFilesLoad && miscFiles.length === 0 ? ( <ErrorState message={errorFiles} onRetry={loadMiscFiles} /> ) : !isLoadingFiles && miscFiles.length === 0 ? (
+        <Box sx={{ textAlign: 'center', mt: 4, p: 3 }}>
+          <ArchiveIcon size={60} className="text-gray-400 dark:text-gray-500 mb-4" />
+          <Typography variant="h6" color="text.secondary">
+            {activeCategoryId ? "No files found in this category." : "No files found."}
+          </Typography>
+        </Box>
+      ) : (
         <>
           <DataTable columns={columns} data={miscFiles} rowClassName="group" isLoading={isLoadingFiles && !isInitialFilesLoad} currentPage={currentPage} totalPages={totalPages} onPageChange={handlePageChange} itemsPerPage={itemsPerPage} totalItems={totalMiscFiles} sortColumn={sortBy} sortOrder={sortOrder} onSort={handleSort} />
         </>

@@ -27,34 +27,8 @@ interface OutletContextType {
 
 const DocumentsView: React.FC = () => {
   const { searchTerm } = useOutletContext<OutletContextType>();
-  const { isAuthenticated, role } = useAuth();
-
-  // Data and Table State
-  const [documents, setDocuments] = useState<DocumentType[]>([]);
-  const [softwareList, setSoftwareList] = useState<Software[]>([]);
-  const [selectedSoftwareId, setSelectedSoftwareId] = useState<number | null>(null); // Filter state
-
-  // Advanced Filter States
-  const [docTypeFilter, setDocTypeFilter] = useState<string>('');
-  const [createdFromFilter, setCreatedFromFilter] = useState<string>('');
-  const [createdToFilter, setCreatedToFilter] = useState<string>('');
-  const [updatedFromFilter, setUpdatedFromFilter] = useState<string>('');
-  const [updatedToFilter, setUpdatedToFilter] = useState<string>('');
-  
-  // Pagination State
-  const [currentPage, setCurrentPage] = useState<number>(1);
-  const [itemsPerPage, setItemsPerPage] = useState<number>(10);
-  const [totalPages, setTotalPages] = useState<number>(0);
-  const [totalDocuments, setTotalDocuments] = useState<number>(0);
-
-  // Sorting State
-  const [sortBy, setSortBy] = useState<string>('doc_name'); // Default sort column
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
-
-  // Loading and Error State
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null); // For initial load error or critical errors
-  const [isInitialLoad, setIsInitialLoad] = useState(true); // New state for initial load tracking
+  // Note: The old `isLoading` and `isInitialLoad` are replaced by `isLoadingInitial` and `isLoadingMore`.
+  // `totalPages` and `itemsPerPage` (as state for DataTable) are no longer primary drivers for pagination.
 
   // UI State for Forms and Modals
   const [showAddDocumentForm, setShowAddDocumentForm] = useState(false);
@@ -68,21 +42,20 @@ const DocumentsView: React.FC = () => {
   const [favoritedItems, setFavoritedItems] = useState<Map<number, { favoriteId: number | undefined }>>(new Map());
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false); // State for filter toggle
 
-  // In DocumentsView.tsx
-
-const loadDocuments = useCallback(async () => {
-  setIsLoading(true);
-  if (isInitialLoad) { // Only clear main error if it's an initial load attempt
+// Core data fetching function
+const fetchAndSetDocuments = useCallback(async (pageToLoad: number, isNewQuery: boolean = false) => {
+  if (isNewQuery) {
+    setIsLoadingInitial(true);
     setError(null);
+  } else {
+    setIsLoadingMore(true);
   }
-  // Do not clear setError for non-initial loads, as we want to show stale data with a toast.
-  // setFeedbackMessage(null); // Optional: Clear previous feedback if needed
 
   try {
     const response: PaginatedDocumentsResponse = await fetchDocuments(
       selectedSoftwareId === null ? undefined : selectedSoftwareId,
-      currentPage,
-      itemsPerPage,
+      pageToLoad,
+      ITEMS_PER_PAGE,
       sortBy,
       sortOrder,
       docTypeFilter || undefined,
@@ -92,49 +65,51 @@ const loadDocuments = useCallback(async () => {
       updatedToFilter || undefined
     );
 
-    setDocuments(response.documents);
-    setTotalPages(response.total_pages);
+    const newDocs = response.documents;
+    // Use functional update for documents to correctly handle appending for favorites update
+    setDocuments(prevDocs => isNewQuery ? newDocs : [...prevDocs, ...newDocs]);
     setTotalDocuments(response.total_documents);
-    setCurrentPage(response.page); // Ensure current page is updated from backend
-    setItemsPerPage(response.per_page); // Ensure items per page is updated from backend
-
-    // Initialize favoritedItems directly from fetched documents (SUCCESS PATH)
-    const newFavoritedItems = new Map<number, { favoriteId: number | undefined }>();
-    if (isAuthenticated && response.documents && response.documents.length > 0) {
-      for (const doc of response.documents) {
-        if (doc.favorite_id) {
-          newFavoritedItems.set(doc.id, { favoriteId: doc.favorite_id });
-        } else {
-          newFavoritedItems.set(doc.id, { favoriteId: undefined });
+    setCurrentPage(response.page + 1); 
+    setHasMore(response.page < response.total_pages);
+    
+    // Update favoritedItems based on the potentially updated documents list
+    // This needs to happen after setDocuments has effectively completed or use the new list directly
+    // For simplicity with async state updates, consider passing the new full list to update favorites
+    setFavoritedItems(prevFavs => {
+        const updatedFavs = new Map(prevFavs);
+        // Construct the current full list based on whether it's a new query or appending
+        const currentFullDocs = isNewQuery ? newDocs : [...documents, ...newDocs]; // 'documents' here refers to state before this update when appending
+        if (isAuthenticated && currentFullDocs) {
+            for (const doc of currentFullDocs) { 
+                if (doc.favorite_id) updatedFavs.set(doc.id, { favoriteId: doc.favorite_id });
+                else updatedFavs.set(doc.id, { favoriteId: undefined }); 
+            }
         }
-      }
-    }
-    setFavoritedItems(newFavoritedItems);
-    if (isInitialLoad) {
-      setIsInitialLoad(false); // Mark initial load as complete
-    }
+        return updatedFavs;
+    });
+
 
   } catch (err: any) {
-    console.error("Failed to load documents:", err);
-    const errorMessage = err.message || 'Failed to fetch documents. Please try again later.';
-    if (isInitialLoad) {
-      setError(errorMessage); // Set error for ErrorState component display
-      setDocuments([]); // Clear documents on initial load error
-      setTotalPages(0);
-      setTotalDocuments(0);
-      setFavoritedItems(new Map());
+    console.error(`Failed to load documents (page ${pageToLoad}):`, err);
+    const errorMessage = err.response?.data?.msg || err.message || 'Failed to fetch documents.';
+    if (isNewQuery) { 
+      setError(errorMessage);
+      setDocuments([]); 
+      setHasMore(false);
     } else {
-      // For non-initial loads, show a toast and keep stale data
-      showErrorToast(err.response?.data?.msg || "Failed to update documents. Previous data shown.");
-      // Do not clear documents or reset pagination here
+      showErrorToast(errorMessage); 
+      setHasMore(false); 
     }
   } finally {
-    setIsLoading(false);
+    if (isNewQuery) {
+      setIsLoadingInitial(false);
+    } else {
+      setIsLoadingMore(false);
+    }
   }
 }, [
   selectedSoftwareId,
-  currentPage,
-  itemsPerPage,
+  ITEMS_PER_PAGE, 
   sortBy,
   sortOrder,
   docTypeFilter,
@@ -142,80 +117,89 @@ const loadDocuments = useCallback(async () => {
   createdToFilter,
   updatedFromFilter,
   updatedToFilter,
-  isAuthenticated
+  isAuthenticated,
+  documents // Added documents as dependency because it's used in favorite items update logic for appending
 ]);
   
-  useEffect(() => {
-    if (!isAuthenticated) {
-      setFavoritedItems(new Map()); 
-    }
-    // loadDocuments will be called by the main useEffect watching `loadDocuments` itself.
-  }, [isAuthenticated]);
+// Effect for initial load and when critical filters/sort change
+useEffect(() => {
+  if (!isAuthenticated) {
+    setDocuments([]);
+    setFavoritedItems(new Map());
+    setCurrentPage(1);
+    setHasMore(false);
+    setIsLoadingInitial(false);
+    return;
+  }
+  setDocuments([]); 
+  setCurrentPage(1);  
+  setHasMore(true);   
+  fetchAndSetDocuments(1, true); 
+}, [
+  isAuthenticated, 
+  selectedSoftwareId, 
+  sortBy, 
+  sortOrder, 
+  docTypeFilter, 
+  createdFromFilter, 
+  createdToFilter, 
+  updatedFromFilter, 
+  updatedToFilter,
+  fetchAndSetDocuments // fetchAndSetDocuments is now a dependency
+]);
 
-  // REMOVED N+1 useEffect for getFavoriteStatusApi calls
 
-  // Handler for applying advanced filters
-  const handleApplyAdvancedFilters = () => {
-    setCurrentPage(1); // This will trigger loadDocuments due to dependency
-  };
+// Handler for applying advanced filters - triggers the useEffect above
+const handleApplyAdvancedFilters = () => {
+  // The state changes for filters (docTypeFilter, etc.) will trigger the useEffect.
+};
 
-  // Handler for clearing advanced filters
-  const handleClearAdvancedFilters = () => {
-    setDocTypeFilter('');
-    setCreatedFromFilter('');
-    setCreatedToFilter('');
-    setUpdatedFromFilter('');
-    setUpdatedToFilter('');
-    // setSelectedSoftwareId(null); // Optional: Clear software tab filter as well
-    setCurrentPage(1); // This will trigger loadDocuments
-  };
+// Handler for clearing advanced filters - triggers the useEffect above
+const handleClearAdvancedFilters = () => {
+  setDocTypeFilter('');
+  setCreatedFromFilter('');
+  setCreatedToFilter('');
+  setUpdatedFromFilter('');
+  setUpdatedToFilter('');
+  // If setSelectedSoftwareId(null) is also part of clear, it will also trigger the effect.
+};
 
-  useEffect(() => {
+useEffect(() => {
     const loadSoftwareForFilters = async () => {
       try {
         const softwareData = await fetchSoftware();
         setSoftwareList(softwareData);
       } catch (err) {
         console.error("Failed to load software for filters", err);
-        // Optionally set an error state for software list loading
       }
     };
     loadSoftwareForFilters();
   }, []);
 
-  useEffect(() => {
-    loadDocuments();
-  }, [loadDocuments]);
-
+// handleFilterChange, handleSort will now just update state, letting the main useEffect handle refetch.
   const handleFilterChange = (softwareId: number | null) => {
     setSelectedSoftwareId(softwareId);
-    setCurrentPage(1); // Reset to first page when filter changes
   };
 
-  const handlePageChange = (newPage: number) => {
-    setCurrentPage(newPage);
-  };
+  // handlePageChange is removed for infinite scroll
 
   const handleSort = (columnKey: string) => {
-    if (sortBy === columnKey) {
-      setSortOrder(prevOrder => (prevOrder === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setSortBy(columnKey);
-      setSortOrder('asc');
-    }
-    setCurrentPage(1); // Reset to first page on sort change
+    const newSortOrder = sortBy === columnKey && sortOrder === 'asc' ? 'desc' : 'asc';
+    setSortBy(columnKey);
+    setSortOrder(newSortOrder);
   };
 
   const handleDocumentAdded = (newDocument: DocumentType) => {
     setShowAddDocumentForm(false);
     setFeedbackMessage(`Document "${newDocument.doc_name}" added successfully.`);
-    loadDocuments(); // Refresh list
+    // Refresh the list from page 1 to show the new document
+    setDocuments([]); setCurrentPage(1); setHasMore(true); fetchAndSetDocuments(1, true);
   };
 
   const handleDocumentUpdated = (updatedDocument: DocumentType) => {
     setEditingDocument(null);
     setFeedbackMessage(`Document "${updatedDocument.doc_name}" updated successfully.`);
-    loadDocuments(); // Refresh list
+    setDocuments([]); setCurrentPage(1); setHasMore(true); fetchAndSetDocuments(1, true);
   };
 
   const openEditForm = (doc: DocumentType) => {

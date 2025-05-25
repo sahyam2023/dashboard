@@ -1,32 +1,36 @@
 // src/App.tsx
-import React, { useEffect } from 'react'; // Added useEffect
+import React, { useEffect, Suspense, lazy } from 'react'; // Added Suspense, lazy
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { ToastContainer } from 'react-toastify';
-import { showErrorToast } from './utils/toastUtils'; // Import showErrorToast
+import { showErrorToast } from './utils/toastUtils'; 
 import 'react-toastify/dist/ReactToastify.css';
 import Layout from './components/Layout';
-import DocumentsView from './views/DocumentsView';
-import PatchesView from './views/PatchesView';
-import LinksView from './views/LinksView';
-import MiscView from './views/MiscView';
-import SearchResultsView from './views/SearchResultsView';
+import LoadingState from './components/LoadingState'; // For Suspense fallback
+
+// Static imports for auth-flow pages and core layouts
 import LoginPage from './views/LoginPage';
 import RegisterPage from './views/RegisterPage';
-import FavoritesView from './views/FavoritesView'; // Added FavoritesView
+import GlobalLoginPage from './views/GlobalLoginPage'; 
+import ForgotPasswordPage from './views/ForgotPasswordPage'; 
+import ForcedPasswordChangePage from './views/ForcedPasswordChangePage'; 
+import AdminLayout from './components/admin/AdminLayout'; 
 
-// Optional: You might create this later for better route protection
-// import ProtectedRoute from './components/ProtectedRoute';
-import UserProfilePage from './views/UserProfilePage'; // Import UserProfilePage
-import SuperAdminDashboard from './views/SuperAdminDashboard'; // Import SuperAdminDashboard
-import AdminLayout from './components/admin/AdminLayout'; // Import AdminLayout
-import AdminDashboardPage from './views/AdminDashboardPage'; 
-import AdminVersionsPage from './views/AdminVersionsPage'; // Import the new AdminVersionsPage
-import AuditLogViewer from './components/admin/AuditLogViewer'; 
+// Lazy loaded views
+const DocumentsView = lazy(() => import('./views/DocumentsView'));
+const PatchesView = lazy(() => import('./views/PatchesView'));
+const LinksView = lazy(() => import('./views/LinksView'));
+const MiscView = lazy(() => import('./views/MiscView'));
+const SearchResultsView = lazy(() => import('./views/SearchResultsView'));
+const UserProfilePage = lazy(() => import('./views/UserProfilePage'));
+const FavoritesView = lazy(() => import('./views/FavoritesView'));
+const SuperAdminDashboard = lazy(() => import('./views/SuperAdminDashboard'));
+const AdminDashboardPage = lazy(() => import('./views/AdminDashboardPage'));
+const AdminVersionsPage = lazy(() => import('./views/AdminVersionsPage'));
+const AuditLogViewer = lazy(() => import('./components/admin/AuditLogViewer')); // Path is components/admin
+
 import { useAuth } from './context/AuthContext'; 
-import AuthModal from './components/shared/AuthModal'; // Import AuthModal
-import GlobalLoginPage from './views/GlobalLoginPage'; // Import GlobalLoginPage
-import ForgotPasswordPage from './views/ForgotPasswordPage'; // Added Forgot Password Route
-import ForcedPasswordChangePage from './views/ForcedPasswordChangePage'; // Import ForcedPasswordChangePage
+import AuthModal from './components/shared/AuthModal'; 
+import SessionTimeoutWarningModal from './components/shared/SessionTimeoutWarningModal'; 
 
 
 // We need to wrap the main logic in a component that can use useLocation
@@ -103,60 +107,55 @@ function AppContent() {
         pauseOnHover
         theme="colored" // Using 'colored' theme for better visual distinction of success/error
       />
-      <Routes>
-        {/* Publicly accessible routes (even if not authenticated, but after global access) */}
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
-        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-        
-        {/* Forced password change route - accessible only if authenticated and flag is set (handled by redirect logic) 
-            OR if directly navigated to while authenticated.
-        */}
-        <Route 
-            path="/force-change-password" 
-            element={isAuthenticated ? <ForcedPasswordChangePage /> : <Navigate to="/login" replace />} 
-        />
-
-        {/* Routes requiring authentication and using the main Layout */}
-        <Route path="/" element={isAuthenticated ? <Layout /> : <Navigate to="/login" replace />}>
-          <Route index element={<Navigate to="/documents" replace />} />
-          <Route path="documents" element={<DocumentsView />} />
-          <Route path="patches" element={<PatchesView />} />
-          <Route path="links" element={<LinksView />} />
-          <Route path="misc" element={<MiscView />} />
-          <Route path="search" element={<SearchResultsView />} />
-          <Route path="profile" element={<UserProfilePage />} />
-          <Route path="favorites" element={<FavoritesView />} />
+      <Suspense fallback={<LoadingState message="Loading page..." />}>
+        <Routes>
+          {/* Publicly accessible routes (even if not authenticated, but after global access) */}
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           
-          {/* Admin and Super Admin Routes - protected by role check within Layout/component or here */}
           <Route 
-            path="superadmin" 
-            element={auth.role === 'super_admin' ? <SuperAdminDashboard /> : <Navigate to="/documents" replace />} 
+              path="/force-change-password" 
+              element={isAuthenticated ? <ForcedPasswordChangePage /> : <Navigate to="/login" replace />} 
           />
-          <Route 
-            path="/admin" 
-            element={(auth.role === 'admin' || auth.role === 'super_admin') ? <AdminLayout /> : <Navigate to="/documents" replace />}
-          >
-            <Route path="dashboard" element={<AdminDashboardPage />} />
-            <Route path="versions" element={<AdminVersionsPage />} />
-            <Route path="audit-logs" element={<AuditLogViewer />} />
-            {/* Add other admin routes here */}
-          </Route>
-        </Route>
-        
-        {/* Catch-all for authenticated users if no other route matches */}
-        {isAuthenticated && <Route path="*" element={<Navigate to="/documents" replace />} />}
-        
-        {/* If not authenticated and no public route matched, show login or a specific 404 */}
-        {/* This specific catch-all might be too broad if /login etc. are not matched above for some reason */}
-        {!isAuthenticated && <Route path="*" element={<Navigate to="/login" replace />} />}
 
-      </Routes>
+          {/* Routes requiring authentication and using the main Layout */}
+          <Route path="/" element={isAuthenticated ? <Layout /> : <Navigate to="/login" replace />}>
+            <Route index element={<Navigate to="/documents" replace />} />
+            <Route path="documents" element={<DocumentsView />} />
+            <Route path="patches" element={<PatchesView />} />
+            <Route path="links" element={<LinksView />} />
+            <Route path="misc" element={<MiscView />} />
+            <Route path="search" element={<SearchResultsView />} />
+            <Route path="profile" element={<UserProfilePage />} />
+            <Route path="favorites" element={<FavoritesView />} />
+            
+            <Route 
+              path="superadmin" 
+              element={auth.role === 'super_admin' ? <SuperAdminDashboard /> : <Navigate to="/documents" replace />} 
+            />
+            <Route 
+              path="/admin" 
+              element={(auth.role === 'admin' || auth.role === 'super_admin') ? <AdminLayout /> : <Navigate to="/documents" replace />}
+            >
+              <Route path="dashboard" element={<AdminDashboardPage />} />
+              <Route path="versions" element={<AdminVersionsPage />} />
+              <Route path="audit-logs" element={<AuditLogViewer />} />
+              {/* Add other admin routes here */}
+            </Route>
+          </Route>
+          
+          {isAuthenticated && <Route path="*" element={<Navigate to="/documents" replace />} />}
+          {!isAuthenticated && <Route path="*" element={<Navigate to="/login" replace />} />}
+
+        </Routes>
+      </Suspense>
       <AuthModal 
         isOpen={isAuthModalOpen} 
         onClose={closeAuthModal} 
         initialView={authModalView} 
       />
+      <SessionTimeoutWarningModal /> {/* Add Session Timeout Warning Modal here */}
     </>
   );
 }

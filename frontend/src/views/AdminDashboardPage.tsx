@@ -16,7 +16,7 @@ import { Bar, Pie, Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS, CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend, PointElement, LineElement
 } from 'chart.js';
-import { showErrorToast } from '../utils/toastUtils'; // Import toast utility
+import { showErrorToast, showSuccessToast } from '../utils/toastUtils'; // Import toast utility
 import LoadingState from '../components/LoadingState'; // For overall loading
 import ErrorState from '../components/ErrorState'; // For overall error
 
@@ -251,7 +251,7 @@ const AdminDashboardPage: React.FC = () => {
           }));
         }
         await saveUserDashboardLayout(apiLayouts);
-        showErrorToast("Dashboard layout saved!", {type: 'success', autoClose: 2000});
+        showSuccessToast("Dashboard layout saved!", { autoClose: 2000 });
       } catch (error) {
         showErrorToast("Failed to save dashboard layout.");
         console.error("Failed to save dashboard layout:", error);
@@ -297,12 +297,14 @@ const AdminDashboardPage: React.FC = () => {
   }, [loadingStats, isInitialLoad]);
 
   const handleLayoutChange = (newLayout: RglLayout[], allLayouts: RglLayouts) => {
-    if (initialLayoutFetched && isEditMode) { // Only save if initial layout is fetched and in edit mode
-      setCurrentLayouts(allLayouts); // Update state with all breakpoint layouts
-      debouncedSaveLayout(allLayouts);
-    } else if (initialLayoutFetched && !isEditMode) {
-      // If not in edit mode, but layout change occurs (e.g. window resize), update state but don't save.
+    if (initialLayoutFetched) { 
       setCurrentLayouts(allLayouts);
+    }
+  };
+
+  const handleDragOrResizeStop = () => {
+    if (isEditMode && currentLayouts) { // Only save if in edit mode and layouts are available
+        debouncedSaveLayout(currentLayouts);
     }
   };
 
@@ -328,7 +330,7 @@ const AdminDashboardPage: React.FC = () => {
         }));
       }
       saveUserDashboardLayout(apiLayouts)
-        .then(() => showErrorToast("Layout saved!", {type: 'success', autoClose: 2000}))
+        .then(() => showSuccessToast("Layout saved!", { autoClose: 2000 }))
         .catch(() => showErrorToast("Failed to save layout."));
     }
   };
@@ -375,6 +377,8 @@ const AdminDashboardPage: React.FC = () => {
           measureBeforeMount={false} 
           useCSSTransforms={true} 
           onLayoutChange={handleLayoutChange}
+          onDragStop={handleDragOrResizeStop}
+          onResizeStop={handleDragOrResizeStop}
           compactType="vertical" // Recommended for predictability
         >
           {widgetConfigs.filter(w => w.visible).map(widget => {

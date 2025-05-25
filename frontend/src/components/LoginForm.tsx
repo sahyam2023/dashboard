@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { loginUser } from '../services/api';
-import { showErrorToast } from '../utils/toastUtils';
+import { showErrorToast, showSuccessToast } from '../utils/toastUtils';
 
 interface LoginFormProps {
   onAuthSuccess?: (passwordResetRequired: boolean) => void;
@@ -32,6 +32,7 @@ const LoginForm: React.FC<LoginFormProps> = ({ onAuthSuccess, onToggleView }) =>
     try {
       const data = await loginUser({ username, password }); 
       const requiresReset = auth.login(data.access_token, data.username, data.role, data.password_reset_required); 
+      showSuccessToast("Login successful!"); // Added success toast
       onAuthSuccess?.(requiresReset); 
     } catch (err: any) {
       if (err.response && err.response.data && err.response.data.msg) {

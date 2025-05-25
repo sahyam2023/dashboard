@@ -26,17 +26,17 @@ interface AuthContextType {
   revokeGlobalAccess: () => void; 
   isPasswordResetRequired: boolean;
   clearPasswordResetRequiredFlag: () => void;
-  // Session Timeout Warning
-  isSessionWarningModalOpen: boolean;
-  setSessionWarningModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  sessionWarningCountdown: number;
-  refreshSession: () => Promise<void>;
+  // Session Timeout Warning - REMOVED
+  // isSessionWarningModalOpen: boolean;
+  // setSessionWarningModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  // sessionWarningCountdown: number;
+  // refreshSession: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const PLACEHOLDER_SESSION_DURATION_SECONDS = 15 * 60; // 15 minutes
-const WARNING_THRESHOLD_SECONDS = 2 * 60; // Show warning 2 minutes before expiry
+// REMOVED const PLACEHOLDER_SESSION_DURATION_SECONDS = 15 * 60; // 15 minutes
+// REMOVED const WARNING_THRESHOLD_SECONDS = 2 * 60; // Show warning 2 minutes before expiry
 
 export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   // const [token, setToken] = useState<string | null>(localStorage.getItem('authToken')); // Replaced by tokenData
@@ -48,9 +48,9 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [authModalView, setAuthModalView] = useState<'login' | 'register'>('login');
 
-  // Session Timeout Warning State
-  const [isSessionWarningModalOpen, setSessionWarningModalOpen] = useState(false);
-  const [sessionWarningCountdown, setSessionWarningCountdown] = useState(WARNING_THRESHOLD_SECONDS);
+  // Session Timeout Warning State - REMOVED
+  // const [isSessionWarningModalOpen, setSessionWarningModalOpen] = useState(false);
+  // const [sessionWarningCountdown, setSessionWarningCountdown] = useState(WARNING_THRESHOLD_SECONDS);
 
 
   // Helper function for initializing global access state
@@ -101,7 +101,7 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
 
   useEffect(() => {
     if (!tokenData) {
-      setSessionWarningModalOpen(false);
+      // setSessionWarningModalOpen(false); // REMOVED
       return;
     }
 
@@ -115,17 +115,18 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
         return;
       }
 
-      if (timeLeftSeconds <= WARNING_THRESHOLD_SECONDS) {
-        if (!isSessionWarningModalOpen) setSessionWarningModalOpen(true);
-        setSessionWarningCountdown(timeLeftSeconds);
-      } else {
-        // If modal was open but session was refreshed (time > threshold), close it.
-        if (isSessionWarningModalOpen) setSessionWarningModalOpen(false);
-      }
+      // REMOVED logic for WARNING_THRESHOLD_SECONDS
+      // if (timeLeftSeconds <= WARNING_THRESHOLD_SECONDS) {
+      //   if (!isSessionWarningModalOpen) setSessionWarningModalOpen(true);
+      //   setSessionWarningCountdown(timeLeftSeconds);
+      // } else {
+      //   // If modal was open but session was refreshed (time > threshold), close it.
+      //   if (isSessionWarningModalOpen) setSessionWarningModalOpen(false);
+      // }
     }, 1000); // Check every second
 
     return () => clearInterval(interval);
-  }, [tokenData, isSessionWarningModalOpen]); // Added isSessionWarningModalOpen to dependencies
+  }, [tokenData]); // REMOVED isSessionWarningModalOpen from dependencies
 
   const login = (newToken: string, newUsername: string, newRole: string, expiresInSeconds: number, passwordResetRequired: boolean = false) => {
     const expiresAt = Date.now() + expiresInSeconds * 1000;
@@ -139,7 +140,7 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     setUsername(newUsername);
     setRole(newRole);
     setIsPasswordResetRequired(passwordResetRequired);
-    setSessionWarningModalOpen(false); // Ensure warning modal is closed on new login
+    // setSessionWarningModalOpen(false); // REMOVED: Ensure warning modal is closed on new login
     return passwordResetRequired;
   };
 
@@ -151,7 +152,7 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     setUsername(null);
     setRole(null);
     setIsPasswordResetRequired(false);
-    setSessionWarningModalOpen(false); // Close warning modal on logout
+    // setSessionWarningModalOpen(false); // REMOVED: Close warning modal on logout
     
     if (sessionExpiredDueToTimeout) {
         // Dispatch the event so App.tsx can show the toast.
@@ -159,39 +160,8 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     }
   };
   
-  const refreshSession = async () => {
-    try {
-      // --- Placeholder for actual API call ---
-      // const response = await someApiService.post('/auth/refresh'); 
-      // const { token: refreshedToken, expiresInSeconds: newExpiresInSeconds } = response.data;
-      // --- End Placeholder ---
-
-      // Simulating a successful refresh for now:
-      await new Promise(resolve => setTimeout(resolve, 500)); // Simulate network delay
-      const refreshedToken = `refreshed-${tokenData?.token}-${Date.now()}`; // Dummy new token
-      const newExpiresInSeconds = PLACEHOLDER_SESSION_DURATION_SECONDS; // Reset to full duration
-
-      const newExpiresAt = Date.now() + newExpiresInSeconds * 1000;
-      if (tokenData) {
-        const newRefreshedTokenData: TokenData = { 
-          ...tokenData, 
-          token: refreshedToken, 
-          expiresAt: newExpiresAt 
-        };
-        setTokenData(newRefreshedTokenData);
-        localStorage.setItem('tokenData', JSON.stringify(newRefreshedTokenData));
-        setSessionWarningModalOpen(false);
-        showSuccessToast('Session extended successfully!');
-      } else {
-        throw new Error("No active session to refresh.");
-      }
-    } catch (error) {
-      console.error("Failed to refresh session:", error);
-      showErrorToast('Failed to extend session. Please log out and log back in.');
-      // Optionally, force logout here if refresh fails critically
-      // logout(true); 
-    }
-  };
+  // REMOVED refreshSession function
+  // const refreshSession = async () => { ... };
 
   const clearPasswordResetRequiredFlag = () => {
     setIsPasswordResetRequired(false);
@@ -241,11 +211,11 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
       // Provide forced password reset state and functions
       isPasswordResetRequired,
       clearPasswordResetRequiredFlag,
-      // Session Timeout Warning
-      isSessionWarningModalOpen,
-      setSessionWarningModalOpen,
-      sessionWarningCountdown,
-      refreshSession,
+      // Session Timeout Warning - REMOVED
+      // isSessionWarningModalOpen,
+      // setSessionWarningModalOpen,
+      // sessionWarningCountdown,
+      // refreshSession,
     }}>
       {children}
     </AuthContext.Provider>

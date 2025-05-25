@@ -1,5 +1,4 @@
 import React, { useState, FormEvent } from 'react';
-import React, { useState, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { changePassword, ChangePasswordPayload } from '../services/api';

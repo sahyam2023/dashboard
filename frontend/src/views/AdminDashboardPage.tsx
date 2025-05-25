@@ -172,16 +172,19 @@ const AdminDashboardPage: React.FC = () => {
               ...item, // Spread all properties from ApiLayoutItem
             }));
           }
+          console.log('Fetched user layout from API:', JSON.stringify(rglLayouts)); // Log fetched
           setCurrentLayouts(rglLayouts);
         } else {
           // Apply initialLayoutLg if no user preferences
           const defaultLayouts: RglLayouts = { lg: initialLayoutLg.map(l => ({...l})) };
+          console.log('Using default layout:', JSON.stringify(defaultLayouts)); // Log default
           setCurrentLayouts(defaultLayouts);
         }
       } catch (error) {
         showErrorToast("Failed to load dashboard layout. Using default.");
         console.error("Failed to load dashboard layout:", error);
         const defaultLayouts: RglLayouts = { lg: initialLayoutLg.map(l => ({...l})) };
+        console.log('Error loading layout, using default:', JSON.stringify(defaultLayouts)); // Log default on error
         setCurrentLayouts(defaultLayouts);
       } finally {
         setIsLoadingLayout(false);
@@ -298,6 +301,7 @@ const AdminDashboardPage: React.FC = () => {
 
   const handleLayoutChange = (newLayout: RglLayout[], allLayouts: RglLayouts) => {
     if (initialLayoutFetched) { 
+      console.log('Layout changed (handleLayoutChange):', JSON.stringify(allLayouts));
       setCurrentLayouts(allLayouts);
     }
   };
@@ -365,9 +369,16 @@ const AdminDashboardPage: React.FC = () => {
                       static: item.static, isDraggable: item.isDraggable, isResizable: item.isResizable,
                     }));
                   }
+                  console.log('Attempting to save layout (Save Layout button onClick):', JSON.stringify(apiLayouts));
                   saveUserDashboardLayout(apiLayouts)
-                    .then(() => showSuccessToast("Dashboard layout saved successfully!", { autoClose: 2000 }))
-                    .catch(() => showErrorToast("Failed to save dashboard layout."));
+                    .then(() => {
+                      showSuccessToast("Dashboard layout saved successfully!", { autoClose: 2000 });
+                      console.log('Layout save API call successful (frontend).');
+                    })
+                    .catch(() => {
+                      showErrorToast("Failed to save dashboard layout.");
+                      console.error('Layout save API call failed (frontend).');
+                    });
                 } else {
                   showErrorToast("No layout data to save.");
                 }

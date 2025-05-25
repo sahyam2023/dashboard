@@ -1,6 +1,9 @@
 // src/App.tsx
-import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'; // Import useLocation
+import React, { useEffect } from 'react'; // Added useEffect
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { ToastContainer } from 'react-toastify';
+import { showErrorToast } from './utils/toastUtils'; // Import showErrorToast
+import 'react-toastify/dist/ReactToastify.css';
 import Layout from './components/Layout';
 import DocumentsView from './views/DocumentsView';
 import PatchesView from './views/PatchesView';
@@ -36,8 +39,30 @@ function AppContent() {
     authModalView, 
     isGlobalAccessGranted, 
     isAuthenticated, // Use this from auth context
-    isPasswordResetRequired // Use this from auth context
+    isPasswordResetRequired, // Use this from auth context
+    logout // Destructure logout to use in event handler
   } = auth;
+
+  useEffect(() => {
+    const handleTokenExpiredEvent = () => {
+      // Check if the user is currently authenticated according to the context
+      // This prevents showing the toast if the user was already logged out
+      // or if the event fires multiple times during the logout process.
+      if (auth.isAuthenticated) { 
+        showErrorToast("Your session has expired. Please login again.");
+        // Logout is already called by AuthContext's own event listener.
+        // No need to call auth.logout() here again, as that's now handled within AuthContext.
+        // The navigation to /login will be handled by the routing logic below
+        // when isAuthenticated becomes false.
+      }
+    };
+
+    document.addEventListener('tokenExpired', handleTokenExpiredEvent);
+    return () => {
+      document.removeEventListener('tokenExpired', handleTokenExpiredEvent);
+    };
+  }, [auth.isAuthenticated, auth]); // Depend on isAuthenticated and the auth object (which includes logout)
+
 
   if (!isGlobalAccessGranted) {
     // If global access is not granted, only show the GlobalLoginPage
@@ -66,6 +91,18 @@ function AppContent() {
 
   return (
     <> {/* Use Fragment instead of BrowserRouter here, as it's already provided by App */}
+      <ToastContainer
+        position="top-right"
+        autoClose={5000}
+        hideProgressBar={false}
+        newestOnTop={false}
+        closeOnClick
+        rtl={false}
+        pauseOnFocusLoss
+        draggable
+        pauseOnHover
+        theme="colored" // Using 'colored' theme for better visual distinction of success/error
+      />
       <Routes>
         {/* Publicly accessible routes (even if not authenticated, but after global access) */}
         <Route path="/login" element={<LoginPage />} />

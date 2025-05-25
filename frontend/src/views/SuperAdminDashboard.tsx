@@ -365,7 +365,7 @@ const SuperAdminDashboard: React.FC = () => {
       key: 'actions',
       header: 'Actions',
       render: (user) => (
-        <div className="space-x-2">
+        <div className="space-x-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
           {user.is_active ? (
             <button
               onClick={(e) => { e.stopPropagation(); handleDeactivate(user.id, user.username);}}
@@ -419,6 +419,7 @@ const SuperAdminDashboard: React.FC = () => {
         <DataTable
           columns={columns}
           data={users}
+          rowClassName="group" // Added group class for row hover effect
         isLoading={isLoading}
         currentPage={currentPage}
         totalPages={totalPages}

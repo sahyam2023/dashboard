@@ -15,27 +15,25 @@ const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 to-slate-700 py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-md w-full space-y-8 p-10 bg-white rounded-xl shadow-2xl">
+        <div className="text-center">
+          <h2 className="mt-6 text-3xl font-bold text-gray-900">
             Sign in to your account
           </h2>
-          <p className="mt-2 text-center text-sm text-gray-600">
+          <p className="mt-2 text-sm text-gray-600">
             Or{' '}
-            <Link to="/register" className="font-medium text-blue-600 hover:text-blue-500">
+            <Link to="/register" className="font-medium text-indigo-600 hover:text-indigo-500">
               create a new account
             </Link>
           </p>
         </div>
-        <div className="bg-white p-8 shadow rounded-lg">
-          {/* Pass the handler to LoginForm */}
-          <LoginForm onAuthSuccess={handleLoginSuccess} /> 
-          <div className="mt-4 text-center text-sm">
-            <Link to="/forgot-password" className="font-medium text-indigo-600 hover:text-indigo-500">
-              Forgot Password?
-            </Link>
-          </div>
+        {/* Removed the inner white card, the outer card now serves this purpose */}
+        <LoginForm onAuthSuccess={handleLoginSuccess} /> 
+        <div className="mt-6 text-center text-sm"> 
+          <Link to="/forgot-password" className="font-medium text-indigo-600 hover:text-indigo-500">
+            Forgot Password?
+          </Link>
         </div>
       </div>
     </div>

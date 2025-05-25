@@ -24,6 +24,7 @@ interface DataTableProps<T> {
   sortColumn: string | null;
   sortOrder: 'asc' | 'desc' | null;
   onSort: (columnKey: string) => void;
+  rowClassName?: string | ((item: T, index: number) => string); // New prop
 }
 
 const DataTable = <T extends Record<string, any>>({
@@ -38,6 +39,7 @@ const DataTable = <T extends Record<string, any>>({
   sortColumn,
   sortOrder,
   onSort,
+  rowClassName, // Destructure new prop
 }: DataTableProps<T>) => {
   if (isLoading) {
     return (
@@ -91,15 +93,23 @@ const DataTable = <T extends Record<string, any>>({
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {data.map((item, index) => (
-              <tr key={item.id || index} className="hover:bg-gray-50 transition-colors"> {/* Use item.id if available */}
+            {data.map((item, index) => {
+              const customRowClass = typeof rowClassName === 'function' 
+                ? rowClassName(item, index) 
+                : rowClassName;
+              return (
+              <tr 
+                key={item.id || index} 
+                className={`hover:bg-gray-50 transition-colors ${customRowClass || ''}`}
+              > {/* Use item.id if available */}
                 {columns.map((column) => (
                   <td key={column.key as string} className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                     {column.render ? column.render(item) : item[column.key as keyof T]}
                   </td>
                 ))}
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

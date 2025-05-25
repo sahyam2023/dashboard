@@ -103,9 +103,9 @@ const AdminVersionsTable: React.FC<AdminVersionsTableProps> = ({ onEdit, onDelet
     {
       key: 'actions', // Unique key for the actions column
       header: 'Actions',
-      accessor: 'actions', // This accessor might just be an identifier; actual data isn't typically pulled via 'item.actions'
+      accessor: 'actions',
       render: (item: AdminSoftwareVersion) => (
-        <div className="flex space-x-2">
+        <div className="flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
           <button
             onClick={() => onEdit(item)}
             className="p-1 text-blue-600 hover:text-blue-800"
@@ -134,6 +134,7 @@ const AdminVersionsTable: React.FC<AdminVersionsTableProps> = ({ onEdit, onDelet
       <DataTable
         columns={columns}
         data={versions}
+        rowClassName="group" // Added group class for row hover effect
         isLoading={isLoading}
         pagination={{
           currentPage,

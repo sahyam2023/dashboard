@@ -2,12 +2,16 @@ import React, { useState, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { changePassword, ChangePasswordPayload } from '../services/api';
-import { Box, TextField, Button, Typography, Container, Alert, Paper } from '@mui/material';
+import { Box, TextField, Button, Typography, Container, Alert, Paper, IconButton, InputAdornment } from '@mui/material';
+import { Visibility, VisibilityOff } from '@mui/icons-material';
 
 const ForcedPasswordChangePage: React.FC = () => {
-  const [currentPassword, setCurrentPassword] = useState<string>(''); // Optional based on flow
+  const [currentPassword, setCurrentPassword] = useState<string>('');
+  const [showCurrentPassword, setShowCurrentPassword] = useState<boolean>(false);
   const [newPassword, setNewPassword] = useState<string>('');
+  const [showNewPassword, setShowNewPassword] = useState<boolean>(false);
   const [confirmNewPassword, setConfirmNewPassword] = useState<string>('');
+  const [showConfirmNewPassword, setShowConfirmNewPassword] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [passwordValidationError, setPasswordValidationError] = useState<string>('');
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -89,12 +93,26 @@ const ForcedPasswordChangePage: React.FC = () => {
             fullWidth
             name="currentPassword"
             label="Current Password"
-            type="password"
+            type={showCurrentPassword ? 'text' : 'password'}
             id="currentPassword"
             value={currentPassword}
             onChange={(e) => setCurrentPassword(e.target.value)}
             disabled={isLoading || !!successMessage}
             helperText="Enter your current password (may not be required if this is a forced reset after login)."
+            InputProps={{
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton
+                    aria-label="toggle current password visibility"
+                    onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                    edge="end"
+                    disabled={isLoading || !!successMessage}
+                  >
+                    {showCurrentPassword ? <VisibilityOff /> : <Visibility />}
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }}
           />
           <TextField
             margin="normal"
@@ -102,7 +120,7 @@ const ForcedPasswordChangePage: React.FC = () => {
             fullWidth
             name="newPassword"
             label="New Password"
-            type="password"
+            type={showNewPassword ? 'text' : 'password'}
             id="newPassword"
             value={newPassword}
             onChange={(e) => {
@@ -112,6 +130,20 @@ const ForcedPasswordChangePage: React.FC = () => {
             error={!!passwordValidationError && !successMessage}
             helperText={!successMessage ? passwordValidationError : ""}
             disabled={isLoading || !!successMessage}
+            InputProps={{
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton
+                    aria-label="toggle new password visibility"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    edge="end"
+                    disabled={isLoading || !!successMessage}
+                  >
+                    {showNewPassword ? <VisibilityOff /> : <Visibility />}
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }}
           />
           <TextField
             margin="normal"
@@ -119,13 +151,27 @@ const ForcedPasswordChangePage: React.FC = () => {
             fullWidth
             name="confirmNewPassword"
             label="Confirm New Password"
-            type="password"
+            type={showConfirmNewPassword ? 'text' : 'password'}
             id="confirmNewPassword"
             value={confirmNewPassword}
             onChange={(e) => setConfirmNewPassword(e.target.value)}
             error={newPassword !== confirmNewPassword && confirmNewPassword !== "" && !successMessage}
             helperText={newPassword !== confirmNewPassword && confirmNewPassword !== "" && !successMessage ? "New passwords do not match." : ""}
             disabled={isLoading || !!successMessage}
+            InputProps={{
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton
+                    aria-label="toggle confirm new password visibility"
+                    onClick={() => setShowConfirmNewPassword(!showConfirmNewPassword)}
+                    edge="end"
+                    disabled={isLoading || !!successMessage}
+                  >
+                    {showConfirmNewPassword ? <VisibilityOff /> : <Visibility />}
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }}
           />
           <Button
             type="submit"

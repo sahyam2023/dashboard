@@ -9,8 +9,9 @@ import {
   SecurityQuestion, // Assuming SecurityQuestion type is exported from api.ts if not from types.ts
 } from '../services/api';
 import {
-  Box, TextField, Button, Typography, Container, Alert, Stepper, Step, StepLabel, CircularProgress, Paper,
+  Box, TextField, Button, Typography, Container, Alert, Stepper, Step, StepLabel, CircularProgress, Paper, IconButton, InputAdornment
 } from '@mui/material';
+import { Visibility, VisibilityOff } from '@mui/icons-material';
 
 type AnswerInput = {
   question_id: number;
@@ -33,7 +34,9 @@ const ForgotPasswordPage: React.FC = () => {
   // Step 2: Reset Token and New Password
   const [resetTokenInfo, setResetTokenInfo] = useState<VerifySecurityAnswersResponse | null>(null);
   const [newPassword, setNewPassword] = useState<string>('');
+  const [showNewPassword, setShowNewPassword] = useState<boolean>(false);
   const [confirmNewPassword, setConfirmNewPassword] = useState<string>('');
+  const [showConfirmNewPassword, setShowConfirmNewPassword] = useState<boolean>(false);
   const [passwordValidationError, setPasswordValidationError] = useState<string>('');
 
 
@@ -220,7 +223,7 @@ const ForgotPasswordPage: React.FC = () => {
               fullWidth
               name="newPassword"
               label="New Password"
-              type="password"
+              type={showNewPassword ? 'text' : 'password'}
               id="newPassword"
               value={newPassword}
               onChange={(e) => {
@@ -230,6 +233,20 @@ const ForgotPasswordPage: React.FC = () => {
               error={!!passwordValidationError}
               helperText={passwordValidationError}
               disabled={isLoading}
+              InputProps={{
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton
+                      aria-label="toggle new password visibility"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                      edge="end"
+                      disabled={isLoading}
+                    >
+                      {showNewPassword ? <VisibilityOff /> : <Visibility />}
+                    </IconButton>
+                  </InputAdornment>
+                ),
+              }}
             />
             <TextField
               margin="normal"
@@ -237,13 +254,27 @@ const ForgotPasswordPage: React.FC = () => {
               fullWidth
               name="confirmNewPassword"
               label="Confirm New Password"
-              type="password"
+              type={showConfirmNewPassword ? 'text' : 'password'}
               id="confirmNewPassword"
               value={confirmNewPassword}
               onChange={(e) => setConfirmNewPassword(e.target.value)}
               error={newPassword !== confirmNewPassword && confirmNewPassword !== ""}
               helperText={newPassword !== confirmNewPassword && confirmNewPassword !== "" ? "Passwords do not match." : ""}
               disabled={isLoading}
+              InputProps={{
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton
+                      aria-label="toggle confirm new password visibility"
+                      onClick={() => setShowConfirmNewPassword(!showConfirmNewPassword)}
+                      edge="end"
+                      disabled={isLoading}
+                    >
+                      {showConfirmNewPassword ? <VisibilityOff /> : <Visibility />}
+                    </IconButton>
+                  </InputAdornment>
+                ),
+              }}
             />
             <Button type="submit" fullWidth variant="contained" sx={{ mt: 3, mb: 2 }} disabled={isLoading}>
               {isLoading ? <CircularProgress size={24} /> : 'Reset Password'}

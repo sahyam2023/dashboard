@@ -187,7 +187,7 @@ export interface AddDocumentPayload {
   doc_type?: string;
 }
 // For editing documents, can use Partial<AddDocumentPayload> if appropriate
-// export type EditDocumentPayload = Partial<AddDocumentPayload>;
+export type EditDocumentPayload = Partial<AddDocumentPayload>;
 
 
 // --- Misc Category Types ---

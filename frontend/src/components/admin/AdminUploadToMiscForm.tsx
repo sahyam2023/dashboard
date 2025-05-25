@@ -38,8 +38,8 @@ const miscUploadValidationSchema = yup.object().shape({
       then: schema => schema.required("Please select a file to upload.").test('filePresent', "File is required for upload.", value => !!value),
       otherwise: schema => schema.nullable(), // Optional in edit mode
     }),
-  title: yup.string().optional().max(255, "Title cannot exceed 255 characters.").nullable(),
-  description: yup.string().optional().max(1000, "Description cannot exceed 1000 characters.").nullable(),
+  title: yup.string().transform(value => value === '' ? undefined : value).optional().max(255, "Title cannot exceed 255 characters.").nullable(),
+  description: yup.string().transform(value => value === '' ? undefined : value).optional().max(1000, "Description cannot exceed 1000 characters.").nullable(),
 });
 
 
@@ -181,13 +181,13 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
   }
 
   return (
-    <form onSubmit={handleSubmit(onSubmit, onFormError)} className="space-y-6 bg-white p-6 rounded-lg shadow-lg border border-gray-200">
+    <form onSubmit={handleSubmit(onSubmit, onFormError)} className="space-y-6 bg-white dark:bg-gray-800 dark:border-gray-700 p-6 rounded-lg shadow-lg border border-gray-200">
       <div className="flex justify-between items-center">
-        <h3 className="text-xl font-semibold text-gray-800">
+        <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-100">
           {isEditMode ? 'Edit Miscellaneous File' : 'Upload File to Misc Category'}
         </h3>
         {isEditMode && onCancelEdit && (
-          <button type="button" onClick={onCancelEdit} className="text-sm text-gray-600 hover:text-gray-800">
+          <button type="button" onClick={onCancelEdit} className="text-sm text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200">
             Cancel Edit
           </button>
         )}
@@ -195,13 +195,13 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
       {/* Global error/success messages removed */}
 
       <div>
-        <label htmlFor="selectedCategoryId" className="block text-sm font-medium text-gray-700">Misc Category*</label>
-        {isFetchingCategories ? <p className="text-sm text-gray-500">Loading categories...</p> : (
+        <label htmlFor="selectedCategoryId" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Misc Category*</label>
+        {isFetchingCategories ? <p className="text-sm text-gray-500 dark:text-gray-400">Loading categories...</p> : (
           <select
             id="selectedCategoryId"
             {...register("selectedCategoryId")}
             disabled={isLoading || miscCategories.length === 0}
-            className={`mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md ${errors.selectedCategoryId ? 'border-red-500' : ''}`}
+            className={`mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md ${errors.selectedCategoryId ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600`}
           >
             <option value="" disabled>Select a category</option>
             {miscCategories.map(cat => (
@@ -213,14 +213,14 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
           {isEditMode ? 'Replace File (Optional)' : 'Select File*'}
         </label>
-        <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md">
+        <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md dark:border-gray-600 hover:border-blue-500 dark:hover:border-blue-400">
           <div className="space-y-1 text-center">
-            <UploadCloud className="mx-auto h-12 w-12 text-gray-400" />
-            <div className="flex text-sm text-gray-600">
-              <label htmlFor="selectedFile" className="relative cursor-pointer bg-white rounded-md font-medium text-blue-600 hover:text-blue-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-blue-500">
+            <UploadCloud className="mx-auto h-12 w-12 text-gray-400 dark:text-gray-500" />
+            <div className="flex text-sm text-gray-600 dark:text-gray-400">
+              <label htmlFor="selectedFile" className="relative cursor-pointer bg-white dark:bg-gray-800 rounded-md font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 focus-within:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
                 <span>{watchedSelectedFile ? 'Change file' : 'Upload a file'}</span>
                 <input 
                     id="selectedFile" // id should match RHF field name if possible or be unique
@@ -234,20 +234,20 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
               </label>
               <p className="pl-1">or drag and drop</p>
             </div>
-            <p className="text-xs text-gray-500">Any allowed file type.</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Any allowed file type.</p>
           </div>
         </div>
         {(watchedSelectedFile || (isEditMode && existingFileName)) && (
-          <div className="mt-3 flex items-center justify-between p-2 bg-gray-50 border border-gray-200 rounded-md">
+          <div className="mt-3 flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md">
             <div className='flex items-center space-x-2 overflow-hidden'>
-               <FileIconLucide size={18} className="text-gray-500 flex-shrink-0" />
-               <span className="text-sm text-gray-700 truncate">
+               <FileIconLucide size={18} className="text-gray-500 dark:text-gray-400 flex-shrink-0" />
+               <span className="text-sm text-gray-700 dark:text-gray-300 truncate">
                  {watchedSelectedFile ? (watchedSelectedFile as File).name : existingFileName}
                </span>
-               {isEditMode && existingFileName && !watchedSelectedFile && <span className="text-xs text-gray-500 ml-2">(current file)</span>}
+               {isEditMode && existingFileName && !watchedSelectedFile && <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">(current file)</span>}
             </div>
             {watchedSelectedFile && (
-                <button type="button" onClick={clearFileSelection} disabled={isLoading} className="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-200">
+                <button type="button" onClick={clearFileSelection} disabled={isLoading} className="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-200 dark:text-gray-500 dark:hover:text-gray-300 dark:hover:bg-gray-600">
                     <X size={16} />
                 </button>
             )}
@@ -257,26 +257,26 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
       </div>
 
       <div>
-        <label htmlFor="title" className="block text-sm font-medium text-gray-700">File Title (Optional)</label>
+        <label htmlFor="title" className="block text-sm font-medium text-gray-700 dark:text-gray-300">File Title (Optional)</label>
         <input 
             type="text" 
             id="title" 
             {...register("title")}
             placeholder={isEditMode && fileToEdit ? fileToEdit.original_filename : "Defaults to filename if blank"}
             disabled={isLoading}
-            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.title ? 'border-red-500' : ''}`}
+            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.title ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400`}
         />
         {errors.title && <p className="mt-1 text-sm text-red-600">{errors.title.message}</p>}
       </div>
 
       <div>
-        <label htmlFor="description" className="block text-sm font-medium text-gray-700">File Description (Optional)</label>
+        <label htmlFor="description" className="block text-sm font-medium text-gray-700 dark:text-gray-300">File Description (Optional)</label>
         <textarea 
             id="description" 
             rows={3} 
             {...register("description")}
             disabled={isLoading}
-            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.description ? 'border-red-500' : ''}`}
+            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.description ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400`}
         />
         {errors.description && <p className="mt-1 text-sm text-red-600">{errors.description.message}</p>}
       </div>
@@ -289,7 +289,7 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
         </button>
         {isEditMode && onCancelEdit && (
             <button type="button" onClick={onCancelEdit} disabled={isLoading}
-                    className="flex-1 inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                    className="flex-1 inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 dark:border-gray-500 dark:text-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600">
                 Cancel
             </button>
         )}

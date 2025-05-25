@@ -8,7 +8,6 @@ import {
   PaginatedDocumentsResponse,
   addFavoriteApi,
   removeFavoriteApi,
-  getFavoriteStatusApi,
   FavoriteItemType 
 } from '../services/api'; 
 import { Document as DocumentType, Software } from '../types'; 
@@ -26,7 +25,9 @@ interface OutletContextType {
 }
 
 const DocumentsView: React.FC = () => {
+  const ITEMS_PER_PAGE = 15;
   const { searchTerm } = useOutletContext<OutletContextType>();
+  const { isAuthenticated, role } = useAuth();
   // Note: The old `isLoading` and `isInitialLoad` are replaced by `isLoadingInitial` and `isLoadingMore`.
   // `totalPages` and `itemsPerPage` (as state for DataTable) are no longer primary drivers for pagination.
 
@@ -41,6 +42,32 @@ const DocumentsView: React.FC = () => {
   // Favorite State
   const [favoritedItems, setFavoritedItems] = useState<Map<number, { favoriteId: number | undefined }>>(new Map());
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false); // State for filter toggle
+  const [selectedSoftwareId, setSelectedSoftwareId] = useState<number | null>(null);
+
+  // Data states
+  const [documents, setDocuments] = useState<DocumentType[]>([]);
+  const [softwareList, setSoftwareList] = useState<Software[]>([]);
+
+  // Loading and Error states
+  const [isLoadingInitial, setIsLoadingInitial] = useState<boolean>(true);
+  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [totalDocuments, setTotalDocuments] = useState<number>(0);
+  const [hasMore, setHasMore] = useState<boolean>(false);
+
+  // Sorting states
+  const [sortBy, setSortBy] = useState<string>('created_at');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+
+  // Advanced Filter states
+  const [docTypeFilter, setDocTypeFilter] = useState<string>('');
+  const [createdFromFilter, setCreatedFromFilter] = useState<string>('');
+  const [createdToFilter, setCreatedToFilter] = useState<string>('');
+  const [updatedFromFilter, setUpdatedFromFilter] = useState<string>('');
+  const [updatedToFilter, setUpdatedToFilter] = useState<string>('');
 
 // Core data fetching function
 const fetchAndSetDocuments = useCallback(async (pageToLoad: number, isNewQuery: boolean = false) => {
@@ -67,7 +94,7 @@ const fetchAndSetDocuments = useCallback(async (pageToLoad: number, isNewQuery: 
 
     const newDocs = response.documents;
     // Use functional update for documents to correctly handle appending for favorites update
-    setDocuments(prevDocs => isNewQuery ? newDocs : [...prevDocs, ...newDocs]);
+    setDocuments((prevDocs: DocumentType[]) => isNewQuery ? newDocs : [...prevDocs, ...newDocs]);
     setTotalDocuments(response.total_documents);
     setCurrentPage(response.page + 1); 
     setHasMore(response.page < response.total_pages);
@@ -117,8 +144,8 @@ const fetchAndSetDocuments = useCallback(async (pageToLoad: number, isNewQuery: 
   createdToFilter,
   updatedFromFilter,
   updatedToFilter,
-  isAuthenticated,
-  documents // Added documents as dependency because it's used in favorite items update logic for appending
+  isAuthenticated
+  // documents // Removed 'documents' to prevent infinite loop
 ]);
   
 // Effect for initial load and when critical filters/sort change
@@ -188,6 +215,15 @@ useEffect(() => {
     setSortBy(columnKey);
     setSortOrder(newSortOrder);
   };
+
+  const loadDocuments = useCallback(() => {
+    fetchAndSetDocuments(1, true);
+  }, [fetchAndSetDocuments]);
+
+  const handlePageChange = useCallback((newPage: number) => {
+    setCurrentPage(newPage);
+    fetchAndSetDocuments(newPage, true);
+  }, [fetchAndSetDocuments, setCurrentPage]);
 
   const handleDocumentAdded = (newDocument: DocumentType) => {
     setShowAddDocumentForm(false);
@@ -281,10 +317,10 @@ useEffect(() => {
         </a>
       )
     },
-    { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: (doc) => doc.uploaded_by_username || 'N/A' },
-    { key: 'updated_by_username', header: 'Updated By', sortable: false, render: (doc) => doc.updated_by_username || 'N/A' }, // Not typically sorted
-    { key: 'created_at', header: 'Created At', sortable: true, render: (doc) => doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-CA') : '-' },
-    { key: 'updated_at', header: 'Updated At', sortable: true, render: (doc) => doc.updated_at ? new Date(doc.updated_at).toLocaleDateString('en-CA') : '-' },
+    { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: (doc: DocumentType) => doc.uploaded_by_username || 'N/A' },
+    { key: 'updated_by_username', header: 'Updated By', sortable: false, render: (doc: DocumentType) => doc.updated_by_username || 'N/A' }, // Not typically sorted
+    { key: 'created_at', header: 'Created At', sortable: true, render: (doc: DocumentType) => doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-CA') : '-' },
+    { key: 'updated_at', header: 'Updated At', sortable: true, render: (doc: DocumentType) => doc.updated_at ? new Date(doc.updated_at).toLocaleDateString('en-CA') : '-' },
     ...(isAuthenticated ? [{ // Changed condition to isAuthenticated for favorite button
       key: 'actions' as keyof DocumentType | 'actions',
       header: 'Actions',
@@ -311,6 +347,8 @@ useEffect(() => {
     }] : [])
   ];
   
+  const totalPages = Math.ceil(totalDocuments / ITEMS_PER_PAGE);
+
   const renderAdminFormArea = () => {
     if (editingDocument) {
       return (
@@ -488,9 +526,9 @@ useEffect(() => {
       )} 
 
 
-      {isInitialLoad && isLoading ? ( // Show LoadingState only on initial load
+      {isLoadingInitial ? ( 
         <LoadingState />
-      ) : error && isInitialLoad && documents.length === 0 ? ( // Ensure ErrorState shows only if no data and initial error
+      ) : error && documents.length === 0 ? ( 
         <ErrorState message={error} onRetry={loadDocuments} />
       ) : (
         <>
@@ -499,11 +537,11 @@ useEffect(() => {
             columns={columns}
             data={filteredDocumentsBySearch}
             rowClassName="group" // Added group class for row hover effect
-            isLoading={isLoading}
+            isLoading={isLoadingInitial || isLoadingMore}
             currentPage={currentPage}
             totalPages={totalPages}
             onPageChange={handlePageChange}
-            itemsPerPage={itemsPerPage}
+            itemsPerPage={ITEMS_PER_PAGE}
             totalItems={totalDocuments}
             sortColumn={sortBy}
             sortOrder={sortOrder}

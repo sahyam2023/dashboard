@@ -167,7 +167,7 @@ const RegisterForm: React.FC<RegisterFormProps> = ({ onAuthSuccess, onToggleView
       const regData: RegisterResponse = await registerUser(registrationPayload); 
       // Assuming regData from backend now includes password_reset_required (it should, based on task context)
       // If not, it will be undefined, and auth.login's default (false) will be used.
-      const requiresReset = auth.login(regData.access_token, regData.username, regData.role, false); 
+      const requiresReset = auth.login(regData.access_token, regData.username, regData.role, 900, false); 
       
       showSuccessToast('Registration successful! Logging you in...');
       
@@ -190,29 +190,29 @@ const RegisterForm: React.FC<RegisterFormProps> = ({ onAuthSuccess, onToggleView
     <form onSubmit={handleSubmit} className="space-y-4 md:space-y-6">
       {/* Error and success message divs are removed */}
       <div>
-        <label htmlFor="register-username" className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+        <label htmlFor="register-username" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Username</label>
         <input id="register-username" type="text" required value={username} onChange={(e) => setUsername(e.target.value)}
-          className="appearance-none block w-full px-3 py-2.5 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+          className="appearance-none block w-full px-3 py-2.5 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400"
           disabled={isLoading} />
       </div>
 
       <div>
-        <label htmlFor="register-email" className="block text-sm font-medium text-gray-700 mb-1">Email (Optional)</label>
+        <label htmlFor="register-email" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email (Optional)</label>
         <input id="register-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-          className="appearance-none block w-full px-3 py-2.5 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+          className="appearance-none block w-full px-3 py-2.5 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400"
           disabled={isLoading} />
       </div>
 
       <div>
-        <label htmlFor="register-password" className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+        <label htmlFor="register-password" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Password</label>
         <div className="relative">
           <input id="register-password" type={showPassword ? 'text' : 'password'} required value={password} onChange={handlePasswordChange}
-            className="appearance-none block w-full px-3 py-2.5 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm pr-10"
+            className="appearance-none block w-full px-3 py-2.5 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm pr-10 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400"
             disabled={isLoading} />
           <button
             type="button"
             onClick={() => setShowPassword(!showPassword)}
-            className="absolute inset-y-0 right-0 pr-3 flex items-center text-sm leading-5 text-gray-500 hover:text-gray-700 focus:outline-none"
+            className="absolute inset-y-0 right-0 pr-3 flex items-center text-sm leading-5 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 focus:outline-none"
             disabled={isLoading}
           >
             {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
@@ -222,15 +222,15 @@ const RegisterForm: React.FC<RegisterFormProps> = ({ onAuthSuccess, onToggleView
       </div>
 
        <div>
-        <label htmlFor="register-confirm-password" className="block text-sm font-medium text-gray-700 mb-1">Confirm Password</label>
+        <label htmlFor="register-confirm-password" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Confirm Password</label>
         <div className="relative">
           <input id="register-confirm-password" type={showConfirmPassword ? 'text' : 'password'} required value={confirmPassword} onChange={handleConfirmPasswordChange}
-            className="appearance-none block w-full px-3 py-2.5 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm pr-10"
+            className="appearance-none block w-full px-3 py-2.5 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm pr-10 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400"
             disabled={isLoading} />
           <button
             type="button"
             onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-            className="absolute inset-y-0 right-0 pr-3 flex items-center text-sm leading-5 text-gray-500 hover:text-gray-700 focus:outline-none"
+            className="absolute inset-y-0 right-0 pr-3 flex items-center text-sm leading-5 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 focus:outline-none"
             disabled={isLoading}
           >
             {showConfirmPassword ? <EyeOff size={20} /> : <Eye size={20} />}
@@ -240,20 +240,20 @@ const RegisterForm: React.FC<RegisterFormProps> = ({ onAuthSuccess, onToggleView
 
       {/* Security Questions Section */}
       <div className="space-y-3 pt-2">
-        <h3 className="text-md font-medium text-gray-700">Security Questions</h3>
-        <p className="text-xs text-gray-500">Select three different questions and provide answers. These will be used for account recovery.</p>
-        {isLoadingQuestions && <p className="text-sm text-gray-500">Loading security questions...</p>}
+        <h3 className="text-md font-medium text-gray-700 dark:text-gray-200">Security Questions</h3>
+        <p className="text-xs text-gray-500 dark:text-gray-400">Select three different questions and provide answers. These will be used for account recovery.</p>
+        {isLoadingQuestions && <p className="text-sm text-gray-500 dark:text-gray-400">Loading security questions...</p>}
         {/* securityQuestionsError display div is removed */}
         {!isLoadingQuestions && allSecurityQuestions.length > 0 && selectedSecurityAnswers.map((_, index) => (
-          <div key={index} className="space-y-1.5 border-t border-gray-200 pt-3 first:border-t-0 first:pt-0">
-            <label htmlFor={`question-${index}`} className="block text-xs font-medium text-gray-600">
+          <div key={index} className="space-y-1.5 border-t border-gray-200 dark:border-gray-600 pt-3 first:border-t-0 first:pt-0">
+            <label htmlFor={`question-${index}`} className="block text-xs font-medium text-gray-600 dark:text-gray-400">
               Question {index + 1}
             </label>
             <select
               id={`question-${index}`}
               value={selectedSecurityAnswers[index].question_id}
               onChange={(e) => handleSecurityQuestionChange(index, e.target.value)}
-              className="appearance-none block w-full px-2.5 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+              className="appearance-none block w-full px-2.5 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 dark:border-gray-600"
               disabled={isLoading || isLoadingQuestions}
               required
             >
@@ -264,7 +264,7 @@ const RegisterForm: React.FC<RegisterFormProps> = ({ onAuthSuccess, onToggleView
                 </option>
               ))}
             </select>
-            <label htmlFor={`answer-${index}`} className="block text-xs font-medium text-gray-600 mt-1">
+            <label htmlFor={`answer-${index}`} className="block text-xs font-medium text-gray-600 dark:text-gray-400 mt-1">
               Answer {index + 1}
             </label>
             <input
@@ -272,7 +272,7 @@ const RegisterForm: React.FC<RegisterFormProps> = ({ onAuthSuccess, onToggleView
               type="text"
               value={selectedSecurityAnswers[index].answer}
               onChange={(e) => handleSecurityAnswerChange(index, e.target.value)}
-              className="appearance-none block w-full px-2.5 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+              className="appearance-none block w-full px-2.5 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400"
               disabled={isLoading || isLoadingQuestions}
               required
             />
@@ -287,7 +287,7 @@ const RegisterForm: React.FC<RegisterFormProps> = ({ onAuthSuccess, onToggleView
         </button>
       </div>
       {onToggleView && ( // Removed !successMessage condition as successMessage state is gone
-        <p className="mt-6 text-center text-sm text-gray-600">
+        <p className="mt-6 text-center text-sm text-gray-600 dark:text-gray-400">
           Already have an account?{' '}
           <button type="button" onClick={onToggleView}
             className="text-indigo-600 hover:text-indigo-500 hover:underline font-medium focus:outline-none"

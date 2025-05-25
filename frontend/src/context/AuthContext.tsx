@@ -222,10 +222,10 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
 
   return (
     <AuthContext.Provider value={{ 
-      token, 
+      tokenData, // Changed key 'token' to 'tokenData' and assigned the tokenData state variable
       username, 
       role, 
-      isAuthenticated: !!token, 
+      isAuthenticated: !!tokenData && tokenData.expiresAt > Date.now(), // Corrected isAuthenticated logic
       login, 
       logout, 
       isLoading,
@@ -240,7 +240,12 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
       revokeGlobalAccess,
       // Provide forced password reset state and functions
       isPasswordResetRequired,
-      clearPasswordResetRequiredFlag
+      clearPasswordResetRequiredFlag,
+      // Session Timeout Warning
+      isSessionWarningModalOpen,
+      setSessionWarningModalOpen,
+      sessionWarningCountdown,
+      refreshSession,
     }}>
       {children}
     </AuthContext.Provider>

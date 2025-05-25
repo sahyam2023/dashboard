@@ -255,10 +255,18 @@ export interface AuditLogResponse {
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
 // Helper to construct Authorization header
-const getAuthHeader = (): Record<string, string> => { 
-  const token = localStorage.getItem('authToken');
-  if (token) {
-    return { 'Authorization': `Bearer ${token}` };
+const getAuthHeader = (): Record<string, string> => {
+  const tokenDataString = localStorage.getItem('tokenData');
+  if (tokenDataString) {
+    try {
+      const tokenData = JSON.parse(tokenDataString);
+      if (tokenData && tokenData.token) {
+        return { 'Authorization': `Bearer ${tokenData.token}` };
+      }
+    } catch (error) {
+      console.error("Failed to parse tokenData from localStorage", error);
+      return {}; // Return empty if parsing fails
+    }
   }
   return {}; 
 };
@@ -275,7 +283,7 @@ const handleApiError = async (response: Response, defaultMessage: string, isLogi
     }
 
     // Check for 401 Unauthorized and if a token was likely used (i.e., not a login attempt itself)
-    if (response.status === 401 && !isLoginAttempt && localStorage.getItem('authToken')) {
+    if (response.status === 401 && !isLoginAttempt && localStorage.getItem('tokenData')) {
       // Dispatch a custom event for token expiration
       // This event should be listened to by AuthContext to handle logout and redirect
       document.dispatchEvent(new CustomEvent('tokenExpired'));

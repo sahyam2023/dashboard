@@ -51,10 +51,10 @@ const patchValidationSchema = yup.object().shape({
   typedVersionString: yup.string().when('selectedVersionId', {
     is: CREATE_NEW_VERSION_SENTINEL,
     then: schema => schema.required("New Version String is required when 'Enter New Version' is selected.").min(1),
-    otherwise: schema => schema.optional().nullable(),
+    otherwise: schema => schema.transform(value => value === '' ? undefined : value).optional().nullable(),
   }),
   patchName: yup.string().required("Patch Name is required.").max(255, "Patch Name cannot exceed 255 characters."),
-  releaseDate: yup.string().optional().nullable(),
+  releaseDate: yup.string().transform(value => value === '' ? undefined : value).optional().nullable(),
   inputMode: yup.string().oneOf(['url', 'upload']).required("Input mode must be selected."),
   externalUrl: yup.string().when('inputMode', {
     is: 'url',
@@ -72,8 +72,8 @@ const patchValidationSchema = yup.object().shape({
       then: schema => schema.required("Please select a file to upload.").test('filePresent', "File is required for upload.", value => !!value),
       otherwise: schema => schema.nullable(),
     }),
-  description: yup.string().optional().max(2000, "Description cannot exceed 2000 characters.").nullable(),
-  patch_by_developer: yup.string().optional().max(255, "Patch developer name cannot exceed 255 characters.").nullable(), // Added
+  description: yup.string().transform(value => value === '' ? undefined : value).optional().max(2000, "Description cannot exceed 2000 characters.").nullable(),
+  patch_by_developer: yup.string().transform(value => value === '' ? undefined : value).optional().max(255, "Patch developer name cannot exceed 255 characters.").nullable(), // Added
 });
 
 
@@ -309,17 +309,17 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
     toast.error("Please correct the errors highlighted in the form.");
   };
 
-  if (!isAuthenticated || !['admin', 'super_admin'].includes(role)) return null;
+  if (!isAuthenticated || !role || !['admin', 'super_admin'].includes(role)) return null;
   // console.log("Current softwareList:", softwareList); // Removed console.log
 
   return (
-    <form onSubmit={handleSubmit(onSubmit, onFormError)} className="space-y-6 bg-white p-6 rounded-lg shadow-md border border-gray-200">
+    <form onSubmit={handleSubmit(onSubmit, onFormError)} className="space-y-6 bg-white dark:bg-gray-800 dark:border-gray-700 p-6 rounded-lg shadow-md border border-gray-200">
       <div className="flex justify-between items-center">
-        <h3 className="text-xl font-semibold text-gray-800">
+        <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-100">
           {isEditMode ? 'Edit Patch' : 'Add New Patch'}
         </h3>
         {isEditMode && onCancelEdit && (
-          <button type="button" onClick={onCancelEdit} className="text-sm text-gray-600 hover:text-gray-800">
+          <button type="button" onClick={onCancelEdit} className="text-sm text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200">
             Cancel
           </button>
         )}
@@ -327,13 +327,13 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
       {/* Global error/success messages removed */}
 
       <div>
-        <label htmlFor="selectedSoftwareId" className="block text-sm font-medium text-gray-700">Software Product*</label>
-        {isFetchingSoftwareOrVersions && !softwareList.length ? <p className="text-sm text-gray-500">Loading software...</p> : (
+        <label htmlFor="selectedSoftwareId" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Software Product*</label>
+        {isFetchingSoftwareOrVersions && !softwareList.length ? <p className="text-sm text-gray-500 dark:text-gray-400">Loading software...</p> : (
           <select 
             id="selectedSoftwareId" 
             {...register("selectedSoftwareId")}
             disabled={isLoading || (isFetchingSoftwareOrVersions && !softwareList.length)}
-            className={`mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md ${errors.selectedSoftwareId ? 'border-red-500' : ''}`}
+            className={`mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md ${errors.selectedSoftwareId ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600`}
           >
             <option value="" disabled>Select Software Product</option>
             {softwareList.map(sw => <option key={sw.id} value={sw.id.toString()}>{sw.name}</option>)}
@@ -343,13 +343,13 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
       </div>
 
       <div>
-        <label htmlFor="selectedVersionId" className="block text-sm font-medium text-gray-700">Version*</label>
+        <label htmlFor="selectedVersionId" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Version*</label>
         <div className="mt-1">
           <select
             id="selectedVersionId"
             {...register("selectedVersionId")}
             disabled={isLoading || isFetchingSoftwareOrVersions || !watchedSoftwareId }
-            className={`block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md ${errors.selectedVersionId ? 'border-red-500' : ''}`}
+            className={`block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md ${errors.selectedVersionId ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600`}
           >
             <option value="" disabled={versionsList.length > 0 && !!watchedSoftwareId}>
               {isFetchingSoftwareOrVersions && watchedSoftwareId ? 'Loading versions...' : 'Select Existing Version'}
@@ -362,7 +362,7 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
         </div>
         {showTypeVersionInput && (
           <div className="mt-2">
-            <label htmlFor="typedVersionString" className="block text-xs font-medium text-gray-600">
+            <label htmlFor="typedVersionString" className="block text-xs font-medium text-gray-600 dark:text-gray-400">
               New Version String*:
             </label>
             <input
@@ -370,9 +370,9 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
               id="typedVersionString"
               {...register("typedVersionString")}
               placeholder="e.g., 2.5.1-hotfix"
-              className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.typedVersionString ? 'border-red-500' : ''}`}
+              className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.typedVersionString ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400`}
             />
-             <p className="mt-1 text-xs text-gray-500">This version will be created for the selected software if it doesn't exist.</p>
+             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">This version will be created for the selected software if it doesn't exist.</p>
           </div>
         )}
         {errors.selectedVersionId && !showTypeVersionInput && <p className="mt-1 text-sm text-red-600">{errors.selectedVersionId.message}</p>}
@@ -380,76 +380,76 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
       </div>
 
       <div>
-        <label htmlFor="patchName" className="block text-sm font-medium text-gray-700">Patch Name*</label>
+        <label htmlFor="patchName" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Patch Name*</label>
         <input 
             type="text" 
             id="patchName" 
             {...register("patchName")} 
             disabled={isLoading} 
-            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.patchName ? 'border-red-500' : ''}`}
+            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.patchName ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400`}
         />
         {errors.patchName && <p className="mt-1 text-sm text-red-600">{errors.patchName.message}</p>}
       </div>
       <div>
-        <label htmlFor="releaseDate" className="block text-sm font-medium text-gray-700">Release Date</label>
+        <label htmlFor="releaseDate" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Release Date</label>
         <input 
             type="date" 
             id="releaseDate" 
             {...register("releaseDate")} 
             disabled={isLoading} 
-            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.releaseDate ? 'border-red-500' : ''}`}
+            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.releaseDate ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600`}
         />
         {errors.releaseDate && <p className="mt-1 text-sm text-red-600">{errors.releaseDate.message}</p>}
       </div>
       <div>
-        <label htmlFor="patch_by_developer" className="block text-sm font-medium text-gray-700">Patch By Developer</label>
+        <label htmlFor="patch_by_developer" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Patch By Developer</label>
         <input 
             type="text" 
             id="patch_by_developer" 
             {...register("patch_by_developer")} 
             disabled={isLoading} 
-            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.patch_by_developer ? 'border-red-500' : ''}`}
+            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.patch_by_developer ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400`}
         />
         {errors.patch_by_developer && <p className="mt-1 text-sm text-red-600">{errors.patch_by_developer.message}</p>}
       </div>
       <div className="my-4">
-        <span className="block text-sm font-medium text-gray-700 mb-2">Patch Source:</span>
+        <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Patch Source:</span>
         <div className="flex items-center space-x-4">
             <label className="flex items-center space-x-2 cursor-pointer">
                 <input type="radio" {...register("inputMode")} value="url" className="form-radio h-4 w-4 text-blue-600" disabled={isLoading}/>
-                <span className="flex items-center"><LinkIconLucide size={16} className="mr-1 text-gray-600"/>Provide External Link</span>
+                <span className="flex items-center dark:text-gray-300"><LinkIconLucide size={16} className="mr-1 text-gray-600 dark:text-gray-400"/>Provide External Link</span>
             </label>
             <label className="flex items-center space-x-2 cursor-pointer">
                 <input type="radio" {...register("inputMode")} value="upload" className="form-radio h-4 w-4 text-blue-600" disabled={isLoading}/>
-                <span className="flex items-center"><UploadCloud size={16} className="mr-1 text-gray-600"/>Upload File</span>
+                <span className="flex items-center dark:text-gray-300"><UploadCloud size={16} className="mr-1 text-gray-600 dark:text-gray-400"/>Upload File</span>
             </label>
         </div>
         {errors.inputMode && <p className="mt-1 text-sm text-red-600">{errors.inputMode.message}</p>}
       </div>
       {watchedInputMode === 'url' && (
         <div>
-            <label htmlFor="externalUrl" className="block text-sm font-medium text-gray-700">External Download URL*</label>
+            <label htmlFor="externalUrl" className="block text-sm font-medium text-gray-700 dark:text-gray-300">External Download URL*</label>
             <input 
                 type="url" 
                 id="externalUrl" 
                 {...register("externalUrl")} 
                 placeholder="https://example.com/patch.exe" 
                 disabled={isLoading} 
-                className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.externalUrl ? 'border-red-500' : ''}`}
+                className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.externalUrl ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400`}
             />
             {errors.externalUrl && <p className="mt-1 text-sm text-red-600">{errors.externalUrl.message}</p>}
         </div>
       )}
       {watchedInputMode === 'upload' && (
         <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 {isEditMode && existingFileName && !watchedSelectedFile ? 'Replace File (Optional)' : 'Select File to Upload*'}
             </label>
-            <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md hover:border-blue-500 transition-colors">
+            <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md hover:border-blue-500 dark:border-gray-600 dark:hover:border-blue-400 transition-colors">
                 <div className="space-y-1 text-center">
-                    <FileIconLucide className="mx-auto h-12 w-12 text-gray-400" />
-                    <div className="flex text-sm text-gray-600">
-                        <label htmlFor="patch-file-upload-input" className="relative cursor-pointer bg-white rounded-md font-medium text-blue-600 hover:text-blue-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-blue-500">
+                    <FileIconLucide className="mx-auto h-12 w-12 text-gray-400 dark:text-gray-500" />
+                    <div className="flex text-sm text-gray-600 dark:text-gray-400">
+                        <label htmlFor="patch-file-upload-input" className="relative cursor-pointer bg-white dark:bg-gray-800 rounded-md font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-blue-500">
                             <span>{watchedSelectedFile ? 'Change file' : 'Upload a file'}</span>
                             <input 
                                 id="patch-file-upload-input" 
@@ -463,20 +463,20 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
                         </label>
                         <p className="pl-1">or drag and drop</p>
                     </div>
-                    <p className="text-xs text-gray-500">EXE, MSI, ZIP, etc.</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">EXE, MSI, ZIP, etc.</p>
                 </div>
             </div>
             {(watchedSelectedFile || (isEditMode && existingFileName)) && (
-            <div className="mt-3 flex items-center justify-between p-2 bg-gray-50 border border-gray-200 rounded-md">
+            <div className="mt-3 flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md">
                 <div className='flex items-center space-x-2 overflow-hidden'>
-                    <FileIconLucide size={18} className="text-gray-500 flex-shrink-0" />
-                    <span className="text-sm text-gray-700 truncate">
+                    <FileIconLucide size={18} className="text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                    <span className="text-sm text-gray-700 dark:text-gray-300 truncate">
                         {watchedSelectedFile ? (watchedSelectedFile as File).name : existingFileName}
                     </span>
-                    {isEditMode && existingFileName && !watchedSelectedFile && <span className="text-xs text-gray-500 ml-2">(current)</span>}
+                    {isEditMode && existingFileName && !watchedSelectedFile && <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">(current)</span>}
                 </div>
                 {watchedSelectedFile && (
-                    <button type="button" onClick={clearFileSelection} disabled={isLoading} className="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-200">
+                    <button type="button" onClick={clearFileSelection} disabled={isLoading} className="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-200 dark:text-gray-500 dark:hover:text-gray-300 dark:hover:bg-gray-600">
                         <X size={16} />
                     </button>
                 )}
@@ -486,13 +486,13 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
         </div>
       )}
       <div>
-        <label htmlFor="description" className="block text-sm font-medium text-gray-700">Description</label>
+        <label htmlFor="description" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Description</label>
         <textarea 
             id="description" 
             rows={3} 
             {...register("description")} 
             disabled={isLoading} 
-            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.description ? 'border-red-500' : ''}`}
+            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.description ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400`}
         />
         {errors.description && <p className="mt-1 text-sm text-red-600">{errors.description.message}</p>}
       </div>
@@ -509,7 +509,7 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
                 type="button" 
                 onClick={onCancelEdit} 
                 disabled={isLoading} 
-                className="flex-1 inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                className="flex-1 inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 dark:border-gray-500 dark:text-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600"
             >
             Cancel
             </button>

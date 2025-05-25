@@ -38,7 +38,7 @@ interface DocumentFormData {
 const documentValidationSchema = yup.object().shape({
   selectedSoftwareId: yup.string().required("Software selection is required."),
   docName: yup.string().required("Document Name is required.").max(255, "Document Name cannot exceed 255 characters."),
-  docType: yup.string().optional(),
+  docType: yup.string().transform(value => value === '' ? undefined : value).nullable().optional(),
   inputMode: yup.string().oneOf(['url', 'upload']).required("Input mode must be selected."),
   externalUrl: yup.string().when('inputMode', {
     is: 'url',
@@ -229,16 +229,16 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
 
   const documentTypes = ["Guide", "Manual", "API Reference", "Datasheet", "Whitepaper", "Specification", "Other"];
 
-  if (!isAuthenticated || !['admin', 'super_admin'].includes(role)) return null;
+  if (!isAuthenticated || !role || !['admin', 'super_admin'].includes(role)) return null;
 
   return (
-    <form onSubmit={handleSubmit(onSubmit, onFormError)} className="space-y-6 bg-white p-6 rounded-lg shadow-md border border-gray-200">
+    <form onSubmit={handleSubmit(onSubmit, onFormError)} className="space-y-6 bg-white dark:bg-gray-800 dark:border-gray-700 p-6 rounded-lg shadow-md border border-gray-200">
       <div className="flex justify-between items-center">
-        <h3 className="text-xl font-semibold text-gray-800">
+        <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-100">
           {isEditMode ? 'Edit Document' : 'Add New Document'}
         </h3>
         {isEditMode && onCancelEdit && (
-          <button type="button" onClick={onCancelEdit} className="text-sm text-gray-600 hover:text-gray-800">
+          <button type="button" onClick={onCancelEdit} className="text-sm text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200">
             Cancel Edit
           </button>
         )}
@@ -246,13 +246,13 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
       {/* Global error/success messages removed, using toast now */}
 
       <div>
-        <label htmlFor="selectedSoftwareId" className="block text-sm font-medium text-gray-700">Software*</label>
-        {isFetchingSoftware ? <p className="text-sm text-gray-500">Loading software...</p> : (
+        <label htmlFor="selectedSoftwareId" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Software*</label>
+        {isFetchingSoftware ? <p className="text-sm text-gray-500 dark:text-gray-400">Loading software...</p> : (
           <select 
             id="selectedSoftwareId" 
             {...register("selectedSoftwareId")} 
             disabled={isLoading || isFetchingSoftware}
-            className={`mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md ${errors.selectedSoftwareId ? 'border-red-500' : ''}`}
+            className={`mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md ${errors.selectedSoftwareId ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600`}
           >
             <option value="" disabled>Select Software</option>
             {softwareList.map(sw => <option key={sw.id} value={sw.id.toString()}>{sw.name}</option>)}
@@ -262,27 +262,27 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
       </div>
 
       <div>
-        <label htmlFor="docName" className="block text-sm font-medium text-gray-700">Document Name*</label>
+        <label htmlFor="docName" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Document Name*</label>
         <input 
             type="text" 
             id="docName" 
             {...register("docName")} 
             disabled={isLoading}
-            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.docName ? 'border-red-500' : ''}`}
+            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.docName ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400`}
         />
         {errors.docName && <p className="mt-1 text-sm text-red-600">{errors.docName.message}</p>}
       </div>
 
       <div className="my-4">
-        <span className="block text-sm font-medium text-gray-700 mb-2">Document Source:</span>
+        <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Document Source:</span>
         <div className="flex items-center space-x-4">
           <label className="flex items-center space-x-2 cursor-pointer">
             <input type="radio" {...register("inputMode")} value="url" className="form-radio h-4 w-4 text-blue-600" disabled={isLoading}/>
-            <span className="flex items-center"><LinkIconLucide size={16} className="mr-1 text-gray-600"/>Provide External Link</span>
+            <span className="flex items-center dark:text-gray-300"><LinkIconLucide size={16} className="mr-1 text-gray-600 dark:text-gray-400"/>Provide External Link</span>
           </label>
           <label className="flex items-center space-x-2 cursor-pointer">
             <input type="radio" {...register("inputMode")} value="upload" className="form-radio h-4 w-4 text-blue-600" disabled={isLoading}/>
-            <span className="flex items-center"><UploadCloud size={16} className="mr-1 text-gray-600"/>Upload File</span>
+            <span className="flex items-center dark:text-gray-300"><UploadCloud size={16} className="mr-1 text-gray-600 dark:text-gray-400"/>Upload File</span>
           </label>
         </div>
         {errors.inputMode && <p className="mt-1 text-sm text-red-600">{errors.inputMode.message}</p>}
@@ -290,14 +290,14 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
 
       {watchedInputMode === 'url' && (
         <div>
-          <label htmlFor="externalUrl" className="block text-sm font-medium text-gray-700">External Download URL*</label>
+          <label htmlFor="externalUrl" className="block text-sm font-medium text-gray-700 dark:text-gray-300">External Download URL*</label>
           <input 
             type="url" 
             id="externalUrl" 
             {...register("externalUrl")}
             placeholder="https://example.com/document.pdf" 
             disabled={isLoading}
-            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.externalUrl ? 'border-red-500' : ''}`}
+            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.externalUrl ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400`}
           />
           {errors.externalUrl && <p className="mt-1 text-sm text-red-600">{errors.externalUrl.message}</p>}
         </div>
@@ -305,14 +305,14 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
 
       {watchedInputMode === 'upload' && (
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
             {isEditMode && existingFileName && !watchedSelectedFile ? 'Replace File (Optional)' : 'Select File to Upload*'}
           </label>
-          <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md hover:border-blue-500 transition-colors">
+          <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md hover:border-blue-500 dark:border-gray-600 dark:hover:border-blue-400 transition-colors">
             <div className="space-y-1 text-center">
-                <FileIconLucide className="mx-auto h-12 w-12 text-gray-400" />
-                <div className="flex text-sm text-gray-600">
-                <label htmlFor="doc-file-upload-input" className="relative cursor-pointer bg-white rounded-md font-medium text-blue-600 hover:text-blue-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-blue-500">
+                <FileIconLucide className="mx-auto h-12 w-12 text-gray-400 dark:text-gray-500" />
+                <div className="flex text-sm text-gray-600 dark:text-gray-400">
+                <label htmlFor="doc-file-upload-input" className="relative cursor-pointer bg-white dark:bg-gray-800 rounded-md font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-blue-500">
                     <span>{watchedSelectedFile ? 'Change file' : 'Upload a file'}</span>
                     <input 
                         id="doc-file-upload-input" 
@@ -326,21 +326,21 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
                 </label>
                 <p className="pl-1">or drag and drop</p>
                 </div>
-                <p className="text-xs text-gray-500">PDF, DOCX, PNG, JPG, ZIP etc.</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">PDF, DOCX, PNG, JPG, ZIP etc.</p>
             </div>
           </div>
           {(watchedSelectedFile || existingFileName) && (
-            <div className="mt-3 flex items-center justify-between p-2 bg-gray-50 border border-gray-200 rounded-md">
+            <div className="mt-3 flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md">
                 <div className='flex items-center space-x-2 overflow-hidden'>
-                    <FileIconLucide size={18} className="text-gray-500 flex-shrink-0" />
-                    <span className="text-sm text-gray-700 truncate">
+                    <FileIconLucide size={18} className="text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                    <span className="text-sm text-gray-700 dark:text-gray-300 truncate">
                       {watchedSelectedFile ? (watchedSelectedFile as File).name : existingFileName}
                     </span>
-                    {isEditMode && existingFileName && !watchedSelectedFile && <span className="text-xs text-gray-500 ml-2">(current)</span>}
+                    {isEditMode && existingFileName && !watchedSelectedFile && <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">(current)</span>}
                 </div>
                 {watchedSelectedFile && (
                   <button type="button" onClick={clearFileSelection} disabled={isLoading}
-                          className="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-200">
+                          className="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-200 dark:text-gray-500 dark:hover:text-gray-300 dark:hover:bg-gray-600">
                       <X size={16} />
                   </button>
                 )}
@@ -351,12 +351,12 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
       )}
 
       <div>
-        <label htmlFor="docType" className="block text-sm font-medium text-gray-700">Document Type</label>
+        <label htmlFor="docType" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Document Type</label>
         <select 
             id="docType" 
             {...register("docType")} 
             disabled={isLoading}
-            className={`mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md ${errors.docType ? 'border-red-500' : ''}`}
+            className={`mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md ${errors.docType ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600`}
         >
           <option value="">Select Type (Optional)</option>
           {documentTypes.map(type => <option key={type} value={type}>{type}</option>)}
@@ -365,13 +365,13 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
       </div>
 
       <div>
-        <label htmlFor="description" className="block text-sm font-medium text-gray-700">Description</label>
+        <label htmlFor="description" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Description</label>
         <textarea 
             id="description" 
             rows={3} 
             {...register("description")}
             disabled={isLoading} 
-            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.description ? 'border-red-500' : ''}`}
+            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.description ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400`}
         />
         {errors.description && <p className="mt-1 text-sm text-red-600">{errors.description.message}</p>}
       </div>
@@ -389,7 +389,7 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
                 type="button" 
                 onClick={onCancelEdit} 
                 disabled={isLoading}
-                className="flex-1 inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                className="flex-1 inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 dark:border-gray-500 dark:text-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600"
             >
                 Cancel
             </button>

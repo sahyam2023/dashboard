@@ -345,7 +345,7 @@ const AdminDashboardPage: React.FC = () => {
   }
   
   return (
-    <Box sx={{ flexGrow: 1, p: 3, backgroundColor: 'grey.100' }}>
+    <Box sx={{ flexGrow: 1, p: 3, backgroundColor: 'background.default' }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
         <Typography variant="h4" gutterBottom component="div" sx={{ color: 'primary.main', mb: 0 }}>Admin Dashboard</Typography>
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -355,7 +355,7 @@ const AdminDashboardPage: React.FC = () => {
       </Box>
 
       <Modal open={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} aria-labelledby="widget-visibility-settings-title">
-        <Box sx={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 400, bgcolor: 'background.paper', border: '2px solid #000', boxShadow: 24, p: 4 }}>
+        <Box sx={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 400, bgcolor: 'background.paper', border: 2, borderColor: 'divider', boxShadow: 24, p: 4 }}>
           <Typography id="widget-visibility-settings-title" variant="h6" component="h2">Widget Visibility</Typography>
           <List sx={{ maxHeight: 300, overflow: 'auto' }}>
             {widgetConfigs.map((widget) => ( <ListItem key={widget.id} dense><FormControlLabel control={ <Checkbox checked={widget.visible} onChange={(e) => handleWidgetVisibilityChange(widget.id, e.target.checked)} />} label={widget.name} /></ListItem> ))}

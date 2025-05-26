@@ -91,7 +91,6 @@ const SuperAdminDashboard: React.FC = () => {
   // --- End State for File Permissions Management ---
 
   const handlePermissionChange = (fileId: number, fileType: 'document', permissionType: 'can_view' | 'can_download', value: boolean) => {
-    console.log("handlePermissionChange: fileId", fileId, "permissionType", permissionType, "value", value, "typeof value", typeof value);
     setPermissionsToUpdate(prev => {
       let updatedItem;
       const existingIndex = prev.findIndex(p => p.file_id === fileId && p.file_type === fileType);
@@ -104,7 +103,6 @@ const SuperAdminDashboard: React.FC = () => {
           }
           return p;
         });
-        console.log("Updated item in permissionsToUpdate:", updatedItem);
         return newState;
       } else {
         const fileInfo = allFilesForPermissions.find(f => f.id === fileId && f.type === fileType);
@@ -116,7 +114,6 @@ const SuperAdminDashboard: React.FC = () => {
                 can_download: true,
             };
             updatedItem[permissionType] = value;
-            console.log("Added new item to permissionsToUpdate:", updatedItem);
             return [...prev, updatedItem];
         }
       }
@@ -136,24 +133,20 @@ const SuperAdminDashboard: React.FC = () => {
     setPermissionsError(null);
     setPermissionsFeedback(null);
 
-    console.log("handleSavePermissions: Payload to be sent (permissionsToUpdate):", JSON.stringify(permissionsToUpdate, null, 2));
     // Ensure all items have boolean values for can_view and can_download
     const validatedPayload = permissionsToUpdate.map(p => ({
       ...p,
       can_view: typeof p.can_view === 'boolean' ? p.can_view : false, // Default to false if not boolean
       can_download: typeof p.can_download === 'boolean' ? p.can_download : false, // Default to false if not boolean
     }));
-    console.log("handleSavePermissions: Validated payload being sent:", JSON.stringify(validatedPayload, null, 2));
 
 
     try {
       const response = await updateUserFilePermissions(selectedUserForPermissions.id, validatedPayload);
-      console.log("handleSavePermissions: Raw response from backend:", response);
       setPermissionsFeedback({ type: 'success', message: response.msg || "Permissions updated successfully!" });
       
       // Refresh userFilePermissions with the newly saved data from the response
       const backendPermissions = response.permissions || [];
-      console.log("handleSavePermissions: Permissions received from backend (response.permissions):", JSON.stringify(backendPermissions, null, 2));
       setUserFilePermissions(backendPermissions);
       
       // Re-initialize permissionsToUpdate based on the *newly saved* permissions and allFilesForPermissions
@@ -168,7 +161,6 @@ const SuperAdminDashboard: React.FC = () => {
         };
         return newPermEntry;
       });
-      console.log("handleSavePermissions: State permissionsToUpdate will be set to (after save):", JSON.stringify(updatedPermissionsToDisplay, null, 2));
       setPermissionsToUpdate(updatedPermissionsToDisplay);
 
     } catch (err: any) {
@@ -277,7 +269,6 @@ const SuperAdminDashboard: React.FC = () => {
               can_download: canDownload,
             };
           });
-          console.log("useEffect (selectedUserForPermissions): Initializing permissionsToUpdate with:", JSON.stringify(initialUpdates, null, 2));
           setPermissionsToUpdate(initialUpdates);
 
         } catch (err: any) {

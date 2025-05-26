@@ -3,7 +3,7 @@ import os
 import uuid
 import sqlite3
 import json # Added for audit logging
-from flask import send_file
+from flask import send_file, after_this_request
 import re
 from database import init_db
 from datetime import datetime, timedelta, timezone # Added timedelta and timezone
@@ -22,6 +22,7 @@ from flask_jwt_extended import (
     get_jwt_identity, verify_jwt_in_request
 )
 from werkzeug.utils import secure_filename
+from tempfile import NamedTemporaryFile
 import database # Your database.py helper
 
 # --- Configuration ---
@@ -57,12 +58,21 @@ ALLOWED_EXTENSIONS = {
     'py', 'js', 'java', 'c', 'cpp', 'h', 'cs', 'html', 'css', 'ps1' # Code files
     # Add any other specific extensions you anticipate
 }
+
+# Define extensions that are prone to be opened inline by browsers
+INLINE_PRONE_EXTENSIONS = {
+    'pdf', 'txt', 'png', 'jpg', 'jpeg', 'gif', 'html', 'css', 'xml', 'json',
+    'svg', 'webp', 'bmp', 'ico', 'tif', 'tiff', # More image types
+    'js', # JavaScript files can sometimes be displayed
+    'md' # Markdown files
+}
+
 app = Flask(__name__, instance_relative_config=True) # instance_relative_config=True is good practice
 
 # CORS Configuration (Restrict origins in production)
 CORS(app, resources={r"/api/*": {"origins": "http://localhost:5173"}}, # Adjust frontend origin
      supports_credentials=True,
-     allow_headers=["Content-Type", "Authorization"],
+     allow_headers=["Content-Type", "Authorization", "Cache-Control", "Pragma"],
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
 # App Configuration
@@ -1520,8 +1530,8 @@ def get_all_documents_api():
     count_params = permission_join_params + params # Combine params for join and filters
     count_query = f"SELECT COUNT(d.id) as count {from_clause}{where_clause}"
     try:
-        app.logger.info(f"Documents Count Query for user {logged_in_user_id}: {count_query}")
-        app.logger.info(f"Documents Count Params: {tuple(count_params)}")
+        # app.logger.info(f"Documents Count Query for user {logged_in_user_id}: {count_query}") # Removed
+        # app.logger.info(f"Documents Count Params: {tuple(count_params)}") # Removed
         total_documents_cursor = db.execute(count_query, tuple(count_params))
         total_documents = total_documents_cursor.fetchone()['count']
     except Exception as e:
@@ -1558,8 +1568,8 @@ def get_all_documents_api():
     final_query = f"{select_clause} {final_from_clause_for_data}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
     
     try:
-        app.logger.info(f"Documents Data Query for user {logged_in_user_id}: {final_query}")
-        app.logger.info(f"Documents Data Params: {tuple(final_params_for_data)}")
+        # app.logger.info(f"Documents Data Query for user {logged_in_user_id}: {final_query}") # Removed
+        # app.logger.info(f"Documents Data Params: {tuple(final_params_for_data)}") # Removed
         documents_cursor = db.execute(final_query, tuple(final_params_for_data))
         documents_list = [dict(row) for row in documents_cursor.fetchall()]
     except Exception as e:
@@ -1677,8 +1687,8 @@ def get_all_patches_api():
     count_params = permission_join_params + params
     count_query = f"SELECT COUNT(p.id) as count {from_clause}{where_clause}"
     try:
-        app.logger.info(f"Patches Count Query for user {logged_in_user_id}: {count_query}")
-        app.logger.info(f"Patches Count Params: {tuple(count_params)}")
+        # app.logger.info(f"Patches Count Query for user {logged_in_user_id}: {count_query}") # Removed
+        # app.logger.info(f"Patches Count Params: {tuple(count_params)}") # Removed
         total_patches_cursor = db.execute(count_query, tuple(count_params))
         total_patches = total_patches_cursor.fetchone()['count']
     except Exception as e:
@@ -1716,8 +1726,8 @@ def get_all_patches_api():
     final_query = f"{select_clause} {final_from_clause_for_data}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
     
     try:
-        app.logger.info(f"Patches Data Query for user {logged_in_user_id}: {final_query}")
-        app.logger.info(f"Patches Data Params: {tuple(final_params_for_data)}")
+        # app.logger.info(f"Patches Data Query for user {logged_in_user_id}: {final_query}") # Removed
+        # app.logger.info(f"Patches Data Params: {tuple(final_params_for_data)}") # Removed
         patches_cursor = db.execute(final_query, tuple(final_params_for_data))
         patches_list = [dict(row) for row in patches_cursor.fetchall()]
     except Exception as e:
@@ -1838,8 +1848,8 @@ def get_all_links_api():
     count_params = permission_join_params + params
     count_query = f"SELECT COUNT(l.id) as count {from_clause}{where_clause}"
     try:
-        app.logger.info(f"Links Count Query for user {logged_in_user_id}: {count_query}")
-        app.logger.info(f"Links Count Params: {tuple(count_params)}")
+        # app.logger.info(f"Links Count Query for user {logged_in_user_id}: {count_query}") # Removed
+        # app.logger.info(f"Links Count Params: {tuple(count_params)}") # Removed
         total_links_cursor = db.execute(count_query, tuple(count_params))
         total_links = total_links_cursor.fetchone()['count']
     except Exception as e:
@@ -1875,8 +1885,8 @@ def get_all_links_api():
     final_query = f"{select_clause} {final_from_clause_for_data}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
     
     try:
-        app.logger.info(f"Links Data Query for user {logged_in_user_id}: {final_query}")
-        app.logger.info(f"Links Data Params: {tuple(final_params_for_data)}")
+        # app.logger.info(f"Links Data Query for user {logged_in_user_id}: {final_query}") # Removed
+        # app.logger.info(f"Links Data Params: {tuple(final_params_for_data)}") # Removed
         links_cursor = db.execute(final_query, tuple(final_params_for_data))
         links_list = [dict(row) for row in links_cursor.fetchall()]
     except Exception as e:
@@ -1983,8 +1993,8 @@ def get_all_misc_files_api():
     count_params = permission_join_params + params
     count_query = f"SELECT COUNT(mf.id) as count {from_clause}{where_clause}"
     try:
-        app.logger.info(f"Misc Files Count Query for user {logged_in_user_id}: {count_query}")
-        app.logger.info(f"Misc Files Count Params: {tuple(count_params)}")
+        # app.logger.info(f"Misc Files Count Query for user {logged_in_user_id}: {count_query}") # Removed
+        # app.logger.info(f"Misc Files Count Params: {tuple(count_params)}") # Removed
         total_misc_files_cursor = db.execute(count_query, tuple(count_params))
         total_misc_files = total_misc_files_cursor.fetchone()['count']
     except Exception as e:
@@ -2020,8 +2030,8 @@ def get_all_misc_files_api():
     final_query = f"{select_clause} {final_from_clause_for_data}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
     
     try:
-        app.logger.info(f"Misc Files Data Query for user {logged_in_user_id}: {final_query}")
-        app.logger.info(f"Misc Files Data Params: {tuple(final_params_for_data)}")
+        # app.logger.info(f"Misc Files Data Query for user {logged_in_user_id}: {final_query}") # Removed
+        # app.logger.info(f"Misc Files Data Params: {tuple(final_params_for_data)}") # Removed
         misc_files_cursor = db.execute(final_query, tuple(final_params_for_data))
         misc_files_list = [dict(row) for row in misc_files_cursor.fetchall()]
     except Exception as e:
@@ -4367,12 +4377,18 @@ def serve_official_doc_file(filename):
     download_as_name = filename # Fallback to stored name
     if doc_details and doc_details['original_filename_ref']:
         download_as_name = doc_details['original_filename_ref']
+
+    file_ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+    mimetype_to_use = None
+    if file_ext in INLINE_PRONE_EXTENSIONS:
+        mimetype_to_use = 'application/octet-stream'
     
     return send_from_directory(
         app.config['DOC_UPLOAD_FOLDER'], 
         filename, # This is the stored_filename on disk
         as_attachment=True,
-        download_name=download_as_name
+        download_name=download_as_name,
+        mimetype=mimetype_to_use
     )
 
 @app.route('/official_uploads/patches/<path:filename>')
@@ -4418,11 +4434,17 @@ def serve_official_patch_file(filename):
     if patch_details and patch_details['original_filename_ref']:
         download_as_name = patch_details['original_filename_ref']
 
+    file_ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+    mimetype_to_use = None
+    if file_ext in INLINE_PRONE_EXTENSIONS:
+        mimetype_to_use = 'application/octet-stream'
+
     return send_from_directory(
         app.config['PATCH_UPLOAD_FOLDER'], 
         filename, 
         as_attachment=True,
-        download_name=download_as_name
+        download_name=download_as_name,
+        mimetype=mimetype_to_use
     )
 
 @app.route('/official_uploads/links/<path:filename>') 
@@ -4469,12 +4491,18 @@ def serve_official_link_file(filename): # Only for uploaded files via "Links"
     download_as_name = filename
     if link_details and link_details['original_filename_ref']:
         download_as_name = link_details['original_filename_ref']
+
+    file_ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+    mimetype_to_use = None
+    if file_ext in INLINE_PRONE_EXTENSIONS:
+        mimetype_to_use = 'application/octet-stream'
         
     return send_from_directory(
         app.config['LINK_UPLOAD_FOLDER'], 
         filename, 
         as_attachment=True,
-        download_name=download_as_name
+        download_name=download_as_name,
+        mimetype=mimetype_to_use
     )
 
 @app.route('/misc_uploads/<path:filename>')
@@ -4520,11 +4548,17 @@ def serve_misc_file(filename):
     if misc_details and misc_details['original_filename']:
         download_as_name = misc_details['original_filename']
 
+    file_ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+    mimetype_to_use = None
+    if file_ext in INLINE_PRONE_EXTENSIONS:
+        mimetype_to_use = 'application/octet-stream'
+
     return send_from_directory(
         app.config['MISC_UPLOAD_FOLDER'], 
         filename, 
         as_attachment=True,
-        download_name=download_as_name
+        download_name=download_as_name,
+        mimetype=mimetype_to_use
     )
 
 # --- Search API (Keep as is, or enhance later) ---
@@ -4574,8 +4608,8 @@ def search_api():
         doc_params.append(None) # Param for fp_dl.user_id = NULL
     
     sql_documents = f"{doc_select_final} {doc_from_final} WHERE {doc_where_base}"
-    app.logger.info(f"Search API - Documents Query for user {logged_in_user_id}: {sql_documents}")
-    app.logger.info(f"Search API - Documents Params: {tuple(doc_params)}")
+    # app.logger.info(f"Search API - Documents Query for user {logged_in_user_id}: {sql_documents}") # Removed
+    # app.logger.info(f"Search API - Documents Params: {tuple(doc_params)}") # Removed
     results.extend([dict(row) for row in db.execute(sql_documents, tuple(doc_params)).fetchall()])
 
     # Patches
@@ -4594,8 +4628,8 @@ def search_api():
         patch_params.append(None)
 
     sql_patches = f"{patch_select_final} {patch_from_final} WHERE {patch_where_base}"
-    app.logger.info(f"Search API - Patches Query for user {logged_in_user_id}: {sql_patches}")
-    app.logger.info(f"Search API - Patches Params: {tuple(patch_params)}")
+    # app.logger.info(f"Search API - Patches Query for user {logged_in_user_id}: {sql_patches}") # Removed
+    # app.logger.info(f"Search API - Patches Params: {tuple(patch_params)}") # Removed
     results.extend([dict(row) for row in db.execute(sql_patches, tuple(patch_params)).fetchall()])
 
     # Links
@@ -4614,8 +4648,8 @@ def search_api():
         link_params.append(None)
         
     sql_links = f"{link_select_final} {link_from_final} WHERE {link_where_base}"
-    app.logger.info(f"Search API - Links Query for user {logged_in_user_id}: {sql_links}")
-    app.logger.info(f"Search API - Links Params: {tuple(link_params)}")
+    # app.logger.info(f"Search API - Links Query for user {logged_in_user_id}: {sql_links}") # Removed
+    # app.logger.info(f"Search API - Links Params: {tuple(link_params)}") # Removed
     results.extend([dict(row) for row in db.execute(sql_links, tuple(link_params)).fetchall()])
 
     # Misc Files
@@ -4634,8 +4668,8 @@ def search_api():
         misc_params.append(None)
 
     sql_misc_files = f"{misc_select_final} {misc_from_final} WHERE {misc_where_base}"
-    app.logger.info(f"Search API - Misc Files Query for user {logged_in_user_id}: {sql_misc_files}")
-    app.logger.info(f"Search API - Misc Files Params: {tuple(misc_params)}")
+    # app.logger.info(f"Search API - Misc Files Query for user {logged_in_user_id}: {sql_misc_files}") # Removed
+    # app.logger.info(f"Search API - Misc Files Params: {tuple(misc_params)}") # Removed
     results.extend([dict(row) for row in db.execute(sql_misc_files, tuple(misc_params)).fetchall()])
 
     # Software (No direct file_permissions, viewability depends on other factors or is public)
@@ -5736,7 +5770,6 @@ def bulk_delete_items():
         )
         return jsonify(msg=f"An error occurred during bulk delete: {str(e)}"), 500
 
-
 @app.route('/api/bulk/download', methods=['POST'])
 @jwt_required()
 def bulk_download_items():
@@ -5831,65 +5864,60 @@ def bulk_download_items():
         log_audit_action(action_type='BULK_DOWNLOAD_NO_FILES', details={'item_type': item_type, 'requested_ids': item_ids, 'errors': errors_details})
         return jsonify(msg="No files found or eligible for download based on selection.", errors=errors_details), 404
 
+    zip_filepath = None # Initialize to ensure it's defined in the finally/except block
     try:
-        # Create a temporary directory to store the zip file
-        with tempfile.TemporaryDirectory() as tmpdir:
-            zip_filename_base = f"bulk_download_{item_type}_{datetime.now().strftime('%Y%m%d%H%M%S')}.zip"
-            zip_filepath = os.path.join(tmpdir, zip_filename_base)
+        # Create a temporary file for the zip archive
+        with NamedTemporaryFile(suffix=".zip", delete=False) as tmp_zip_file:
+            zip_filepath = tmp_zip_file.name
+        # tmp_zip_file is now closed, but the file still exists at zip_filepath
+        # We will open it again using zipfile.ZipFile
 
-            with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zf:
-                for file_detail in files_to_zip_details:
-                    # Ensure unique names within zip if original names might clash
-                    # A simple way: prefix with item_id or use a counter for duplicate names
-                    # For now, using original/stored name as is.
-                    # Consider a check for duplicate 'name_in_zip' here if strict uniqueness is needed.
-                    zf.write(file_detail['path'], arcname=file_detail['name_in_zip'])
-                    # Log individual file download as part of bulk operation.
-                    # Note: _log_download_activity requires the stored_filename, not the path or name_in_zip.
-                    # We need to find the stored_filename for the item_id again if not easily available here.
-                    # Let's re-fetch stored_filename based on item_id for logging.
-                    # This is slightly inefficient but ensures correct logging.
-                    # A better way would be to pass stored_filename through files_to_zip_details.
-                    
-                    # Find the stored_filename for logging
-                    # This is already available in `file_detail['path'].split(os.sep)[-1]` if path is direct
-                    # Or more robustly, ensure 'stored_filename' is part of 'file_detail'
-                    # Let's assume file_detail['path'] ends with the stored_filename.
-                    # We added 'stored_filename' to item fetch, so it should be in item['stored_filename']
-                    # The `file_detail` dictionary needs `stored_filename` for `_log_download_activity`.
-                    # Let's refine `files_to_zip_details` to include `stored_filename`.
+        zip_filename_base = f"bulk_download_{item_type}_{datetime.now().strftime('%Y%m%d%H%M%S')}.zip"
 
-            # At this point, zip is created. Log the successful creation and content list.
-            log_audit_action(
-                action_type='BULK_DOWNLOAD_CREATED',
-                details={
-                    'item_type': item_type,
-                    'zip_filename': zip_filename_base,
-                    'file_count': len(files_to_zip_details),
-                    'requested_ids_count': len(item_ids),
-                    'files_included': [{'id': fd['item_id'], 'name': fd['item_name'], 'zipped_as': fd['name_in_zip']} for fd in files_to_zip_details],
-                    'errors_encountered': errors_details if errors_details else None
-                }
-            )
-            
-            # Log individual downloads using _log_download_activity
-            # This part is tricky because _log_download_activity assumes a single file context.
-            # We need to call it for each file *before* sending the zip.
-            # The current _log_download_activity also tries to get user from JWT.
-            # It's better to have a specific bulk download audit log as done above.
-            # Individual file download logging via _log_download_activity might be redundant or misleading here.
-            # Let's rely on the BULK_DOWNLOAD_CREATED log for now.
+        with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for file_detail in files_to_zip_details:
+                zf.write(file_detail['path'], arcname=file_detail['name_in_zip'])
 
-            return send_file(zip_filepath, as_attachment=True, download_name=zip_filename_base)
-            # tempfile.TemporaryDirectory() handles cleanup of tmpdir and its contents (zip_filepath)
+        # Log successful creation
+        log_audit_action(
+            action_type='BULK_DOWNLOAD_CREATED',
+            details={
+                'item_type': item_type,
+                'zip_filename': zip_filename_base,
+                'file_count': len(files_to_zip_details),
+                'requested_ids_count': len(item_ids),
+                'files_included': [{'id': fd['item_id'], 'name': fd['item_name'], 'zipped_as': fd['name_in_zip']} for fd in files_to_zip_details],
+                'errors_encountered': errors_details if errors_details else None
+            }
+        )
+
+        @after_this_request
+        def cleanup_zip(response):
+            try:
+                if zip_filepath and os.path.exists(zip_filepath):
+                    os.remove(zip_filepath)
+                    app.logger.info(f"Successfully cleaned up temporary zip file: {zip_filepath}")
+            except Exception as e_cleanup:
+                app.logger.error(f"Error cleaning up temporary zip file {zip_filepath}: {e_cleanup}", exc_info=True)
+            return response
+
+        return send_file(zip_filepath, as_attachment=True, download_name=zip_filename_base)
 
     except Exception as e:
         app.logger.error(f"Error during bulk download zip creation or sending for {item_type}: {e}", exc_info=True)
+        if zip_filepath and os.path.exists(zip_filepath): # Attempt to cleanup partially created file on error
+            try:
+                os.remove(zip_filepath)
+                app.logger.info(f"Cleaned up temporary zip file on error: {zip_filepath}")
+            except Exception as e_cleanup_error:
+                app.logger.error(f"Error cleaning up temporary zip file {zip_filepath} on error: {e_cleanup_error}", exc_info=True)
+        
         log_audit_action(
             action_type='BULK_DOWNLOAD_FAILED',
             details={'item_type': item_type, 'error': str(e), 'item_ids_requested': item_ids, 'files_prepared_count': len(files_to_zip_details)}
         )
         return jsonify(msg=f"Failed to create or send bulk download archive: {str(e)}"), 500
+
 
 
 @app.route('/api/bulk/move', methods=['POST'])

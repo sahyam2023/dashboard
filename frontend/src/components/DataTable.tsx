@@ -112,7 +112,7 @@ const DataTable = <T extends { id: number }>({
                       if (onSelectAllItems) {
                         // If indeterminate or unchecked, next state is checked (select all)
                         // If checked, next state is unchecked (deselect all)
-                        onSelectAllItems(e.target.indeterminate || !e.target.checked);
+                        onSelectAllItems(e.target.checked);
                       }
                     }}
                     // Checked state is handled by useEffect and indeterminate logic
@@ -172,7 +172,7 @@ const DataTable = <T extends { id: number }>({
                 )}
                 {columns.map((column) => (
                   <td key={column.key as string} className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                    {column.render ? column.render(item) : item[column.key as keyof T]}
+                    {column.render ? column.render(item) : String(item[column.key as keyof T] ?? '')}
                   </td>
                 ))}
               </tr>

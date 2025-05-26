@@ -264,7 +264,7 @@ export interface AuditLogResponse {
 }
 // --- End of Interfaces for Audit Log ---
 
-const API_BASE_URL = 'http://127.0.0.1:5000';
+const API_BASE_URL = 'http://127.0.0.1:7000';
 
 // Helper to construct Authorization header
 const getAuthHeader = (): Record<string, string> => {
@@ -349,7 +349,13 @@ const handleApiError = async (response: Response, defaultMessage: string, isLogi
 
 export async function fetchSoftware(): Promise<Software[]> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/software`);
+    const response = await fetch(`${API_BASE_URL}/api/software`, {
+      method: 'GET',
+      headers: {
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
+    });
     if (!response.ok) {
       throw new Error(`Failed to fetch software: ${response.status}`);
     }
@@ -366,7 +372,11 @@ export async function getUserFilePermissions(userId: number): Promise<FilePermis
   try {
     const response = await fetch(`${API_BASE_URL}/api/superadmin/users/${userId}/permissions`, {
       method: 'GET',
-      headers: { ...getAuthHeader() },
+      headers: {
+        ...getAuthHeader(),
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
     });
     return handleApiError(response, `Failed to fetch file permissions for user ${userId}`);
   } catch (error) {
@@ -525,7 +535,11 @@ export async function getUserDashboardLayout(): Promise<LayoutObject> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/user/dashboard-layout`, {
       method: 'GET',
-      headers: { ...getAuthHeader() },
+      headers: {
+        ...getAuthHeader(),
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
     });
     // Assuming handleApiError correctly parses and returns the JSON object
     return handleApiError(response, 'Failed to fetch dashboard layout');
@@ -608,7 +622,11 @@ export async function fetchSystemHealth(): Promise<SystemHealth> {
     const url = `${API_BASE_URL}/api/admin/system-health`;
     const response = await fetch(url, {
       method: 'GET',
-      headers: { ...getAuthHeader() },
+      headers: {
+        ...getAuthHeader(),
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
     });
     return handleApiError(response, 'Failed to fetch system health');
   } catch (error) {
@@ -622,7 +640,11 @@ export async function getMaintenanceModeStatus(): Promise<MaintenanceStatusRespo
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/maintenance-mode`, {
       method: 'GET',
-      headers: { ...getAuthHeader() },
+      headers: {
+        ...getAuthHeader(),
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
     });
     return handleApiError(response, 'Failed to fetch maintenance mode status');
   } catch (error) {
@@ -664,7 +686,11 @@ export async function fetchAuditLogEntries(params: URLSearchParams): Promise<Aud
     const url = `${API_BASE_URL}/api/admin/audit-logs?${params.toString()}`;
     const response = await fetch(url, {
       method: 'GET',
-      headers: { ...getAuthHeader() },
+      headers: {
+        ...getAuthHeader(),
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
     });
     return handleApiError(response, 'Failed to fetch audit logs');
   } catch (error) {
@@ -679,7 +705,11 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
     const url = `${API_BASE_URL}/api/admin/dashboard-stats`;
     const response = await fetch(url, {
       method: 'GET',
-      headers: { ...getAuthHeader() },
+      headers: {
+        ...getAuthHeader(),
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
     });
     return handleApiError(response, 'Failed to fetch dashboard statistics');
   } catch (error) {
@@ -696,7 +726,13 @@ export interface SecurityQuestion {
 
 export async function fetchSecurityQuestions(): Promise<SecurityQuestion[]> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/security-questions`);
+    const response = await fetch(`${API_BASE_URL}/api/security-questions`, {
+      method: 'GET',
+      headers: {
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
+    });
     return handleApiError(response, 'Failed to fetch security questions');
   } catch (error) {
     console.error('Error fetching security questions:', error);
@@ -737,7 +773,11 @@ export async function fetchAdminVersions(
     
     const response = await fetch(url, {
       method: 'GET',
-      headers: { ...getAuthHeader() },
+      headers: {
+        ...getAuthHeader(),
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
     });
     return handleApiError(response, 'Failed to fetch admin software versions');
   } catch (error) {
@@ -750,7 +790,11 @@ export async function fetchAdminVersionById(versionId: number): Promise<AdminSof
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/versions/${versionId}`, {
       method: 'GET',
-      headers: { ...getAuthHeader() },
+      headers: {
+        ...getAuthHeader(),
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
     });
     return handleApiError(response, 'Failed to fetch software version by ID');
   } catch (error) {
@@ -815,7 +859,16 @@ export async function fetchLinks(
     const queryString = params.toString();
     const url = `${API_BASE_URL}/api/links${queryString ? `?${queryString}` : ''}`;
     
-    const response = await fetch(url);
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        // Links can be public or require auth depending on permissions,
+        // getAuthHeader() will include Authorization if token exists.
+        ...getAuthHeader(),
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
+    });
     return handleApiError(response, 'Failed to fetch links');
   } catch (error) {
     console.error('Error fetching links:', error);
@@ -854,7 +907,15 @@ export async function fetchDocuments(
     const queryString = params.toString();
     const url = `${API_BASE_URL}/api/documents${queryString ? `?${queryString}` : ''}`;
         
-    const response = await fetch(url);
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        // Documents can be public or require auth depending on permissions
+        ...getAuthHeader(),
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
+    });
     return handleApiError(response, 'Failed to fetch documents');
   } catch (error) {
     console.error('Error fetching documents:', error);
@@ -889,7 +950,15 @@ export async function fetchPatches(
     const queryString = params.toString();
     const url = `${API_BASE_URL}/api/patches${queryString ? `?${queryString}` : ''}`;
         
-    const response = await fetch(url);
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        // Patches can be public or require auth depending on permissions
+        ...getAuthHeader(),
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
+    });
     return handleApiError(response, 'Failed to fetch patches');
   } catch (error) {
     console.error('Error fetching patches:', error);
@@ -899,7 +968,15 @@ export async function fetchPatches(
 
 export async function searchData(query: string): Promise<any[]> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/search?q=${encodeURIComponent(query)}`);
+    const response = await fetch(`${API_BASE_URL}/api/search?q=${encodeURIComponent(query)}`, {
+      method: 'GET',
+      headers: {
+        // Search results can be public or require auth depending on permissions
+        ...getAuthHeader(),
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
+    });
     if (!response.ok) {
       throw new Error(`Failed to search: ${response.status}`);
     }
@@ -912,7 +989,14 @@ export async function searchData(query: string): Promise<any[]> {
 
 export async function fetchVersionsForSoftware(softwareId: number): Promise<SoftwareVersion[]> { 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/versions_for_software?software_id=${softwareId}`);
+    const response = await fetch(`${API_BASE_URL}/api/versions_for_software?software_id=${softwareId}`, {
+      method: 'GET',
+      headers: {
+        // This is often a public endpoint or for populating dropdowns
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
+    });
     return handleApiError(response, 'Failed to fetch versions for software');
   } catch (error) {
     console.error('Error fetching versions for software:', error);
@@ -1066,7 +1150,14 @@ export async function uploadAdminLinkFile(formData: FormData): Promise<Link> {
 
 export async function fetchMiscCategories(): Promise<MiscCategory[]> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/misc_categories`);
+    const response = await fetch(`${API_BASE_URL}/api/misc_categories`, {
+      method: 'GET',
+      headers: {
+        // Public endpoint
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
+    });
     return handleApiError(response, 'Failed to fetch misc categories');
   } catch (error) {
     console.error('Error fetching misc categories:', error);
@@ -1122,7 +1213,15 @@ export async function fetchMiscFiles(
     const queryString = params.toString();
     const url = `${API_BASE_URL}/api/misc_files${queryString ? `?${queryString}` : ''}`;
         
-    const response = await fetch(url);
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        // Misc files can be public or require auth depending on permissions
+        ...getAuthHeader(),
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
+    });
     return handleApiError(response, 'Failed to fetch misc files');
   } catch (error) {
     console.error('Error fetching misc files:', error);
@@ -1343,6 +1442,8 @@ export async function getFavoriteStatusApi(itemId: number, itemType: FavoriteIte
       method: 'GET',
       headers: {
         ...getAuthHeader(),
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
       },
     });
     return handleApiError(response, 'Failed to get favorite status');
@@ -1396,6 +1497,8 @@ export async function getUserFavoritesApi(
       method: 'GET',
       headers: {
         ...getAuthHeader(),
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
       },
     });
     return handleApiError(response, 'Failed to fetch user favorites');
@@ -1564,7 +1667,11 @@ export async function listUsers(
     
     const response = await fetch(url, {
       method: 'GET',
-      headers: { ...getAuthHeader() },
+      headers: {
+        ...getAuthHeader(),
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
     });
     return handleApiError(response, 'Failed to list users');
   } catch (error) {

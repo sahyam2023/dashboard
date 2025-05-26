@@ -18,7 +18,7 @@ import Modal from '../components/shared/Modal';
 import { Download, FileText as FileIconLucide, PlusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Archive as ArchiveIcon, Move, AlertTriangle } from 'lucide-react';
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils'; 
 
-const API_BASE_URL = 'http://127.0.0.1:5000'; // Not actively used for constructing URLs here
+const API_BASE_URL = 'http://127.0.0.1:7000'; // Not actively used for constructing URLs here
 
 interface OutletContextType {
   searchTerm: string;

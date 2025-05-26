@@ -2,17 +2,32 @@ import React, { useEffect, useState, useCallback, FormEvent } from 'react'; // A
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { 
-  listUsers, updateUserRole, deactivateUser, activateUser, deleteUser, User, 
+  listUsers, updateUserRole, deactivateUser, activateUser, deleteUser, User,
   UpdateUserRolePayload, PaginatedUsersResponse,
   changeGlobalPassword, ChangeGlobalPasswordPayload,
-  forceUserPasswordReset, // Import the new function
-  backupDatabase, // Import backup function
-  restoreDatabase, // Import restore function
+  forceUserPasswordReset,
+  backupDatabase,
+  restoreDatabase,
   getMaintenanceModeStatus,
   enableMaintenanceMode,
-  disableMaintenanceMode
+  disableMaintenanceMode,
+  // Permissions related imports
+  getUserFilePermissions,
+  updateUserFilePermissions,
+  fetchDocuments, // To get list of documents
+  PaginatedDocumentsResponse
 } from '../services/api';
+import { FilePermission, FilePermissionUpdatePayload, UpdateUserFilePermissionsResponse, Document as DocumentType } from '../types';
+
+
 import DataTable, { ColumnDef } from '../components/DataTable';
+
+// Define a type for the files we'll list for permission editing
+interface PermissibleFile {
+  id: number;
+  name: string;
+  type: 'document'; // Initially only documents
+}
 
 const SuperAdminDashboard: React.FC = () => {
   const auth = useAuth();
@@ -61,6 +76,98 @@ const SuperAdminDashboard: React.FC = () => {
   const [isMaintenanceLoading, setIsMaintenanceLoading] = useState<boolean>(true); // Start true for initial fetch
   const [maintenanceError, setMaintenanceError] = useState<string | null>(null);
 
+  // --- State for File Permissions Management ---
+  const [selectedUserForPermissions, setSelectedUserForPermissions] = useState<User | null>(null);
+  const [userFilePermissions, setUserFilePermissions] = useState<FilePermission[]>([]);
+  const [allFilesForPermissions, setAllFilesForPermissions] = useState<PermissibleFile[]>([]);
+  const [permissionsToUpdate, setPermissionsToUpdate] = useState<FilePermissionUpdatePayload[]>([]);
+  
+  const [isPermissionsLoading, setIsPermissionsLoading] = useState<boolean>(false);
+  const [permissionsError, setPermissionsError] = useState<string | null>(null);
+  const [permissionsFeedback, setPermissionsFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  // --- End State for File Permissions Management ---
+
+  const handlePermissionChange = (fileId: number, fileType: 'document', permissionType: 'can_view' | 'can_download', value: boolean) => {
+    setPermissionsToUpdate(prev => {
+      const existingIndex = prev.findIndex(p => p.file_id === fileId && p.file_type === fileType);
+      if (existingIndex > -1) {
+        // Update existing permission
+        return prev.map((p, index) =>
+          index === existingIndex ? { ...p, [permissionType]: value } : p
+        );
+      } else {
+        // This case should ideally be handled by the initial population of permissionsToUpdate.
+        // If a file appears in allFilesForPermissions but wasn't in the initial userFilePermissions
+        // (and thus not in initial permissionsToUpdate), this adds it.
+        const fileInfo = allFilesForPermissions.find(f => f.id === fileId && f.type === fileType);
+        if (fileInfo) {
+            const newPerm: FilePermissionUpdatePayload = {
+                file_id: fileInfo.id,
+                file_type: fileInfo.type, // This is 'document'
+                can_view: permissionType === 'can_view' ? value : false,
+                can_download: permissionType === 'can_download' ? value : false,
+            };
+            // Ensure the other permission type retains a default false if this is the first interaction
+            if (permissionType === 'can_view') newPerm.can_download = false;
+            else newPerm.can_view = false;
+            
+            return [...prev, newPerm];
+        }
+      }
+      return prev; 
+    });
+    // Clear feedback when user starts making changes
+    if (permissionsFeedback) setPermissionsFeedback(null);
+    if (permissionsError) setPermissionsError(null);
+  };
+
+  const handleSavePermissions = async () => {
+    if (!selectedUserForPermissions) {
+      setPermissionsFeedback({ type: 'error', message: "No user selected." });
+      return;
+    }
+    setIsPermissionsLoading(true);
+    setPermissionsError(null);
+    setPermissionsFeedback(null);
+    try {
+      const response = await updateUserFilePermissions(selectedUserForPermissions.id, permissionsToUpdate);
+      setPermissionsFeedback({ type: 'success', message: response.msg || "Permissions updated successfully!" });
+      
+      // Refresh userFilePermissions with the newly saved data from the response
+      setUserFilePermissions(response.permissions);
+      
+      // Re-initialize permissionsToUpdate based on the *newly saved* permissions and allFilesForPermissions
+      // This ensures the UI checkboxes correctly reflect the actual persisted state.
+      const updatedPermissionsToDisplay = allFilesForPermissions.map(file => {
+        const savedPerm = response.permissions.find(p => p.file_id === file.id && p.file_type === file.type);
+        return {
+          file_id: file.id,
+          file_type: file.type as 'document', // Cast since we only handle documents now
+          can_view: savedPerm?.can_view || false,
+          can_download: savedPerm?.can_download || false,
+        };
+      });
+      setPermissionsToUpdate(updatedPermissionsToDisplay);
+
+    } catch (err: any) {
+      console.error("Error saving permissions:", err);
+      const errMsg = err.response?.data?.msg || err.message || "Failed to save permissions.";
+      setPermissionsError(errMsg); 
+      setPermissionsFeedback({ type: 'error', message: errMsg });
+    } finally {
+      setIsPermissionsLoading(false);
+    }
+  };
+
+  const closePermissionsSection = () => {
+    setSelectedUserForPermissions(null);
+    setUserFilePermissions([]);
+    setAllFilesForPermissions([]);
+    setPermissionsToUpdate([]);
+    setPermissionsError(null);
+    setPermissionsFeedback(null);
+  };
+
   const fetchUsers = useCallback(async () => {
     if (auth.isAuthenticated && auth.role === 'super_admin') {
       setIsLoading(true);
@@ -106,6 +213,57 @@ const SuperAdminDashboard: React.FC = () => {
     };
     fetchMaintenanceStatus();
   }, [auth.isAuthenticated, auth.role]);
+
+  // Effect to fetch documents and user permissions when a user is selected for permission editing
+  useEffect(() => {
+    if (selectedUserForPermissions) {
+      const fetchDataForPermissions = async () => {
+        setIsPermissionsLoading(true);
+        setPermissionsError(null);
+        setPermissionsFeedback(null);
+        setUserFilePermissions([]); // Clear previous user's permissions
+        setAllFilesForPermissions([]); // Clear previous files
+        setPermissionsToUpdate([]); // Clear previous updates
+
+        try {
+          // 1. Fetch all documents (first page for now)
+          // TODO: Handle pagination for documents if necessary, or fetch all.
+          // For now, fetching first page (e.g., up to 100 docs as a practical limit for UI)
+          const docsResponse: PaginatedDocumentsResponse = await fetchDocuments(undefined, 1, 100); 
+          const documentsAsPermissibleFiles: PermissibleFile[] = docsResponse.documents.map(doc => ({
+            id: doc.id,
+            name: doc.doc_name,
+            type: 'document',
+          }));
+          setAllFilesForPermissions(documentsAsPermissibleFiles);
+
+          // 2. Fetch selected user's current permissions
+          const fetchedPermissions = await getUserFilePermissions(selectedUserForPermissions.id);
+          setUserFilePermissions(fetchedPermissions);
+          
+          // 3. Initialize permissionsToUpdate
+          const initialUpdates: FilePermissionUpdatePayload[] = documentsAsPermissibleFiles.map(file => {
+            const existingPerm = fetchedPermissions.find(p => p.file_id === file.id && p.file_type === file.type);
+            return {
+              file_id: file.id,
+              file_type: file.type,
+              can_view: existingPerm?.can_view || false,
+              can_download: existingPerm?.can_download || false,
+            };
+          });
+          setPermissionsToUpdate(initialUpdates);
+
+        } catch (err: any) {
+          console.error("Error fetching data for permissions:", err);
+          setPermissionsError(err.message || "Failed to fetch data for permissions.");
+          setPermissionsFeedback({ type: 'error', message: err.message || "Failed to fetch data for permissions." });
+        } finally {
+          setIsPermissionsLoading(false);
+        }
+      };
+      fetchDataForPermissions();
+    }
+  }, [selectedUserForPermissions, auth.isAuthenticated, auth.role]); // Added auth dependencies
 
 
   if (!auth.isAuthenticated) {
@@ -449,6 +607,13 @@ const SuperAdminDashboard: React.FC = () => {
               Force Reset
             </button>
           )}
+           {/* Manage Permissions Button */}
+           <button
+              onClick={(e) => { e.stopPropagation(); setSelectedUserForPermissions(user); }}
+              className="text-teal-600 hover:text-teal-900 text-xs ml-2"
+            >
+              Manage Permissions
+            </button>
         </div>
       )
     }
@@ -647,17 +812,17 @@ const SuperAdminDashboard: React.FC = () => {
             <div className="flex items-center space-x-4 mb-2">
               <label htmlFor="maintenanceToggle" className="flex items-center cursor-pointer">
                 <div className="relative">
-                  <input 
-                    type="checkbox" 
-                    id="maintenanceToggle" 
-                    className="sr-only" 
+                  <input
+                    type="checkbox"
+                    id="maintenanceToggle"
+                    className="sr-only"
                     checked={isMaintenanceModeActive}
                     onChange={handleToggleMaintenanceMode}
                     disabled={isMaintenanceLoading} // Disable during any loading (initial or toggle action)
                   />
                   {/* Styling for the toggle switch */}
                   <div className={`block w-14 h-8 rounded-full transition-colors ${isMaintenanceModeActive ? 'bg-green-500' : 'bg-gray-300'}`}></div>
-                  <div 
+                  <div
                     className={`dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full shadow-md transition-transform duration-300 ease-in-out ${isMaintenanceModeActive ? 'transform translate-x-6' : ''}`}
                   ></div>
                 </div>
@@ -676,6 +841,81 @@ const SuperAdminDashboard: React.FC = () => {
         ) : null }
       </div>
 
+      {/* Permissions Management Section */}
+      {selectedUserForPermissions && (
+        <div className="mt-12 p-6 bg-white shadow rounded-lg">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-semibold text-gray-800">
+              Manage File Permissions for: <span className="font-bold text-blue-600">{selectedUserForPermissions.username}</span>
+            </h2>
+            <button
+              onClick={() => {
+                setSelectedUserForPermissions(null);
+                setPermissionsError(null);
+                setPermissionsFeedback(null);
+              }}
+              className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+            >
+              Close
+            </button>
+          </div>
+
+          {isPermissionsLoading && <div className="text-sm text-gray-500">Loading permissions info...</div>}
+          {permissionsError && <div className="p-3 mb-4 rounded bg-red-100 text-red-700 text-sm">{permissionsError}</div>}
+          {permissionsFeedback && (
+            <div className={`p-3 mb-4 rounded text-sm ${permissionsFeedback.type === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+              {permissionsFeedback.message}
+            </div>
+          )}
+
+          {!isPermissionsLoading && !permissionsError && allFilesForPermissions.length > 0 && (
+            <form onSubmit={(e) => { e.preventDefault(); handleSavePermissions(); }} className="space-y-6">
+              <div className="max-h-96 overflow-y-auto border border-gray-200 rounded-md p-4 space-y-4">
+                {allFilesForPermissions.map((file) => {
+                  const currentPermission = permissionsToUpdate.find(p => p.file_id === file.id && p.file_type === file.type);
+                  return (
+                    <div key={`${file.type}-${file.id}`} className="p-3 border-b border-gray-100 last:border-b-0 hover:bg-gray-50 rounded-md transition-colors duration-150">
+                      <h4 className="font-medium text-gray-700 truncate" title={file.name}>{file.name} <span className="text-xs text-gray-400">({file.type})</span></h4>
+                      <div className="flex items-center space-x-6 mt-2">
+                        <label className="flex items-center space-x-2 cursor-pointer text-sm">
+                          <input
+                            type="checkbox"
+                            className="rounded text-blue-600 focus:ring-blue-500 h-4 w-4 border-gray-300"
+                            checked={currentPermission?.can_view || false}
+                            onChange={(e) => handlePermissionChange(file.id, file.type, 'can_view', e.target.checked)}
+                          />
+                          <span>Can View</span>
+                        </label>
+                        <label className="flex items-center space-x-2 cursor-pointer text-sm">
+                          <input
+                            type="checkbox"
+                            className="rounded text-blue-600 focus:ring-blue-500 h-4 w-4 border-gray-300"
+                            checked={currentPermission?.can_download || false}
+                            onChange={(e) => handlePermissionChange(file.id, file.type, 'can_download', e.target.checked)}
+                          />
+                          <span>Can Download</span>
+                        </label>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex justify-end pt-4">
+                <button
+                  type="submit"
+                  disabled={isPermissionsLoading}
+                  className="px-6 py-2.5 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                >
+                  {isPermissionsLoading ? 'Saving...' : 'Save Permissions'}
+                </button>
+              </div>
+            </form>
+          )}
+           {!isPermissionsLoading && !permissionsError && allFilesForPermissions.length === 0 && (
+             <p className="text-sm text-gray-500">No documents found to set permissions for. Ensure documents are uploaded to the system.</p>
+           )}
+        </div>
+      )}
     </div>
   );
 };

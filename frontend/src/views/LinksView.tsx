@@ -225,7 +225,41 @@ const LinksView: React.FC = () => {
     { key: 'title', header: 'Title', sortable: true }, { key: 'software_name', header: 'Software', sortable: true },
     { key: 'version_name', header: 'Version', sortable: true, render: l => l.version_number || 'N/A' },
     { key: 'description', header: 'Description', render: l => <span className="text-sm text-gray-600 block max-w-xs truncate" title={l.description||''}>{l.description||'-'}</span> },
-    { key: 'url', header: 'URL/File', render: (l: LinkType) => ( <a href={l.url} target={l.is_external_link || !l.url?.startsWith('/') ? "_blank" : "_self"} rel="noopener noreferrer" className="flex items-center text-blue-600 hover:text-blue-800" onClick={e=>e.stopPropagation()}> {l.is_external_link ? l.url.length > 40 ? `${l.url.substring(0,37)}...` : l.url : (l.original_filename_ref || l.url.split('/').pop() || 'Uploaded File')} {(l.is_external_link || !l.url?.startsWith('/')) && <ExternalLink size={14} className="ml-1 flex-shrink-0"/>} </a> ) },
+    { 
+      key: 'url', 
+      header: 'URL/File', 
+      render: (l: LinkType) => {
+        const isEffectivelyDownloadable = l.is_external_link || l.is_downloadable !== false;
+        const linkText = l.is_external_link 
+          ? (l.url.length > 40 ? `${l.url.substring(0,37)}...` : l.url) 
+          : (l.original_filename_ref || l.url.split('/').pop() || 'Uploaded File');
+
+        if (!isEffectivelyDownloadable && !l.is_external_link) { // Uploaded file, not downloadable
+          return (
+            <span className="flex items-center text-gray-400 cursor-not-allowed" title="Download not permitted">
+              {l.is_external_link ? <ExternalLink size={14} className="mr-1 flex-shrink-0"/> : <Download size={14} className="mr-1 flex-shrink-0"/>}
+              {linkText}
+            </span>
+          );
+        }
+        return (
+          <a 
+            href={l.url} 
+            target={l.is_external_link || !l.url?.startsWith('/') ? "_blank" : "_self"} 
+            rel="noopener noreferrer" 
+            className={`flex items-center ${isEffectivelyDownloadable ? 'text-blue-600 hover:text-blue-800' : 'text-gray-400 cursor-not-allowed'}`}
+            onClick={(e) => {
+              if (!isEffectivelyDownloadable) e.preventDefault();
+              e.stopPropagation();
+            }}
+            title={isEffectivelyDownloadable ? (l.is_external_link ? "Open external link" : "Download file") : "Download not permitted"}
+          >
+            {l.is_external_link || !l.url?.startsWith('/') ? <ExternalLink size={14} className="mr-1 flex-shrink-0"/> : <Download size={14} className="mr-1 flex-shrink-0"/>}
+            {linkText}
+          </a>
+        );
+      } 
+    },
     { key: 'uploaded_by_username', header: 'Added By', sortable: true, render: l => l.uploaded_by_username||'N/A' },
     { key: 'updated_by_username', header: 'Updated By', sortable: false, render: l => l.updated_by_username||'N/A' },
     { key: 'created_at', header: 'Created', sortable: true, render: l => l.created_at?new Date(l.created_at).toLocaleDateString('en-CA'):'-' },
@@ -356,7 +390,7 @@ const LinksView: React.FC = () => {
       )}
 
       {showDeleteConfirm && linkToDelete && (<ConfirmationModal isOpen={showDeleteConfirm} title="Delete Link" message={`Delete "${linkToDelete.title}"?`} onConfirm={handleDeleteLinkConfirm} onCancel={closeDeleteConfirm} isConfirming={isProcessingSingleItem} confirmButtonText="Delete" confirmButtonVariant="danger"/>)}
-      {showBulkDeleteConfirmModal && (<ConfirmationModal isOpen={showBulkDeleteConfirmModal} title={`Delete ${selectedLinkIds.size} Link(s)`} message={`Delete ${selectedLinkIds.size} selected items?`} onConfirm={confirmBulkDeleteLinks} onCancel={()=>setShowBulkDeleteConfirmModal(false)} isConfirming={isDeletingSelected} confirmButtonText="Delete Selected" confirmButtonVariant="danger" Icon={AlertTriangle}/>)}
+      {showBulkDeleteConfirmModal && (<ConfirmationModal isOpen={showBulkDeleteConfirmModal} title={`Delete ${selectedLinkIds.size} Link(s)`} message={`Delete ${selectedLinkIds.size} selected items?`} onConfirm={confirmBulkDeleteLinks} onCancel={()=>setShowBulkDeleteConfirmModal(false)} isConfirming={isDeletingSelected} confirmButtonText="Delete Selected" confirmButtonVariant="danger"/>)}
       
       {showBulkMoveModal && (
         <Modal isOpen={showBulkMoveModal} onClose={()=>setShowBulkMoveModal(false)} title={`Move ${selectedLinkIds.size} Link(s)`}>

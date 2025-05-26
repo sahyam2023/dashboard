@@ -2,11 +2,13 @@ import unittest
 import json
 import os
 import tempfile
+import sqlite3
 
 # Adjust the import path to go up one level to the parent directory where 'app.py' and 'database.py' are located
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from datetime import datetime, timezone # Added timezone
 from app import app, get_db, INSTANCE_FOLDER_PATH
 from database import init_db, get_db_connection
 
@@ -55,16 +57,55 @@ class TestAPISearch(unittest.TestCase):
             cursor = db.cursor()
 
             # Clear existing data to ensure test isolation
-            tables = ["documents", "patches", "links", "misc_files", "software", "versions", "misc_categories", "users"]
+            tables = [
+                "documents", "patches", "links", "misc_files", 
+                "software", "versions", "misc_categories", "users", 
+                "file_permissions", "user_security_answers", "security_questions", "password_reset_requests",
+                "audit_logs", "download_log" # Added audit_logs and download_log
+            ]
             for table in tables:
-                cursor.execute(f"DELETE FROM {table}")
+                try:
+                    cursor.execute(f"DELETE FROM {table}")
+                except sqlite3.OperationalError: # Table might not exist on first run if schema changed
+                    pass # Or log this if it's unexpected during normal test runs
             db.commit()
 
-            # Sample Users (required for created_by_user_id etc.)
-            cursor.execute("INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, ?, ?)",
-                           (1, 'testadmin', 'hashed_password', 'admin'))
-            cursor.execute("INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, ?, ?)",
-                           (2, 'testuser', 'hashed_password', 'user'))
+            # Ensure security questions exist for registration
+            cursor.execute("INSERT OR IGNORE INTO security_questions (id, question_text) VALUES (1, 'Q1'), (2, 'Q2'), (3, 'Q3')")
+            db.commit()
+
+            # Register testadmin (will be user_id 1, typically super_admin if first)
+            admin_reg_payload = {
+                "username": "testadmin", "password": "", "email": "admin@test.com",
+                "security_answers": [{"question_id": 1, "answer": "test"},{"question_id": 2, "answer": "test"},{"question_id": 3, "answer": "test"}]
+            }
+            response = self.client.post('/api/auth/register', json=admin_reg_payload)
+            self.assertEqual(response.status_code, 201, f"Failed to register testadmin: {response.get_json()}")
+            
+            # Register testuser (will be user_id 2)
+            user_reg_payload = {
+                "username": "testuser", "password": "userpassword", "email": "user@test.com",
+                "security_answers": [{"question_id": 1, "answer": "test"},{"question_id": 2, "answer": "test"},{"question_id": 3, "answer": "test"}]
+            }
+            response = self.client.post('/api/auth/register', json=user_reg_payload)
+            self.assertEqual(response.status_code, 201, f"Failed to register testuser: {response.get_json()}")
+
+            # Manually ensure testadmin is super_admin (user_id 1 from registration)
+            # and testuser is user (user_id 2 from registration)
+            cursor.execute("UPDATE users SET role = 'super_admin' WHERE id = 1")
+            cursor.execute("UPDATE users SET role = 'user' WHERE id = 2")
+            db.commit()
+            
+            # Re-fetch user details to confirm IDs if needed, though we'll assume 1 and 2 for simplicity
+            # self.admin_user = db.execute("SELECT * FROM users WHERE username = 'testadmin'").fetchone()
+            # self.test_user = db.execute("SELECT * FROM users WHERE username = 'testuser'").fetchone()
+            # self.admin_user_id = self.admin_user['id']
+            # self.test_user_id = self.test_user['id']
+            
+            # Use fixed IDs for predictability in tests
+            self.admin_user_id = 1
+            self.test_user_id = 2
+
 
             # Sample Software
             cursor.execute("INSERT INTO software (id, name, description) VALUES (?, ?, ?)",
@@ -296,10 +337,542 @@ class TestAPISearch(unittest.TestCase):
         self.assertTrue(any(item['name'].lower() == 'testapp alpha' and item['type'] == 'software' for item in data_sw_name), "Case-insensitive search for 'testapp alpha' failed in software name.")
         
         # Search "ui_screenshot.jpg" (lowercase) for "UI_screenshot.JPG" (misc_files original_filename)
-        response_misc_orig = self.client.get('/api/search?q=ui_screenshot.jpg')
-        self._assert_common_search_response_structure(response_misc_orig)
+        # Assuming testuser (id=2) has view permission for this misc_file (id=2)
+        with app.app_context():
+            db = get_db()
+            # user_id=2 (testuser), file_id=2 (UI_screenshot.JPG), file_type='misc_file'
+            _set_permission_for_test(db, 2, 2, 'misc_file', True, False) 
+            db.commit()
+        
+        # Log in as testuser
+        access_token = _login_user_for_test(self.client, 'testuser', 'userpassword')
+        headers = {'Authorization': f'Bearer {access_token}'}
+
+        response_misc_orig = self.client.get('/api/search?q=ui_screenshot.jpg', headers=headers)
+        self._assert_common_search_response_structure(response_misc_orig, expected_min_items=1) # Expecting at least one result
         data_misc_orig = json.loads(response_misc_orig.data)
         self.assertTrue(any(item.get('original_filename','').lower() == 'ui_screenshot.jpg' and item['type'] == 'misc_file' for item in data_misc_orig), "Case-insensitive search for 'ui_screenshot.jpg' failed in misc_file original_filename.")
+
+
+# --- Helper Functions for Auth and Permissions ---
+def _login_user_for_test(client, username, password):
+    """Logs in a user and returns the access token."""
+    response = client.post('/api/auth/login', json={'username': username, 'password': password})
+    if response.status_code != 200:
+        # Attempt to get more detailed error from JSON response if possible
+        error_details = ""
+        try:
+            error_data = response.get_json()
+            if error_data and 'msg' in error_data:
+                error_details = error_data['msg']
+        except Exception: # Fallback if response is not JSON or 'msg' key is missing
+            error_details = response.get_data(as_text=True)
+        raise ValueError(f"Login failed for {username}: {response.status_code} - {error_details}")
+    return json.loads(response.data)['access_token']
+
+def _set_permission_for_test(db, user_id, file_id, file_type, can_view, can_download):
+    """Directly inserts or updates a file permission in the database."""
+    now_ts = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    try:
+        cursor = db.cursor()
+        cursor.execute("""
+            INSERT INTO file_permissions (user_id, file_id, file_type, can_view, can_download, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, file_id, file_type) DO UPDATE SET
+                can_view = excluded.can_view,
+                can_download = excluded.can_download,
+                updated_at = excluded.updated_at
+        """, (user_id, file_id, file_type, can_view, can_download, now_ts, now_ts))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"Error in _set_permission_for_test: {e}") # Print error for debugging
+        raise
+
+
+# --- Test Class for File Permission API Endpoints ---
+class TestFilePermissionsAPI(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        if not os.path.exists(INSTANCE_FOLDER_PATH):
+            os.makedirs(INSTANCE_FOLDER_PATH)
+        cls.db_fd, cls.db_path = tempfile.mkstemp(suffix='.db', dir=INSTANCE_FOLDER_PATH)
+        app.config['DATABASE'] = cls.db_path
+        app.config['TESTING'] = True
+        app.config['JWT_SECRET_KEY'] = 'testsecretkeypermissions' 
+        
+        with app.app_context():
+            init_db(cls.db_path)
+
+    @classmethod
+    def tearDownClass(cls):
+        os.close(cls.db_fd)
+        os.unlink(cls.db_path)
+
+    def setUp(self):
+        self.client = app.test_client()
+        with app.app_context():
+            db = get_db()
+            cursor = db.cursor()
+            # Extended list of tables including new ones
+            tables = [
+                "documents", "patches", "links", "misc_files", 
+                "software", "versions", "misc_categories", "users", 
+                "file_permissions", "user_security_answers", "security_questions", 
+                "password_reset_requests", "audit_logs", "download_log", "site_settings", "system_settings"
+            ]
+            for table in tables:
+                try:
+                    cursor.execute(f"DELETE FROM {table}")
+                except sqlite3.OperationalError as e:
+                    print(f"Could not delete from {table}: {e}") # Table might not exist on first run
+            
+            # Pre-populate security questions for user registration
+            cursor.execute("INSERT OR IGNORE INTO security_questions (id, question_text) VALUES (1, 'Q1'), (2, 'Q2'), (3, 'Q3')")
+            # Initialize system settings like maintenance mode
+            cursor.execute("INSERT OR IGNORE INTO system_settings (setting_name, is_enabled) VALUES ('maintenance_mode', FALSE)")
+
+            db.commit()
+
+            # Register users using the helper
+            self._register_user_for_test_internal("superadmin_perm", "superpassword1", "superperm@test.com") # Expected User ID 1
+            self._register_user_for_test_internal("admin_perm", "adminpassword1", "adminperm@test.com")     # Expected User ID 2
+            self._register_user_for_test_internal("user_perm", "userpassword1", "userperm@test.com")       # Expected User ID 3
+            
+            # Manually set roles
+            cursor.execute("UPDATE users SET role='super_admin' WHERE username='superadmin_perm'")
+            cursor.execute("UPDATE users SET role='admin' WHERE username='admin_perm'")
+            cursor.execute("UPDATE users SET role='user' WHERE username='user_perm'")
+
+            # Sample software and document for permission testing
+            cursor.execute("INSERT INTO software (id, name, created_by_user_id) VALUES (300, 'PermTestSW', 1)")
+            cursor.execute("INSERT INTO documents (id, software_id, doc_name, download_link, created_by_user_id) VALUES (?, ?, ?, ?, ?)",
+                           (3001, 300, 'Perm Doc Alpha', '/docs/pdoc_alpha.pdf', 1))
+            db.commit()
+
+        # Login as superadmin for tests in this class
+        self.superadmin_token = _login_user_for_test(self.client, "superadmin_perm", "superpassword1")
+        self.superadmin_headers = {'Authorization': f'Bearer {self.superadmin_token}'}
+        
+        # Store IDs for convenience
+        self.superadmin_id = 1
+        self.admin_id = 2
+        self.user_id = 3
+        self.doc_id = 3001
+
+
+    def _register_user_for_test_internal(self, username, password, email, role_to_set=None):
+        payload = {
+            "username": username, "password": password, "email": email,
+            "security_answers": [{"question_id": 1, "answer": "test"},{"question_id": 2, "answer": "test"},{"question_id": 3, "answer": "test"}]
+        }
+        response = self.client.post('/api/auth/register', json=payload)
+        # Allow 409 if user already exists from a previous (failed) test run's setup
+        self.assertTrue(response.status_code == 201 or response.status_code == 409, f"Registration failed for {username}: {response.get_json()}")
+        # If a specific role needs to be ensured beyond what registration does:
+        if role_to_set:
+            with app.app_context():
+                db = get_db()
+                db.execute("UPDATE users SET role = ? WHERE username = ?", (role_to_set, username))
+                db.commit()
+
+
+    def test_get_permissions_success_superadmin(self):
+        response = self.client.get(f'/api/superadmin/users/{self.user_id}/permissions', headers=self.superadmin_headers)
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.data)
+        self.assertIsInstance(data, list)
+        self.assertEqual(len(data), 0) # No permissions set yet
+
+    def test_get_permissions_forbidden_admin(self):
+        admin_token = _login_user_for_test(self.client, "admin_perm", "adminpassword1")
+        response = self.client.get(f'/api/superadmin/users/{self.user_id}/permissions', headers={'Authorization': f'Bearer {admin_token}'})
+        self.assertEqual(response.status_code, 403)
+
+    def test_get_permissions_unauthorized(self):
+        response = self.client.get(f'/api/superadmin/users/{self.user_id}/permissions') # No token
+        self.assertEqual(response.status_code, 401)
+
+    def test_get_permissions_user_not_found(self):
+        response = self.client.get('/api/superadmin/users/9999/permissions', headers=self.superadmin_headers)
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_permissions_with_existing_data(self):
+        with app.app_context():
+            _set_permission_for_test(get_db(), self.user_id, self.doc_id, 'document', True, False)
+        
+        response = self.client.get(f'/api/superadmin/users/{self.user_id}/permissions', headers=self.superadmin_headers)
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.data)
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]['file_id'], self.doc_id)
+        self.assertEqual(data[0]['file_type'], 'document')
+        self.assertTrue(data[0]['can_view'])
+        self.assertFalse(data[0]['can_download'])
+
+    def test_update_permissions_new_and_update_existing(self):
+        # Initial permission for doc_id
+        with app.app_context():
+            _set_permission_for_test(get_db(), self.user_id, self.doc_id, 'document', True, False)
+        
+        # Create another document for this test
+        with app.app_context():
+            db = get_db()
+            cursor = db.cursor()
+            cursor.execute("INSERT INTO documents (id, software_id, doc_name, download_link, created_by_user_id) VALUES (?, ?, ?, ?, ?)",
+                           (3002, 300, 'Perm Doc Beta', '/docs/pdoc_beta.pdf', self.superadmin_id))
+            db.commit()
+        
+        doc_id_beta = 3002
+        payload = [
+            {'file_id': self.doc_id, 'file_type': 'document', 'can_view': False, 'can_download': True}, # Update existing
+            {'file_id': doc_id_beta, 'file_type': 'document', 'can_view': True, 'can_download': True}    # New permission
+        ]
+        response = self.client.put(f'/api/superadmin/users/{self.user_id}/permissions', headers=self.superadmin_headers, json=payload)
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.data)
+        self.assertIn('permissions updated successfully', data.get('msg', '').lower()) # Check 'msg' key
+        self.assertEqual(len(data['permissions']), 2)
+
+        # Verify in DB
+        with app.app_context():
+            db = get_db()
+            perm1 = db.execute("SELECT * FROM file_permissions WHERE user_id = ? AND file_id = ? AND file_type = 'document'", (self.user_id, self.doc_id)).fetchone()
+            self.assertIsNotNone(perm1)
+            self.assertFalse(perm1['can_view'])
+            self.assertTrue(perm1['can_download'])
+            
+            perm2 = db.execute("SELECT * FROM file_permissions WHERE user_id = ? AND file_id = ? AND file_type = 'document'", (self.user_id, doc_id_beta)).fetchone()
+            self.assertIsNotNone(perm2)
+            self.assertTrue(perm2['can_view'])
+            self.assertTrue(perm2['can_download'])
+            
+            # Check audit log (simplified)
+            log = db.execute("SELECT * FROM audit_logs WHERE action_type = 'UPDATE_USER_FILE_PERMISSIONS_SUCCESS' AND target_id = ?", (self.user_id,)).fetchone()
+            self.assertIsNotNone(log)
+            log_details = json.loads(log['details'])
+            self.assertEqual(log_details['permissions_processed_count'], 2)
+
+    def test_update_permissions_forbidden_non_superadmin(self):
+        # Login as admin (not superadmin)
+        admin_token = _login_user_for_test(self.client, "admin_perm", "adminpassword1")
+        headers = {'Authorization': f'Bearer {admin_token}'}
+        payload = [{'file_id': self.doc_id, 'file_type': 'document', 'can_view': True, 'can_download': True}]
+        response = self.client.put(f'/api/superadmin/users/{self.user_id}/permissions', headers=headers, json=payload)
+        self.assertEqual(response.status_code, 403)
+
+        # Login as regular user
+        user_token = _login_user_for_test(self.client, "user_perm", "userpassword1")
+        headers = {'Authorization': f'Bearer {user_token}'}
+        response = self.client.put(f'/api/superadmin/users/{self.superadmin_id}/permissions', headers=headers, json=payload) # Targetting superadmin to check
+        self.assertEqual(response.status_code, 403)
+
+    def test_update_permissions_unauthorized_no_token(self):
+        payload = [{'file_id': self.doc_id, 'file_type': 'document', 'can_view': True, 'can_download': True}]
+        response = self.client.put(f'/api/superadmin/users/{self.user_id}/permissions', json=payload)
+        self.assertEqual(response.status_code, 401)
+
+    def test_update_permissions_target_user_not_found(self):
+        payload = [{'file_id': self.doc_id, 'file_type': 'document', 'can_view': True, 'can_download': True}]
+        response = self.client.put('/api/superadmin/users/9999/permissions', headers=self.superadmin_headers, json=payload)
+        self.assertEqual(response.status_code, 404)
+        data = json.loads(response.data)
+        self.assertEqual(data['msg'], "Target user not found.")
+
+    def test_update_permissions_invalid_payload_bad_list(self):
+        payload = {"key": "not a list"} # Not a list
+        response = self.client.put(f'/api/superadmin/users/{self.user_id}/permissions', headers=self.superadmin_headers, json=payload)
+        self.assertEqual(response.status_code, 400)
+        data = json.loads(response.data)
+        self.assertIn("request body must be a list", data['msg'].lower())
+        
+    def test_update_permissions_invalid_payload_item_not_dict(self):
+        payload = ["not a dict"] # List item not a dict
+        response = self.client.put(f'/api/superadmin/users/{self.user_id}/permissions', headers=self.superadmin_headers, json=payload)
+        self.assertEqual(response.status_code, 400)
+        data = json.loads(response.data)
+        self.assertIn("each item in the list must be a permission object", data['errors'][0].lower())
+
+    def test_update_permissions_invalid_payload_bad_file_id(self):
+        payload = [{'file_id': 'not-an-int', 'file_type': 'document', 'can_view': True, 'can_download': False}]
+        response = self.client.put(f'/api/superadmin/users/{self.user_id}/permissions', headers=self.superadmin_headers, json=payload)
+        self.assertEqual(response.status_code, 400)
+        data = json.loads(response.data)
+        self.assertIn("invalid 'file_id'", data['errors'][0].lower())
+
+        payload_zero = [{'file_id': 0, 'file_type': 'document', 'can_view': True, 'can_download': False}]
+        response_zero = self.client.put(f'/api/superadmin/users/{self.user_id}/permissions', headers=self.superadmin_headers, json=payload_zero)
+        self.assertEqual(response_zero.status_code, 400)
+        data_zero = json.loads(response_zero.data)
+        self.assertIn("invalid 'file_id'", data_zero['errors'][0].lower())
+
+
+    def test_update_permissions_invalid_payload_bad_can_view_type(self):
+        payload = [{'file_id': self.doc_id, 'file_type': 'document', 'can_view': 'not-a-bool', 'can_download': False}]
+        response = self.client.put(f'/api/superadmin/users/{self.user_id}/permissions', headers=self.superadmin_headers, json=payload)
+        self.assertEqual(response.status_code, 400)
+        data = json.loads(response.data)
+        self.assertIn("invalid 'can_view' value", data['errors'][0].lower())
+
+
+# --- Test Class for Permission Enforcement ---
+class TestPermissionEnforcement(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        if not os.path.exists(INSTANCE_FOLDER_PATH): os.makedirs(INSTANCE_FOLDER_PATH)
+        cls.db_fd, cls.db_path = tempfile.mkstemp(suffix='.db', dir=INSTANCE_FOLDER_PATH)
+        app.config['DATABASE'] = cls.db_path
+        app.config['TESTING'] = True
+        app.config['JWT_SECRET_KEY'] = 'testsecretkeyenforcement'
+        with app.app_context(): init_db(cls.db_path)
+
+    @classmethod
+    def tearDownClass(cls):
+        os.close(cls.db_fd)
+        os.unlink(cls.db_path)
+
+    def setUp(self):
+        self.client = app.test_client()
+        with app.app_context():
+            db = get_db()
+            cursor = db.cursor()
+            # Extended list of tables including new ones
+            tables = [
+                "documents", "patches", "links", "misc_files", 
+                "software", "versions", "misc_categories", "users", 
+                "file_permissions", "user_security_answers", "security_questions", 
+                "password_reset_requests", "audit_logs", "download_log", "site_settings", "system_settings"
+            ]
+            for table in tables: 
+                try:
+                    cursor.execute(f"DELETE FROM {table}")
+                except sqlite3.OperationalError: pass # Ignore if table doesn't exist yet
+            
+            cursor.execute("INSERT OR IGNORE INTO security_questions (id, question_text) VALUES (1, 'Q1'), (2, 'Q2'), (3, 'Q3')")
+            cursor.execute("INSERT OR IGNORE INTO system_settings (setting_name, is_enabled) VALUES ('maintenance_mode', FALSE)")
+            db.commit()
+
+            # Register users
+            self._register_user_for_test_internal("perm_superadmin", "superpassword", "perm_super@test.com") # ID 1
+            self._register_user_for_test_internal("perm_testuser", "userpassword", "perm_user@test.com")   # ID 2
+            
+            # Set roles
+            cursor.execute("UPDATE users SET role='super_admin' WHERE username='perm_superadmin'")
+            cursor.execute("UPDATE users SET role='user' WHERE username='perm_testuser'")
+            
+            self.superadmin_id = 1 # Based on registration order
+            self.testuser_id = 2   # Based on registration order
+
+            # Sample Data
+            cursor.execute("INSERT INTO software (id, name, created_by_user_id) VALUES (400, 'PermEnforceSW', ?)", (self.superadmin_id,))
+            # Document
+            cursor.execute("INSERT INTO documents (id, software_id, doc_name, download_link, stored_filename, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?)", 
+                           (4001, 400, 'ViewPermDoc', '/docs/vpdoc.pdf', 'vpdoc.pdf', self.superadmin_id))
+            # Version (for Patch)
+            cursor.execute("INSERT INTO versions (id, software_id, version_number, created_by_user_id) VALUES (?, ?, ?, ?)", 
+                           (401, 400, '1.0-perm', self.superadmin_id))
+            # Patch
+            cursor.execute("INSERT INTO patches (id, version_id, patch_name, download_link, stored_filename, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?)", 
+                           (4002, 401, 'ViewPermPatch', '/patch/vppatch.zip', 'vppatch.zip', self.superadmin_id))
+            # Link (uploaded file type)
+            cursor.execute("INSERT INTO links (id, software_id, version_id, title, url, stored_filename, is_external_link, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", 
+                           (4003, 400, 401, 'ViewPermLinkFile', '/links/vplink.txt', 'vplink.txt', 0, self.superadmin_id))
+            # Misc Category
+            cursor.execute("INSERT INTO misc_categories (id, name, created_by_user_id) VALUES (?, ?, ?)", 
+                           (402, 'PermEnforceCat', self.superadmin_id))
+            # Misc File
+            cursor.execute("INSERT INTO misc_files (id, misc_category_id, user_id, original_filename, stored_filename, file_path, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)", 
+                           (4004, 402, self.superadmin_id, 'viewmisc.txt', 'viewmisc.txt', '/misc_uploads/viewmisc.txt', self.superadmin_id))
+            db.commit()
+            
+            self.doc_id_perm = 4001
+            self.patch_id_perm = 4002
+            self.link_id_perm = 4003
+            self.misc_id_perm = 4004
+
+
+        self.user_token = _login_user_for_test(self.client, "perm_testuser", "userpassword")
+        self.user_headers = {'Authorization': f'Bearer {self.user_token}'}
+
+    def _register_user_for_test_internal(self, username, password, email=None, role_to_set=None): # Duplicated for now
+        if email is None: email = f"{username}@example.com"
+        payload = {"username": username, "password": password, "email": email, "security_answers": [{"question_id":1,"answer":"t"},{"question_id":2,"answer":"t"},{"question_id":3,"answer":"t"}]}
+        self.client.post('/api/auth/register', json=payload)
+
+
+    def test_document_view_permission_enforcement(self):
+        # Initially, testuser should not see document
+        response = self.client.get('/api/documents', headers=self.user_headers) # No specific software filter
+        data = json.loads(response.data)
+        self.assertFalse(any(doc['id'] == self.doc_id_perm for doc in data['documents']), "Document visible without permission")
+
+        # Grant view permission
+        with app.app_context(): _set_permission_for_test(get_db(), self.testuser_id, self.doc_id_perm, 'document', True, False)
+        
+        response = self.client.get('/api/documents', headers=self.user_headers)
+        data = json.loads(response.data)
+        doc_found = next((doc for doc in data['documents'] if doc['id'] == self.doc_id_perm), None)
+        self.assertIsNotNone(doc_found, "Document not visible after granting view permission")
+        self.assertFalse(doc_found.get('is_downloadable', True)) # Explicitly check for False as default might be True if key missing
+
+        # Revoke view permission
+        with app.app_context(): _set_permission_for_test(get_db(), self.testuser_id, self.doc_id_perm, 'document', False, False)
+        response = self.client.get('/api/documents', headers=self.user_headers)
+        data = json.loads(response.data)
+        self.assertFalse(any(doc['id'] == self.doc_id_perm for doc in data['documents']), "Document still visible after revoking view permission")
+
+    def test_document_download_permission_enforcement(self):
+        # Grant view, no download
+        with app.app_context(): _set_permission_for_test(get_db(), self.testuser_id, self.doc_id_perm, 'document', True, False)
+        
+        response = self.client.get(f'/official_uploads/docs/vpdoc.pdf', headers=self.user_headers) # filename from setup
+        self.assertEqual(response.status_code, 403, "Download allowed without can_download=True")
+
+        # Grant download
+        with app.app_context(): _set_permission_for_test(get_db(), self.testuser_id, self.doc_id_perm, 'document', True, True)
+        response = self.client.get(f'/official_uploads/docs/vpdoc.pdf', headers=self.user_headers)
+        self.assertEqual(response.status_code, 200, "Download denied with can_download=True")
+        # Verify download log
+        with app.app_context():
+            log = get_db().execute("SELECT * FROM download_log WHERE file_id = ? AND file_type = 'document' AND user_id = ?", (self.doc_id_perm, self.testuser_id)).fetchone()
+            self.assertIsNotNone(log, "Download activity not logged")
+
+        # Revoke download
+        with app.app_context(): _set_permission_for_test(get_db(), self.testuser_id, self.doc_id_perm, 'document', True, False)
+        response = self.client.get(f'/official_uploads/docs/vpdoc.pdf', headers=self.user_headers)
+        self.assertEqual(response.status_code, 403, "Download allowed after revoking can_download")
+
+    # Similar tests for patch, link, misc_file would follow...
+    # For search, it's more complex as it aggregates. One test might suffice to show search respects view perms.
+    def test_search_respects_view_permission_document(self):
+        # Initially, no permission for doc_id_perm (4001)
+        response = self.client.get(f'/api/search?q=ViewPermDoc', headers=self.user_headers)
+        data = json.loads(response.data)
+        self.assertFalse(any(item['id'] == self.doc_id_perm and item['type'] == 'document' for item in data), "Document found in search without view permission")
+
+        # Grant view permission
+        with app.app_context(): _set_permission_for_test(get_db(), self.testuser_id, self.doc_id_perm, 'document', True, False)
+        response = self.client.get(f'/api/search?q=ViewPermDoc', headers=self.user_headers)
+        data = json.loads(response.data)
+        found_item = next((item for item in data if item['id'] == self.doc_id_perm and item['type'] == 'document'), None)
+        self.assertIsNotNone(found_item, "Document not found in search after granting view permission")
+        self.assertFalse(found_item.get('is_downloadable', True)) # Check is_downloadable flag from search
+
+        # Revoke view
+        with app.app_context(): _set_permission_for_test(get_db(), self.testuser_id, self.doc_id_perm, 'document', False, False)
+        response = self.client.get(f'/api/search?q=ViewPermDoc', headers=self.user_headers)
+        data = json.loads(response.data)
+        self.assertFalse(any(item['id'] == self.doc_id_perm and item['type'] == 'document' for item in data), "Document still found in search after revoking view permission")
+
+    # --- Patch Permission Tests ---
+    def test_patch_view_permission_enforcement(self):
+        response = self.client.get('/api/patches', headers=self.user_headers)
+        data = json.loads(response.data)
+        self.assertFalse(any(p['id'] == self.patch_id_perm for p in data['patches']), "Patch visible without permission")
+
+        with app.app_context(): _set_permission_for_test(get_db(), self.testuser_id, self.patch_id_perm, 'patch', True, False)
+        response = self.client.get('/api/patches', headers=self.user_headers)
+        data = json.loads(response.data)
+        patch_found = next((p for p in data['patches'] if p['id'] == self.patch_id_perm), None)
+        self.assertIsNotNone(patch_found)
+        self.assertFalse(patch_found.get('is_downloadable', True))
+
+        with app.app_context(): _set_permission_for_test(get_db(), self.testuser_id, self.patch_id_perm, 'patch', False, False)
+        response = self.client.get('/api/patches', headers=self.user_headers)
+        data = json.loads(response.data)
+        self.assertFalse(any(p['id'] == self.patch_id_perm for p in data['patches']))
+
+    def test_patch_download_permission_enforcement(self):
+        with app.app_context(): _set_permission_for_test(get_db(), self.testuser_id, self.patch_id_perm, 'patch', True, False)
+        response = self.client.get(f'/official_uploads/patches/vppatch.zip', headers=self.user_headers)
+        self.assertEqual(response.status_code, 403)
+
+        with app.app_context(): _set_permission_for_test(get_db(), self.testuser_id, self.patch_id_perm, 'patch', True, True)
+        response = self.client.get(f'/official_uploads/patches/vppatch.zip', headers=self.user_headers)
+        self.assertEqual(response.status_code, 200)
+        with app.app_context():
+            log = get_db().execute("SELECT * FROM download_log WHERE file_id = ? AND file_type = 'patch' AND user_id = ?", (self.patch_id_perm, self.testuser_id)).fetchone()
+            self.assertIsNotNone(log)
+
+    # --- Link (Uploaded File) Permission Tests ---
+    def test_link_view_permission_enforcement(self):
+        response = self.client.get('/api/links', headers=self.user_headers)
+        data = json.loads(response.data)
+        self.assertFalse(any(l['id'] == self.link_id_perm for l in data['links']), "Link visible without permission")
+
+        with app.app_context(): _set_permission_for_test(get_db(), self.testuser_id, self.link_id_perm, 'link', True, False)
+        response = self.client.get('/api/links', headers=self.user_headers)
+        data = json.loads(response.data)
+        link_found = next((l for l in data['links'] if l['id'] == self.link_id_perm), None)
+        self.assertIsNotNone(link_found)
+        self.assertFalse(link_found.get('is_downloadable', True))
+
+    def test_link_download_permission_enforcement(self): # Assuming 'vplink.txt' is the stored_filename for link_id_perm
+        with app.app_context(): _set_permission_for_test(get_db(), self.testuser_id, self.link_id_perm, 'link', True, False)
+        response = self.client.get(f'/official_uploads/links/vplink.txt', headers=self.user_headers)
+        self.assertEqual(response.status_code, 403)
+
+        with app.app_context(): _set_permission_for_test(get_db(), self.testuser_id, self.link_id_perm, 'link', True, True)
+        response = self.client.get(f'/official_uploads/links/vplink.txt', headers=self.user_headers)
+        self.assertEqual(response.status_code, 200)
+        with app.app_context():
+            log = get_db().execute("SELECT * FROM download_log WHERE file_id = ? AND file_type = 'link_file' AND user_id = ?", (self.link_id_perm, self.testuser_id)).fetchone()
+            self.assertIsNotNone(log)
+
+    # --- Misc File Permission Tests ---
+    def test_misc_file_view_permission_enforcement(self):
+        response = self.client.get('/api/misc_files', headers=self.user_headers)
+        data = json.loads(response.data)
+        self.assertFalse(any(mf['id'] == self.misc_id_perm for mf in data['misc_files']), "Misc file visible without permission")
+
+        with app.app_context(): _set_permission_for_test(get_db(), self.testuser_id, self.misc_id_perm, 'misc_file', True, False)
+        response = self.client.get('/api/misc_files', headers=self.user_headers)
+        data = json.loads(response.data)
+        misc_found = next((mf for mf in data['misc_files'] if mf['id'] == self.misc_id_perm), None)
+        self.assertIsNotNone(misc_found)
+        self.assertFalse(misc_found.get('is_downloadable', True))
+
+    def test_misc_file_download_permission_enforcement(self): # Assuming 'viewmisc.txt' is the stored_filename
+        with app.app_context(): _set_permission_for_test(get_db(), self.testuser_id, self.misc_id_perm, 'misc_file', True, False)
+        response = self.client.get(f'/misc_uploads/viewmisc.txt', headers=self.user_headers)
+        self.assertEqual(response.status_code, 403)
+
+        with app.app_context(): _set_permission_for_test(get_db(), self.testuser_id, self.misc_id_perm, 'misc_file', True, True)
+        response = self.client.get(f'/misc_uploads/viewmisc.txt', headers=self.user_headers)
+        self.assertEqual(response.status_code, 200)
+        with app.app_context():
+            log = get_db().execute("SELECT * FROM download_log WHERE file_id = ? AND file_type = 'misc_file' AND user_id = ?", (self.misc_id_perm, self.testuser_id)).fetchone()
+            self.assertIsNotNone(log)
+
+    def test_no_login_access_denied(self):
+        # Document
+        response_doc_list = self.client.get('/api/documents') # No headers
+        data_doc_list = json.loads(response_doc_list.data)
+        # If user_id is None in the backend query for permissions, it won't match, so list will be empty of permissioned files
+        self.assertFalse(any(doc['id'] == self.doc_id_perm for doc in data_doc_list['documents']))
+        response_doc_dl = self.client.get(f'/official_uploads/docs/vpdoc.pdf')
+        self.assertEqual(response_doc_dl.status_code, 401) # @jwt_required(optional=True) but then checks user_id
+        
+        # Patch
+        response_patch_list = self.client.get('/api/patches')
+        data_patch_list = json.loads(response_patch_list.data)
+        self.assertFalse(any(p['id'] == self.patch_id_perm for p in data_patch_list['patches']))
+        response_patch_dl = self.client.get(f'/official_uploads/patches/vppatch.zip')
+        self.assertEqual(response_patch_dl.status_code, 401)
+
+        # Link
+        response_link_list = self.client.get('/api/links')
+        data_link_list = json.loads(response_link_list.data)
+        self.assertFalse(any(l['id'] == self.link_id_perm for l in data_link_list['links']))
+        response_link_dl = self.client.get(f'/official_uploads/links/vplink.txt')
+        self.assertEqual(response_link_dl.status_code, 401)
+
+        # Misc File
+        response_misc_list = self.client.get('/api/misc_files')
+        data_misc_list = json.loads(response_misc_list.data)
+        self.assertFalse(any(mf['id'] == self.misc_id_perm for mf in data_misc_list['misc_files']))
+        response_misc_dl = self.client.get(f'/misc_uploads/viewmisc.txt')
+        self.assertEqual(response_misc_dl.status_code, 401)
 
 
 if __name__ == '__main__':

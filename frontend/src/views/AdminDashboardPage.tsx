@@ -159,18 +159,6 @@ const AdminDashboardPage: React.FC = () => {
     // dateString is now expected to be in ISO 8601 UTC format (e.g., "YYYY-MM-DDTHH:MM:SSZ")
     
     const dateObj = new Date(dateString);
-  
-    // Enhanced console log for debugging
-    console.log(
-      `formatDate Debug (post-schema change):
-      Original dateString (expected ISO8601 UTC): "${dateString}"
-      Created Date object:`, dateObj, `
-      dateObj.toString(): "${dateObj.toString()}"
-      dateObj.toISOString(): "${dateObj.toISOString()}"
-      dateObj.toLocaleString('en-US', { hour12: false }): "${dateObj.toLocaleString('en-US', { hour12: false })}" 
-      dateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }): "${dateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}"`
-    );
-  
     return dateObj.toLocaleDateString('en-US', {
       year: 'numeric', month: 'short', day: 'numeric',
       hour: '2-digit', minute: '2-digit',

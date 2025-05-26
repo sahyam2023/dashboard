@@ -23,6 +23,7 @@ interface SearchResultItem {
   url?: string; // For external links
   is_external_link?: boolean; // For links
   stored_filename?: string; // For uploaded files (links, misc_files)
+  is_downloadable?: boolean;
   is_favorited?: boolean; // Added
   favorite_id?: number; // Added
   // Add other fields that might appear in search results
@@ -112,38 +113,42 @@ const SearchResultsView: React.FC = () => {
     let isExternal = false;
     let isDownload = false;
     let downloadUrl: string | undefined = undefined;
+    let isEffectivelyDownloadable = true; // Default to true, adjust based on type and flags
 
     switch (result.type) {
       case 'document':
-        linkTo = `/documents?highlight=${result.id}`; // Or just /documents
+        linkTo = `/documents?highlight=${result.id}`; 
+        // Downloadability for documents in search results is handled by DocumentsView
         break;
       case 'patch':
-        linkTo = `/patches?highlight=${result.id}`; // Or just /patches
+        linkTo = `/patches?highlight=${result.id}`; 
+        // Downloadability for patches in search results is handled by PatchesView
         break;
       case 'software':
         linkTo = `/documents?software_id=${result.id}`;
         break;
       case 'version':
-        linkTo = `/patches?software_id=${result.software_id}`; // Future: &version=${result.name}
+        linkTo = `/patches?software_id=${result.software_id}`;
         break;
       case 'link':
         if (result.is_external_link && result.url) {
           linkTo = result.url;
           isExternal = true;
+          // External links are always "downloadable" (clickable)
         } else if (result.stored_filename) {
-          // Assuming official_uploads for links, adjust if path varies
           downloadUrl = `/official_uploads/links/${result.stored_filename}`;
           isDownload = true;
+          isEffectivelyDownloadable = result.is_downloadable !== false;
         }
         break;
       case 'misc_file':
         if (result.stored_filename) {
           downloadUrl = `/misc_uploads/${result.stored_filename}`;
           isDownload = true;
+          isEffectivelyDownloadable = result.is_downloadable !== false;
         }
         break;
       default:
-        // No specific link, just display info
         break;
     }
 
@@ -188,6 +193,14 @@ const SearchResultsView: React.FC = () => {
     }
     
     if (isDownload && downloadUrl) {
+       if (!isEffectivelyDownloadable) {
+         return (
+           <div key={key} className={`${commonClasses} cursor-not-allowed opacity-70`} title="Download not permitted">
+             {content}
+             {/* Optionally, add a disabled-looking download icon here if needed */}
+           </div>
+         );
+       }
        return (
         <a href={downloadUrl} key={key} className={commonClasses} download target="_blank" rel="noopener noreferrer">
           {content}

@@ -237,7 +237,32 @@ const MiscView: React.FC = () => {
     { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: f => f.uploaded_by_username||'N/A' },
     { key: 'file_size', header: 'Size', sortable: true, render: f => formatFileSize(f.file_size) },
     { key: 'created_at', header: 'Uploaded At', sortable: true, render: f => formatDate(f.created_at) },
-    { key: 'file_path', header: 'Link', render: f => (<a href={`${API_BASE_URL}${f.file_path}`} target="_blank" rel="noopener noreferrer" className="flex items-center text-blue-600 hover:text-blue-800" onClick={e=>e.stopPropagation()}><Download size={14}className="mr-1"/>Download</a>)},
+    { 
+      key: 'file_path', 
+      header: 'Link', 
+      render: (f: MiscFile) => {
+        const isEffectivelyDownloadable = f.is_downloadable !== false; // Default to true if undefined
+        if (!isEffectivelyDownloadable) {
+          return (
+            <span className="flex items-center text-gray-400 cursor-not-allowed" title="Download not permitted">
+              <Download size={14} className="mr-1"/>Download
+            </span>
+          );
+        }
+        return (
+          <a 
+            href={`${API_BASE_URL}${f.file_path}`} 
+            target="_blank" // Misc files are always served, so target _blank is fine
+            rel="noopener noreferrer" 
+            className="flex items-center text-blue-600 hover:text-blue-800"
+            onClick={(e) => e.stopPropagation()}
+            title="Download file"
+          >
+            <Download size={14}className="mr-1"/>Download
+          </a>
+        );
+      }
+    },
     { key: 'actions' as any, header: 'Actions', render: (f: MiscFile) => (<div className="flex space-x-1 items-center">{isAuthenticated&&(<button onClick={e=>{e.stopPropagation();handleFavoriteToggle(f,'misc_file')}} className={`p-1 rounded-md ${favoritedItems.get(f.id)?.favoriteId?'text-yellow-500 hover:text-yellow-600':'text-gray-400 hover:text-yellow-500'}`} title={favoritedItems.get(f.id)?.favoriteId?"Remove Favorite":"Add Favorite"}><Star size={16} className={favoritedItems.get(f.id)?.favoriteId?"fill-current":""}/></button>)}{(role==='admin'||role==='super_admin')&&(<> <button onClick={e=>{e.stopPropagation();openAddOrEditFileForm(f)}} className="p-1 text-blue-600 hover:text-blue-800 rounded-md" title="Edit"><Edit3 size={16}/></button> <button onClick={e=>{e.stopPropagation();openDeleteFileConfirm(f)}} className="p-1 text-red-600 hover:text-red-800 rounded-md" title="Delete"><Trash2 size={16}/></button></>)}</div>)},
   ];
   const loadMiscFilesCallback = useCallback(() => { fetchAndSetMiscFiles(1, true); }, [fetchAndSetMiscFiles]);
@@ -336,7 +361,7 @@ const MiscView: React.FC = () => {
 
       {showDeleteCategoryConfirm && categoryToDelete && (<ConfirmationModal isOpen={showDeleteCategoryConfirm} title="Delete Category" message={`Delete category "${categoryToDelete.name}"? Files in it won't be deleted but will become uncategorized.`} onConfirm={handleDeleteCategoryConfirm} onCancel={closeDeleteCategoryConfirm} isConfirming={isProcessingCategory} confirmButtonText="Delete" confirmButtonVariant="danger"/>)}
       {showDeleteFileConfirm && fileToDelete && (<ConfirmationModal isOpen={showDeleteFileConfirm} title="Delete File" message={`Delete "${fileToDelete.user_provided_title||fileToDelete.original_filename}"?`} onConfirm={handleDeleteFileConfirm} onCancel={closeDeleteFileConfirm} isConfirming={isProcessingSingleItem} confirmButtonText="Delete" confirmButtonVariant="danger"/>)}
-      {showBulkDeleteConfirmModal && (<ConfirmationModal isOpen={showBulkDeleteConfirmModal} title={`Delete ${selectedMiscFileIds.size} File(s)`} message={`Delete ${selectedMiscFileIds.size} selected items?`} onConfirm={confirmBulkDeleteMiscFiles} onCancel={()=>setShowBulkDeleteConfirmModal(false)} isConfirming={isDeletingSelected} confirmButtonText="Delete Selected" confirmButtonVariant="danger" Icon={AlertTriangle}/>)}
+      {showBulkDeleteConfirmModal && (<ConfirmationModal isOpen={showBulkDeleteConfirmModal} title={`Delete ${selectedMiscFileIds.size} File(s)`} message={`Delete ${selectedMiscFileIds.size} selected items?`} onConfirm={confirmBulkDeleteMiscFiles} onCancel={()=>setShowBulkDeleteConfirmModal(false)} isConfirming={isDeletingSelected} confirmButtonText="Delete Selected" confirmButtonVariant="danger"/>)}
       
       {showBulkMoveModal && (
         <Modal isOpen={showBulkMoveModal} onClose={()=>setShowBulkMoveModal(false)} title={`Move ${selectedMiscFileIds.size} File(s)`}>

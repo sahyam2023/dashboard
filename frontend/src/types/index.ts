@@ -48,6 +48,7 @@ export interface Document {
   updated_by_username?: string;
   is_favorited?: boolean;
   favorite_id?: number;
+  is_downloadable?: boolean;
 }
 
 // --- Patch Types ---
@@ -78,6 +79,7 @@ export interface Patch {
   updated_by_username?: string;
   is_favorited?: boolean;
   favorite_id?: number;
+  is_downloadable?: boolean;
 }
 
 // --- Link Types ---
@@ -106,6 +108,7 @@ export interface Link {
   updated_by_username?: string;
   is_favorited?: boolean;
   favorite_id?: number;
+  is_downloadable?: boolean;
   // category?: string; // Removed as it's not in the current backend schema for links
 }
 
@@ -232,6 +235,33 @@ export interface MiscFile {
   updated_by_username?: string;
   is_favorited?: boolean;
   favorite_id?: number;
+  is_downloadable?: boolean;
 }
 // No specific EditMiscFilePayload type is defined here as edit operations for misc files
 // (like replacing the file or changing metadata) will likely use FormData via editAdminMiscFile.
+
+// --- File Permission Management Types ---
+export type PermissibleFileType = 'document' | 'patch' | 'link' | 'misc_file';
+
+export interface FilePermission {
+  id: number;
+  user_id: number;
+  file_id: number;
+  file_type: PermissibleFileType;
+  can_view: boolean;
+  can_download: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface FilePermissionUpdatePayload {
+  file_id: number;
+  file_type: PermissibleFileType;
+  can_view: boolean;
+  can_download: boolean;
+}
+
+export interface UpdateUserFilePermissionsResponse {
+  msg: string;
+  permissions: FilePermission[];
+}

@@ -10,11 +10,16 @@ import {
   AddLinkPayloadFlexible, EditLinkPayloadFlexible,
 
   MiscCategory, AddCategoryPayload, EditCategoryPayload, // EditCategoryPayload is used
-  MiscFile
+  MiscFile,
   // EditMiscFilePayload is not used if all misc file edits are via FormData
   // User, ChangePasswordPayload, UpdateEmailPayload, UpdateUserRolePayload,
   // DocumentType, Link, Patch, Software, SoftwareVersion, MiscCategory, MiscFile
   // should ideally be imported from a central types.ts file.
+
+  // File Permission Types
+  FilePermission,
+  FilePermissionUpdatePayload,
+  UpdateUserFilePermissionsResponse,
 } from '../types'; // Assuming '../types' will eventually export these
 export type { Software } from '../types'; // Re-exporting Software type
 
@@ -351,6 +356,41 @@ export async function fetchSoftware(): Promise<Software[]> {
     return await response.json();
   } catch (error) {
     console.error('Error fetching software:', error);
+    throw error;
+  }
+}
+
+// --- Super Admin File Permission Management Functions ---
+
+export async function getUserFilePermissions(userId: number): Promise<FilePermission[]> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/superadmin/users/${userId}/permissions`, {
+      method: 'GET',
+      headers: { ...getAuthHeader() },
+    });
+    return handleApiError(response, `Failed to fetch file permissions for user ${userId}`);
+  } catch (error) {
+    console.error(`Error fetching file permissions for user ${userId}:`, error);
+    throw error;
+  }
+}
+
+export async function updateUserFilePermissions(
+  userId: number,
+  permissions: FilePermissionUpdatePayload[]
+): Promise<UpdateUserFilePermissionsResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/superadmin/users/${userId}/permissions`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeader(),
+      },
+      body: JSON.stringify(permissions),
+    });
+    return handleApiError(response, `Failed to update file permissions for user ${userId}`);
+  } catch (error) {
+    console.error(`Error updating file permissions for user ${userId}:`, error);
     throw error;
   }
 }

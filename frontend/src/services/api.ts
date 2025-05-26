@@ -336,6 +336,115 @@ export async function fetchSoftware(): Promise<Software[]> {
   }
 }
 
+// --- Bulk Action API Functions ---
+
+/**
+ * Represents the type of item being targeted in a bulk action.
+ * Should align with backend's `ALLOWED_BULK_ITEM_TYPES`.
+ */
+export type BulkItemType = 'document' | 'patch' | 'link' | 'misc_file';
+
+/**
+ * Response type for bulk delete operations.
+ */
+export interface BulkDeleteResponse {
+  msg: string;
+  deleted_count: number;
+  failed_ids: number[];
+}
+
+/**
+ * Response type for bulk move operations.
+ */
+export interface BulkMoveResponse {
+  msg: string;
+  moved_count: number;
+  failed_items: Array<{ id: number; error: string }>; // Backend sends failed_items_details
+}
+
+/**
+ * Performs a bulk delete operation on specified items.
+ * @param itemIds - An array of item IDs to delete.
+ * @param itemType - The type of items to delete (e.g., 'document', 'patch').
+ * @returns A promise that resolves to the backend's response.
+ */
+export async function bulkDeleteItems(itemIds: number[], itemType: BulkItemType): Promise<BulkDeleteResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/bulk/delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ item_ids: itemIds, item_type: itemType }),
+    });
+    return handleApiError(response, `Failed to bulk delete ${itemType} items`);
+  } catch (error) {
+    console.error(`Error bulk deleting ${itemType} items:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Performs a bulk download operation for specified items.
+ * The backend will respond with a zip file containing the requested items.
+ * @param itemIds - An array of item IDs to download.
+ * @param itemType - The type of items to download (e.g., 'document', 'patch').
+ * @returns A promise that resolves to a Blob (the zip file).
+ */
+export async function bulkDownloadItems(itemIds: number[], itemType: BulkItemType): Promise<Blob> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/bulk/download`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ item_ids: itemIds, item_type: itemType }),
+    });
+
+    if (!response.ok) {
+      // If response is not OK, backend should send a JSON error message
+      // Use handleApiError to parse it and throw an error
+      // Note: handleApiError throws, so we don't need to return its result here.
+      // We await it to ensure the error is processed before any further (unlikely) execution.
+      await handleApiError(response, `Failed to initiate bulk download for ${itemType} items`);
+      // The line above will throw, so the code below this won't execute on error.
+      // Adding a fallback throw just in case handleApiError's behavior changes or is misinterp.
+      throw new Error(`Bulk download initiation failed with status ${response.status}`);
+    }
+    
+    // If response is OK, expect a blob (zip file)
+    return response.blob();
+  } catch (error) {
+    console.error(`Error bulk downloading ${itemType} items:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Performs a bulk move operation on specified items.
+ * @param itemIds - An array of item IDs to move.
+ * @param itemType - The type of items to move.
+ * @param targetMetadata - An object containing the target foreign key IDs (e.g., { target_software_id: 123 }).
+ * @returns A promise that resolves to the backend's response.
+ */
+export async function bulkMoveItems(
+  itemIds: number[], 
+  itemType: BulkItemType, 
+  targetMetadata: Record<string, any>
+): Promise<BulkMoveResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/bulk/move`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ 
+        item_ids: itemIds, 
+        item_type: itemType, 
+        target_metadata: targetMetadata 
+      }),
+    });
+    return handleApiError(response, `Failed to bulk move ${itemType} items`);
+  } catch (error) {
+    console.error(`Error bulk moving ${itemType} items:`, error);
+    throw error;
+  }
+}
+// --- End Bulk Action API Functions ---
 // --- User Dashboard Layout Preferences API Functions ---
 // Simplified layout type for API communication.
 // `react-grid-layout` uses `Layout[]` which is `Array<Layout>`

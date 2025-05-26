@@ -11,6 +11,8 @@ import secrets # Added for secure token generation
 import shutil # For file operations if needed, though .backup is preferred for DB
 import click # For CLI arguments
 from functools import wraps
+import zipfile
+import tempfile
 from flask import Flask, request, g, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
@@ -4947,3 +4949,521 @@ if __name__ == '__main__':
 
 # --- User Favorites Endpoints ---
 ALLOWED_FAVORITE_ITEM_TYPES = ['document', 'patch', 'link', 'misc_file', 'software', 'version']
+
+# --- Bulk Action Constants ---
+ALLOWED_BULK_ITEM_TYPES = ['document', 'patch', 'link', 'misc_file']
+
+
+# --- Bulk Action Endpoints ---
+
+@app.route('/api/bulk/delete', methods=['POST'])
+@jwt_required()
+@admin_required
+def bulk_delete_items():
+    data = request.get_json()
+    if not data:
+        return jsonify(msg="Missing JSON data"), 400
+
+    item_ids = data.get('item_ids')
+    item_type = data.get('item_type')
+
+    if not isinstance(item_ids, list) or not item_ids or not all(isinstance(i, int) and i > 0 for i in item_ids):
+        return jsonify(msg="item_ids must be a non-empty list of positive integers."), 400
+    if not item_type or item_type not in ALLOWED_BULK_ITEM_TYPES:
+        return jsonify(msg=f"item_type is required and must be one of: {', '.join(ALLOWED_BULK_ITEM_TYPES)}."), 400
+
+    current_user_id = int(get_jwt_identity())
+    db = get_db()
+
+    item_type_map = {
+        'document': {
+            'table': 'documents', 'id_col': 'id', 'name_col': 'doc_name', 
+            'filename_col': 'stored_filename', 'is_external_col': 'is_external_link',
+            'folder_config': 'DOC_UPLOAD_FOLDER', 'log_action': 'BULK_DELETE_DOCUMENT_ITEM'
+        },
+        'patch': {
+            'table': 'patches', 'id_col': 'id', 'name_col': 'patch_name',
+            'filename_col': 'stored_filename', 'is_external_col': 'is_external_link',
+            'folder_config': 'PATCH_UPLOAD_FOLDER', 'log_action': 'BULK_DELETE_PATCH_ITEM'
+        },
+        'link': {
+            'table': 'links', 'id_col': 'id', 'name_col': 'title',
+            'filename_col': 'stored_filename', 'is_external_col': 'is_external_link', # True for external URLs, False for uploaded files via links
+            'folder_config': 'LINK_UPLOAD_FOLDER', 'log_action': 'BULK_DELETE_LINK_ITEM'
+        },
+        'misc_file': {
+            'table': 'misc_files', 'id_col': 'id', 'name_col': 'user_provided_title', # or original_filename
+            'filename_col': 'stored_filename', 'is_external_col': None, # Misc files are always physical
+            'folder_config': 'MISC_UPLOAD_FOLDER', 'log_action': 'BULK_DELETE_MISC_FILE_ITEM'
+        }
+    }
+
+    if item_type not in item_type_map: # Should be caught by ALLOWED_BULK_ITEM_TYPES, but good practice
+        return jsonify(msg=f"Invalid item_type '{item_type}' for bulk delete."), 400
+
+    config = item_type_map[item_type]
+    success_count = 0
+    failed_ids = []
+    processed_ids_details = [] # For logging individual successes or failures
+
+    db.execute("BEGIN") # Start transaction
+
+    try:
+        for item_id in item_ids:
+            item_query = f"SELECT {config['name_col']} AS name, {config['filename_col']} AS filename"
+            if config['is_external_col']:
+                item_query += f", {config['is_external_col']} AS is_external"
+            item_query += f" FROM {config['table']} WHERE {config['id_col']} = ?"
+            
+            item = db.execute(item_query, (item_id,)).fetchone()
+
+            if not item:
+                failed_ids.append(item_id)
+                processed_ids_details.append({'id': item_id, 'status': 'not_found'})
+                continue
+
+            item_name = item['name']
+            stored_filename = item['filename']
+            is_external = item['is_external'] if config['is_external_col'] and 'is_external' in item.keys() else False
+
+            file_deleted_successfully = True # Assume true for external links or items without files
+            if stored_filename and (config['is_external_col'] is None or not is_external) : # Physical file exists
+                file_path = os.path.join(app.config[config['folder_config']], stored_filename)
+                if not _delete_file_if_exists(file_path):
+                    app.logger.warning(f"Bulk delete: Failed to delete physical file {file_path} for {item_type} ID {item_id}.")
+                    # Depending on policy, you might add this to failed_ids or just log.
+                    # For now, we'll proceed to delete DB record even if file deletion fails, but log it.
+                    file_deleted_successfully = False # Log this, but don't necessarily fail the DB delete for it
+
+            # Delete DB record
+            delete_cursor = db.execute(f"DELETE FROM {config['table']} WHERE {config['id_col']} = ?", (item_id,))
+            
+            if delete_cursor.rowcount > 0:
+                success_count += 1
+                processed_ids_details.append({'id': item_id, 'name': item_name, 'status': 'deleted', 'file_deleted': file_deleted_successfully})
+                log_audit_action(
+                    action_type=config['log_action'],
+                    target_table=config['table'],
+                    target_id=item_id,
+                    details={'deleted_item_name': item_name, 'bulk_operation_id': request.headers.get('X-Request-ID', 'N/A'), 'file_deleted': file_deleted_successfully}
+                )
+            else:
+                # This case should be rare if item was fetched successfully above, but handle it.
+                failed_ids.append(item_id)
+                processed_ids_details.append({'id': item_id, 'name': item_name, 'status': 'delete_failed_db'})
+                app.logger.error(f"Bulk delete: DB delete command affected 0 rows for {item_type} ID {item_id} which was previously fetched.")
+        
+        if not failed_ids: # All items processed successfully (or file deletion failed but DB delete succeeded)
+            db.commit()
+            msg = f"Successfully deleted {success_count} {item_type}(s)."
+            if success_count != len(item_ids): # Some items were not found initially
+                 msg += f" ({len(item_ids) - success_count} items not found or failed to delete)."
+        else:
+            db.rollback()
+            msg = f"Bulk delete for {item_type} failed for {len(failed_ids)} IDs: {', '.join(map(str, failed_ids))}. No items were deleted."
+            # If we want partial success, the commit would be outside this else, and message adjusted.
+            # For now, full rollback on any DB delete failure for an item that was found.
+            # Items not found initially don't cause a rollback if others succeed.
+
+        log_audit_action(
+            action_type='BULK_DELETE_COMPLETE',
+            details={
+                'item_type': item_type, 
+                'requested_count': len(item_ids),
+                'deleted_count': success_count, 
+                'failed_ids': failed_ids,
+                'processed_details': processed_ids_details # Provides status for each item
+            }
+        )
+        return jsonify(msg=msg, deleted_count=success_count, failed_ids=failed_ids), 200 if not failed_ids or success_count > 0 else 400
+
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"Exception during bulk delete for {item_type}: {e}", exc_info=True)
+        log_audit_action(
+            action_type='BULK_DELETE_FAILED',
+            details={'item_type': item_type, 'error': str(e), 'item_ids_requested': item_ids}
+        )
+        return jsonify(msg=f"An error occurred during bulk delete: {str(e)}"), 500
+
+
+@app.route('/api/bulk/download', methods=['POST'])
+@jwt_required()
+def bulk_download_items():
+    data = request.get_json()
+    if not data:
+        return jsonify(msg="Missing JSON data"), 400
+
+    item_ids = data.get('item_ids')
+    item_type = data.get('item_type')
+
+    if not isinstance(item_ids, list) or not item_ids or not all(isinstance(i, int) and i > 0 for i in item_ids):
+        return jsonify(msg="item_ids must be a non-empty list of positive integers."), 400
+    if not item_type or item_type not in ALLOWED_BULK_ITEM_TYPES:
+        return jsonify(msg=f"item_type is required and must be one of: {', '.join(ALLOWED_BULK_ITEM_TYPES)}."), 400
+
+    current_user_id = int(get_jwt_identity()) # For logging, though _log_download_activity handles user from JWT
+    db = get_db()
+
+    item_type_map = {
+        'document': {
+            'table': 'documents', 'id_col': 'id', 'name_col': 'doc_name', 
+            'filename_col': 'stored_filename', 'is_external_col': 'is_external_link',
+            'folder_config': 'DOC_UPLOAD_FOLDER', 'original_ref_col': 'original_filename_ref'
+        },
+        'patch': {
+            'table': 'patches', 'id_col': 'id', 'name_col': 'patch_name',
+            'filename_col': 'stored_filename', 'is_external_col': 'is_external_link',
+            'folder_config': 'PATCH_UPLOAD_FOLDER', 'original_ref_col': 'original_filename_ref'
+        },
+        'link': { # Only uploaded files associated with links are downloadable in bulk
+            'table': 'links', 'id_col': 'id', 'name_col': 'title',
+            'filename_col': 'stored_filename', 'is_external_col': 'is_external_link',
+            'folder_config': 'LINK_UPLOAD_FOLDER', 'original_ref_col': 'original_filename_ref'
+        },
+        'misc_file': {
+            'table': 'misc_files', 'id_col': 'id', 'name_col': 'user_provided_title', 
+            'filename_col': 'stored_filename', 'is_external_col': None, # Misc files are always physical
+            'folder_config': 'MISC_UPLOAD_FOLDER', 'original_ref_col': 'original_filename'
+        }
+    }
+
+    if item_type not in item_type_map:
+        return jsonify(msg=f"Invalid item_type '{item_type}' for bulk download."), 400
+
+    config = item_type_map[item_type]
+    files_to_zip_details = []
+    errors_details = [] # To store details about why certain items couldn't be added
+
+    for item_id in item_ids:
+        # Fetch item details including original filename for use in zip
+        query_fields = f"{config['id_col']} AS id, {config['name_col']} AS name, {config['filename_col']} AS stored_filename, {config['original_ref_col']} AS original_name_ref"
+        if config['is_external_col']:
+            query_fields += f", {config['is_external_col']} AS is_external"
+        
+        item_query = f"SELECT {query_fields} FROM {config['table']} WHERE {config['id_col']} = ?"
+        item = db.execute(item_query, (item_id,)).fetchone()
+
+        if not item:
+            errors_details.append({'id': item_id, 'error': 'not_found'})
+            continue
+
+        is_external = item['is_external'] if config['is_external_col'] and 'is_external' in item.keys() else False
+        if is_external:
+            errors_details.append({'id': item_id, 'name': item['name'], 'error': 'is_external_link'})
+            continue
+
+        stored_filename = item['stored_filename']
+        if not stored_filename:
+            errors_details.append({'id': item_id, 'name': item['name'], 'error': 'no_stored_file'})
+            continue
+
+        file_path = os.path.join(app.config[config['folder_config']], stored_filename)
+        if not os.path.exists(file_path):
+            errors_details.append({'id': item_id, 'name': item['name'], 'error': 'file_not_found_on_disk', 'path_checked': file_path})
+            app.logger.warning(f"Bulk download: File {file_path} for {item_type} ID {item_id} not found on disk.")
+            continue
+        
+        # Use original filename if available and sensible, otherwise use stored_filename or ID-based name
+        name_in_zip = item['original_name_ref'] or stored_filename
+        # Sanitize name_in_zip further if needed, or ensure uniqueness if multiple items have same original_name_ref
+        # For now, direct use. Could add item_id prefix for guaranteed uniqueness: f"{item_id}_{name_in_zip}"
+        
+        files_to_zip_details.append({'path': file_path, 'name_in_zip': name_in_zip, 'item_id': item_id, 'item_name': item['name']})
+        
+        # Log individual download attempt (actual logging happens when file is served, but good to note here)
+        # _log_download_activity is typically called by the serving endpoint.
+        # For bulk, we might log a single "BULK_DOWNLOAD_PACKAGE_CREATED" and list contents.
+        # Or, if _log_download_activity is called per file, ensure it happens before sending.
+        # For now, deferring specific logging of individual files until after zip creation and before sending.
+
+    if not files_to_zip_details:
+        log_audit_action(action_type='BULK_DOWNLOAD_NO_FILES', details={'item_type': item_type, 'requested_ids': item_ids, 'errors': errors_details})
+        return jsonify(msg="No files found or eligible for download based on selection.", errors=errors_details), 404
+
+    try:
+        # Create a temporary directory to store the zip file
+        with tempfile.TemporaryDirectory() as tmpdir:
+            zip_filename_base = f"bulk_download_{item_type}_{datetime.now().strftime('%Y%m%d%H%M%S')}.zip"
+            zip_filepath = os.path.join(tmpdir, zip_filename_base)
+
+            with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for file_detail in files_to_zip_details:
+                    # Ensure unique names within zip if original names might clash
+                    # A simple way: prefix with item_id or use a counter for duplicate names
+                    # For now, using original/stored name as is.
+                    # Consider a check for duplicate 'name_in_zip' here if strict uniqueness is needed.
+                    zf.write(file_detail['path'], arcname=file_detail['name_in_zip'])
+                    # Log individual file download as part of bulk operation.
+                    # Note: _log_download_activity requires the stored_filename, not the path or name_in_zip.
+                    # We need to find the stored_filename for the item_id again if not easily available here.
+                    # Let's re-fetch stored_filename based on item_id for logging.
+                    # This is slightly inefficient but ensures correct logging.
+                    # A better way would be to pass stored_filename through files_to_zip_details.
+                    
+                    # Find the stored_filename for logging
+                    # This is already available in `file_detail['path'].split(os.sep)[-1]` if path is direct
+                    # Or more robustly, ensure 'stored_filename' is part of 'file_detail'
+                    # Let's assume file_detail['path'] ends with the stored_filename.
+                    # We added 'stored_filename' to item fetch, so it should be in item['stored_filename']
+                    # The `file_detail` dictionary needs `stored_filename` for `_log_download_activity`.
+                    # Let's refine `files_to_zip_details` to include `stored_filename`.
+
+            # At this point, zip is created. Log the successful creation and content list.
+            log_audit_action(
+                action_type='BULK_DOWNLOAD_CREATED',
+                details={
+                    'item_type': item_type,
+                    'zip_filename': zip_filename_base,
+                    'file_count': len(files_to_zip_details),
+                    'requested_ids_count': len(item_ids),
+                    'files_included': [{'id': fd['item_id'], 'name': fd['item_name'], 'zipped_as': fd['name_in_zip']} for fd in files_to_zip_details],
+                    'errors_encountered': errors_details if errors_details else None
+                }
+            )
+            
+            # Log individual downloads using _log_download_activity
+            # This part is tricky because _log_download_activity assumes a single file context.
+            # We need to call it for each file *before* sending the zip.
+            # The current _log_download_activity also tries to get user from JWT.
+            # It's better to have a specific bulk download audit log as done above.
+            # Individual file download logging via _log_download_activity might be redundant or misleading here.
+            # Let's rely on the BULK_DOWNLOAD_CREATED log for now.
+
+            return send_file(zip_filepath, as_attachment=True, download_name=zip_filename_base)
+            # tempfile.TemporaryDirectory() handles cleanup of tmpdir and its contents (zip_filepath)
+
+    except Exception as e:
+        app.logger.error(f"Error during bulk download zip creation or sending for {item_type}: {e}", exc_info=True)
+        log_audit_action(
+            action_type='BULK_DOWNLOAD_FAILED',
+            details={'item_type': item_type, 'error': str(e), 'item_ids_requested': item_ids, 'files_prepared_count': len(files_to_zip_details)}
+        )
+        return jsonify(msg=f"Failed to create or send bulk download archive: {str(e)}"), 500
+
+
+@app.route('/api/bulk/move', methods=['POST'])
+@jwt_required()
+@admin_required
+def bulk_move_items():
+    data = request.get_json()
+    if not data:
+        return jsonify(msg="Missing JSON data"), 400
+
+    item_ids = data.get('item_ids')
+    item_type = data.get('item_type')
+    target_metadata = data.get('target_metadata')
+
+    if not isinstance(item_ids, list) or not item_ids or not all(isinstance(i, int) and i > 0 for i in item_ids):
+        return jsonify(msg="item_ids must be a non-empty list of positive integers."), 400
+    if not item_type or item_type not in ALLOWED_BULK_ITEM_TYPES:
+        return jsonify(msg=f"item_type is required and must be one of: {', '.join(ALLOWED_BULK_ITEM_TYPES)}."), 400
+    if not isinstance(target_metadata, dict):
+        return jsonify(msg="target_metadata (object) is required."), 400
+
+    current_user_id = int(get_jwt_identity())
+    db = get_db()
+
+    item_type_config_map = {
+        'document': {
+            'table': 'documents', 'id_col': 'id', 'name_col': 'doc_name',
+            'fk_map': {'target_software_id': 'software_id'},
+            'required_targets': ['target_software_id'],
+            'target_validations': {
+                'target_software_id': {'table': 'software', 'col': 'id'}
+            },
+            'log_action': 'BULK_MOVE_DOCUMENT_ITEM'
+        },
+        'patch': {
+            'table': 'patches', 'id_col': 'id', 'name_col': 'patch_name',
+            'fk_map': {'target_version_id': 'version_id'},
+            'required_targets': ['target_version_id'],
+            'target_validations': {
+                'target_version_id': {'table': 'versions', 'col': 'id'}
+            },
+            'log_action': 'BULK_MOVE_PATCH_ITEM'
+        },
+        'link': {
+            'table': 'links', 'id_col': 'id', 'name_col': 'title',
+            'fk_map': {'target_software_id': 'software_id', 'target_version_id': 'version_id'},
+            'required_targets': ['target_software_id'], # version_id is optional for links (can be NULL)
+            'target_validations': {
+                'target_software_id': {'table': 'software', 'col': 'id'},
+                'target_version_id': {'table': 'versions', 'col': 'id', 'optional': True} # Validate if provided
+            },
+            'log_action': 'BULK_MOVE_LINK_ITEM'
+        },
+        'misc_file': {
+            'table': 'misc_files', 'id_col': 'id', 'name_col': 'user_provided_title',
+            'fk_map': {'target_misc_category_id': 'misc_category_id'},
+            'required_targets': ['target_misc_category_id'],
+            'target_validations': {
+                'target_misc_category_id': {'table': 'misc_categories', 'col': 'id'}
+            },
+            'log_action': 'BULK_MOVE_MISC_FILE_ITEM'
+        }
+    }
+
+    if item_type not in item_type_config_map:
+        return jsonify(msg=f"Invalid item_type '{item_type}' for bulk move."), 400
+
+    config = item_type_config_map[item_type]
+    
+    # Validate presence of required target_metadata fields
+    for req_target in config['required_targets']:
+        if req_target not in target_metadata or target_metadata[req_target] is None: # Ensure it's not None if required
+            return jsonify(msg=f"Missing required target_metadata field for {item_type}: {req_target}"), 400
+        try:
+            # Ensure required target IDs are positive integers
+            if not (isinstance(target_metadata[req_target], int) and target_metadata[req_target] > 0):
+                 return jsonify(msg=f"Invalid value for {req_target}. Must be a positive integer."), 400
+        except Exception: # Broad exception for type issues if not int
+            return jsonify(msg=f"Invalid type for {req_target}. Must be an integer."), 400
+
+
+    # Validate existence of target IDs in the database
+    valid_targets = {}
+    for target_key, target_val_details in config['target_validations'].items():
+        target_id_value = target_metadata.get(target_key)
+        is_optional = target_val_details.get('optional', False)
+
+        if target_id_value is not None: # If a value is provided (even for optional fields)
+            if not (isinstance(target_id_value, int) and target_id_value > 0):
+                 return jsonify(msg=f"Invalid value for {target_key}. Must be a positive integer if provided."), 400
+            
+            target_exists_query = f"SELECT 1 FROM {target_val_details['table']} WHERE {target_val_details['col']} = ?"
+            if not db.execute(target_exists_query, (target_id_value,)).fetchone():
+                return jsonify(msg=f"Target {target_val_details['table']} with ID {target_id_value} for {target_key} not found."), 404
+            valid_targets[config['fk_map'][target_key]] = target_id_value # Store actual DB column name and value
+        elif not is_optional and target_key in config['required_targets']: # Should have been caught above, but double check
+             return jsonify(msg=f"Required target_metadata field {target_key} is missing or null."), 400
+        elif is_optional: # If optional and not provided, set to NULL for update
+            valid_targets[config['fk_map'][target_key]] = None
+
+
+    if not valid_targets: # No valid FKs to update based on input
+        return jsonify(msg="No valid target metadata provided for update."), 400
+
+    # Special validation for 'link' type: if target_version_id is provided, it must belong to target_software_id
+    if item_type == 'link' and valid_targets.get('version_id') is not None:
+        target_software_id_for_link = valid_targets.get('software_id') # This must be present for links
+        target_version_id_for_link = valid_targets['version_id']
+        
+        if not target_software_id_for_link: # Should be caught by required_targets but good check
+            return jsonify(msg="target_software_id is required when target_version_id is specified for a link."), 400
+
+        version_belongs_to_software = db.execute(
+            "SELECT 1 FROM versions WHERE id = ? AND software_id = ?",
+            (target_version_id_for_link, target_software_id_for_link)
+        ).fetchone()
+        if not version_belongs_to_software:
+            return jsonify(msg=f"Target version ID {target_version_id_for_link} does not belong to target software ID {target_software_id_for_link}."), 400
+    
+    # Special validation for 'patch' type: target_version_id implies a specific software_id.
+    # The UI should handle this, but good to be aware. We only update version_id directly.
+
+    success_count = 0
+    failed_items_details = [] # Store {id, error_reason}
+    processed_ids_audit_details = []
+
+    db.execute("BEGIN")
+    try:
+        for item_id in item_ids:
+            # Fetch old item details for logging
+            old_item_details_query = f"SELECT * FROM {config['table']} WHERE {config['id_col']} = ?"
+            old_item = db.execute(old_item_details_query, (item_id,)).fetchone()
+
+            if not old_item:
+                failed_items_details.append({'id': item_id, 'error': 'not_found'})
+                processed_ids_audit_details.append({'id': item_id, 'status': 'not_found'})
+                continue
+            
+            old_associations = {db_col: old_item[db_col] for db_col in valid_targets.keys()}
+
+            set_clauses = []
+            update_params = []
+            for db_col, new_val in valid_targets.items():
+                set_clauses.append(f"{db_col} = ?")
+                update_params.append(new_val)
+            
+            set_clauses.append("updated_by_user_id = ?")
+            update_params.append(current_user_id)
+            set_clauses.append("updated_at = CURRENT_TIMESTAMP")
+
+            update_query = f"UPDATE {config['table']} SET {', '.join(set_clauses)} WHERE {config['id_col']} = ?"
+            update_params.append(item_id)
+
+            update_cursor = db.execute(update_query, tuple(update_params))
+
+            if update_cursor.rowcount > 0:
+                success_count += 1
+                processed_ids_audit_details.append({
+                    'id': item_id, 'status': 'moved', 
+                    'old_associations': old_associations, 
+                    'new_associations': valid_targets
+                })
+                log_audit_action(
+                    action_type=config['log_action'],
+                    target_table=config['table'],
+                    target_id=item_id,
+                    details={
+                        'item_name': old_item[config['name_col']],
+                        'old_associations': old_associations,
+                        'new_associations': valid_targets,
+                        'bulk_operation_id': request.headers.get('X-Request-ID', 'N/A')
+                    }
+                )
+            else:
+                # Should not happen if item was found, unless DB error or concurrent modification
+                failed_items_details.append({'id': item_id, 'error': 'update_failed_in_db'})
+                processed_ids_audit_details.append({'id': item_id, 'status': 'db_update_failed'})
+                app.logger.error(f"Bulk move: DB update command affected 0 rows for {item_type} ID {item_id}.")
+
+        if not failed_items_details : # All items processed successfully
+            db.commit()
+            msg = f"Successfully moved {success_count} {item_type}(s)."
+            # If some items were not found, success_count might be less than len(item_ids)
+            items_not_found_count = sum(1 for detail in processed_ids_audit_details if detail['status'] == 'not_found')
+            if items_not_found_count > 0:
+                 msg += f" ({items_not_found_count} items not found)."
+        else: # Some items failed (either not found or DB update failed for a found item)
+            # Decide on atomicity: if any DB update failed for a *found* item, rollback all.
+            # Items not found don't necessarily cause a rollback if others succeed.
+            db_update_failures = sum(1 for detail in processed_ids_audit_details if detail['status'] == 'db_update_failed')
+            if db_update_failures > 0:
+                db.rollback()
+                msg = f"Bulk move for {item_type} failed for {db_update_failures} items due to database update issues. No items were moved."
+                # Reset success_count as all changes are rolled back
+                success_count = 0 
+            else: # Only "not_found" errors, so commit the successful moves
+                db.commit()
+                msg = f"Successfully moved {success_count} {item_type}(s). {len(failed_items_details) - db_update_failures} items were not found."
+        
+        log_audit_action(
+            action_type='BULK_MOVE_COMPLETE',
+            details={
+                'item_type': item_type,
+                'requested_count': len(item_ids),
+                'moved_count': success_count,
+                'target_metadata_applied': valid_targets, # Log what was applied
+                'processed_details': processed_ids_audit_details
+            }
+        )
+        
+        # Determine overall status code
+        status_code = 200
+        if success_count == 0 and len(item_ids) > 0: # No items moved at all
+            status_code = 400 # Or 404 if all were "not_found"
+        elif success_count < len(item_ids): # Partial success
+            status_code = 207 # Multi-Status
+
+        return jsonify(msg=msg, moved_count=success_count, failed_items=failed_items_details), status_code
+
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"Exception during bulk move for {item_type}: {e}", exc_info=True)
+        log_audit_action(
+            action_type='BULK_MOVE_FAILED',
+            details={'item_type': item_type, 'error': str(e), 'item_ids_requested': item_ids, 'target_metadata': target_metadata}
+        )
+        return jsonify(msg=f"An error occurred during bulk move: {str(e)}"), 500

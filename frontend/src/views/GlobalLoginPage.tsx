@@ -29,7 +29,7 @@ const GlobalLoginPage: React.FC = () => {
       alignItems: 'center', 
       justifyContent: 'center', 
       minHeight: '100vh',
-      backgroundColor: '#f0f2f5' // A slightly different background for distinction
+      backgroundColor: 'background.default' // Use theme's default background
     }}>
       <Box
         sx={{
@@ -38,12 +38,12 @@ const GlobalLoginPage: React.FC = () => {
           flexDirection: 'column',
           alignItems: 'center',
           padding: 3,
-          backgroundColor: 'white',
+          backgroundColor: 'background.paper', // Use theme's paper background for the card
           borderRadius: 2,
-          boxShadow: '0 3px 10px rgb(0 0 0 / 0.2)'
+          boxShadow: '0 3px 10px rgb(0 0 0 / 0.2)' // Shadow can remain, usually fine for both modes
         }}
       >
-        <Typography component="h1" variant="h5" sx={{ mb: 2 }}>
+        <Typography component="h1" variant="h5" sx={{ mb: 2, color: 'text.primary' }}> 
           Site Access Control
         </Typography>
         <Typography component="p" sx={{ mb: 2, textAlign: 'center', color: 'text.secondary' }}>
@@ -72,7 +72,8 @@ const GlobalLoginPage: React.FC = () => {
             type="submit"
             fullWidth
             variant="contained"
-            sx={{ mt: 3, mb: 2, backgroundColor: '#1976d2' }} // Standard blue
+            color="primary" // Use theme's primary color
+            sx={{ mt: 3, mb: 2 }} 
           >
             Unlock
           </Button>

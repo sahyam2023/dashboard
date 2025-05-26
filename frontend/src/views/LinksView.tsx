@@ -4,9 +4,9 @@ import { useOutletContext } from 'react-router-dom';
 import {
   fetchLinks, fetchSoftware, fetchVersionsForSoftware, deleteAdminLink,
   PaginatedLinksResponse, addFavoriteApi, removeFavoriteApi, FavoriteItemType,
-  bulkDeleteItems, bulkDownloadItems, bulkMoveItems, BulkItemType, SoftwareVersion
+  bulkDeleteItems, bulkDownloadItems, bulkMoveItems, BulkItemType
 } from '../services/api';
-import { Link as LinkType, Software } from '../types';
+import { Link as LinkType, Software, SoftwareVersion } from '../types';
 import DataTable, { ColumnDef } from '../components/DataTable';
 import FilterTabs from '../components/FilterTabs';
 import LoadingState from '../components/LoadingState'; 
@@ -263,7 +263,11 @@ const LinksView: React.FC = () => {
       <div className="flex justify-between items-start sm:items-center mb-6 flex-col sm:flex-row">
         <div> <h2 className="text-2xl font-bold text-gray-800 dark:text-white">Links</h2> <p className="text-gray-600 mt-1 dark:text-gray-300">Manage and browse useful links and resources.</p> </div>
         {isAuthenticated && (role === 'admin' || role === 'super_admin') && !editingLink && (
-          <button onClick={showAddOrEditForm ? closeAdminForm : openAddForm} className="mt-4 sm:mt-0 btn-primary">
+          <button 
+            onClick={showAddOrEditForm ? closeAdminForm : openAddForm} 
+            // Explicit classes for blue button, matching DocumentsView
+            className="mt-4 sm:mt-0 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+          >
             <PlusCircle size={18} className="mr-2" /> {showAddOrEditForm ? 'Cancel' : 'Add New Link'}
           </button>
         )}
@@ -282,23 +286,34 @@ const LinksView: React.FC = () => {
         </div>
       )}
 
-      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-4">
-        <div className="flex flex-col md:flex-row md:items-end gap-4">
-            {softwareList.length > 0 && <FilterTabs software={softwareList} selectedSoftwareId={activeSoftwareId} onSelectFilter={handleSoftwareFilterChange} />}
-            {activeSoftwareId && (
-            <div className="flex flex-col min-w-[200px]">
-                <label htmlFor="versionFilterLinks" className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Version</label>
-                <select id="versionFilterLinks" value={activeVersionId || ''} onChange={handleVersionFilterChange} className="input-class" disabled={versionList.length === 0}>
-                <option value="">All Versions</option>
-                {versionList.map(v => (<option key={v.id} value={v.id}>{v.version_number}</option>))}
-                </select>
-            </div>
-            )}
-        </div>
-        <button onClick={() => setShowAdvancedFilters(p => !p)} className="btn-secondary text-sm flex items-center self-start md:self-end">
-            {showAdvancedFilters ? <ChevronUp size={18} className="mr-1.5" /> : <Filter size={18} className="mr-1.5" />} Advanced Filters
+      {/* REVISED STRUCTURE FOR FILTERS START */}
+      {/* This div contains the FilterTabs AND the Version dropdown side-by-side (on md screens) */}
+      <div className="flex flex-col md:flex-row md:items-end md:gap-4">  
+        {softwareList.length > 0 && (
+          <FilterTabs software={softwareList} selectedSoftwareId={activeSoftwareId} onSelectFilter={handleSoftwareFilterChange} />
+        )}
+        {activeSoftwareId && (
+          <div className="flex flex-col min-w-[200px] mt-4 md:mt-0"> {/* mt-4 for small screens, md:mt-0 to align horizontally on medium+ */}
+            <label htmlFor="versionFilterLinks" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Version</label>
+            <select id="versionFilterLinks" value={activeVersionId || ''} onChange={handleVersionFilterChange} className="input-class" disabled={versionList.length === 0}>
+              <option value="">All Versions</option>
+              {versionList.map(v => (<option key={v.id} value={v.id}>{v.version_number}</option>))}
+            </select>
+          </div>
+        )}
+      </div>
+
+      {/* This div specifically for the Advanced Filters button, placing it directly below the above section */}
+      <div className="mb-4">
+        <button 
+          onClick={() => setShowAdvancedFilters(p => !p)} 
+          // Explicit classes for grey button, matching DocumentsView
+          className="flex items-center px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-md text-sm font-medium"
+        >
+          {showAdvancedFilters ? <ChevronUp size={18} className="mr-1.5" /> : <Filter size={18} className="mr-1.5" />} Advanced Filters
         </button>
       </div>
+      {/* REVISED STRUCTURE FOR FILTERS END */}
 
       {showAdvancedFilters && (
         <div className="my-4 p-4 border dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-700 space-y-4 md:space-y-0 md:flex md:flex-wrap md:items-end md:gap-4">

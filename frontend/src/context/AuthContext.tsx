@@ -1,5 +1,5 @@
 // src/context/AuthContext.tsx
-import React, { createContext, useState, useContext, useEffect, ReactNode } from 'react';
+import React, { createContext, useState, useContext, useEffect, ReactNode, useCallback } from 'react';
 
 interface TokenData {
   token: string;
@@ -51,7 +51,6 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   // const [isSessionWarningModalOpen, setSessionWarningModalOpen] = useState(false);
   // const [sessionWarningCountdown, setSessionWarningCountdown] = useState(WARNING_THRESHOLD_SECONDS);
 
-
   // Helper function for initializing global access state
   const initialGlobalAccess = () => {
     const twoHoursInMs = 2 * 60 * 60 * 1000;
@@ -72,6 +71,23 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
 
   const [isGlobalAccessGranted, setIsGlobalAccessGranted] = useState<boolean>(initialGlobalAccess);
   const [isPasswordResetRequired, setIsPasswordResetRequired] = useState<boolean>(false);
+
+  // Define logout function using useCallback to ensure stable reference
+  const logout = useCallback((sessionExpiredDueToTimeout: boolean = false) => {
+    localStorage.removeItem('tokenData');
+    localStorage.removeItem('username');
+    localStorage.removeItem('userRole');
+    setTokenData(null);
+    setUsername(null);
+    setRole(null);
+    setIsPasswordResetRequired(false);
+    // setSessionWarningModalOpen(false); // REMOVED: Close warning modal on logout
+    
+    if (sessionExpiredDueToTimeout) {
+        // Dispatch the event so App.tsx can show the toast.
+        document.dispatchEvent(new CustomEvent('tokenExpired'));
+    }
+  }, []);
 
   useEffect(() => {
     const storedTokenDataString = localStorage.getItem('tokenData');
@@ -97,6 +113,21 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     setIsLoading(false);
   }, []);
 
+  // Listen for maintenance mode forced logout event
+  useEffect(() => {
+    const handleMaintenanceLogout = (event: Event) => {
+      // The toast message will be handled by App.tsx listening to the same event.
+      // We just need to ensure the user is logged out from the context.
+      const customEvent = event as CustomEvent<{ message?: string }>; // Message is optional here
+      console.log('AuthContext: maintenanceModeForcedLogout event received.', customEvent.detail);
+      logout(); // Call existing logout, no toast message needed from here.
+    };
+
+    document.addEventListener('maintenanceModeForcedLogout', handleMaintenanceLogout);
+    return () => {
+      document.removeEventListener('maintenanceModeForcedLogout', handleMaintenanceLogout);
+    };
+  }, [logout]); // logout is now stable due to useCallback
 
   useEffect(() => {
     if (!tokenData) {
@@ -125,7 +156,7 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     }, 1000); // Check every second
 
     return () => clearInterval(interval);
-  }, [tokenData]); // REMOVED isSessionWarningModalOpen from dependencies
+  }, [tokenData, logout]); // Added logout to dependencies since it's used in the effect
 
   const login = (newToken: string, newUsername: string, newRole: string, expiresInSeconds: number, passwordResetRequired: boolean = false) => {
     const expiresAt = Date.now() + expiresInSeconds * 1000;
@@ -141,22 +172,6 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     setIsPasswordResetRequired(passwordResetRequired);
     // setSessionWarningModalOpen(false); // REMOVED: Ensure warning modal is closed on new login
     return passwordResetRequired;
-  };
-
-  const logout = (sessionExpiredDueToTimeout: boolean = false) => {
-    localStorage.removeItem('tokenData');
-    localStorage.removeItem('username');
-    localStorage.removeItem('userRole');
-    setTokenData(null);
-    setUsername(null);
-    setRole(null);
-    setIsPasswordResetRequired(false);
-    // setSessionWarningModalOpen(false); // REMOVED: Close warning modal on logout
-    
-    if (sessionExpiredDueToTimeout) {
-        // Dispatch the event so App.tsx can show the toast.
-        document.dispatchEvent(new CustomEvent('tokenExpired'));
-    }
   };
   
   // REMOVED refreshSession function

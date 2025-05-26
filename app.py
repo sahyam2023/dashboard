@@ -104,6 +104,27 @@ def get_db():
         g.db.row_factory = sqlite3.Row
     return g.db
 
+# --- Maintenance Mode Helper ---
+def is_maintenance_mode_active():
+    """Checks if maintenance mode is active. Defaults to False on error or if setting not found."""
+    try:
+        db = get_db()
+        # Ensure the system_settings table and the specific setting exist.
+        # The schema.sql should initialize 'maintenance_mode' to FALSE (0).
+        setting = db.execute("SELECT is_enabled FROM system_settings WHERE setting_name = 'maintenance_mode'").fetchone()
+        if setting:
+            return bool(setting['is_enabled'])
+        else:
+            # This case means the setting row is missing, which shouldn't happen with proper DB schema init.
+            app.logger.warning("Maintenance mode setting 'maintenance_mode' not found in system_settings. Defaulting to False.")
+            return False
+    except sqlite3.Error as e:
+        app.logger.error(f"Database error checking maintenance mode: {e}. Defaulting to False.")
+        return False
+    except Exception as e: # Catch any other unexpected errors
+        app.logger.error(f"Unexpected error checking maintenance mode: {e}. Defaulting to False.")
+        return False
+
 @app.teardown_appcontext
 def close_db(exception):
     db = g.pop('db', None)
@@ -299,10 +320,27 @@ def admin_required(fn):
         current_user_id_str = get_jwt_identity()
         try:
             user = find_user_by_id(int(current_user_id_str))
-            if not user or user['role'] not in ['admin', 'super_admin']: # Modified line
-                return jsonify(msg="Administration rights required."), 403
+            if not user:
+                return jsonify(msg="User not found or invalid token."), 401 # Or 403
+
+            if is_maintenance_mode_active():
+                if user['role'] != 'super_admin':
+                    # During maintenance, only super_admins can access admin_required routes
+                    log_audit_action(
+                        action_type='ADMIN_ACCESS_DENIED_MAINTENANCE',
+                        user_id=user['id'], username=user['username'],
+                        details={'route_attempted': request.path}
+                    )
+                    return jsonify(msg="System is currently undergoing maintenance. Only super administrators have access.", maintenance_mode_active=True), 503
+            else: # Not in maintenance mode, original logic applies
+                if user['role'] not in ['admin', 'super_admin']:
+                    return jsonify(msg="Administration rights required."), 403
+            
         except ValueError:
              return jsonify(msg="Invalid user identity in token."), 400
+        except Exception as e:
+            app.logger.error(f"Error in admin_required decorator: {e}")
+            return jsonify(msg="An internal error occurred during authorization."), 500
         return fn(*args, **kwargs)
     return wrapper
 
@@ -940,18 +978,30 @@ def login():
     user = find_user_by_username(username)
     if user and bcrypt.check_password_hash(user['password_hash'], password):
         if not user['is_active']:
-            # Log failed login attempt due to inactive account, then return
             log_audit_action(
                 action_type='USER_LOGIN_FAILED_INACTIVE',
                 target_table='users',
                 target_id=user['id'],
-                user_id=user['id'], # Use the ID of the user attempting to log in
-                username=user['username'], # Use the username of the user attempting to log in
+                user_id=user['id'], 
+                username=user['username'], 
                 details={'reason': 'Account deactivated'}
             )
             return jsonify(msg="Account deactivated."), 403
+
+        # Maintenance mode check for non-super_admin users
+        if is_maintenance_mode_active():
+            if user['role'] != 'super_admin':
+                log_audit_action(
+                    action_type='USER_LOGIN_DENIED_MAINTENANCE',
+                    target_table='users',
+                    target_id=user['id'],
+                    user_id=user['id'],
+                    username=user['username'],
+                    details={'reason': 'Maintenance mode active'}
+                )
+                return jsonify({"msg": "System is currently undergoing maintenance. Only super administrators can log in at this time.", "maintenance_mode_active": True}), 503
         
-        access_token = create_access_token(identity=str(user['id'])) # Ensure identity is string
+        access_token = create_access_token(identity=str(user['id'])) 
         log_audit_action(
             action_type='USER_LOGIN',
             target_table='users',
@@ -4947,6 +4997,75 @@ if __name__ == '__main__':
             print(f"Database file already exists at {db_path}. Skipping initialization.")
 
     app.run(host='0.0.0.0', port=5000, debug=True)
+
+# --- Maintenance Mode Endpoints (Super Admin) ---
+@app.route('/api/admin/maintenance-mode', methods=['GET'])
+@jwt_required()
+@super_admin_required
+def get_maintenance_mode_status():
+    db = get_db()
+    try:
+        setting = db.execute("SELECT is_enabled FROM system_settings WHERE setting_name = 'maintenance_mode'").fetchone()
+        if setting:
+            return jsonify({"maintenance_mode_enabled": bool(setting['is_enabled'])}), 200
+        else:
+            # This case should ideally not happen if schema.sql initializes the setting
+            app.logger.warning("Maintenance mode setting 'maintenance_mode' not found in system_settings.")
+            # Default to False if not found, though it should always be there.
+            return jsonify({"maintenance_mode_enabled": False, "msg": "Setting not found, defaulting to disabled."}), 404 
+    except sqlite3.Error as e:
+        app.logger.error(f"Database error fetching maintenance mode status: {e}")
+        return jsonify({"msg": "Database error", "error": str(e)}), 500
+    except Exception as e:
+        app.logger.error(f"Unexpected error fetching maintenance mode status: {e}", exc_info=True)
+        return jsonify({"msg": "An unexpected server error occurred", "error": str(e)}), 500
+
+@app.route('/api/admin/maintenance-mode/enable', methods=['POST'])
+@jwt_required()
+@super_admin_required
+def enable_maintenance_mode():
+    db = get_db()
+    try:
+        cursor = db.execute("UPDATE system_settings SET is_enabled = 1 WHERE setting_name = 'maintenance_mode'")
+        db.commit()
+        if cursor.rowcount > 0:
+            log_audit_action(action_type='MAINTENANCE_MODE_ENABLED')
+            return jsonify({"msg": "Maintenance mode enabled", "maintenance_mode_enabled": True}), 200
+        else:
+            # This implies 'maintenance_mode' setting was not found to update.
+            app.logger.error("Failed to enable maintenance mode: 'maintenance_mode' setting not found in system_settings for update.")
+            return jsonify({"msg": "Failed to enable maintenance mode: setting not found."}), 404
+    except sqlite3.Error as e:
+        db.rollback()
+        app.logger.error(f"Database error enabling maintenance mode: {e}")
+        return jsonify({"msg": "Database error", "error": str(e)}), 500
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"Unexpected error enabling maintenance mode: {e}", exc_info=True)
+        return jsonify({"msg": "An unexpected server error occurred", "error": str(e)}), 500
+
+@app.route('/api/admin/maintenance-mode/disable', methods=['POST'])
+@jwt_required()
+@super_admin_required
+def disable_maintenance_mode():
+    db = get_db()
+    try:
+        cursor = db.execute("UPDATE system_settings SET is_enabled = 0 WHERE setting_name = 'maintenance_mode'")
+        db.commit()
+        if cursor.rowcount > 0:
+            log_audit_action(action_type='MAINTENANCE_MODE_DISABLED')
+            return jsonify({"msg": "Maintenance mode disabled", "maintenance_mode_enabled": False}), 200
+        else:
+            app.logger.error("Failed to disable maintenance mode: 'maintenance_mode' setting not found in system_settings for update.")
+            return jsonify({"msg": "Failed to disable maintenance mode: setting not found."}), 404
+    except sqlite3.Error as e:
+        db.rollback()
+        app.logger.error(f"Database error disabling maintenance mode: {e}")
+        return jsonify({"msg": "Database error", "error": str(e)}), 500
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"Unexpected error disabling maintenance mode: {e}", exc_info=True)
+        return jsonify({"msg": "An unexpected server error occurred", "error": str(e)}), 500
 
 # --- User Favorites Endpoints ---
 ALLOWED_FAVORITE_ITEM_TYPES = ['document', 'patch', 'link', 'misc_file', 'software', 'version']

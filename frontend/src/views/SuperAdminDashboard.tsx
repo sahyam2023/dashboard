@@ -7,7 +7,10 @@ import {
   changeGlobalPassword, ChangeGlobalPasswordPayload,
   forceUserPasswordReset, // Import the new function
   backupDatabase, // Import backup function
-  restoreDatabase // Import restore function
+  restoreDatabase, // Import restore function
+  getMaintenanceModeStatus,
+  enableMaintenanceMode,
+  disableMaintenanceMode
 } from '../services/api';
 import DataTable, { ColumnDef } from '../components/DataTable';
 
@@ -52,6 +55,12 @@ const SuperAdminDashboard: React.FC = () => {
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [selectedRestoreFile, setSelectedRestoreFile] = useState<File | null>(null);
   const [restoreFileKey, setRestoreFileKey] = useState<number>(Date.now()); // For resetting file input
+
+  // State for Maintenance Mode
+  const [isMaintenanceModeActive, setIsMaintenanceModeActive] = useState<boolean>(false);
+  const [isMaintenanceLoading, setIsMaintenanceLoading] = useState<boolean>(true); // Start true for initial fetch
+  const [maintenanceError, setMaintenanceError] = useState<string | null>(null);
+
   const fetchUsers = useCallback(async () => {
     if (auth.isAuthenticated && auth.role === 'super_admin') {
       setIsLoading(true);
@@ -77,6 +86,26 @@ const SuperAdminDashboard: React.FC = () => {
   useEffect(() => {
     fetchUsers();
   }, [fetchUsers]);
+
+  useEffect(() => {
+    const fetchMaintenanceStatus = async () => {
+      if (auth.isAuthenticated && auth.role === 'super_admin') {
+        setIsMaintenanceLoading(true);
+        setMaintenanceError(null);
+        try {
+          const response = await getMaintenanceModeStatus();
+          setIsMaintenanceModeActive(response.maintenance_mode_enabled);
+        } catch (err: any) {
+          console.error("Failed to fetch maintenance mode status:", err);
+          setMaintenanceError(err.response?.data?.msg || err.message || "Failed to fetch maintenance status.");
+          // Feedback is not set here as this is an initial load error, not action feedback
+        } finally {
+          setIsMaintenanceLoading(false);
+        }
+      }
+    };
+    fetchMaintenanceStatus();
+  }, [auth.isAuthenticated, auth.role]);
 
 
   if (!auth.isAuthenticated) {
@@ -189,6 +218,28 @@ const SuperAdminDashboard: React.FC = () => {
       } catch (err: any) {
         setFeedback({ type: 'error', message: err.message || `Failed to deactivate ${username}.` });
       }
+    }
+  };
+
+  const handleToggleMaintenanceMode = async () => {
+    setIsMaintenanceLoading(true);
+    setMaintenanceError(null);
+    setFeedback(null); // Clear general feedback
+
+    const action = isMaintenanceModeActive ? disableMaintenanceMode : enableMaintenanceMode;
+    const successMessage = isMaintenanceModeActive ? "Maintenance mode disabled." : "Maintenance mode enabled.";
+    const errorMessage = isMaintenanceModeActive ? "Failed to disable maintenance mode." : "Failed to enable maintenance mode.";
+
+    try {
+      const response = await action();
+      setIsMaintenanceModeActive(response.maintenance_mode_enabled);
+      setFeedback({ type: 'success', message: successMessage });
+    } catch (err: any) {
+      const apiError = err.response?.data?.msg || err.message || errorMessage;
+      setMaintenanceError(apiError); // Set specific error for the section
+      setFeedback({ type: 'error', message: apiError }); // Also set general feedback
+    } finally {
+      setIsMaintenanceLoading(false);
     }
   };
 
@@ -576,6 +627,55 @@ const SuperAdminDashboard: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* System Maintenance Mode Section */}
+      <div className="mt-12 p-6 bg-white shadow rounded-lg">
+        <h2 className="text-xl font-semibold mb-4 text-gray-800">System Maintenance Mode</h2>
+        
+        {maintenanceError && (
+          <div className="p-3 mb-4 rounded bg-red-100 text-red-700 text-sm">
+            Error: {maintenanceError}
+          </div>
+        )}
+
+        {isMaintenanceLoading && users.length === 0 && !maintenanceError && ( /* Condition for initial loading of status */
+          <div className="text-sm text-gray-500">Loading maintenance status...</div>
+        )}
+
+        {!isMaintenanceLoading || users.length > 0 || maintenanceError ? ( /* Show toggle once initial load attempt is done or if users loaded (meaning page is generally ready) */
+          <>
+            <div className="flex items-center space-x-4 mb-2">
+              <label htmlFor="maintenanceToggle" className="flex items-center cursor-pointer">
+                <div className="relative">
+                  <input 
+                    type="checkbox" 
+                    id="maintenanceToggle" 
+                    className="sr-only" 
+                    checked={isMaintenanceModeActive}
+                    onChange={handleToggleMaintenanceMode}
+                    disabled={isMaintenanceLoading} // Disable during any loading (initial or toggle action)
+                  />
+                  {/* Styling for the toggle switch */}
+                  <div className={`block w-14 h-8 rounded-full transition-colors ${isMaintenanceModeActive ? 'bg-green-500' : 'bg-gray-300'}`}></div>
+                  <div 
+                    className={`dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full shadow-md transition-transform duration-300 ease-in-out ${isMaintenanceModeActive ? 'transform translate-x-6' : ''}`}
+                  ></div>
+                </div>
+              </label>
+              <span className={`text-sm font-medium ${isMaintenanceModeActive ? 'text-green-700' : 'text-gray-700'}`}>
+                Maintenance Mode is {isMaintenanceModeActive ? 'ACTIVATED' : 'DEACTIVATED'}
+              </span>
+              {isMaintenanceLoading && ( /* Spinner specifically for toggle action */
+                <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-blue-500"></div>
+              )}
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              When activated, only Super Administrators can log in. All other users, including regular Admins, will be denied access and active sessions (except Super Admins) may be affected on their next API interaction.
+            </p>
+          </>
+        ) : null }
+      </div>
+
     </div>
   );
 };

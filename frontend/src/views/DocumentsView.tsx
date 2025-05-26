@@ -114,22 +114,32 @@ const fetchAndSetDocuments = useCallback(async (pageToLoad: number, isNewQuery: 
       updatedFromFilter || undefined, updatedToFilter || undefined
     );
     const newDocs = response.documents;
-    setDocuments(isNewQuery ? newDocs : [...documents, ...newDocs]); 
+    setDocuments(prevDocuments => {
+      const finalDocs = isNewQuery ? newDocs : [...prevDocuments, ...newDocs];
+      // Update favoritedItems based on the finalDocs
+      setFavoritedItems(prevFavs => {
+        const updatedFavs = new Map(); // Start fresh or with prevFavs depending on logic for *all* docs vs new ones
+        if (isAuthenticated && finalDocs) {
+          for (const doc of finalDocs) {
+            // Ensure all docs in view have their favorite status reflected
+            updatedFavs.set(doc.id, { favoriteId: doc.favorite_id });
+          }
+        }
+        // If you only want to update based on newDocs and merge with prevFavs for existing ones:
+        // const updatedFavs = new Map(prevFavs);
+        // if (isAuthenticated && newDocs) {
+        //   for (const doc of newDocs) {
+        //     updatedFavs.set(doc.id, { favoriteId: doc.favorite_id });
+        //   }
+        // }
+        return updatedFavs;
+      });
+      return finalDocs;
+    });
     setTotalDocuments(response.total_documents);
     setCurrentPage(response.page); 
     setHasMore(response.page < response.total_pages); 
     
-    setFavoritedItems(prevFavs => {
-        const updatedFavs = new Map(prevFavs);
-        const currentFullDocs = isNewQuery ? newDocs : [...documents, ...newDocs]; 
-        if (isAuthenticated && currentFullDocs) {
-            for (const doc of currentFullDocs) { 
-                if (doc.favorite_id) updatedFavs.set(doc.id, { favoriteId: doc.favorite_id });
-                else updatedFavs.set(doc.id, { favoriteId: undefined }); 
-            }
-        }
-        return updatedFavs;
-    });
   } catch (err: any) {
     console.error(`Failed to load documents (page ${pageToLoad}):`, err);
     const errorMessage = err.response?.data?.msg || err.message || 'Failed to fetch documents.';
@@ -148,7 +158,7 @@ const fetchAndSetDocuments = useCallback(async (pageToLoad: number, isNewQuery: 
 }, [
   selectedSoftwareId, ITEMS_PER_PAGE, sortBy, sortOrder, docTypeFilter, 
   createdFromFilter, createdToFilter, updatedFromFilter, updatedToFilter, 
-  isAuthenticated, documents 
+  isAuthenticated
 ]);
   
 useEffect(() => {
@@ -356,7 +366,7 @@ useEffect(() => {
         <ErrorState message={error} onRetry={loadDocumentsCallback} />
       ) : !isLoadingInitial && !error && documents.length === 0 ? (
         <div className="text-center py-10 bg-white dark:bg-gray-800 rounded-lg shadow-sm my-6">
-          <AlertTriangle size={48} className="mx-auto text-yellow-500 dark:text-yellow-400 mb-4" />
+          <FileText size={48} className="mx-auto text-yellow-500 dark:text-yellow-400 mb-4" />
           <p className="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-3">
             {filtersAreActive ? "No Documents Found Matching Criteria" : "No Documents Available"}
           </p>
@@ -370,7 +380,7 @@ useEffect(() => {
         <DataTable columns={columns} data={filteredDocumentsBySearch} rowClassName="group" isLoading={isLoadingInitial||isLoadingMore} currentPage={currentPage} totalPages={totalPagesComputed} onPageChange={handlePageChange} itemsPerPage={ITEMS_PER_PAGE} totalItems={totalDocuments} sortColumn={sortBy} sortOrder={sortOrder} onSort={handleSort} isSelectionEnabled={true} selectedItemIds={selectedDocumentIds} onSelectItem={handleSelectItem} onSelectAllItems={handleSelectAllItems} />
       )}
       {showDeleteConfirm && documentToDelete && (<ConfirmationModal isOpen={showDeleteConfirm} title="Delete Document" message={`Delete "${documentToDelete.doc_name}"?`} onConfirm={handleDeleteConfirm} onCancel={closeDeleteConfirm} isConfirming={isDeleting} confirmButtonText="Delete" confirmButtonVariant="danger"/>)}
-      {showBulkDeleteConfirmModal && (<ConfirmationModal isOpen={showBulkDeleteConfirmModal} title={`Delete ${selectedDocumentIds.size} Document(s)`} message={`Delete ${selectedDocumentIds.size} selected items?`} onConfirm={confirmBulkDelete} onCancel={()=>setShowBulkDeleteConfirmModal(false)} isConfirming={isDeletingSelected} confirmButtonText="Delete Selected" confirmButtonVariant="danger" Icon={AlertTriangle}/>)}
+      {showBulkDeleteConfirmModal && (<ConfirmationModal isOpen={showBulkDeleteConfirmModal} title={`Delete ${selectedDocumentIds.size} Document(s)`} message={`Delete ${selectedDocumentIds.size} selected items?`} onConfirm={confirmBulkDelete} onCancel={()=>setShowBulkDeleteConfirmModal(false)} isConfirming={isDeletingSelected} confirmButtonText="Delete Selected" confirmButtonVariant="danger"/>)}
       {showBulkMoveModal && (
         <Modal isOpen={showBulkMoveModal} onClose={()=>setShowBulkMoveModal(false)} title={`Move ${selectedDocumentIds.size} Document(s)`}>
           <div className="p-4">

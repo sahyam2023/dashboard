@@ -11,7 +11,7 @@ import { MiscCategory, MiscFile } from '../types';
 import DataTable, { ColumnDef } from '../components/DataTable';
 import ErrorState from '../components/ErrorState';
 import LoadingState from '../components/LoadingState';
-import AdminMiscFileForm from '../components/admin/AdminMiscFileForm'; // Using the correct form name
+import AdminUploadToMiscForm from '../components/admin/AdminUploadToMiscForm'; // Using the correct form name
 import AdminMiscCategoryForm from '../components/admin/AdminMiscCategoryForm';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
 import Modal from '../components/shared/Modal';
@@ -144,9 +144,7 @@ const MiscView: React.FC = () => {
   const openAddOrEditFileForm = (file?: MiscFile) => { setEditingMiscFile(file || null); setShowAddOrEditForm(true); setShowCategoryForm(false); };
   const closeAdminFileForm = () => { setEditingMiscFile(null); setShowAddOrEditForm(false); };
   const openAddCategoryForm = () => { setEditingCategory(null); setShowCategoryForm(true); setShowAddOrEditForm(false); };
-  const openEditCategoryForm = (cat: MiscCategory) => { setEditingCategory(cat); setShowCategoryForm(true); setShowAddOrEditForm(false); };
   const closeCategoryForm = () => { setEditingCategory(null); setShowCategoryForm(false); };
-  const openDeleteCategoryConfirm = (cat: MiscCategory) => { setCategoryToDelete(cat); setShowDeleteCategoryConfirm(true); };
   const closeDeleteCategoryConfirm = () => { setCategoryToDelete(null); setShowDeleteCategoryConfirm(false);};
   const openDeleteFileConfirm = (file: MiscFile) => { setFileToDelete(file); setShowDeleteFileConfirm(true); };
   const closeDeleteFileConfirm = () => { setFileToDelete(null); setShowDeleteFileConfirm(false);};
@@ -242,7 +240,6 @@ const MiscView: React.FC = () => {
     { key: 'file_path', header: 'Link', render: f => (<a href={`${API_BASE_URL}${f.file_path}`} target="_blank" rel="noopener noreferrer" className="flex items-center text-blue-600 hover:text-blue-800" onClick={e=>e.stopPropagation()}><Download size={14}className="mr-1"/>Download</a>)},
     { key: 'actions' as any, header: 'Actions', render: (f: MiscFile) => (<div className="flex space-x-1 items-center">{isAuthenticated&&(<button onClick={e=>{e.stopPropagation();handleFavoriteToggle(f,'misc_file')}} className={`p-1 rounded-md ${favoritedItems.get(f.id)?.favoriteId?'text-yellow-500 hover:text-yellow-600':'text-gray-400 hover:text-yellow-500'}`} title={favoritedItems.get(f.id)?.favoriteId?"Remove Favorite":"Add Favorite"}><Star size={16} className={favoritedItems.get(f.id)?.favoriteId?"fill-current":""}/></button>)}{(role==='admin'||role==='super_admin')&&(<> <button onClick={e=>{e.stopPropagation();openAddOrEditFileForm(f)}} className="p-1 text-blue-600 hover:text-blue-800 rounded-md" title="Edit"><Edit3 size={16}/></button> <button onClick={e=>{e.stopPropagation();openDeleteFileConfirm(f)}} className="p-1 text-red-600 hover:text-red-800 rounded-md" title="Delete"><Trash2 size={16}/></button></>)}</div>)},
   ];
-  
   const loadMiscFilesCallback = useCallback(() => { fetchAndSetMiscFiles(1, true); }, [fetchAndSetMiscFiles]);
 
   const handleFavoriteToggle = async (item: MiscFile, itemType: FavoriteItemType) => {
@@ -275,14 +272,27 @@ const MiscView: React.FC = () => {
         <div><h2 className="text-2xl font-bold text-gray-800 dark:text-white">Miscellaneous Files</h2><p className="text-gray-600 mt-1 dark:text-gray-300">Manage and browse categorized files.</p></div>
         {isAuthenticated && (role === 'admin' || role === 'super_admin') && (
           <div className="flex space-x-3 mt-4 sm:mt-0">
-            <button onClick={showCategoryForm && !editingCategory ? closeCategoryForm : openAddCategoryForm} className="btn-secondary flex items-center"><PlusCircle size={18} className="mr-2"/>{showCategoryForm && !editingCategory ? 'Cancel' : 'Add/Edit Category'}</button>
-            <button onClick={showAddOrEditForm && !editingMiscFile ? closeAdminFileForm : () => openAddOrEditFileForm()} className="btn-primary flex items-center"><PlusCircle size={18} className="mr-2"/>{showAddOrEditForm && !editingMiscFile ? 'Cancel' : 'Upload New File'}</button>
+            <button 
+  onClick={showCategoryForm && !editingCategory ? closeCategoryForm : openAddCategoryForm} 
+  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+>
+  <PlusCircle size={18} className="mr-2"/>
+  {showCategoryForm && !editingCategory ? 'Cancel' : 'Add/Edit Category'}
+</button>
+
+<button 
+  onClick={showAddOrEditForm && !editingMiscFile ? closeAdminFileForm : () => openAddOrEditFileForm()} 
+  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+>
+  <PlusCircle size={18} className="mr-2"/>
+  {showAddOrEditForm && !editingMiscFile ? 'Cancel' : 'Upload New File'}
+</button>
           </div>
         )}
       </div>
 
       {showCategoryForm && (<div className="my-4 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg shadow"><AdminMiscCategoryForm categoryToEdit={editingCategory} onSuccess={(cat)=>handleCategoryOperationSuccess(`Category "${cat.name}" saved.`)} onCancel={closeCategoryForm}/></div>)}
-      {showAddOrEditForm && (<div className="my-4 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg shadow"><AdminMiscFileForm fileToEdit={editingMiscFile} onFileAdded={(f)=>handleMiscFileAddedOrUpdated(f,false)} onFileUpdated={(f)=>handleMiscFileAddedOrUpdated(f,true)} onCancelEdit={closeAdminFileForm}/></div>)}
+      {showAddOrEditForm && (<div className="my-4 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg shadow"><AdminUploadToMiscForm fileToEdit={editingMiscFile} onUploadSuccess={(f)=>handleMiscFileAddedOrUpdated(f,false)} onFileUpdated={(f)=>handleMiscFileAddedOrUpdated(f,true)} onCancelEdit={closeAdminFileForm}/></div>)}
 
       {selectedMiscFileIds.size > 0 && (
         <div className="my-4 p-3 bg-gray-100 dark:bg-gray-700 rounded-md shadow-sm border border-gray-200 dark:border-gray-600">
@@ -302,7 +312,7 @@ const MiscView: React.FC = () => {
         {showCategoryFilter && (
           <>
             <label htmlFor="category-filter" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 sr-only">Filter by Category</label>
-            <select id="category-filter" value={activeCategoryId??''} onChange={handleCategoryFilterChange} className="input-class w-full md:w-1/3" disabled={isLoadingCategories||categories.length===0}>
+            <select id="category-filter" value={activeCategoryId??''} onChange={handleCategoryFilterChange} className="block w-full sm:w-1/3 pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md shadow-sm" disabled={isLoadingCategories||categories.length===0}>
               <option value="">All Categories</option>
               {categories.map(c=>(<option key={c.id} value={c.id}>{c.name}</option>))}
             </select>

@@ -31,6 +31,7 @@ const AuditLogViewer = lazy(() => import('./components/admin/AuditLogViewer')); 
 import { useAuth } from './context/AuthContext'; 
 import AuthModal from './components/shared/AuthModal'; 
 // import SessionTimeoutWarningModal from './components/shared/SessionTimeoutWarningModal'; // Removed import
+import { toast } from 'react-toastify'; // Import toast for info notifications
 
 
 // We need to wrap the main logic in a component that can use useLocation
@@ -63,8 +64,16 @@ function AppContent() {
     };
 
     document.addEventListener('tokenExpired', handleTokenExpiredEvent);
+
+    const handleMaintenanceEvent = (event: Event) => {
+      const customEvent = event as CustomEvent<{ message: string }>;
+      toast.info(customEvent.detail.message || "Logged out due to system maintenance.", { autoClose: 10000 });
+    };
+    document.addEventListener('maintenanceModeForcedLogout', handleMaintenanceEvent);
+
     return () => {
       document.removeEventListener('tokenExpired', handleTokenExpiredEvent);
+      document.removeEventListener('maintenanceModeForcedLogout', handleMaintenanceEvent);
     };
   }, [auth.isAuthenticated, auth]); // Depend on isAuthenticated and the auth object (which includes logout)
 

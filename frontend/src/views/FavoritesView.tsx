@@ -185,8 +185,17 @@ const FavoritesView: React.FC = () => {
       </div>
 
       {favorites.length === 0 && !isLoadingData ? (
-        <Box sx={{ textAlign: 'center', py: 10 }}>
-          <Star size={60} className="text-gray-400 dark:text-gray-500 mb-4" /> {/* Adjusted icon size and color */}
+        <Box 
+          sx={{ 
+            textAlign: 'center', 
+            py: 10,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }} 
+          className="bg-white dark:bg-gray-800 rounded-lg shadow-sm my-6">
+          <Star size={48} className="text-yellow-500 dark:text-yellow-400 mb-4" /> {/* Changed color to yellow and added centering styles */}
           <Typography variant="h6" color="text.secondary" sx={{ mb: 1 }}>
             You haven't favorited any items yet.
           </Typography>

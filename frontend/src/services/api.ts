@@ -231,6 +231,13 @@ export interface SystemHealth {
 }
 // --- End of Interface for System Health ---
 
+// --- Interface for Maintenance Mode Status ---
+export interface MaintenanceStatusResponse {
+  maintenance_mode_enabled: boolean;
+  msg?: string; // Optional message, e.g., if setting not found and defaulting
+}
+// --- End of Interface for Maintenance Mode Status ---
+
 // --- Interfaces for Audit Log ---
 export interface AuditLogEntry {
   id: number;
@@ -280,6 +287,18 @@ const handleApiError = async (response: Response, defaultMessage: string, isLogi
     } catch (e) {
       // If parsing errorData fails, use a generic message
       errorData = { msg: `${defaultMessage}: ${response.status} ${response.statusText}` };
+    }
+
+    // Check for 503 Maintenance Mode and if a token was used (i.e., not a login attempt)
+    if (response.status === 503 && errorData?.maintenance_mode_active === true && !isLoginAttempt && localStorage.getItem('tokenData')) {
+      // Dispatch a custom event for maintenance mode forced logout
+      const maintenanceMessage = errorData?.msg || "You have been logged out as the system is now in maintenance mode.";
+      document.dispatchEvent(new CustomEvent('maintenanceModeForcedLogout', { detail: { message: maintenanceMessage } }));
+      
+      const error: any = new Error(maintenanceMessage);
+      error.response = { data: errorData, status: response.status };
+      error.isMaintenanceModeError = true; // Custom flag
+      throw error; // Stop further processing in the calling function
     }
 
     // Check for 401 Unauthorized and if a token was likely used (i.e., not a login attempt itself)
@@ -557,6 +576,47 @@ export async function fetchSystemHealth(): Promise<SystemHealth> {
     throw error;
   }
 }
+
+// --- Maintenance Mode API Functions (for Super Admin) ---
+export async function getMaintenanceModeStatus(): Promise<MaintenanceStatusResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/admin/maintenance-mode`, {
+      method: 'GET',
+      headers: { ...getAuthHeader() },
+    });
+    return handleApiError(response, 'Failed to fetch maintenance mode status');
+  } catch (error) {
+    console.error('Error fetching maintenance mode status:', error);
+    throw error;
+  }
+}
+
+export async function enableMaintenanceMode(): Promise<MaintenanceStatusResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/admin/maintenance-mode/enable`, {
+      method: 'POST',
+      headers: { ...getAuthHeader() },
+    });
+    return handleApiError(response, 'Failed to enable maintenance mode');
+  } catch (error) {
+    console.error('Error enabling maintenance mode:', error);
+    throw error;
+  }
+}
+
+export async function disableMaintenanceMode(): Promise<MaintenanceStatusResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/admin/maintenance-mode/disable`, {
+      method: 'POST',
+      headers: { ...getAuthHeader() },
+    });
+    return handleApiError(response, 'Failed to disable maintenance mode');
+  } catch (error) {
+    console.error('Error disabling maintenance mode:', error);
+    throw error;
+  }
+}
+// --- End Maintenance Mode API Functions ---
 
 // --- Audit Log Fetch Function ---
 export async function fetchAuditLogEntries(params: URLSearchParams): Promise<AuditLogResponse> {

@@ -13,6 +13,7 @@ DROP TABLE IF EXISTS site_settings;
 DROP TABLE IF EXISTS user_security_answers;
 DROP TABLE IF EXISTS security_questions;
 DROP TABLE IF EXISTS password_reset_requests;
+DROP TABLE IF EXISTS system_settings;
 
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -258,3 +259,26 @@ CREATE TABLE IF NOT EXISTS password_reset_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_password_reset_requests_user_id ON password_reset_requests (user_id);
 CREATE INDEX IF NOT EXISTS idx_password_reset_requests_expires_at ON password_reset_requests (expires_at);
+
+-- System Settings Table
+-- Stores global system-wide settings like maintenance mode.
+CREATE TABLE IF NOT EXISTS system_settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    setting_name TEXT UNIQUE NOT NULL,
+    is_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+-- Trigger to update 'updated_at' timestamp on row update.
+CREATE TRIGGER IF NOT EXISTS trigger_system_settings_updated_at
+AFTER UPDATE ON system_settings
+FOR EACH ROW
+BEGIN
+    UPDATE system_settings SET updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE id = OLD.id;
+END;
+
+-- Initialize the maintenance_mode setting.
+INSERT INTO system_settings (setting_name, is_enabled) VALUES ('maintenance_mode', FALSE)
+ON CONFLICT(setting_name) DO NOTHING;
+-- 'ON CONFLICT' ensures this doesn't error if schema is run multiple times,
+-- though for a fresh DB it's just an insert.

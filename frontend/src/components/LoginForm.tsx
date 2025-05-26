@@ -35,7 +35,10 @@ const LoginForm: React.FC<LoginFormProps> = ({ onAuthSuccess, onToggleView }) =>
       showSuccessToast("Login successful!"); // Added success toast
       onAuthSuccess?.(requiresReset); 
     } catch (err: any) {
-      if (err.response && err.response.data && err.response.data.msg) {
+      // Specific handling for maintenance mode
+      if (err.response && err.response.status === 503 && err.response.data?.maintenance_mode_active === true) {
+        showErrorToast(err.response.data.msg || "System is currently undergoing maintenance. Only super administrators can log in at this time.");
+      } else if (err.response && err.response.data && err.response.data.msg) {
         showErrorToast(err.response.data.msg);
       } else {
         showErrorToast('Login failed. Please try again.');

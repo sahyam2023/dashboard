@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { ExternalLink, PlusCircle, Edit3, Trash2, Star, Filter, ChevronUp } from 'lucide-react';
+import { ExternalLink, PlusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Download, Move, AlertTriangle, FileText } from 'lucide-react'; 
 import { 
   fetchDocuments, 
   fetchSoftware, 
@@ -8,68 +8,96 @@ import {
   PaginatedDocumentsResponse,
   addFavoriteApi,
   removeFavoriteApi,
-  FavoriteItemType 
+  FavoriteItemType,
+  bulkDeleteItems,
+  bulkDownloadItems,
+  bulkMoveItems,
+  BulkItemType,
 } from '../services/api'; 
 import { Document as DocumentType, Software } from '../types'; 
 import DataTable, { ColumnDef } from '../components/DataTable'; 
 import FilterTabs from '../components/FilterTabs';
-import LoadingState from '../components/LoadingState'; // Can be replaced by DataTable's isLoading
+import LoadingState from '../components/LoadingState'; 
 import ErrorState from '../components/ErrorState';
 import { useAuth } from '../context/AuthContext';
 import AdminDocumentEntryForm from '../components/admin/AdminDocumentEntryForm';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
-import { showErrorToast } from '../utils/toastUtils';
+import Modal from '../components/shared/Modal'; 
+import { showErrorToast, showSuccessToast } from '../utils/toastUtils';
 
 interface OutletContextType {
   searchTerm: string;
+  setSearchTerm: (term: string) => void; 
 }
 
 const DocumentsView: React.FC = () => {
   const ITEMS_PER_PAGE = 15;
-  const { searchTerm } = useOutletContext<OutletContextType>();
+  const { searchTerm, setSearchTerm } = useOutletContext<OutletContextType>(); 
   const { isAuthenticated, role } = useAuth();
-  // Note: The old `isLoading` and `isInitialLoad` are replaced by `isLoadingInitial` and `isLoadingMore`.
-  // `totalPages` and `itemsPerPage` (as state for DataTable) are no longer primary drivers for pagination.
 
-  // UI State for Forms and Modals
   const [showAddDocumentForm, setShowAddDocumentForm] = useState(false);
   const [editingDocument, setEditingDocument] = useState<DocumentType | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [documentToDelete, setDocumentToDelete] = useState<DocumentType | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
-
-  // Favorite State
+  
   const [favoritedItems, setFavoritedItems] = useState<Map<number, { favoriteId: number | undefined }>>(new Map());
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false); // State for filter toggle
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false); 
   const [selectedSoftwareId, setSelectedSoftwareId] = useState<number | null>(null);
 
-  // Data states
   const [documents, setDocuments] = useState<DocumentType[]>([]);
   const [softwareList, setSoftwareList] = useState<Software[]>([]);
 
-  // Loading and Error states
   const [isLoadingInitial, setIsLoadingInitial] = useState<boolean>(true);
-  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
+  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false); 
   const [error, setError] = useState<string | null>(null);
   
-  // Pagination states
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [totalDocuments, setTotalDocuments] = useState<number>(0);
-  const [hasMore, setHasMore] = useState<boolean>(false);
+  const [hasMore, setHasMore] = useState<boolean>(false); 
 
-  // Sorting states
-  const [sortBy, setSortBy] = useState<string>('created_at');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [sortBy, setSortBy] = useState<string>('doc_name'); 
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc'); 
 
-  // Advanced Filter states
   const [docTypeFilter, setDocTypeFilter] = useState<string>('');
   const [createdFromFilter, setCreatedFromFilter] = useState<string>('');
   const [createdToFilter, setCreatedToFilter] = useState<string>('');
   const [updatedFromFilter, setUpdatedFromFilter] = useState<string>('');
   const [updatedToFilter, setUpdatedToFilter] = useState<string>('');
 
-// Core data fetching function
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState<Set<number>>(new Set());
+  const [showBulkMoveModal, setShowBulkMoveModal] = useState<boolean>(false);
+  const [targetSoftwareForMove, setTargetSoftwareForMove] = useState<number | null>(null);
+  const [showBulkDeleteConfirmModal, setShowBulkDeleteConfirmModal] = useState<boolean>(false);
+  const [isDeletingSelected, setIsDeletingSelected] = useState<boolean>(false);
+  const [isDownloadingSelected, setIsDownloadingSelected] = useState<boolean>(false);
+  const [isMovingSelected, setIsMovingSelected] = useState<boolean>(false);
+
+  const filtersAreActive = useMemo(() => {
+    return (
+      selectedSoftwareId !== null ||
+      docTypeFilter !== '' ||
+      createdFromFilter !== '' ||
+      createdToFilter !== '' ||
+      updatedFromFilter !== '' ||
+      updatedToFilter !== '' ||
+      searchTerm !== ''
+    );
+  }, [selectedSoftwareId, docTypeFilter, createdFromFilter, createdToFilter, updatedFromFilter, updatedToFilter, searchTerm]);
+
+  const handleClearAllFiltersAndSearch = useCallback(() => {
+    setSelectedSoftwareId(null);
+    setDocTypeFilter('');
+    setCreatedFromFilter('');
+    setCreatedToFilter('');
+    setUpdatedFromFilter('');
+    setUpdatedToFilter('');
+    if (setSearchTerm) { 
+      setSearchTerm(''); 
+    }
+    // fetchAndSetDocuments(1, true); // Main useEffect will handle this
+  }, [setSearchTerm]);
+
 const fetchAndSetDocuments = useCallback(async (pageToLoad: number, isNewQuery: boolean = false) => {
   if (isNewQuery) {
     setIsLoadingInitial(true);
@@ -81,31 +109,19 @@ const fetchAndSetDocuments = useCallback(async (pageToLoad: number, isNewQuery: 
   try {
     const response: PaginatedDocumentsResponse = await fetchDocuments(
       selectedSoftwareId === null ? undefined : selectedSoftwareId,
-      pageToLoad,
-      ITEMS_PER_PAGE,
-      sortBy,
-      sortOrder,
-      docTypeFilter || undefined,
-      createdFromFilter || undefined,
-      createdToFilter || undefined,
-      updatedFromFilter || undefined,
-      updatedToFilter || undefined
+      pageToLoad, ITEMS_PER_PAGE, sortBy, sortOrder,
+      docTypeFilter || undefined, createdFromFilter || undefined, createdToFilter || undefined,
+      updatedFromFilter || undefined, updatedToFilter || undefined
     );
-
     const newDocs = response.documents;
-    // Use functional update for documents to correctly handle appending for favorites update
-    setDocuments((prevDocs: DocumentType[]) => isNewQuery ? newDocs : [...prevDocs, ...newDocs]);
+    setDocuments(isNewQuery ? newDocs : [...documents, ...newDocs]); 
     setTotalDocuments(response.total_documents);
-    setCurrentPage(response.page + 1); 
-    setHasMore(response.page < response.total_pages);
+    setCurrentPage(response.page); 
+    setHasMore(response.page < response.total_pages); 
     
-    // Update favoritedItems based on the potentially updated documents list
-    // This needs to happen after setDocuments has effectively completed or use the new list directly
-    // For simplicity with async state updates, consider passing the new full list to update favorites
     setFavoritedItems(prevFavs => {
         const updatedFavs = new Map(prevFavs);
-        // Construct the current full list based on whether it's a new query or appending
-        const currentFullDocs = isNewQuery ? newDocs : [...documents, ...newDocs]; // 'documents' here refers to state before this update when appending
+        const currentFullDocs = isNewQuery ? newDocs : [...documents, ...newDocs]; 
         if (isAuthenticated && currentFullDocs) {
             for (const doc of currentFullDocs) { 
                 if (doc.favorite_id) updatedFavs.set(doc.id, { favoriteId: doc.favorite_id });
@@ -114,8 +130,6 @@ const fetchAndSetDocuments = useCallback(async (pageToLoad: number, isNewQuery: 
         }
         return updatedFavs;
     });
-
-
   } catch (err: any) {
     console.error(`Failed to load documents (page ${pageToLoad}):`, err);
     const errorMessage = err.response?.data?.msg || err.message || 'Failed to fetch documents.';
@@ -128,68 +142,30 @@ const fetchAndSetDocuments = useCallback(async (pageToLoad: number, isNewQuery: 
       setHasMore(false); 
     }
   } finally {
-    if (isNewQuery) {
-      setIsLoadingInitial(false);
-    } else {
-      setIsLoadingMore(false);
-    }
+    if (isNewQuery) setIsLoadingInitial(false);
+    else setIsLoadingMore(false);
   }
 }, [
-  selectedSoftwareId,
-  ITEMS_PER_PAGE, 
-  sortBy,
-  sortOrder,
-  docTypeFilter,
-  createdFromFilter,
-  createdToFilter,
-  updatedFromFilter,
-  updatedToFilter,
-  isAuthenticated
-  // documents // Removed 'documents' to prevent infinite loop
+  selectedSoftwareId, ITEMS_PER_PAGE, sortBy, sortOrder, docTypeFilter, 
+  createdFromFilter, createdToFilter, updatedFromFilter, updatedToFilter, 
+  isAuthenticated, documents 
 ]);
   
-// Effect for initial load and when critical filters/sort change
 useEffect(() => {
   if (!isAuthenticated) {
-    setDocuments([]);
-    setFavoritedItems(new Map());
-    setCurrentPage(1);
-    setHasMore(false);
-    setIsLoadingInitial(false);
-    return;
+    setDocuments([]); setFavoritedItems(new Map()); setCurrentPage(1);
+    setHasMore(false); setIsLoadingInitial(false); return;
   }
-  setDocuments([]); 
-  setCurrentPage(1);  
-  setHasMore(true);   
   fetchAndSetDocuments(1, true); 
 }, [
-  isAuthenticated, 
-  selectedSoftwareId, 
-  sortBy, 
-  sortOrder, 
-  docTypeFilter, 
-  createdFromFilter, 
-  createdToFilter, 
-  updatedFromFilter, 
-  updatedToFilter,
-  fetchAndSetDocuments // fetchAndSetDocuments is now a dependency
+  isAuthenticated, selectedSoftwareId, sortBy, sortOrder, 
+  docTypeFilter, createdFromFilter, createdToFilter, updatedFromFilter, updatedToFilter,
+  fetchAndSetDocuments 
 ]);
 
-
-// Handler for applying advanced filters - triggers the useEffect above
-const handleApplyAdvancedFilters = () => {
-  // The state changes for filters (docTypeFilter, etc.) will trigger the useEffect.
-};
-
-// Handler for clearing advanced filters - triggers the useEffect above
-const handleClearAdvancedFilters = () => {
-  setDocTypeFilter('');
-  setCreatedFromFilter('');
-  setCreatedToFilter('');
-  setUpdatedFromFilter('');
-  setUpdatedToFilter('');
-  // If setSelectedSoftwareId(null) is also part of clear, it will also trigger the effect.
-};
+useEffect(() => {
+  setSelectedDocumentIds(new Set());
+}, [selectedSoftwareId, sortBy, sortOrder, docTypeFilter, createdFromFilter, createdToFilter, updatedFromFilter, updatedToFilter, searchTerm, currentPage]);
 
 useEffect(() => {
     const loadSoftwareForFilters = async () => {
@@ -198,229 +174,144 @@ useEffect(() => {
         setSoftwareList(softwareData);
       } catch (err) {
         console.error("Failed to load software for filters", err);
+        showErrorToast("Failed to load software list for filtering.");
       }
     };
-    loadSoftwareForFilters();
-  }, []);
+    if (isAuthenticated) loadSoftwareForFilters();
+  }, [isAuthenticated]);
 
-// handleFilterChange, handleSort will now just update state, letting the main useEffect handle refetch.
-  const handleFilterChange = (softwareId: number | null) => {
-    setSelectedSoftwareId(softwareId);
-  };
-
-  // handlePageChange is removed for infinite scroll
-
+  const handleFilterChange = (softwareId: number | null) => setSelectedSoftwareId(softwareId);
   const handleSort = (columnKey: string) => {
     const newSortOrder = sortBy === columnKey && sortOrder === 'asc' ? 'desc' : 'asc';
-    setSortBy(columnKey);
-    setSortOrder(newSortOrder);
+    setSortBy(columnKey); setSortOrder(newSortOrder);
   };
-
-  const loadDocuments = useCallback(() => {
-    fetchAndSetDocuments(1, true);
+  const handlePageChange = useCallback((newPage: number) => {
+    fetchAndSetDocuments(newPage, true); setSelectedDocumentIds(new Set()); 
   }, [fetchAndSetDocuments]);
 
-  const handlePageChange = useCallback((newPage: number) => {
-    setCurrentPage(newPage);
-    fetchAndSetDocuments(newPage, true);
-  }, [fetchAndSetDocuments, setCurrentPage]);
-
   const handleDocumentAdded = (newDocument: DocumentType) => {
-    setShowAddDocumentForm(false);
-    setFeedbackMessage(`Document "${newDocument.doc_name}" added successfully.`);
-    // Refresh the list from page 1 to show the new document
-    setDocuments([]); setCurrentPage(1); setHasMore(true); fetchAndSetDocuments(1, true);
+    setShowAddDocumentForm(false); showSuccessToast(`Document "${newDocument.doc_name}" added.`);
+    fetchAndSetDocuments(1, true);
   };
-
   const handleDocumentUpdated = (updatedDocument: DocumentType) => {
-    setEditingDocument(null);
-    setFeedbackMessage(`Document "${updatedDocument.doc_name}" updated successfully.`);
-    setDocuments([]); setCurrentPage(1); setHasMore(true); fetchAndSetDocuments(1, true);
+    setEditingDocument(null); showSuccessToast(`Document "${updatedDocument.doc_name}" updated.`);
+    fetchAndSetDocuments(1, true);
   };
 
-  const openEditForm = (doc: DocumentType) => {
-    setShowAddDocumentForm(false);
-    setEditingDocument(doc);
-    setFeedbackMessage(null);
-  };
-
-  const closeEditForm = () => {
-    setEditingDocument(null);
-  };
-
-  const openDeleteConfirm = (doc: DocumentType) => {
-    setDocumentToDelete(doc);
-    setShowDeleteConfirm(true);
-    setFeedbackMessage(null);
-  };
-
-  const closeDeleteConfirm = () => {
-    setDocumentToDelete(null);
-    setShowDeleteConfirm(false);
-  };
+  const openEditForm = (doc: DocumentType) => { setShowAddDocumentForm(false); setEditingDocument(doc); };
+  const closeEditForm = () => setEditingDocument(null);
+  const openDeleteConfirm = (doc: DocumentType) => { setDocumentToDelete(doc); setShowDeleteConfirm(true); };
+  const closeDeleteConfirm = () => { setDocumentToDelete(null); setShowDeleteConfirm(false); };
 
   const handleDeleteConfirm = async () => {
     if (!documentToDelete) return;
     setIsDeleting(true);
-    setError(null);
     try {
       await deleteAdminDocument(documentToDelete.id);
-      setFeedbackMessage(`Document "${documentToDelete.doc_name}" deleted successfully.`);
-      closeDeleteConfirm();
-      // If on the last page and it becomes empty, go to previous page
-      if (documents.length === 1 && currentPage > 1) {
-        setCurrentPage(currentPage - 1); // This will trigger a re-fetch via useEffect
-      } else {
-        loadDocuments(); // Otherwise, just re-fetch
-      }
-    } catch (err: any) {
-      setError(err.message || "Failed to delete document.");
-      closeDeleteConfirm();
-    } finally {
-      setIsDeleting(false);
-    }
+      showSuccessToast(`Document "${documentToDelete.doc_name}" deleted.`);
+      closeDeleteConfirm(); fetchAndSetDocuments(1, true); 
+    } catch (err: any) { showErrorToast(err.message || "Failed to delete document."); closeDeleteConfirm(); }
+    finally { setIsDeleting(false); }
   };
 
   const filteredDocumentsBySearch = useMemo(() => {
-    // Client-side search on the currently fetched page of documents
-    if (!searchTerm) return documents;
+    if (!searchTerm) return documents; 
     const lowerSearchTerm = searchTerm.toLowerCase();
-    return documents.filter(doc =>
+    return documents.filter(doc => 
       doc.doc_name.toLowerCase().includes(lowerSearchTerm) ||
       (doc.description || '').toLowerCase().includes(lowerSearchTerm) ||
       (doc.software_name || '').toLowerCase().includes(lowerSearchTerm)
     );
   }, [documents, searchTerm]);
 
+  const handleSelectItem = (itemId: number, isSelected: boolean) => {
+    setSelectedDocumentIds(prev => { const n = new Set(prev); if (isSelected) n.add(itemId); else n.delete(itemId); return n; });
+  };
+  const handleSelectAllItems = (isSelected: boolean) => {
+    const n = new Set<number>(); if (isSelected) filteredDocumentsBySearch.forEach(d => n.add(d.id)); setSelectedDocumentIds(n);
+  };
+
+  const handleBulkDeleteClick = () => { if (selectedDocumentIds.size === 0) { showErrorToast("No items selected."); return; } setShowBulkDeleteConfirmModal(true); };
+  const confirmBulkDelete = async () => {
+    setShowBulkDeleteConfirmModal(false); setIsDeletingSelected(true); 
+    try {
+      const res = await bulkDeleteItems(Array.from(selectedDocumentIds), 'document' as BulkItemType);
+      showSuccessToast(res.msg || `${res.deleted_count} item(s) deleted.`);
+      setSelectedDocumentIds(new Set()); fetchAndSetDocuments(1, true);
+    } catch (e: any) { showErrorToast(e.message || "Bulk delete failed."); }
+    finally { setIsDeletingSelected(false); }
+  };
+
+  const handleBulkDownload = async () => {
+    if (selectedDocumentIds.size === 0) { showErrorToast("No items selected."); return; }
+    setIsDownloadingSelected(true); 
+    try {
+      const blob = await bulkDownloadItems(Array.from(selectedDocumentIds), 'document' as BulkItemType);
+      const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url;
+      const ts = new Date().toISOString().replace(/:/g, '-'); a.download = `bulk_download_document_${ts}.zip`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+      showSuccessToast('Download started.');
+    } catch (e: any) { showErrorToast(e.message || "Bulk download failed."); }
+    finally { setIsDownloadingSelected(false); }
+  };
+  
+  const handleOpenBulkMoveModal = () => {
+    if (selectedDocumentIds.size === 0) { showErrorToast("No items selected."); return; }
+    if (softwareList.length === 0) { showErrorToast("Software list unavailable."); return; }
+    setTargetSoftwareForMove(null); setShowBulkMoveModal(true);
+  };
+  const handleConfirmBulkMoveDocuments = async () => {
+    if (!targetSoftwareForMove) { showErrorToast("Select target software."); return; }
+    setShowBulkMoveModal(false); setIsMovingSelected(true); 
+    try {
+      const res = await bulkMoveItems(Array.from(selectedDocumentIds), 'document' as BulkItemType, { target_software_id: targetSoftwareForMove });
+      showSuccessToast(res.msg || `${res.moved_count} item(s) moved.`);
+      setSelectedDocumentIds(new Set()); fetchAndSetDocuments(1, true);
+    } catch (e: any) { showErrorToast(e.message || "Bulk move failed."); }
+    finally { setIsMovingSelected(false); setTargetSoftwareForMove(null); }
+  };
+
   const columns: ColumnDef<DocumentType>[] = [
-    { key: 'doc_name', header: 'Name', sortable: true },
-    { key: 'doc_type', header: 'Type', sortable: true },
+    { key: 'doc_name', header: 'Name', sortable: true }, { key: 'doc_type', header: 'Type', sortable: true },
     { key: 'software_name', header: 'Software', sortable: true },
-    { key: 'description', header: 'Description', render: (doc: DocumentType) => (
-      <span className="text-sm text-gray-600 block max-w-xs truncate" title={doc.description || ''}>
-        {doc.description || '-'}
-      </span>
-    )},
-    {
-      key: 'download_link',
-      header: 'Download',
-      render: (document: DocumentType) => (
-        <a
-          href={document.download_link}
-          target={document.is_external_link || !document.download_link?.startsWith('/') ? "_blank" : "_self"}
-          rel="noopener noreferrer"
-          className="flex items-center text-blue-600 hover:text-blue-800"
-          onClick={(e) => e.stopPropagation()}
-        >
-          Download
-          <ExternalLink size={14} className="ml-1" />
-        </a>
-      )
-    },
-    { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: (doc: DocumentType) => doc.uploaded_by_username || 'N/A' },
-    { key: 'updated_by_username', header: 'Updated By', sortable: false, render: (doc: DocumentType) => doc.updated_by_username || 'N/A' }, // Not typically sorted
-    { key: 'created_at', header: 'Created At', sortable: true, render: (doc: DocumentType) => doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-CA') : '-' },
-    { key: 'updated_at', header: 'Updated At', sortable: true, render: (doc: DocumentType) => doc.updated_at ? new Date(doc.updated_at).toLocaleDateString('en-CA') : '-' },
-    ...(isAuthenticated ? [{ // Changed condition to isAuthenticated for favorite button
-      key: 'actions' as keyof DocumentType | 'actions',
-      header: 'Actions',
-      render: (document: DocumentType) => (
-        <div className="flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              handleFavoriteToggle(document, 'document' as FavoriteItemType);
-            }}
-            className={`p-1 ${favoritedItems.get(document.id)?.favoriteId ? 'text-yellow-500' : 'text-gray-400'} hover:text-yellow-600`}
-            title={favoritedItems.get(document.id)?.favoriteId ? "Remove from Favorites" : "Add to Favorites"}
-          >
-            <Star size={16} className={favoritedItems.get(document.id)?.favoriteId ? "fill-current" : ""} />
-          </button>
-          {(role === 'admin' || role === 'super_admin') && (
-            <>
-              <button onClick={(e) => { e.stopPropagation(); openEditForm(document);}} className="p-1 text-blue-600 hover:text-blue-800" title="Edit Document"><Edit3 size={16} /></button>
-              <button onClick={(e) => { e.stopPropagation(); openDeleteConfirm(document);}} className="p-1 text-red-600 hover:text-red-800" title="Delete Document"><Trash2 size={16} /></button>
-            </>
-          )}
-        </div>
-      ),
-    }] : [])
+    { key: 'description', header: 'Description', render: (d: DocumentType) => <span className="text-sm text-gray-600 block max-w-xs truncate" title={d.description||''}>{d.description||'-'}</span> },
+    { key: 'download_link', header: 'Download', render: (d: DocumentType) => <a href={d.download_link} target={d.is_external_link||!d.download_link?.startsWith('/')?"_blank":"_self"} rel="noopener noreferrer" className="flex items-center text-blue-600 hover:text-blue-800" onClick={e=>e.stopPropagation()}><Download size={14} className="mr-1"/>Link</a> },
+    { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: (d: DocumentType) => d.uploaded_by_username||'N/A' },
+    { key: 'updated_by_username', header: 'Updated By', sortable: false, render: (d: DocumentType) => d.updated_by_username||'N/A' },
+    { key: 'created_at', header: 'Created At', sortable: true, render: (d: DocumentType) => d.created_at?new Date(d.created_at).toLocaleDateString('en-CA'):'-' },
+    { key: 'updated_at', header: 'Updated At', sortable: true, render: (d: DocumentType) => d.updated_at?new Date(d.updated_at).toLocaleDateString('en-CA'):'-' },
+    { key: 'actions' as any, header: 'Actions', render: (d: DocumentType) => (<div className="flex space-x-1 items-center">{isAuthenticated&&( <button onClick={e=>{e.stopPropagation();handleFavoriteToggle(d,'document')}} className={`p-1 rounded-md ${favoritedItems.get(d.id)?.favoriteId?'text-yellow-500 hover:text-yellow-600':'text-gray-400 hover:text-yellow-500'}`} title={favoritedItems.get(d.id)?.favoriteId?"Remove Favorite":"Add Favorite"}><Star size={16} className={favoritedItems.get(d.id)?.favoriteId?"fill-current":""}/></button>)}{(role==='admin'||role==='super_admin')&&(<> <button onClick={e=>{e.stopPropagation();openEditForm(d)}} className="p-1 text-blue-600 hover:text-blue-800 rounded-md" title="Edit"><Edit3 size={16}/></button> <button onClick={e=>{e.stopPropagation();openDeleteConfirm(d)}} className="p-1 text-red-600 hover:text-red-800 rounded-md" title="Delete"><Trash2 size={16}/></button></>)}</div>)},
   ];
   
-  const totalPages = Math.ceil(totalDocuments / ITEMS_PER_PAGE);
+  const totalPagesComputed = Math.ceil(totalDocuments / ITEMS_PER_PAGE);
+  const loadDocumentsCallback = useCallback(() => { fetchAndSetDocuments(1, true); }, [fetchAndSetDocuments]);
 
   const renderAdminFormArea = () => {
-    if (editingDocument) {
-      return (
-        <div className="my-6 p-4 bg-gray-50 rounded-lg shadow">
-          <AdminDocumentEntryForm documentToEdit={editingDocument} onDocumentUpdated={handleDocumentUpdated} onCancelEdit={closeEditForm} />
-        </div>
-      );
-    }
-    if (showAddDocumentForm) {
-      return (
-        <div className="my-6 p-4 bg-gray-50 rounded-lg shadow">
-          <AdminDocumentEntryForm onDocumentAdded={handleDocumentAdded} onCancelEdit={() => setShowAddDocumentForm(false)} />
-        </div>
-      );
-    }
+    if (editingDocument) return <div className="my-6 p-4 bg-gray-50 rounded-lg shadow dark:bg-gray-700"><AdminDocumentEntryForm documentToEdit={editingDocument} onDocumentUpdated={handleDocumentUpdated} onCancelEdit={closeEditForm} /></div>;
+    if (showAddDocumentForm) return <div className="my-6 p-4 bg-gray-50 rounded-lg shadow dark:bg-gray-700"><AdminDocumentEntryForm onDocumentAdded={handleDocumentAdded} onCancelEdit={() => setShowAddDocumentForm(false)} /></div>;
     return null;
   };
 
   const handleFavoriteToggle = async (item: DocumentType, itemType: FavoriteItemType) => {
-    if (!isAuthenticated) {
-      setFeedbackMessage("Please log in to manage favorites.");
-      return;
-    }
-
+    if (!isAuthenticated) { showErrorToast("Please log in to manage favorites."); return; }
     const currentStatus = favoritedItems.get(item.id);
     const isCurrentlyFavorited = !!currentStatus?.favoriteId;
-    
-    // Optimistic UI update
-    const tempFavoritedItems = new Map(favoritedItems);
-    if (isCurrentlyFavorited) {
-      tempFavoritedItems.set(item.id, { favoriteId: undefined });
-    } else {
-      // For optimistic add, we don't have the real favorite_id yet.
-      // We can use a placeholder or handle it by refetching status.
-      // Here, we'll just mark it as favorited and update with real ID later.
-      tempFavoritedItems.set(item.id, { favoriteId: -1 }); // Placeholder for "favorited"
-    }
-    setFavoritedItems(tempFavoritedItems);
-    setFeedbackMessage(null); // Clear previous messages
-
+    const tempFavs = new Map(favoritedItems);
+    if (isCurrentlyFavorited) tempFavs.set(item.id, { favoriteId: undefined }); else tempFavs.set(item.id, { favoriteId: -1 });
+    setFavoritedItems(tempFavs);
     try {
       if (isCurrentlyFavorited && typeof currentStatus?.favoriteId === 'number') {
         await removeFavoriteApi(item.id, itemType);
-        setFeedbackMessage(`"${item.doc_name}" removed from favorites.`);
-        // UI already updated optimistically for removal, confirm by ensuring it's undefined
-        setFavoritedItems(prev => {
-            const newMap = new Map(prev);
-            newMap.set(item.id, { favoriteId: undefined });
-            return newMap;
-        });
+        showSuccessToast(`"${item.doc_name}" removed from favorites.`);
+        setFavoritedItems(prev => { const n = new Map(prev); n.set(item.id, { favoriteId: undefined }); return n; });
       } else {
-        const newFavorite = await addFavoriteApi(item.id, itemType);
-        setFavoritedItems(prev => {
-          const newMap = new Map(prev);
-          newMap.set(item.id, { favoriteId: newFavorite.id }); // Update with real ID
-          return newMap;
-        });
-        setFeedbackMessage(`"${item.doc_name}" added to favorites.`);
+        const newFav = await addFavoriteApi(item.id, itemType);
+        setFavoritedItems(prev => { const n = new Map(prev); n.set(item.id, { favoriteId: newFav.id }); return n; });
+        showSuccessToast(`"${item.doc_name}" added to favorites.`);
       }
-    } catch (error: any) {
-      console.error("Failed to toggle favorite:", error);
-      setFeedbackMessage(error?.response?.data?.msg || error.message || "Failed to update favorite status.");
-      // Revert optimistic update
-      setFavoritedItems(prev => {
-        const newMap = new Map(prev);
-        if (isCurrentlyFavorited) { // Failed to remove, so it's still favorited (revert to original state)
-            newMap.set(item.id, { favoriteId: currentStatus?.favoriteId });
-        } else { // Failed to add, so it's not favorited
-            newMap.set(item.id, { favoriteId: undefined });
-        }
-        return newMap;
-      });
+    } catch (e: any) {
+      showErrorToast(e?.response?.data?.msg || e.message || "Failed to update favorite.");
+      setFavoritedItems(prev => { const n=new Map(prev); if(isCurrentlyFavorited)n.set(item.id,{favoriteId:currentStatus?.favoriteId}); else n.set(item.id,{favoriteId:undefined}); return n;});
     }
   };
 
@@ -429,138 +320,75 @@ useEffect(() => {
       <div className="flex justify-between items-start sm:items-center mb-6 flex-col sm:flex-row">
         <div>
           <h2 className="text-2xl font-bold text-gray-800 dark:text-white">Documents</h2>
-          <p className="text-gray-600 mt-1 dark:text-gray-300">Browse and download documentation</p>
+          <p className="text-gray-600 mt-1 dark:text-gray-300">Browse and manage official documents and resources.</p>
         </div>
         {isAuthenticated && (role === 'admin' || role === 'super_admin') && !editingDocument && (
-          <button
-            onClick={() => { setShowAddDocumentForm(prev => !prev); setEditingDocument(null); setFeedbackMessage(null); }}
-            className="mt-4 sm:mt-0 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-          >
-            <PlusCircle size={18} className="mr-2" />
-            {showAddDocumentForm ? 'Cancel Add Document' : 'Add New Document'}
+          <button onClick={() => { setShowAddDocumentForm(p => !p); setEditingDocument(null);}}
+            className="mt-4 sm:mt-0 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+            <PlusCircle size={18} className="mr-2" />{showAddDocumentForm ? 'Cancel' : 'Add New Document'}
           </button>
         )}
       </div>
-
-      {feedbackMessage && <div className="p-3 my-2 bg-green-100 text-green-700 rounded text-sm">{feedbackMessage}</div>}
       {renderAdminFormArea()}
-
-      {softwareList.length > 0 && (
-        <FilterTabs
-          software={softwareList}
-          selectedSoftwareId={selectedSoftwareId}
-          onSelectFilter={handleFilterChange}
-        />
+      {selectedDocumentIds.size > 0 && (
+        <div className="my-4 p-3 bg-gray-100 dark:bg-gray-700 rounded-md shadow-sm border border-gray-200 dark:border-gray-600">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">{selectedDocumentIds.size} item(s) selected</span>
+            {(role === 'admin' || role === 'super_admin') && (<button onClick={handleBulkDeleteClick} disabled={isDeletingSelected} className="px-3 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-700 rounded-md shadow-sm disabled:opacity-50 flex items-center"><Trash2 size={14} className="mr-1.5"/>Delete</button>)}
+            {isAuthenticated && (<button onClick={handleBulkDownload} disabled={isDownloadingSelected} className="px-3 py-1.5 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md shadow-sm disabled:opacity-50 flex items-center"><Download size={14} className="mr-1.5"/>Download</button>)}
+            {(role === 'admin' || role === 'super_admin') && (<button onClick={handleOpenBulkMoveModal} disabled={isMovingSelected} className="px-3 py-1.5 text-xs font-medium text-black bg-yellow-400 hover:bg-yellow-500 rounded-md shadow-sm disabled:opacity-50 flex items-center"><Move size={14} className="mr-1.5"/>Move</button>)}
+          </div>
+        </div>
       )}
-
-      {/* Toggle Button for Advanced Filters */}
-      <div className="mb-4">
-        <button
-          onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-          className="flex items-center px-4 py-2 bg-gray-200 text-gray-700 hover:bg-gray-300 rounded-md text-sm font-medium"
-        >
-          {showAdvancedFilters ? (
-            <>
-              <ChevronUp size={18} className="mr-2" /> Hide Advanced Filters
-            </>
-          ) : (
-            <>
-              <Filter size={18} className="mr-2" /> Show Advanced Filters
-            </>
-          )}
-        </button>
-      </div>
-
-      {/* Advanced Filter UI - Conditionally Rendered */}
+      {softwareList.length > 0 && <FilterTabs software={softwareList} selectedSoftwareId={selectedSoftwareId} onSelectFilter={handleFilterChange} />}
+      <div className="mb-4"><button onClick={() => setShowAdvancedFilters(p => !p)} className="flex items-center px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-md text-sm font-medium">{showAdvancedFilters?(<><ChevronUp size={18}className="mr-2"/>Hide</>):(<><Filter size={18}className="mr-2"/>Show</>)} Advanced Filters</button></div>
       {showAdvancedFilters && (
-        <div className="my-4 p-4 border rounded-md bg-gray-50 space-y-4 md:space-y-0 md:flex md:flex-wrap md:items-end md:gap-4">
-          {/* Document Type Filter */}
-          <div className="flex flex-col">
-          <label htmlFor="docTypeFilterInput" className="text-sm font-medium text-gray-700 mb-1">Document Type</label>
-          <input
-            id="docTypeFilterInput"
-            type="text"
-            value={docTypeFilter}
-            onChange={(e) => setDocTypeFilter(e.target.value)}
-            placeholder="e.g., Manual, Guide"
-            className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-          />
+        <div className="my-4 p-4 border dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-700 space-y-4 md:space-y-0 md:flex md:flex-wrap md:items-end md:gap-4">
+          <div><label htmlFor="docTypeFilterInput" className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Doc Type</label><input id="docTypeFilterInput" type="text" value={docTypeFilter} onChange={e=>setDocTypeFilter(e.target.value)} placeholder="e.g., Manual" className="input-class"/></div>
+          <div><label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Created</label><div className="flex items-center gap-2"><input type="date" value={createdFromFilter} onChange={e=>setCreatedFromFilter(e.target.value)} className="input-class"/><span className="text-gray-500 dark:text-gray-400">to</span><input type="date" value={createdToFilter} onChange={e=>setCreatedToFilter(e.target.value)} className="input-class"/></div></div>
+          <div><label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Updated</label><div className="flex items-center gap-2"><input type="date" value={updatedFromFilter} onChange={e=>setUpdatedFromFilter(e.target.value)} className="input-class"/><span className="text-gray-500 dark:text-gray-400">to</span><input type="date" value={updatedToFilter} onChange={e=>setUpdatedToFilter(e.target.value)} className="input-class"/></div></div>
+          <div className="flex items-end gap-2 pt-5"><button onClick={()=>fetchAndSetDocuments(1,true)} className="btn-primary text-sm">Apply</button><button onClick={handleClearAllFiltersAndSearch} className="btn-secondary text-sm">Clear</button></div>
         </div>
-
-        {/* Created At Filter */}
-        <div className="flex flex-col">
-          <label className="text-sm font-medium text-gray-700 mb-1">Created Between</label>
-          <div className="flex items-center gap-2">
-            <input type="date" value={createdFromFilter} onChange={(e) => setCreatedFromFilter(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" />
-            <span className="text-gray-500">and</span>
-            <input type="date" value={createdToFilter} onChange={(e) => setCreatedToFilter(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" />
-          </div>
-        </div>
-        
-        {/* Updated At Filter */}
-        <div className="flex flex-col">
-          <label className="text-sm font-medium text-gray-700 mb-1">Updated Between</label>
-          <div className="flex items-center gap-2">
-            <input type="date" value={updatedFromFilter} onChange={(e) => setUpdatedFromFilter(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" />
-            <span className="text-gray-500">and</span>
-            <input type="date" value={updatedToFilter} onChange={(e) => setUpdatedToFilter(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" />
-          </div>
-        </div>
-
-        {/* Action Buttons */}
-        <div className="flex items-end gap-2 pt-5"> {/* pt-5 to align with labels if inputs are taller */}
-          <button
-            onClick={handleApplyAdvancedFilters}
-            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 text-sm"
-          >
-            Apply Filters
-          </button>
-          <button
-            onClick={handleClearAdvancedFilters}
-            className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 text-sm"
-          >
-            Clear Filters
-          </button>
-        </div>
-      </div>
-      )} 
-
-
-      {isLoadingInitial ? ( 
-        <LoadingState />
-      ) : error && documents.length === 0 ? ( 
-        <ErrorState message={error} onRetry={loadDocuments} />
-      ) : (
-        <>
-          {/* Toasts will handle non-initial load errors. No specific inline error display needed here. */}
-          <DataTable
-            columns={columns}
-            data={filteredDocumentsBySearch}
-            rowClassName="group" // Added group class for row hover effect
-            isLoading={isLoadingInitial || isLoadingMore}
-            currentPage={currentPage}
-            totalPages={totalPages}
-            onPageChange={handlePageChange}
-            itemsPerPage={ITEMS_PER_PAGE}
-            totalItems={totalDocuments}
-            sortColumn={sortBy}
-            sortOrder={sortOrder}
-            onSort={handleSort}
-          />
-        </>
       )}
-
-      {showDeleteConfirm && documentToDelete && (
-        <ConfirmationModal
-          isOpen={showDeleteConfirm}
-          title="Delete Document"
-          message={`Are you sure you want to delete the document "${documentToDelete.doc_name}"? This action cannot be undone.`}
-          onConfirm={handleDeleteConfirm}
-          onCancel={closeDeleteConfirm}
-          isConfirming={isDeleting}
-          confirmButtonText="Delete"
-          confirmButtonVariant="danger"
-        />
+      {isLoadingInitial ? (
+        <div className="py-10"><LoadingState message="Loading documents..." /></div>
+      ) : error && documents.length === 0 && !isLoadingInitial ? (
+        <ErrorState message={error} onRetry={loadDocumentsCallback} />
+      ) : !isLoadingInitial && !error && documents.length === 0 ? (
+        <div className="text-center py-10 bg-white dark:bg-gray-800 rounded-lg shadow-sm my-6">
+          <AlertTriangle size={48} className="mx-auto text-yellow-500 dark:text-yellow-400 mb-4" />
+          <p className="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-3">
+            {filtersAreActive ? "No Documents Found Matching Criteria" : "No Documents Available"}
+          </p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 px-4">
+            {filtersAreActive ? "Try adjusting or clearing your search/filter settings." : 
+             (role==='admin'||role==='super_admin') ? "Add new documents to get started." : "Please check back later."}
+          </p>
+          {filtersAreActive && (<button onClick={handleClearAllFiltersAndSearch} className="mt-6 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 text-sm font-medium">Clear All Filters & Search</button>)}
+        </div>
+      ) : (
+        <DataTable columns={columns} data={filteredDocumentsBySearch} rowClassName="group" isLoading={isLoadingInitial||isLoadingMore} currentPage={currentPage} totalPages={totalPagesComputed} onPageChange={handlePageChange} itemsPerPage={ITEMS_PER_PAGE} totalItems={totalDocuments} sortColumn={sortBy} sortOrder={sortOrder} onSort={handleSort} isSelectionEnabled={true} selectedItemIds={selectedDocumentIds} onSelectItem={handleSelectItem} onSelectAllItems={handleSelectAllItems} />
+      )}
+      {showDeleteConfirm && documentToDelete && (<ConfirmationModal isOpen={showDeleteConfirm} title="Delete Document" message={`Delete "${documentToDelete.doc_name}"?`} onConfirm={handleDeleteConfirm} onCancel={closeDeleteConfirm} isConfirming={isDeleting} confirmButtonText="Delete" confirmButtonVariant="danger"/>)}
+      {showBulkDeleteConfirmModal && (<ConfirmationModal isOpen={showBulkDeleteConfirmModal} title={`Delete ${selectedDocumentIds.size} Document(s)`} message={`Delete ${selectedDocumentIds.size} selected items?`} onConfirm={confirmBulkDelete} onCancel={()=>setShowBulkDeleteConfirmModal(false)} isConfirming={isDeletingSelected} confirmButtonText="Delete Selected" confirmButtonVariant="danger" Icon={AlertTriangle}/>)}
+      {showBulkMoveModal && (
+        <Modal isOpen={showBulkMoveModal} onClose={()=>setShowBulkMoveModal(false)} title={`Move ${selectedDocumentIds.size} Document(s)`}>
+          <div className="p-4">
+            <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">Select target software:</p>
+            <div className="mb-4">
+              <label htmlFor="targetSoftware" className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Target Software</label>
+              <select id="targetSoftware" value={targetSoftwareForMove??''} onChange={e=>setTargetSoftwareForMove(e.target.value?parseInt(e.target.value):null)} className="input-class w-full" disabled={softwareList.length===0||isMovingSelected}>
+                <option value="">Select Software...</option>
+                {softwareList.map(sw=>(<option key={sw.id} value={sw.id}>{sw.name}</option>))}
+              </select>
+              {softwareList.length===0&&<p className="text-xs text-red-500 mt-1">Software list unavailable.</p>}
+            </div>
+            <div className="flex justify-end space-x-3 mt-6">
+              <button type="button" onClick={()=>setShowBulkMoveModal(false)} className="btn-secondary" disabled={isMovingSelected}>Cancel</button>
+              <button type="button" onClick={handleConfirmBulkMoveDocuments} className="btn-primary" disabled={isMovingSelected||!targetSoftwareForMove}>{isMovingSelected?'Moving...':'Confirm Move'}</button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );

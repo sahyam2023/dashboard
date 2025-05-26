@@ -25,22 +25,54 @@ interface DataTableProps<T> {
   sortOrder: 'asc' | 'desc' | null;
   onSort: (columnKey: string) => void;
   rowClassName?: string | ((item: T, index: number) => string); // New prop
+  // Selection Props
+  isSelectionEnabled?: boolean;
+  selectedItemIds?: Set<number>;
+  onSelectItem?: (itemId: number, isSelected: boolean) => void;
+  onSelectAllItems?: (isSelected: boolean) => void;
 }
 
-const DataTable = <T extends Record<string, any>>({
+// Ensure T has an 'id' property of type number for selection logic
+const DataTable = <T extends { id: number }>({
   data,
   columns,
   isLoading = false,
   currentPage,
   totalPages,
   onPageChange,
-  itemsPerPage, // Not used in rendering logic directly, but available if needed
-  totalItems,   // Not used in rendering logic directly, but available if needed
+  itemsPerPage, 
+  totalItems,   
   sortColumn,
   sortOrder,
   onSort,
-  rowClassName, // Destructure new prop
+  rowClassName,
+  // Selection Props
+  isSelectionEnabled = false, // Default to false if not provided
+  selectedItemIds = new Set(), // Default to an empty set
+  onSelectItem,
+  onSelectAllItems,
 }: DataTableProps<T>) => {
+  const selectAllCheckboxRef = React.useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    if (isSelectionEnabled && selectAllCheckboxRef.current) {
+      const visibleItemIds = data.map(item => item.id);
+      const numSelected = visibleItemIds.filter(id => selectedItemIds.has(id)).length;
+      
+      if (numSelected === 0) {
+        selectAllCheckboxRef.current.checked = false;
+        selectAllCheckboxRef.current.indeterminate = false;
+      } else if (numSelected === visibleItemIds.length && visibleItemIds.length > 0) {
+        selectAllCheckboxRef.current.checked = true;
+        selectAllCheckboxRef.current.indeterminate = false;
+      } else {
+        selectAllCheckboxRef.current.checked = false;
+        selectAllCheckboxRef.current.indeterminate = true;
+      }
+    }
+  }, [isSelectionEnabled, selectedItemIds, data]);
+
+
   if (isLoading) {
     return (
       <LoadingState type="table" count={itemsPerPage || 5} message="Loading entries..." />
@@ -70,6 +102,23 @@ const DataTable = <T extends Record<string, any>>({
         <table className="min-w-full bg-white rounded-lg shadow-sm">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
+              {isSelectionEnabled && (
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <input
+                    type="checkbox"
+                    ref={selectAllCheckboxRef}
+                    className="form-checkbox h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    onChange={(e) => {
+                      if (onSelectAllItems) {
+                        // If indeterminate or unchecked, next state is checked (select all)
+                        // If checked, next state is unchecked (deselect all)
+                        onSelectAllItems(e.target.indeterminate || !e.target.checked);
+                      }
+                    }}
+                    // Checked state is handled by useEffect and indeterminate logic
+                  />
+                </th>
+              )}
               {columns.map((column) => (
                 <th
                   key={column.key as string}
@@ -97,11 +146,30 @@ const DataTable = <T extends Record<string, any>>({
               const customRowClass = typeof rowClassName === 'function' 
                 ? rowClassName(item, index) 
                 : rowClassName;
+              const isSelected = selectedItemIds.has(item.id);
+              
               return (
               <tr 
                 key={item.id || index} 
-                className={`hover:bg-gray-50 transition-colors ${customRowClass || ''}`}
-              > {/* Use item.id if available */}
+                className={`transition-colors 
+                            ${customRowClass || ''} 
+                            ${isSelected ? 'bg-sky-50 hover:bg-sky-100' : 'hover:bg-gray-50'}`}
+              >
+                {isSelectionEnabled && (
+                  <td className="px-4 py-4 whitespace-nowrap">
+                    <input
+                      type="checkbox"
+                      className="form-checkbox h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                      checked={isSelected}
+                      onChange={(e) => {
+                        if (onSelectItem) {
+                          onSelectItem(item.id, e.target.checked);
+                        }
+                      }}
+                      onClick={(e) => e.stopPropagation()} // Prevent row click if any defined by parent
+                    />
+                  </td>
+                )}
                 {columns.map((column) => (
                   <td key={column.key as string} className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                     {column.render ? column.render(item) : item[column.key as keyof T]}
@@ -114,7 +182,7 @@ const DataTable = <T extends Record<string, any>>({
         </table>
       </div>
 
-      {/* 3. Implement Pagination UI and Logic */}
+      {/* Pagination UI and Logic (remains unchanged) */}
       {totalPages > 0 && (
         <div className="py-4 flex items-center justify-between bg-white px-4 rounded-b-lg shadow-sm border-t border-gray-200">
           <div className="flex-1 flex justify-between sm:hidden">

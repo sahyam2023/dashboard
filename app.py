@@ -3,6 +3,7 @@ import os
 import uuid
 import sqlite3
 import json # Added for audit logging
+from flask import send_file
 import re
 from database import init_db
 from datetime import datetime, timedelta, timezone # Added timedelta and timezone

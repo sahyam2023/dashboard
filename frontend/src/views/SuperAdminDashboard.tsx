@@ -13,6 +13,8 @@ import {
   disableMaintenanceMode
 } from '../services/api';
 import DataTable, { ColumnDef } from '../components/DataTable';
+import { ManagePermissionsByItem } from '../components/admin/permissions/ManagePermissionsByItem';
+import { ManagePermissionsByUser } from '../components/admin/permissions/ManagePermissionsByUser'; // Import the new component
 
 const SuperAdminDashboard: React.FC = () => {
   const auth = useAuth();
@@ -674,6 +676,18 @@ const SuperAdminDashboard: React.FC = () => {
             </p>
           </>
         ) : null }
+      </div>
+
+      {/* Granular Permissions Management by Item Section */}
+      <div className="mt-12 p-6 bg-white shadow rounded-lg">
+        <h2 className="text-xl font-semibold mb-4 text-gray-800">Manage Item Permissions</h2>
+        <ManagePermissionsByItem />
+      </div>
+
+      {/* Granular Permissions Management by User Section */}
+      <div className="mt-12 p-6 bg-white shadow rounded-lg">
+        <h2 className="text-xl font-semibold mb-4 text-gray-800">Manage Permissions by User</h2>
+        <ManagePermissionsByUser />
       </div>
 
     </div>

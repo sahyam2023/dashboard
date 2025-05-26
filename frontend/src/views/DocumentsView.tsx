@@ -225,9 +225,11 @@ useEffect(() => {
   };
 
   const filteredDocumentsBySearch = useMemo(() => {
-    if (!searchTerm) return documents; 
+    const viewableDocuments = documents.filter(doc => !doc.permissions || doc.permissions.can_view !== false);
+    
+    if (!searchTerm) return viewableDocuments; 
     const lowerSearchTerm = searchTerm.toLowerCase();
-    return documents.filter(doc => 
+    return viewableDocuments.filter(doc => 
       doc.doc_name.toLowerCase().includes(lowerSearchTerm) ||
       (doc.description || '').toLowerCase().includes(lowerSearchTerm) ||
       (doc.software_name || '').toLowerCase().includes(lowerSearchTerm)

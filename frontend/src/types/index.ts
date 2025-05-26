@@ -1,5 +1,25 @@
 // src/types/index.ts
 
+// --- Permission Types ---
+export interface ItemPermissions {
+  can_view: boolean;
+  can_download: boolean;
+  note?: string; // For items not subject to granular permissions (e.g. software, version in search)
+}
+
+export interface UserItemPermission {
+  id: number; // Permission record ID
+  user_id: number;
+  username?: string; // Username of the user, (e.g. from /api/superadmin/permissions/item/<item_type>/<item_id>)
+  item_id: number;
+  item_type: string; // e.g., 'document', 'patch', 'link', 'misc_file'
+  can_view: boolean;
+  can_download: boolean;
+  created_at: string; // ISO date string
+  updated_at: string; // ISO date string
+  // item_name?: string; // Optional: If backend includes item name in permission listings
+}
+
 // --- Software Types ---
 export interface Software {
   id: number;
@@ -7,6 +27,10 @@ export interface Software {
   description: string | null;
   is_favorited?: boolean;
   favorite_id?: number;
+  permissions?: ItemPermissions; // Software items in search might get this
+  permissions?: ItemPermissions; // Version items in search might get this
+  permissions?: ItemPermissions;
+  permissions?: ItemPermissions;
 }
 
 // --- Version Type (from /api/versions_for_software for dropdowns) ---
@@ -106,6 +130,7 @@ export interface Link {
   updated_by_username?: string;
   is_favorited?: boolean;
   favorite_id?: number;
+  permissions?: ItemPermissions;
   // category?: string; // Removed as it's not in the current backend schema for links
 }
 
@@ -232,6 +257,7 @@ export interface MiscFile {
   updated_by_username?: string;
   is_favorited?: boolean;
   favorite_id?: number;
+  permissions?: ItemPermissions;
 }
 // No specific EditMiscFilePayload type is defined here as edit operations for misc files
 // (like replacing the file or changing metadata) will likely use FormData via editAdminMiscFile.

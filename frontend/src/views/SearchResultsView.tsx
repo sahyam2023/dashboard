@@ -130,14 +130,14 @@ const SearchResultsView: React.FC = () => {
         if (result.is_external_link && result.url) {
           linkTo = result.url;
           isExternal = true;
-        } else if (result.stored_filename) {
+        } else if (result.stored_filename && (!result.permissions || result.permissions.can_download !== false)) {
           // Assuming official_uploads for links, adjust if path varies
           downloadUrl = `/official_uploads/links/${result.stored_filename}`;
           isDownload = true;
         }
         break;
       case 'misc_file':
-        if (result.stored_filename) {
+        if (result.stored_filename && (!result.permissions || result.permissions.can_download !== false)) {
           downloadUrl = `/misc_uploads/${result.stored_filename}`;
           isDownload = true;
         }
@@ -319,18 +319,19 @@ const SearchResultsView: React.FC = () => {
         </Typography>
       </div>
       
-      {Object.entries(categorizedResults).map(([type, items]) => (
-        items.length > 0 && (
+      {Object.entries(categorizedResults).map(([type, items]) => {
+        const viewableItems = items.filter(item => !item.permissions || item.permissions.can_view !== false);
+        return viewableItems.length > 0 && (
           <div key={type} className="mb-8"> 
             <Typography variant="h6" component="h3" sx={{ mb: 2, textTransform: 'capitalize', borderBottom: 1, borderColor: 'divider', pb: 1, color: 'text.primary' }}>
-              {type.replace('_', ' ')}s
+              {type.replace('_', ' ')}s ({viewableItems.length})
             </Typography>
             <div className="space-y-4">
-              {items.map((result, index) => renderResultItem(result, index))}
+              {viewableItems.map((result, index) => renderResultItem(result, index))}
             </div>
           </div>
-        )
-      ))}
+        );
+      })}
     </div>
   );
 };

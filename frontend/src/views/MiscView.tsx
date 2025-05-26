@@ -173,9 +173,11 @@ const MiscView: React.FC = () => {
   };
 
   const filteredMiscFilesBySearch = useMemo(() => {
-    if (!searchTerm) return miscFiles;
+    const viewableMiscFiles = miscFiles.filter(file => !file.permissions || file.permissions.can_view !== false);
+
+    if (!searchTerm) return viewableMiscFiles;
     const lower = searchTerm.toLowerCase();
-    return miscFiles.filter(f => (f.user_provided_title||'').toLowerCase().includes(lower) || f.original_filename.toLowerCase().includes(lower) || (f.user_provided_description||'').toLowerCase().includes(lower) || (f.category_name||'').toLowerCase().includes(lower));
+    return viewableMiscFiles.filter(f => (f.user_provided_title||'').toLowerCase().includes(lower) || f.original_filename.toLowerCase().includes(lower) || (f.user_provided_description||'').toLowerCase().includes(lower) || (f.category_name||'').toLowerCase().includes(lower));
   }, [miscFiles, searchTerm]);
 
   const handleSelectItem = (id: number, isSelected: boolean) => setSelectedMiscFileIds(prev => { const n = new Set(prev); if (isSelected) n.add(id); else n.delete(id); return n; });
@@ -237,7 +239,16 @@ const MiscView: React.FC = () => {
     { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: f => f.uploaded_by_username||'N/A' },
     { key: 'file_size', header: 'Size', sortable: true, render: f => formatFileSize(f.file_size) },
     { key: 'created_at', header: 'Uploaded At', sortable: true, render: f => formatDate(f.created_at) },
-    { key: 'file_path', header: 'Link', render: f => (<a href={`${API_BASE_URL}${f.file_path}`} target="_blank" rel="noopener noreferrer" className="flex items-center text-blue-600 hover:text-blue-800" onClick={e=>e.stopPropagation()}><Download size={14}className="mr-1"/>Download</a>)},
+    { 
+      key: 'file_path', 
+      header: 'Link', 
+      render: (f: MiscFile) => 
+        (!f.permissions || f.permissions.can_download !== false) ? (
+          <a href={`${API_BASE_URL}${f.file_path}`} target="_blank" rel="noopener noreferrer" className="flex items-center text-blue-600 hover:text-blue-800" onClick={e=>e.stopPropagation()}><Download size={14}className="mr-1"/>Download</a>
+        ) : (
+          <span className="text-gray-400 text-sm italic flex items-center"><Download size={14} className="mr-1"/>N/A (No Permission)</span>
+        )
+    },
     { key: 'actions' as any, header: 'Actions', render: (f: MiscFile) => (<div className="flex space-x-1 items-center">{isAuthenticated&&(<button onClick={e=>{e.stopPropagation();handleFavoriteToggle(f,'misc_file')}} className={`p-1 rounded-md ${favoritedItems.get(f.id)?.favoriteId?'text-yellow-500 hover:text-yellow-600':'text-gray-400 hover:text-yellow-500'}`} title={favoritedItems.get(f.id)?.favoriteId?"Remove Favorite":"Add Favorite"}><Star size={16} className={favoritedItems.get(f.id)?.favoriteId?"fill-current":""}/></button>)}{(role==='admin'||role==='super_admin')&&(<> <button onClick={e=>{e.stopPropagation();openAddOrEditFileForm(f)}} className="p-1 text-blue-600 hover:text-blue-800 rounded-md" title="Edit"><Edit3 size={16}/></button> <button onClick={e=>{e.stopPropagation();openDeleteFileConfirm(f)}} className="p-1 text-red-600 hover:text-red-800 rounded-md" title="Delete"><Trash2 size={16}/></button></>)}</div>)},
   ];
   const loadMiscFilesCallback = useCallback(() => { fetchAndSetMiscFiles(1, true); }, [fetchAndSetMiscFiles]);

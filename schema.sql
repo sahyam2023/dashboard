@@ -260,6 +260,25 @@ CREATE TABLE IF NOT EXISTS password_reset_requests (
 CREATE INDEX IF NOT EXISTS idx_password_reset_requests_user_id ON password_reset_requests (user_id);
 CREATE INDEX IF NOT EXISTS idx_password_reset_requests_expires_at ON password_reset_requests (expires_at);
 
+CREATE TABLE IF NOT EXISTS user_item_permissions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    item_id INTEGER NOT NULL,
+    item_type TEXT NOT NULL,
+    can_view BOOLEAN DEFAULT FALSE NOT NULL,
+    can_download BOOLEAN DEFAULT FALSE NOT NULL,
+    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    UNIQUE (user_id, item_id, item_type)
+);
+CREATE INDEX IF NOT EXISTS idx_user_item_permissions_user_id ON user_item_permissions (user_id);
+CREATE INDEX IF NOT EXISTS idx_user_item_permissions_item_id_item_type ON user_item_permissions (item_id, item_type);
+CREATE TRIGGER IF NOT EXISTS update_user_item_permissions_updated_at
+AFTER UPDATE ON user_item_permissions FOR EACH ROW BEGIN
+    UPDATE user_item_permissions SET updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE id = OLD.id;
+END;
+
 -- System Settings Table
 -- Stores global system-wide settings like maintenance mode.
 CREATE TABLE IF NOT EXISTS system_settings (

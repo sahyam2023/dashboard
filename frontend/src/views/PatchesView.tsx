@@ -190,9 +190,11 @@ const PatchesView: React.FC = () => {
   };
 
   const filteredPatchesBySearch = useMemo(() => {
-    if (!searchTerm) return patches;
+    const viewablePatches = patches.filter(p => !p.permissions || p.permissions.can_view !== false);
+
+    if (!searchTerm) return viewablePatches;
     const lower = searchTerm.toLowerCase();
-    return patches.filter(p => 
+    return viewablePatches.filter(p => 
       p.patch_name.toLowerCase().includes(lower) ||
       (p.description || '').toLowerCase().includes(lower) ||
       (p.software_name || '').toLowerCase().includes(lower) ||
@@ -250,7 +252,16 @@ const PatchesView: React.FC = () => {
     { key: 'patch_by_developer', header: 'Developer', sortable: true, render: p => p.patch_by_developer || '-' },
     { key: 'description', header: 'Description', render: p => <span className="text-sm text-gray-600 block max-w-xs truncate" title={p.description||''}>{p.description||'-'}</span> },
     { key: 'release_date', header: 'Release Date', sortable: true, render: p => formatDate(p.release_date) },
-    { key: 'download_link', header: 'Link', render: p => <a href={p.download_link} target={p.is_external_link||!p.download_link?.startsWith('/')?"_blank":"_self"} rel="noopener noreferrer" className="flex items-center text-blue-600 hover:text-blue-800" onClick={e=>e.stopPropagation()}><Download size={14}className="mr-1"/>Link</a> },
+    { 
+      key: 'download_link', 
+      header: 'Link', 
+      render: (p: PatchType) => 
+        (!p.permissions || p.permissions.can_download !== false) ? (
+          <a href={p.download_link} target={p.is_external_link||!p.download_link?.startsWith('/')?"_blank":"_self"} rel="noopener noreferrer" className="flex items-center text-blue-600 hover:text-blue-800" onClick={e=>e.stopPropagation()}><Download size={14}className="mr-1"/>Link</a>
+        ) : (
+          <span className="text-gray-400 text-sm italic flex items-center"><Download size={14} className="mr-1"/>N/A (No Permission)</span>
+        )
+    },
     { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: p => p.uploaded_by_username||'N/A' },
     { key: 'updated_by_username', header: 'Updated By', sortable: false, render: p => p.updated_by_username||'N/A' },
     { key: 'created_at', header: 'Created At', sortable: true, render: p => formatDate(p.created_at) },

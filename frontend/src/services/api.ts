@@ -224,6 +224,21 @@ export interface DashboardStats {
 }
 // --- End of Interface for Dashboard Statistics ---
 
+// --- Granular Permissions Type Definitions (Placeholder) ---
+// This will be properly defined in types/index.ts later.
+export interface UserItemPermission {
+  id: number;
+  user_id: number;
+  username?: string; // Included in getPermissionsForItem from backend
+  item_id: number;
+  item_type: string; // e.g., 'document', 'patch', 'link', 'misc_file'
+  can_view: boolean;
+  can_download: boolean;
+  created_at: string; // ISO date string
+  updated_at: string; // ISO date string
+}
+// --- End Granular Permissions Type Definitions ---
+
 // --- Interface for System Health ---
 export interface SystemHealth {
   api_status: string;
@@ -354,6 +369,96 @@ export async function fetchSoftware(): Promise<Software[]> {
     throw error;
   }
 }
+
+// --- Granular Permissions API Functions ---
+
+export async function grantPermission(
+  userId: number, 
+  itemId: number, 
+  itemType: string, 
+  canView: boolean, 
+  canDownload: boolean
+): Promise<UserItemPermission> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/superadmin/permissions/grant`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ 
+        user_id: userId, 
+        item_id: itemId, 
+        item_type: itemType, 
+        can_view: canView, 
+        can_download: canDownload 
+      }),
+    });
+    return handleApiError(response, 'Failed to grant permission');
+  } catch (error) {
+    console.error('Error granting permission:', error);
+    throw error;
+  }
+}
+
+export async function revokePermission(
+  userId: number, 
+  itemId: number, 
+  itemType: string
+): Promise<{ msg: string }> { // Backend returns a success message
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/superadmin/permissions/revoke`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ 
+        user_id: userId, 
+        item_id: itemId, 
+        item_type: itemType 
+      }),
+    });
+    return handleApiError(response, 'Failed to revoke permission');
+  } catch (error) {
+    console.error('Error revoking permission:', error);
+    throw error;
+  }
+}
+
+export async function getPermissionsForItem(
+  itemType: string, 
+  itemId: number
+): Promise<UserItemPermission[]> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/superadmin/permissions/item/${itemType}/${itemId}`, {
+      method: 'GET',
+      headers: { ...getAuthHeader() },
+    });
+    return handleApiError(response, 'Failed to fetch permissions for item');
+  } catch (error) {
+    console.error(`Error fetching permissions for item ${itemType}/${itemId}:`, error);
+    throw error;
+  }
+}
+
+export async function getPermissionsForUser(
+  userId: number, 
+  itemTypeFilter?: string
+): Promise<UserItemPermission[]> {
+  try {
+    const params = new URLSearchParams();
+    if (itemTypeFilter) {
+      params.append('item_type', itemTypeFilter);
+    }
+    const queryString = params.toString();
+    const url = `${API_BASE_URL}/api/superadmin/permissions/user/${userId}${queryString ? `?${queryString}` : ''}`;
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { ...getAuthHeader() },
+    });
+    return handleApiError(response, 'Failed to fetch permissions for user');
+  } catch (error) {
+    console.error(`Error fetching permissions for user ${userId}:`, error);
+    throw error;
+  }
+}
+// --- End Granular Permissions API Functions ---
 
 // --- Bulk Action API Functions ---
 

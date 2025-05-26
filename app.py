@@ -57,6 +57,8 @@ ALLOWED_EXTENSIONS = {
     'py', 'js', 'java', 'c', 'cpp', 'h', 'cs', 'html', 'css', 'ps1' # Code files
     # Add any other specific extensions you anticipate
 }
+ALLOWED_ITEM_TYPES = ['document', 'patch', 'link', 'misc_file'] # Added as per requirement
+
 app = Flask(__name__, instance_relative_config=True) # instance_relative_config=True is good practice
 
 # CORS Configuration (Restrict origins in production)
@@ -161,6 +163,35 @@ def create_user_in_db(username, password, email=None, role='user'): # Added role
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+# --- Permission Checking Helper ---
+def check_item_permission(user_id: int, item_id: int, item_type: str, permission_type: str) -> bool:
+    """
+    Checks if a user has a specific permission for an item.
+    permission_type can be 'view' or 'download'.
+    Implements default grant policy if no specific rule exists.
+    """
+    db = get_db()
+    permission_record = database.get_user_item_permission(db, user_id, item_id, item_type)
+
+    if permission_record:
+        if permission_type == 'view':
+            return bool(permission_record['can_view'])
+        elif permission_type == 'download':
+            return bool(permission_record['can_download'])
+        else:
+            app.logger.warning(f"check_item_permission: Invalid permission_type '{permission_type}' requested.")
+            return False # Or raise error
+    else:
+        # Default Policy: Grant if no specific rule exists
+        if permission_type == 'view':
+            return True # Default view access
+        elif permission_type == 'download':
+            return True # Default download access (implicitly, if viewable)
+        else:
+            app.logger.warning(f"check_item_permission: Invalid permission_type '{permission_type}' for default policy.")
+            return False
+    return False # Should not be reached if permission_type is valid
 
 # --- Password Strength Helper ---
 def is_password_strong(password: str) -> tuple[bool, str]:
@@ -1286,21 +1317,22 @@ def get_all_documents_api():
     user_id_param_for_join = [] # Parameter for the JOIN clause (user_id for favorites)
 
     # Attempt to get user_id for favorites
-    user_id = None
+    # Attempt to get user_id for favorites and permissions
+    requesting_user_id = None
     try:
-        verify_jwt_in_request(optional=True)
-        current_user_identity = get_jwt_identity()
-        if current_user_identity:
-            user_id = int(current_user_identity)
+        verify_jwt_in_request(optional=True) # JWT is optional for public listing
+        current_user_identity_str = get_jwt_identity()
+        if current_user_identity_str:
+            requesting_user_id = int(current_user_identity_str)
     except Exception as e:
         app.logger.error(f"Error getting user_id in get_all_documents_api: {e}")
 
-    if user_id:
+    if requesting_user_id:
         base_query_select = f"SELECT {base_query_select_fields}, uf.id AS favorite_id"
         base_query_from += " LEFT JOIN user_favorites uf ON d.id = uf.item_id AND uf.item_type = 'document' AND uf.user_id = ?"
-        user_id_param_for_join.append(user_id)
+        user_id_param_for_join.append(requesting_user_id)
     else:
-        base_query_select = f"SELECT {base_query_select_fields}, NULL AS favorite_id" # Ensure favorite_id column exists even if null
+        base_query_select = f"SELECT {base_query_select_fields}, NULL AS favorite_id"
 
     filter_conditions = []
 
@@ -1358,15 +1390,30 @@ def get_all_documents_api():
     
     try:
         documents_cursor = db.execute(final_query, final_params)
-        documents_list = [dict(row) for row in documents_cursor.fetchall()]
+        # documents_list = [dict(row) for row in documents_cursor.fetchall()]
+        
+        processed_documents_list = []
+        for row in documents_cursor.fetchall():
+            item_dict = dict(row)
+            item_id = item_dict['id']
+            
+            # Permission check
+            can_view_item = check_item_permission(requesting_user_id, item_id, 'document', 'view')
+            if can_view_item:
+                can_download_item = check_item_permission(requesting_user_id, item_id, 'document', 'download')
+                item_dict['permissions'] = {'can_view': True, 'can_download': can_download_item}
+                processed_documents_list.append(item_dict)
+            # If cannot view, item is excluded.
+
     except Exception as e:
-        app.logger.error(f"Error fetching paginated documents: {e} with query {final_query} and params {final_params}")
+        app.logger.error(f"Error fetching paginated documents or checking permissions: {e} with query {final_query} and params {final_params}")
         return jsonify(msg="Error fetching documents."), 500
 
+    # Note: total_documents and total_pages are based on pre-permission-filtered counts.
     return jsonify({
-        "documents": documents_list,
+        "documents": processed_documents_list,
         "page": page,
-        "per_page": per_page,
+        "per_page": per_page, # Actual items returned might be less due to permissions
         "total_documents": total_documents,
         "total_pages": total_pages
     }), 200
@@ -1420,19 +1467,19 @@ def get_all_patches_api():
     params = [] 
     user_id_param_for_join = []
 
-    user_id = None
+    requesting_user_id = None
     try:
         verify_jwt_in_request(optional=True)
-        current_user_identity = get_jwt_identity()
-        if current_user_identity:
-            user_id = int(current_user_identity)
+        current_user_identity_str = get_jwt_identity()
+        if current_user_identity_str:
+            requesting_user_id = int(current_user_identity_str)
     except Exception as e:
         app.logger.error(f"Error getting user_id in get_all_patches_api: {e}")
 
-    if user_id:
+    if requesting_user_id:
         base_query_select = f"SELECT {base_query_select_fields}, uf.id AS favorite_id"
         base_query_from += " LEFT JOIN user_favorites uf ON p.id = uf.item_id AND uf.item_type = 'patch' AND uf.user_id = ?"
-        user_id_param_for_join.append(user_id)
+        user_id_param_for_join.append(requesting_user_id)
     else:
         base_query_select = f"SELECT {base_query_select_fields}, NULL AS favorite_id"
 
@@ -1479,13 +1526,24 @@ def get_all_patches_api():
     
     try:
         patches_cursor = db.execute(final_query, final_params)
-        patches_list = [dict(row) for row in patches_cursor.fetchall()]
+        # patches_list = [dict(row) for row in patches_cursor.fetchall()]
+        processed_patches_list = []
+        for row in patches_cursor.fetchall():
+            item_dict = dict(row)
+            item_id = item_dict['id']
+
+            can_view_item = check_item_permission(requesting_user_id, item_id, 'patch', 'view')
+            if can_view_item:
+                can_download_item = check_item_permission(requesting_user_id, item_id, 'patch', 'download')
+                item_dict['permissions'] = {'can_view': True, 'can_download': can_download_item}
+                processed_patches_list.append(item_dict)
+
     except Exception as e:
-        app.logger.error(f"Error fetching paginated patches: {e} with query {final_query} and params {final_params}")
+        app.logger.error(f"Error fetching paginated patches or checking permissions: {e} with query {final_query} and params {final_params}")
         return jsonify(msg="Error fetching patches."), 500
 
     return jsonify({
-        "patches": patches_list,
+        "patches": processed_patches_list,
         "page": page,
         "per_page": per_page,
         "total_patches": total_patches,
@@ -1540,22 +1598,21 @@ def get_all_links_api():
     params = []
     user_id_param_for_join = []
 
-    user_id = None
+    requesting_user_id = None
     try:
         verify_jwt_in_request(optional=True)
-        current_user_identity = get_jwt_identity()
-        if current_user_identity:
-            user_id = int(current_user_identity)
+        current_user_identity_str = get_jwt_identity()
+        if current_user_identity_str:
+            requesting_user_id = int(current_user_identity_str)
     except Exception as e:
         app.logger.error(f"Error getting user_id in get_all_links_api: {e}")
 
-    if user_id:
+    if requesting_user_id:
         base_query_select = f"SELECT {base_query_select_fields}, uf.id AS favorite_id"
         base_query_from += " LEFT JOIN user_favorites uf ON l.id = uf.item_id AND uf.item_type = 'link' AND uf.user_id = ?"
-        user_id_param_for_join.append(user_id)
+        user_id_param_for_join.append(requesting_user_id)
     else:
         base_query_select = f"SELECT {base_query_select_fields}, NULL AS favorite_id"
-        
     filter_conditions = []
 
     if software_id_filter:
@@ -1606,13 +1663,24 @@ def get_all_links_api():
     
     try:
         links_cursor = db.execute(final_query, final_params)
-        links_list = [dict(row) for row in links_cursor.fetchall()]
+        # links_list = [dict(row) for row in links_cursor.fetchall()]
+        processed_links_list = []
+        for row in links_cursor.fetchall():
+            item_dict = dict(row)
+            item_id = item_dict['id']
+            
+            can_view_item = check_item_permission(requesting_user_id, item_id, 'link', 'view')
+            if can_view_item:
+                can_download_item = check_item_permission(requesting_user_id, item_id, 'link', 'download')
+                item_dict['permissions'] = {'can_view': True, 'can_download': can_download_item}
+                processed_links_list.append(item_dict)
+                
     except Exception as e:
-        app.logger.error(f"Error fetching paginated links: {e} with query {final_query} and params {final_params}")
+        app.logger.error(f"Error fetching paginated links or checking permissions: {e} with query {final_query} and params {final_params}")
         return jsonify(msg="Error fetching links."), 500
 
     return jsonify({
-        "links": links_list,
+        "links": processed_links_list,
         "page": page,
         "per_page": per_page,
         "total_links": total_links,
@@ -1667,19 +1735,19 @@ def get_all_misc_files_api():
     params = []
     user_id_param_for_join = []
 
-    user_id = None
+    requesting_user_id = None
     try:
         verify_jwt_in_request(optional=True)
-        current_user_identity = get_jwt_identity()
-        if current_user_identity:
-            user_id = int(current_user_identity)
+        current_user_identity_str = get_jwt_identity()
+        if current_user_identity_str:
+            requesting_user_id = int(current_user_identity_str)
     except Exception as e:
         app.logger.error(f"Error getting user_id in get_all_misc_files_api: {e}")
 
-    if user_id:
+    if requesting_user_id:
         base_query_select = f"SELECT {base_query_select_fields}, uf.id AS favorite_id"
         base_query_from += " LEFT JOIN user_favorites uf ON mf.id = uf.item_id AND uf.item_type = 'misc_file' AND uf.user_id = ?"
-        user_id_param_for_join.append(user_id)
+        user_id_param_for_join.append(requesting_user_id)
     else:
         base_query_select = f"SELECT {base_query_select_fields}, NULL AS favorite_id"
 
@@ -1716,13 +1784,24 @@ def get_all_misc_files_api():
     
     try:
         misc_files_cursor = db.execute(final_query, final_params)
-        misc_files_list = [dict(row) for row in misc_files_cursor.fetchall()]
+        # misc_files_list = [dict(row) for row in misc_files_cursor.fetchall()]
+        processed_misc_files_list = []
+        for row in misc_files_cursor.fetchall():
+            item_dict = dict(row)
+            item_id = item_dict['id']
+
+            can_view_item = check_item_permission(requesting_user_id, item_id, 'misc_file', 'view')
+            if can_view_item:
+                can_download_item = check_item_permission(requesting_user_id, item_id, 'misc_file', 'download')
+                item_dict['permissions'] = {'can_view': True, 'can_download': can_download_item}
+                processed_misc_files_list.append(item_dict)
+
     except Exception as e:
-        app.logger.error(f"Error fetching paginated misc_files: {e} with query {final_query} and params {final_params}")
+        app.logger.error(f"Error fetching paginated misc_files or checking permissions: {e} with query {final_query} and params {final_params}")
         return jsonify(msg="Error fetching misc_files."), 500
 
     return jsonify({
-        "misc_files": misc_files_list,
+        "misc_files": processed_misc_files_list,
         "page": page,
         "per_page": per_page,
         "total_misc_files": total_misc_files,
@@ -4010,38 +4089,138 @@ def admin_delete_version(version_id):
 # --- File Serving Endpoints ---
 @app.route('/official_uploads/docs/<path:filename>')
 def serve_official_doc_file(filename):
+    db_conn = get_db()
+    requesting_user_id = None
     try:
-        db_conn = get_db() # Get DB connection
-        _log_download_activity(filename, 'document', db_conn)
+        verify_jwt_in_request(optional=True)
+        current_user_id_str = get_jwt_identity()
+        if current_user_id_str:
+            requesting_user_id = int(current_user_id_str)
     except Exception as e:
-        # Log any error from get_db() or the call itself, but do not prevent file serving
+        app.logger.error(f"Error getting user_id in serve_official_doc_file: {e}")
+
+    item_details = db_conn.execute("SELECT id FROM documents WHERE stored_filename = ?", (filename,)).fetchone()
+    if not item_details:
+        return jsonify(msg="File record not found."), 404
+    item_id = item_details['id']
+    item_type_for_permission = 'document'
+
+    if not check_item_permission(requesting_user_id, item_id, item_type_for_permission, 'download'):
+        log_audit_action(
+            action_type='DOWNLOAD_DENIED',
+            target_table='documents', 
+            target_id=item_id,
+            details={'filename': filename, 'reason': 'No permission'},
+            user_id=requesting_user_id 
+        )
+        return jsonify(msg="You do not have permission to download this file."), 403
+    
+    try:
+        _log_download_activity(filename, 'document', db_conn) # _log_download_activity uses 'document'
+    except Exception as e:
         app.logger.error(f"Error during pre-download logging for doc '{filename}': {e}")
     
     return send_from_directory(app.config['DOC_UPLOAD_FOLDER'], filename, as_attachment=True)
 
 @app.route('/official_uploads/patches/<path:filename>')
 def serve_official_patch_file(filename):
+    db_conn = get_db()
+    requesting_user_id = None
     try:
-        db_conn = get_db()
-        _log_download_activity(filename, 'patch', db_conn)
+        verify_jwt_in_request(optional=True)
+        current_user_id_str = get_jwt_identity()
+        if current_user_id_str:
+            requesting_user_id = int(current_user_id_str)
+    except Exception as e:
+        app.logger.error(f"Error getting user_id in serve_official_patch_file: {e}")
+
+    item_details = db_conn.execute("SELECT id FROM patches WHERE stored_filename = ?", (filename,)).fetchone()
+    if not item_details:
+        return jsonify(msg="File record not found."), 404
+    item_id = item_details['id']
+    item_type_for_permission = 'patch'
+
+    if not check_item_permission(requesting_user_id, item_id, item_type_for_permission, 'download'):
+        log_audit_action(
+            action_type='DOWNLOAD_DENIED',
+            target_table='patches',
+            target_id=item_id,
+            details={'filename': filename, 'reason': 'No permission'},
+            user_id=requesting_user_id
+        )
+        return jsonify(msg="You do not have permission to download this file."), 403
+
+    try:
+        _log_download_activity(filename, 'patch', db_conn) # _log_download_activity uses 'patch'
     except Exception as e:
         app.logger.error(f"Error during pre-download logging for patch '{filename}': {e}")
     return send_from_directory(app.config['PATCH_UPLOAD_FOLDER'], filename, as_attachment=True)
 
 @app.route('/official_uploads/links/<path:filename>') # For files uploaded as "Links"
 def serve_official_link_file(filename):
+    db_conn = get_db()
+    requesting_user_id = None
     try:
-        db_conn = get_db()
-        _log_download_activity(filename, 'link_file', db_conn) # 'link_file' as per previous definition
+        verify_jwt_in_request(optional=True)
+        current_user_id_str = get_jwt_identity()
+        if current_user_id_str:
+            requesting_user_id = int(current_user_id_str)
+    except Exception as e:
+        app.logger.error(f"Error getting user_id in serve_official_link_file: {e}")
+        
+    item_details = db_conn.execute("SELECT id FROM links WHERE stored_filename = ?", (filename,)).fetchone()
+    if not item_details:
+        return jsonify(msg="File record not found."), 404
+    item_id = item_details['id']
+    item_type_for_permission = 'link' 
+
+    if not check_item_permission(requesting_user_id, item_id, item_type_for_permission, 'download'):
+        log_audit_action(
+            action_type='DOWNLOAD_DENIED',
+            target_table='links', 
+            target_id=item_id,
+            details={'filename': filename, 'reason': 'No permission'},
+            user_id=requesting_user_id
+        )
+        return jsonify(msg="You do not have permission to download this file."), 403
+    
+    try:
+        # _log_download_activity uses 'link_file' for files associated with links.
+        _log_download_activity(filename, 'link_file', db_conn) 
     except Exception as e:
         app.logger.error(f"Error during pre-download logging for link file '{filename}': {e}")
     return send_from_directory(app.config['LINK_UPLOAD_FOLDER'], filename, as_attachment=True)
 
 @app.route('/misc_uploads/<path:filename>')
 def serve_misc_file(filename):
+    db_conn = get_db()
+    requesting_user_id = None
     try:
-        db_conn = get_db()
-        _log_download_activity(filename, 'misc_file', db_conn)
+        verify_jwt_in_request(optional=True)
+        current_user_id_str = get_jwt_identity()
+        if current_user_id_str:
+            requesting_user_id = int(current_user_id_str)
+    except Exception as e:
+        app.logger.error(f"Error getting user_id in serve_misc_file: {e}")
+
+    item_details = db_conn.execute("SELECT id FROM misc_files WHERE stored_filename = ?", (filename,)).fetchone()
+    if not item_details:
+        return jsonify(msg="File record not found."), 404
+    item_id = item_details['id']
+    item_type_for_permission = 'misc_file'
+
+    if not check_item_permission(requesting_user_id, item_id, item_type_for_permission, 'download'):
+        log_audit_action(
+            action_type='DOWNLOAD_DENIED',
+            target_table='misc_files',
+            target_id=item_id,
+            details={'filename': filename, 'reason': 'No permission'},
+            user_id=requesting_user_id
+        )
+        return jsonify(msg="You do not have permission to download this file."), 403
+        
+    try:
+        _log_download_activity(filename, 'misc_file', db_conn) # _log_download_activity uses 'misc_file'
     except Exception as e:
         app.logger.error(f"Error during pre-download logging for misc file '{filename}': {e}")
     return send_from_directory(app.config['MISC_UPLOAD_FOLDER'], filename, as_attachment=True)
@@ -4055,17 +4234,17 @@ def search_api():
         return jsonify({"error": "Search query parameter 'q' is required and cannot be empty."}), 400
 
     db = get_db()
-    results = []
+    raw_results = [] # Temp list to hold all results before permission check
     
     # Prepare the search term for LIKE queries
     like_query_term = f"%{query_term.lower()}%"
 
-    user_id = None
+    requesting_user_id = None
     try:
         verify_jwt_in_request(optional=True)
-        current_user_identity = get_jwt_identity()
-        if current_user_identity:
-            user_id = int(current_user_identity)
+        current_user_id_str = get_jwt_identity()
+        if current_user_id_str:
+            requesting_user_id = int(current_user_id_str)
     except Exception as e:
         app.logger.error(f"Error getting user_id in search: {e}")
 
@@ -4073,69 +4252,102 @@ def search_api():
     sql_documents_select = "SELECT d.id, d.doc_name AS name, d.description, 'document' AS type"
     sql_documents_from = "FROM documents d"
     doc_params = [like_query_term, like_query_term]
-    if user_id:
+    if requesting_user_id: # Adjusted to use requesting_user_id
         sql_documents_select += ", uf.id AS favorite_id"
         sql_documents_from += " LEFT JOIN user_favorites uf ON d.id = uf.item_id AND uf.item_type = 'document' AND uf.user_id = ?"
-        doc_params.append(user_id)
+        doc_params.append(requesting_user_id)
+    else: # Add NULL favorite_id if no user
+        sql_documents_select += ", NULL AS favorite_id"
     sql_documents = f"{sql_documents_select} {sql_documents_from} WHERE (LOWER(d.doc_name) LIKE ? OR LOWER(d.description) LIKE ?)"
-    results.extend([dict(row) for row in db.execute(sql_documents, tuple(doc_params)).fetchall()])
+    raw_results.extend([dict(row) for row in db.execute(sql_documents, tuple(doc_params)).fetchall()])
 
     # Patches
     sql_patches_select = "SELECT p.id, p.patch_name AS name, p.description, 'patch' AS type"
     sql_patches_from = "FROM patches p"
     patch_params = [like_query_term, like_query_term]
-    if user_id:
+    if requesting_user_id:
         sql_patches_select += ", uf.id AS favorite_id"
         sql_patches_from += " LEFT JOIN user_favorites uf ON p.id = uf.item_id AND uf.item_type = 'patch' AND uf.user_id = ?"
-        patch_params.append(user_id)
+        patch_params.append(requesting_user_id)
+    else:
+        sql_patches_select += ", NULL AS favorite_id"
     sql_patches = f"{sql_patches_select} {sql_patches_from} WHERE (LOWER(p.patch_name) LIKE ? OR LOWER(p.description) LIKE ?)"
-    results.extend([dict(row) for row in db.execute(sql_patches, tuple(patch_params)).fetchall()])
+    raw_results.extend([dict(row) for row in db.execute(sql_patches, tuple(patch_params)).fetchall()])
 
     # Links
-    sql_links_select = "SELECT l.id, l.title AS name, l.description, l.url, l.is_external_link, l.stored_filename, 'link' AS type" # Added is_external_link and stored_filename
+    # For item_type consistency with permissions, search should return 'link' not 'link_file'
+    sql_links_select = "SELECT l.id, l.title AS name, l.description, l.url, l.is_external_link, l.stored_filename, 'link' AS type"
     sql_links_from = "FROM links l"
     link_params = [like_query_term, like_query_term, like_query_term]
-    if user_id:
+    if requesting_user_id:
         sql_links_select += ", uf.id AS favorite_id"
         sql_links_from += " LEFT JOIN user_favorites uf ON l.id = uf.item_id AND uf.item_type = 'link' AND uf.user_id = ?"
-        link_params.append(user_id)
+        link_params.append(requesting_user_id)
+    else:
+        sql_links_select += ", NULL AS favorite_id"
     sql_links = f"{sql_links_select} {sql_links_from} WHERE (LOWER(l.title) LIKE ? OR LOWER(l.description) LIKE ? OR LOWER(l.url) LIKE ?)"
-    results.extend([dict(row) for row in db.execute(sql_links, tuple(link_params)).fetchall()])
+    raw_results.extend([dict(row) for row in db.execute(sql_links, tuple(link_params)).fetchall()])
 
     # Misc Files
-    sql_misc_files_select = "SELECT mf.id, mf.user_provided_title AS name, mf.original_filename, mf.user_provided_description AS description, mf.stored_filename, 'misc_file' AS type" # Added stored_filename
+    sql_misc_files_select = "SELECT mf.id, mf.user_provided_title AS name, mf.original_filename, mf.user_provided_description AS description, mf.stored_filename, 'misc_file' AS type"
     sql_misc_files_from = "FROM misc_files mf"
     misc_params = [like_query_term, like_query_term, like_query_term]
-    if user_id:
+    if requesting_user_id:
         sql_misc_files_select += ", uf.id AS favorite_id"
         sql_misc_files_from += " LEFT JOIN user_favorites uf ON mf.id = uf.item_id AND uf.item_type = 'misc_file' AND uf.user_id = ?"
-        misc_params.append(user_id)
+        misc_params.append(requesting_user_id)
+    else:
+        sql_misc_files_select += ", NULL AS favorite_id"
     sql_misc_files = f"{sql_misc_files_select} {sql_misc_files_from} WHERE (LOWER(mf.user_provided_title) LIKE ? OR LOWER(mf.user_provided_description) LIKE ? OR LOWER(mf.original_filename) LIKE ?)"
-    results.extend([dict(row) for row in db.execute(sql_misc_files, tuple(misc_params)).fetchall()])
+    raw_results.extend([dict(row) for row in db.execute(sql_misc_files, tuple(misc_params)).fetchall()])
 
-    # Software
+    # Software (Not in ALLOWED_ITEM_TYPES for granular permissions, so no permission check needed here)
     sql_software_select = "SELECT s.id, s.name, s.description, 'software' AS type"
     sql_software_from = "FROM software s"
     software_params = [like_query_term, like_query_term]
-    if user_id:
+    if requesting_user_id:
         sql_software_select += ", uf.id AS favorite_id"
         sql_software_from += " LEFT JOIN user_favorites uf ON s.id = uf.item_id AND uf.item_type = 'software' AND uf.user_id = ?"
-        software_params.append(user_id)
+        software_params.append(requesting_user_id)
+    else:
+        sql_software_select += ", NULL AS favorite_id"
     sql_software_query = f"{sql_software_select} {sql_software_from} WHERE (LOWER(s.name) LIKE ? OR LOWER(s.description) LIKE ?)"
-    results.extend([dict(row) for row in db.execute(sql_software_query, tuple(software_params)).fetchall()])
+    raw_results.extend([dict(row) for row in db.execute(sql_software_query, tuple(software_params)).fetchall()])
 
-    # Versions
+    # Versions (Not in ALLOWED_ITEM_TYPES for granular permissions, so no permission check needed here)
     sql_versions_select = "SELECT v.id, v.version_number AS name, v.changelog, v.known_bugs, v.software_id, s.name AS software_name, 'version' AS type"
     sql_versions_from = "FROM versions v JOIN software s ON v.software_id = s.id"
     version_params = [like_query_term, like_query_term, like_query_term]
-    if user_id:
+    if requesting_user_id:
         sql_versions_select += ", uf.id AS favorite_id"
         sql_versions_from += " LEFT JOIN user_favorites uf ON v.id = uf.item_id AND uf.item_type = 'version' AND uf.user_id = ?"
-        version_params.append(user_id)
+        version_params.append(requesting_user_id)
+    else:
+        sql_versions_select += ", NULL AS favorite_id"
     sql_versions_query = f"{sql_versions_select} {sql_versions_from} WHERE (LOWER(v.version_number) LIKE ? OR LOWER(v.changelog) LIKE ? OR LOWER(v.known_bugs) LIKE ?)"
-    results.extend([dict(row) for row in db.execute(sql_versions_query, tuple(version_params)).fetchall()])
+    raw_results.extend([dict(row) for row in db.execute(sql_versions_query, tuple(version_params)).fetchall()])
+    
+    # Filter results based on permissions and add permissions field
+    permitted_results = []
+    for item_dict in raw_results:
+        item_id = item_dict['id']
+        item_type = item_dict['type'] # 'document', 'patch', 'link', 'misc_file', 'software', 'version'
 
-    return jsonify(results)
+        # Only apply granular permissions for types in ALLOWED_ITEM_TYPES
+        if item_type in ALLOWED_ITEM_TYPES:
+            can_view_item = check_item_permission(requesting_user_id, item_id, item_type, 'view')
+            if can_view_item:
+                can_download_item = check_item_permission(requesting_user_id, item_id, item_type, 'download')
+                item_dict['permissions'] = {'can_view': True, 'can_download': can_download_item}
+                permitted_results.append(item_dict)
+            # If cannot view, item is excluded from results.
+        else:
+            # For types not covered by granular permissions (software, version), include them directly.
+            # And add a default full permission set or indicate not applicable.
+            item_dict['permissions'] = {'can_view': True, 'can_download': True, 'note': 'Not subject to granular item permissions'}
+            permitted_results.append(item_dict)
+            
+    return jsonify(permitted_results)
 
 # --- CLI Command ---
 @app.cli.command('init-db')
@@ -5073,6 +5285,161 @@ ALLOWED_FAVORITE_ITEM_TYPES = ['document', 'patch', 'link', 'misc_file', 'softwa
 # --- Bulk Action Constants ---
 ALLOWED_BULK_ITEM_TYPES = ['document', 'patch', 'link', 'misc_file']
 
+# --- User Item Permission Management Endpoints (Super Admin) ---
+
+@app.route('/api/superadmin/permissions/grant', methods=['POST'])
+@jwt_required()
+@super_admin_required
+def grant_user_item_permission():
+    data = request.get_json()
+    if not data:
+        return jsonify(msg="Missing JSON data"), 400
+
+    user_id = data.get('user_id')
+    item_id = data.get('item_id')
+    item_type = data.get('item_type')
+    can_view = data.get('can_view')
+    can_download = data.get('can_download')
+
+    if not all(isinstance(val, int) and val > 0 for val in [user_id, item_id]):
+        return jsonify(msg="user_id and item_id must be positive integers."), 400
+    if item_type not in ALLOWED_ITEM_TYPES:
+        return jsonify(msg=f"Invalid item_type. Must be one of: {', '.join(ALLOWED_ITEM_TYPES)}."), 400
+    if not isinstance(can_view, bool) or not isinstance(can_download, bool):
+        return jsonify(msg="can_view and can_download must be boolean values."), 400
+
+    db = get_db()
+    try:
+        # Check if user and item exist (optional but good practice)
+        user = find_user_by_id(user_id)
+        if not user:
+            return jsonify(msg=f"User with ID {user_id} not found."), 404
+        
+        # Item existence check (simplified, ideally check specific item table)
+        # This is a basic check, a more robust check would query the specific item table
+        # For now, we rely on the DB foreign keys if permissions were on item tables directly,
+        # but user_item_permissions doesn't have FK to item tables.
+        # So, this check is more conceptual here.
+        # if not db.execute(f"SELECT 1 FROM {item_type}s WHERE id = ?", (item_id,)).fetchone(): # Example, not directly applicable
+        #     return jsonify(msg=f"{item_type.capitalize()} with ID {item_id} not found."), 404
+
+
+        permission_id = database.grant_permission(db, user_id, item_id, item_type, can_view, can_download)
+        if permission_id:
+            log_audit_action(
+                action_type='GRANT_PERMISSION',
+                target_table='user_item_permissions',
+                target_id=permission_id, # ID of the permission record itself
+                details={
+                    'granted_to_user_id': user_id, 
+                    'item_id': item_id, 
+                    'item_type': item_type,
+                    'can_view': can_view,
+                    'can_download': can_download
+                }
+            )
+            # Fetch the newly granted/updated permission to return
+            new_permission = database.get_user_item_permission(db, user_id, item_id, item_type)
+            if new_permission:
+                return jsonify(dict(new_permission)), 200 # 200 OK as it's an update or insert
+            else: # Should not happen if grant_permission returned an ID
+                return jsonify(msg="Permission granted/updated but failed to retrieve."), 500
+        else:
+            return jsonify(msg="Failed to grant permission due to a database error."), 500
+    except sqlite3.Error as e:
+        app.logger.error(f"Error granting permission: {e}")
+        db.rollback()
+        return jsonify(msg=f"Database error while granting permission: {e}"), 500
+    except Exception as e:
+        app.logger.error(f"Unexpected error granting permission: {e}", exc_info=True)
+        db.rollback()
+        return jsonify(msg=f"An unexpected server error occurred: {e}"), 500
+
+@app.route('/api/superadmin/permissions/revoke', methods=['POST'])
+@jwt_required()
+@super_admin_required
+def revoke_user_item_permission():
+    data = request.get_json()
+    if not data:
+        return jsonify(msg="Missing JSON data"), 400
+
+    user_id = data.get('user_id')
+    item_id = data.get('item_id')
+    item_type = data.get('item_type')
+
+    if not all(isinstance(val, int) and val > 0 for val in [user_id, item_id]):
+        return jsonify(msg="user_id and item_id must be positive integers."), 400
+    if item_type not in ALLOWED_ITEM_TYPES:
+        return jsonify(msg=f"Invalid item_type. Must be one of: {', '.join(ALLOWED_ITEM_TYPES)}."), 400
+    
+    db = get_db()
+    try:
+        # Optional: Check if permission exists before revoking to give specific feedback
+        # existing_permission = database.get_user_item_permission(db, user_id, item_id, item_type)
+        # if not existing_permission:
+        #     return jsonify(msg="Permission not found to revoke."), 404
+
+        if database.revoke_permission(db, user_id, item_id, item_type):
+            log_audit_action(
+                action_type='REVOKE_PERMISSION',
+                target_table='user_item_permissions', 
+                # target_id could be the ID of the permission record if known, or not set
+                details={'revoked_for_user_id': user_id, 'item_id': item_id, 'item_type': item_type}
+            )
+            return jsonify(msg="Permission revoked successfully."), 200
+        else:
+            # This means no row was deleted, likely because the permission didn't exist.
+            return jsonify(msg="Permission not found or already revoked."), 404 
+    except sqlite3.Error as e:
+        app.logger.error(f"Error revoking permission: {e}")
+        db.rollback()
+        return jsonify(msg=f"Database error while revoking permission: {e}"), 500
+    except Exception as e:
+        app.logger.error(f"Unexpected error revoking permission: {e}", exc_info=True)
+        db.rollback()
+        return jsonify(msg=f"An unexpected server error occurred: {e}"), 500
+
+@app.route('/api/superadmin/permissions/item/<item_type>/<int:item_id>', methods=['GET'])
+@jwt_required()
+@super_admin_required
+def get_item_permissions_api(item_type, item_id):
+    if item_type not in ALLOWED_ITEM_TYPES:
+        return jsonify(msg=f"Invalid item_type. Must be one of: {', '.join(ALLOWED_ITEM_TYPES)}."), 400
+    if item_id <= 0:
+        return jsonify(msg="item_id must be a positive integer."), 400
+
+    db = get_db()
+    try:
+        permissions = database.get_permissions_for_item(db, item_id, item_type)
+        return jsonify([dict(row) for row in permissions]), 200
+    except sqlite3.Error as e:
+        app.logger.error(f"Error fetching permissions for item {item_id} ({item_type}): {e}")
+        return jsonify(msg=f"Database error: {e}"), 500
+    except Exception as e:
+        app.logger.error(f"Unexpected error fetching permissions for item {item_id} ({item_type}): {e}", exc_info=True)
+        return jsonify(msg=f"An unexpected server error occurred: {e}"), 500
+
+@app.route('/api/superadmin/permissions/user/<int:user_id>', methods=['GET'])
+@jwt_required()
+@super_admin_required
+def get_user_permissions_api(user_id):
+    if user_id <= 0:
+        return jsonify(msg="user_id must be a positive integer."), 400
+
+    item_type_filter = request.args.get('item_type', default=None, type=str)
+    if item_type_filter and item_type_filter not in ALLOWED_ITEM_TYPES:
+        return jsonify(msg=f"Invalid item_type filter. Must be one of: {', '.join(ALLOWED_ITEM_TYPES)}."), 400
+
+    db = get_db()
+    try:
+        permissions = database.get_permissions_for_user(db, user_id, item_type_filter=item_type_filter)
+        return jsonify([dict(row) for row in permissions]), 200
+    except sqlite3.Error as e:
+        app.logger.error(f"Error fetching permissions for user {user_id}: {e}")
+        return jsonify(msg=f"Database error: {e}"), 500
+    except Exception as e:
+        app.logger.error(f"Unexpected error fetching permissions for user {user_id}: {e}", exc_info=True)
+        return jsonify(msg=f"An unexpected server error occurred: {e}"), 500
 
 # --- Bulk Action Endpoints ---
 

@@ -156,9 +156,11 @@ const LinksView: React.FC = () => {
   };
 
   const filteredLinksBySearch = useMemo(() => {
-    if (!searchTerm) return links;
+    const viewableLinks = links.filter(l => !l.permissions || l.permissions.can_view !== false);
+
+    if (!searchTerm) return viewableLinks;
     const lower = searchTerm.toLowerCase();
-    return links.filter(l => l.title.toLowerCase().includes(lower) || (l.description||'').toLowerCase().includes(lower) || (l.software_name||'').toLowerCase().includes(lower) || (l.version_number||'').toLowerCase().includes(lower));
+    return viewableLinks.filter(l => l.title.toLowerCase().includes(lower) || (l.description||'').toLowerCase().includes(lower) || (l.software_name||'').toLowerCase().includes(lower) || (l.version_number||'').toLowerCase().includes(lower));
   }, [links, searchTerm]);
 
   const handleSelectItem = (id: number, isSelected: boolean) => setSelectedLinkIds(prev => { const n = new Set(prev); if (isSelected) n.add(id); else n.delete(id); return n; });

@@ -205,7 +205,9 @@ const FavoritesView: React.FC = () => {
         </Box>
       ) : (
         <div className="space-y-4">
-          {favorites.map(item => (
+          {favorites
+            .filter(item => !item.permissions || item.permissions.can_view !== false)
+            .map(item => (
             <div key={item.favorite_id} className="bg-white shadow-sm rounded-lg p-4 flex items-center justify-between hover:shadow-md transition-shadow">
               <div className="flex items-center">
                 {mapItemTypeToIcon(item.item_type)}

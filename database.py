@@ -277,3 +277,77 @@ def get_user_favorites(db, user_id, page, per_page, item_type_filter=None):
         # Potentially log more details about the query_sql for debugging
         print(f"Problematic Query: {query_sql}")
         return [], 0
+
+# User Item Permission Management Functions
+
+def grant_permission(db, user_id, item_id, item_type, can_view, can_download):
+    """Inserts or replaces a permission entry in user_item_permissions."""
+    try:
+        cursor = db.execute(
+            "INSERT OR REPLACE INTO user_item_permissions (user_id, item_id, item_type, can_view, can_download) VALUES (?, ?, ?, ?, ?)",
+            (user_id, item_id, item_type, can_view, can_download)
+        )
+        db.commit()
+        return cursor.lastrowid
+    except sqlite3.Error as e:
+        print(f"DB_PERMISSIONS: Error granting permission for user {user_id}, item {item_id}, type {item_type}: {e}")
+        return None
+
+def revoke_permission(db, user_id, item_id, item_type):
+    """Deletes a permission entry from user_item_permissions."""
+    try:
+        cursor = db.execute(
+            "DELETE FROM user_item_permissions WHERE user_id = ? AND item_id = ? AND item_type = ?",
+            (user_id, item_id, item_type)
+        )
+        db.commit()
+        return cursor.rowcount > 0  # True if a row was deleted
+    except sqlite3.Error as e:
+        print(f"DB_PERMISSIONS: Error revoking permission for user {user_id}, item {item_id}, type {item_type}: {e}")
+        return False
+
+def get_user_item_permission(db, user_id, item_id, item_type):
+    """Retrieves a specific permission entry for a user and item."""
+    try:
+        cursor = db.execute(
+            "SELECT id, user_id, item_id, item_type, can_view, can_download, created_at, updated_at FROM user_item_permissions WHERE user_id = ? AND item_id = ? AND item_type = ?",
+            (user_id, item_id, item_type)
+        )
+        return cursor.fetchone() # Returns a Row object or None
+    except sqlite3.Error as e:
+        print(f"DB_PERMISSIONS: Error fetching permission for user {user_id}, item {item_id}, type {item_type}: {e}")
+        return None
+
+def get_permissions_for_item(db, item_id, item_type):
+    """Retrieves all users and their permissions for a specific item."""
+    try:
+        cursor = db.execute(
+            """
+            SELECT uip.id, uip.user_id, u.username, uip.item_id, uip.item_type, 
+                   uip.can_view, uip.can_download, uip.created_at, uip.updated_at 
+            FROM user_item_permissions uip
+            JOIN users u ON uip.user_id = u.id
+            WHERE uip.item_id = ? AND uip.item_type = ?
+            """,
+            (item_id, item_type)
+        )
+        return cursor.fetchall() # List of Row objects
+    except sqlite3.Error as e:
+        print(f"DB_PERMISSIONS: Error fetching permissions for item {item_id}, type {item_type}: {e}")
+        return []
+
+def get_permissions_for_user(db, user_id, item_type_filter=None):
+    """Retrieves all item permissions for a specific user, optionally filtered by item_type."""
+    sql = "SELECT id, user_id, item_id, item_type, can_view, can_download, created_at, updated_at FROM user_item_permissions WHERE user_id = ?"
+    params = [user_id]
+    
+    if item_type_filter:
+        sql += " AND item_type = ?"
+        params.append(item_type_filter)
+        
+    try:
+        cursor = db.execute(sql, tuple(params))
+        return cursor.fetchall() # List of Row objects
+    except sqlite3.Error as e:
+        print(f"DB_PERMISSIONS: Error fetching permissions for user {user_id} (filter: {item_type_filter}): {e}")
+        return []

@@ -285,7 +285,41 @@ useEffect(() => {
     { key: 'doc_name', header: 'Name', sortable: true }, { key: 'doc_type', header: 'Type', sortable: true },
     { key: 'software_name', header: 'Software', sortable: true },
     { key: 'description', header: 'Description', render: (d: DocumentType) => <span className="text-sm text-gray-600 block max-w-xs truncate" title={d.description||''}>{d.description||'-'}</span> },
-    { key: 'download_link', header: 'Download', render: (d: DocumentType) => <a href={d.download_link} target={d.is_external_link||!d.download_link?.startsWith('/')?"_blank":"_self"} rel="noopener noreferrer" className="flex items-center text-blue-600 hover:text-blue-800" onClick={e=>e.stopPropagation()}><Download size={14} className="mr-1"/>Link</a> },
+    { 
+      key: 'download_link', 
+      header: 'Download', 
+      render: (d: DocumentType) => {
+        // Check if the document is an external link or an uploaded file that is downloadable
+        const canDirectlyDownload = d.is_external_link || d.is_downloadable;
+        // For uploaded files, if is_downloadable is explicitly false, it's not downloadable.
+        // If is_downloadable is undefined (for older data or if backend missed it), default to allowing download for non-external links.
+        const isEffectivelyDownloadable = d.is_external_link || d.is_downloadable !== false;
+
+        if (!isEffectivelyDownloadable && !d.is_external_link) { // It's an uploaded file and not downloadable
+          return (
+            <span className="flex items-center text-gray-400 cursor-not-allowed" title="Download not permitted">
+              <Download size={14} className="mr-1"/>Link
+            </span>
+          );
+        }
+        // For external links or downloadable files
+        return (
+          <a 
+            href={d.download_link} 
+            target={d.is_external_link || !d.download_link?.startsWith('/') ? "_blank" : "_self"} 
+            rel="noopener noreferrer" 
+            className={`flex items-center ${canDirectlyDownload ? 'text-blue-600 hover:text-blue-800' : 'text-gray-400 cursor-not-allowed'}`} 
+            onClick={(e) => {
+              if (!canDirectlyDownload) e.preventDefault(); // Prevent action if not downloadable
+              e.stopPropagation();
+            }}
+            title={canDirectlyDownload ? (d.is_external_link ? "Open external link" : "Download file") : "Download not permitted"}
+          >
+            <Download size={14} className="mr-1"/>Link
+          </a>
+        );
+      } 
+    },
     { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: (d: DocumentType) => d.uploaded_by_username||'N/A' },
     { key: 'updated_by_username', header: 'Updated By', sortable: false, render: (d: DocumentType) => d.updated_by_username||'N/A' },
     { key: 'created_at', header: 'Created At', sortable: true, render: (d: DocumentType) => d.created_at?new Date(d.created_at).toLocaleDateString('en-CA'):'-' },

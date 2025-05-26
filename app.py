@@ -863,6 +863,147 @@ def force_password_reset(user_id):
         app.logger.error(f"Error forcing password reset for user {user_id}: {e}")
         return jsonify(msg="Failed to force password reset due to a server error."), 500
 
+# --- Super Admin File Permission Management Endpoints ---
+@app.route('/api/superadmin/users/<int:user_id>/permissions', methods=['GET'])
+@jwt_required()
+@super_admin_required
+def get_user_file_permissions(user_id):
+    db = get_db()
+    target_user = find_user_by_id(user_id)
+    if not target_user:
+        return jsonify(msg="User not found."), 404
+
+    try:
+        permissions_cursor = db.execute(
+            "SELECT id, file_id, file_type, can_view, can_download, created_at, updated_at FROM file_permissions WHERE user_id = ?",
+            (user_id,)
+        )
+        permissions = [dict(row) for row in permissions_cursor.fetchall()]
+
+        log_audit_action(
+            action_type='GET_USER_FILE_PERMISSIONS',
+            target_table='users',
+            target_id=user_id,
+            details={'retrieved_for_user_id': user_id, 'permission_count': len(permissions)}
+        )
+        return jsonify(permissions), 200
+    except Exception as e:
+        app.logger.error(f"Error fetching file permissions for user {user_id}: {e}")
+        return jsonify(msg="Failed to retrieve file permissions due to a server error."), 500
+
+@app.route('/api/superadmin/users/<int:user_id>/permissions', methods=['PUT'])
+@jwt_required()
+@super_admin_required
+def update_user_file_permissions(user_id):
+    db = get_db()
+    acting_super_admin_id = int(get_jwt_identity()) # For logging
+
+    target_user = find_user_by_id(user_id)
+    if not target_user:
+        return jsonify(msg="Target user not found."), 404
+
+    permissions_data = request.get_json()
+    if not isinstance(permissions_data, list):
+        return jsonify(msg="Request body must be a list of permission objects."), 400
+
+    # Allowed file types for permissions, align with your application's file types
+    # This should ideally come from a shared constant or configuration if available.
+    VALID_FILE_TYPES_FOR_PERMISSIONS = ['document', 'patch', 'link', 'misc_file']
+    
+    processed_count = 0
+    errors = []
+
+    for perm_data in permissions_data:
+        if not isinstance(perm_data, dict):
+            errors.append("Each item in the list must be a permission object (dictionary).")
+            continue
+
+        file_id = perm_data.get('file_id')
+        file_type = perm_data.get('file_type')
+        can_view = perm_data.get('can_view')
+        can_download = perm_data.get('can_download')
+
+        # Validation
+        if not isinstance(file_id, int) or file_id <= 0:
+            errors.append(f"Invalid 'file_id': {file_id}. Must be a positive integer.")
+            continue
+        if not isinstance(file_type, str) or file_type not in VALID_FILE_TYPES_FOR_PERMISSIONS:
+            errors.append(f"Invalid 'file_type': {file_type}. Allowed types: {', '.join(VALID_FILE_TYPES_FOR_PERMISSIONS)}.")
+            continue
+        if not isinstance(can_view, bool):
+            errors.append(f"Invalid 'can_view' value for file_id {file_id} (type: {file_type}). Must be boolean.")
+            continue
+        if not isinstance(can_download, bool):
+            errors.append(f"Invalid 'can_download' value for file_id {file_id} (type: {file_type}). Must be boolean.")
+            continue
+        
+        # Here you might want to add validation that file_id and file_type combination actually exists
+        # e.g., SELECT 1 FROM documents WHERE id = ? (if file_type == 'document')
+        # For brevity, this example omits that deep validation.
+
+        try:
+            # UPSERT logic for file_permissions
+            # The file_permissions table has a UNIQUE constraint on (user_id, file_id, file_type)
+            # and created_at/updated_at are handled by DEFAULT and a trigger respectively.
+            cursor = db.execute("""
+                INSERT INTO file_permissions (user_id, file_id, file_type, can_view, can_download, updated_at)
+                VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+                ON CONFLICT(user_id, file_id, file_type) DO UPDATE SET
+                    can_view = excluded.can_view,
+                    can_download = excluded.can_download,
+                    updated_at = excluded.updated_at
+            """, (user_id, file_id, file_type, can_view, can_download))
+            
+            if cursor.rowcount > 0: # Indicates an insert or update occurred
+                processed_count += 1
+            # No specific error if rowcount is 0 for an UPSERT unless an actual error occurs.
+            # An UPSERT that results in no change (same values) might report 0 affected rows in some SQLite versions/contexts.
+            # For this logic, we count it if the command was successful and didn't raise an exception.
+
+        except sqlite3.IntegrityError as e_int:
+            # This might catch FK violations if user_id is somehow invalid (though checked)
+            # or other integrity issues not covered by ON CONFLICT.
+            errors.append(f"Database integrity error for file_id {file_id} (type: {file_type}): {e_int}")
+        except Exception as e_gen:
+            errors.append(f"General error processing file_id {file_id} (type: {file_type}): {e_gen}")
+
+    if errors:
+        db.rollback() # Rollback if any error occurred during processing of items
+        log_audit_action(
+            action_type='UPDATE_USER_FILE_PERMISSIONS_FAILED',
+            target_table='users', target_id=user_id,
+            details={'reason': 'Validation or DB errors', 'errors_list': errors, 'permissions_provided_count': len(permissions_data)}
+        )
+        return jsonify(msg="Errors occurred while updating permissions. No changes were saved.", errors=errors), 400
+    
+    try:
+        db.commit()
+        log_audit_action(
+            action_type='UPDATE_USER_FILE_PERMISSIONS_SUCCESS',
+            target_table='users', target_id=user_id,
+            details={
+                'updated_for_user_id': user_id,
+                'permissions_processed_count': processed_count,
+                'permissions_provided_count': len(permissions_data)
+            }
+        )
+        # Fetch updated permissions to return
+        updated_permissions_cursor = db.execute(
+            "SELECT id, file_id, file_type, can_view, can_download, created_at, updated_at FROM file_permissions WHERE user_id = ?",
+            (user_id,)
+        )
+        updated_permissions = [dict(row) for row in updated_permissions_cursor.fetchall()]
+        return jsonify(msg=f"Successfully processed {processed_count} permission(s) for user {user_id}.", permissions=updated_permissions), 200
+    except Exception as e_commit:
+        db.rollback() # Rollback on commit error
+        app.logger.error(f"Error committing file permissions for user {user_id}: {e_commit}")
+        log_audit_action(
+            action_type='UPDATE_USER_FILE_PERMISSIONS_FAILED',
+            target_table='users', target_id=user_id,
+            details={'reason': 'Commit error', 'error_message': str(e_commit)}
+        )
+        return jsonify(msg="Failed to save updated file permissions due to a server error during commit."), 500
+
 # --- Authentication Endpoints ---
 @app.route('/api/auth/register', methods=['POST'])
 def register():
@@ -1285,36 +1426,52 @@ def get_all_documents_api():
     params = [] # Parameters for the WHERE clause
     user_id_param_for_join = [] # Parameter for the JOIN clause (user_id for favorites)
 
-    # Attempt to get user_id for favorites
-    user_id = None
+    # Attempt to get user_id for favorites and permissions
+    logged_in_user_id = None
     try:
         verify_jwt_in_request(optional=True)
         current_user_identity = get_jwt_identity()
         if current_user_identity:
-            user_id = int(current_user_identity)
+            logged_in_user_id = int(current_user_identity)
     except Exception as e:
         app.logger.error(f"Error getting user_id in get_all_documents_api: {e}")
 
-    if user_id:
-        base_query_select = f"SELECT {base_query_select_fields}, uf.id AS favorite_id"
-        base_query_from += " LEFT JOIN user_favorites uf ON d.id = uf.item_id AND uf.item_type = 'document' AND uf.user_id = ?"
-        user_id_param_for_join.append(user_id)
+    # Base query components
+    base_query_select_fields_with_aliases = "d.id, d.software_id, d.doc_name, d.description, d.doc_type, d.is_external_link, d.download_link, d.stored_filename, d.original_filename_ref, d.file_size, d.file_type, d.created_by_user_id, u.username as uploaded_by_username, d.created_at, d.updated_by_user_id, upd_u.username as updated_by_username, d.updated_at, s.name as software_name"
+    
+    # Dynamic select for favorites and download permission
+    if logged_in_user_id:
+        # Select favorite_id and is_downloadable based on the logged_in_user_id
+        select_clause = f"SELECT {base_query_select_fields_with_aliases}, uf.id AS favorite_id, (fp_dl.id IS NOT NULL) AS is_downloadable"
     else:
-        base_query_select = f"SELECT {base_query_select_fields}, NULL AS favorite_id" # Ensure favorite_id column exists even if null
+        # If no user is logged in, favorite_id is NULL and is_downloadable is FALSE (0 in SQLite for boolean)
+        select_clause = f"SELECT {base_query_select_fields_with_aliases}, NULL AS favorite_id, 0 AS is_downloadable"
 
+    from_clause = "FROM documents d JOIN software s ON d.software_id = s.id LEFT JOIN users u ON d.created_by_user_id = u.id LEFT JOIN users upd_u ON d.updated_by_user_id = upd_u.id"
+    
+    params = []
     filter_conditions = []
 
+    # Permission Join and Conditions
+    # If a user is logged in, they must have explicit view permission.
+    # If no user is logged in, they see no permissioned files (secure by default).
+    # This INNER JOIN will filter out documents for which the logged_in_user_id does not have can_view=TRUE.
+    # If logged_in_user_id is None, the condition fp.user_id = NULL will not match any rows,
+    # effectively hiding all permissioned documents, which is the desired behavior.
+    from_clause += " JOIN file_permissions fp ON d.id = fp.file_id AND fp.file_type = 'document'"
+    filter_conditions.append("fp.user_id = ? AND fp.can_view IS TRUE")
+    params.append(logged_in_user_id) # This will be None if no user is logged in.
+                                     # SQLite handles `col = NULL` as false, which is what we want.
+                                     # If a user must be logged in to see anything,
+                                     # an explicit check for logged_in_user_id can be added at the start.
+
+    # Existing Filters
     if software_id_filter:
         filter_conditions.append("d.software_id = ?")
         params.append(software_id_filter)
-
     if doc_type_filter:
         filter_conditions.append("LOWER(d.doc_type) LIKE ?")
         params.append(f"%{doc_type_filter.lower()}%")
-    
-    # Date range filters
-    # Note: No explicit date validation here as per instructions, relying on DB behavior.
-    # Consider adding a helper function for date validation (YYYY-MM-DD) for robustness.
     if created_from_filter:
         filter_conditions.append("date(d.created_at) >= date(?)")
         params.append(created_from_filter)
@@ -1332,35 +1489,50 @@ def get_all_documents_api():
     if filter_conditions:
         where_clause = " WHERE " + " AND ".join(filter_conditions)
 
-    # Database Query for Total Count
-    # For count_query, we don't need the favorite_id or the join to user_favorites, nor user_id_param_for_join
-    count_query_from_without_fav_join = "FROM documents d JOIN software s ON d.software_id = s.id LEFT JOIN users u ON d.created_by_user_id = u.id LEFT JOIN users upd_u ON d.updated_by_user_id = upd_u.id"
-    count_query = f"SELECT COUNT(d.id) as count {count_query_from_without_fav_join}{where_clause}"
+    # Count Query (reflects permission filtering)
+    count_query = f"SELECT COUNT(d.id) as count {from_clause}{where_clause}"
     try:
-        total_documents_cursor = db.execute(count_query, tuple(params)) 
+        total_documents_cursor = db.execute(count_query, tuple(params))
         total_documents = total_documents_cursor.fetchone()['count']
     except Exception as e:
-        app.logger.error(f"Error fetching total document count: {e}")
+        app.logger.error(f"Error fetching total document count with permissions: {e}")
         return jsonify(msg="Error fetching document count."), 500
 
-    # Calculate Pagination Details
+    # Pagination Details
     total_pages = math.ceil(total_documents / per_page) if total_documents > 0 else 1
     offset = (page - 1) * per_page
-
     if page > total_pages and total_documents > 0:
         page = total_pages
         offset = (page - 1) * per_page
     
-    # Database Query for Paginated Documents
-    # Combine params for WHERE clause and the user_id for JOIN clause
-    final_params = tuple(params + user_id_param_for_join + [per_page, offset])
-    final_query = f"{base_query_select} {base_query_from}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
+    # Main Data Query
+    final_from_clause_for_data = from_clause
+    final_params_for_data = list(params) # Start with filter params for view permissions
+
+    if logged_in_user_id:
+        # Add JOIN for favorite status
+        final_from_clause_for_data += " LEFT JOIN user_favorites uf ON d.id = uf.item_id AND uf.item_type = 'document' AND uf.user_id = ?"
+        final_params_for_data.append(logged_in_user_id) 
+        
+        # Add JOIN for download permission status
+        # This specific user_id is for the download permission check (fp_dl)
+        final_from_clause_for_data += " LEFT JOIN file_permissions fp_dl ON d.id = fp_dl.file_id AND fp_dl.file_type = 'document' AND fp_dl.user_id = ? AND fp_dl.can_download IS TRUE"
+        final_params_for_data.append(logged_in_user_id)
+    else:
+        # If no user is logged in, no need to add these specific user-based joins for favorites or download status,
+        # as is_downloadable is already set to 0 and favorite_id to NULL in the select_clause.
+        pass
+
+
+    final_params_for_data.extend([per_page, offset]) # Add pagination params
+    
+    final_query = f"{select_clause} {final_from_clause_for_data}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
     
     try:
-        documents_cursor = db.execute(final_query, final_params)
+        documents_cursor = db.execute(final_query, tuple(final_params_for_data))
         documents_list = [dict(row) for row in documents_cursor.fetchall()]
     except Exception as e:
-        app.logger.error(f"Error fetching paginated documents: {e} with query {final_query} and params {final_params}")
+        app.logger.error(f"Error fetching paginated documents with permissions: {e} with query {final_query} and params {final_params_for_data}")
         return jsonify(msg="Error fetching documents."), 500
 
     return jsonify({
@@ -1420,28 +1592,38 @@ def get_all_patches_api():
     params = [] 
     user_id_param_for_join = []
 
-    user_id = None
+    # Attempt to get user_id for favorites and permissions
+    logged_in_user_id = None
     try:
         verify_jwt_in_request(optional=True)
         current_user_identity = get_jwt_identity()
         if current_user_identity:
-            user_id = int(current_user_identity)
+            logged_in_user_id = int(current_user_identity)
     except Exception as e:
         app.logger.error(f"Error getting user_id in get_all_patches_api: {e}")
 
-    if user_id:
-        base_query_select = f"SELECT {base_query_select_fields}, uf.id AS favorite_id"
-        base_query_from += " LEFT JOIN user_favorites uf ON p.id = uf.item_id AND uf.item_type = 'patch' AND uf.user_id = ?"
-        user_id_param_for_join.append(user_id)
-    else:
-        base_query_select = f"SELECT {base_query_select_fields}, NULL AS favorite_id"
+    # Base query components
+    base_query_select_fields_with_aliases = "p.id, p.version_id, p.patch_name, p.description, p.release_date, p.is_external_link, p.download_link, p.stored_filename, p.original_filename_ref, p.file_size, p.file_type, p.patch_by_developer, p.created_by_user_id, u.username as uploaded_by_username, p.created_at, p.updated_by_user_id, upd_u.username as updated_by_username, p.updated_at, s.name as software_name, s.id as software_id, v.version_number"
 
+    if logged_in_user_id:
+        select_clause = f"SELECT {base_query_select_fields_with_aliases}, uf.id AS favorite_id, (fp_dl.id IS NOT NULL) AS is_downloadable"
+    else:
+        select_clause = f"SELECT {base_query_select_fields_with_aliases}, NULL AS favorite_id, 0 AS is_downloadable"
+
+    from_clause = "FROM patches p JOIN versions v ON p.version_id = v.id JOIN software s ON v.software_id = s.id LEFT JOIN users u ON p.created_by_user_id = u.id LEFT JOIN users upd_u ON p.updated_by_user_id = upd_u.id"
+    
+    params = [] 
     filter_conditions = []
 
-    if software_id_filter:
-        filter_conditions.append("s.id = ?") # Filter by software_id from the software table
-        params.append(software_id_filter)
+    # Permission Join and Conditions
+    from_clause += " JOIN file_permissions fp ON p.id = fp.file_id AND fp.file_type = 'patch'"
+    filter_conditions.append("fp.user_id = ? AND fp.can_view IS TRUE")
+    params.append(logged_in_user_id)
 
+    # Existing Filters
+    if software_id_filter:
+        filter_conditions.append("s.id = ?") 
+        params.append(software_id_filter)
     if release_from_filter:
         filter_conditions.append("date(p.release_date) >= date(?)")
         params.append(release_from_filter)
@@ -1456,32 +1638,44 @@ def get_all_patches_api():
     if filter_conditions:
         where_clause = " WHERE " + " AND ".join(filter_conditions)
 
-    # Database Query for Total Count
-    count_query_from_without_fav_join = "FROM patches p JOIN versions v ON p.version_id = v.id JOIN software s ON v.software_id = s.id LEFT JOIN users u ON p.created_by_user_id = u.id LEFT JOIN users upd_u ON p.updated_by_user_id = upd_u.id"
-    count_query = f"SELECT COUNT(p.id) as count {count_query_from_without_fav_join}{where_clause}"
+    # Count Query
+    count_query = f"SELECT COUNT(p.id) as count {from_clause}{where_clause}"
     try:
         total_patches_cursor = db.execute(count_query, tuple(params))
         total_patches = total_patches_cursor.fetchone()['count']
     except Exception as e:
-        app.logger.error(f"Error fetching total patch count: {e}")
+        app.logger.error(f"Error fetching total patch count with permissions: {e}")
         return jsonify(msg="Error fetching patch count."), 500
 
-    # Calculate Pagination Details
+    # Pagination Details
     total_pages = math.ceil(total_patches / per_page) if total_patches > 0 else 1
     offset = (page - 1) * per_page
-
     if page > total_pages and total_patches > 0:
         page = total_pages
         offset = (page - 1) * per_page
     
-    final_params = tuple(params + user_id_param_for_join + [per_page, offset])
-    final_query = f"{base_query_select} {base_query_from}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
+    # Main Data Query
+    final_from_clause_for_data = from_clause
+    final_params_for_data = list(params) # Start with filter params for view permissions
+
+    if logged_in_user_id:
+        # Add JOIN for favorite status
+        final_from_clause_for_data += " LEFT JOIN user_favorites uf ON p.id = uf.item_id AND uf.item_type = 'patch' AND uf.user_id = ?"
+        final_params_for_data.append(logged_in_user_id)
+        
+        # Add JOIN for download permission status
+        final_from_clause_for_data += " LEFT JOIN file_permissions fp_dl ON p.id = fp_dl.file_id AND fp_dl.file_type = 'patch' AND fp_dl.user_id = ? AND fp_dl.can_download IS TRUE"
+        final_params_for_data.append(logged_in_user_id)
+    # If no user logged_in, is_downloadable is already 0 and favorite_id is NULL in select_clause
+
+    final_params_for_data.extend([per_page, offset]) # Add pagination params
+    final_query = f"{select_clause} {final_from_clause_for_data}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
     
     try:
-        patches_cursor = db.execute(final_query, final_params)
+        patches_cursor = db.execute(final_query, tuple(final_params_for_data))
         patches_list = [dict(row) for row in patches_cursor.fetchall()]
     except Exception as e:
-        app.logger.error(f"Error fetching paginated patches: {e} with query {final_query} and params {final_params}")
+        app.logger.error(f"Error fetching paginated patches with permissions: {e} with query {final_query} and params {final_params_for_data}")
         return jsonify(msg="Error fetching patches."), 500
 
     return jsonify({
@@ -1540,38 +1734,46 @@ def get_all_links_api():
     params = []
     user_id_param_for_join = []
 
-    user_id = None
+    # Attempt to get user_id for favorites and permissions
+    logged_in_user_id = None
     try:
         verify_jwt_in_request(optional=True)
         current_user_identity = get_jwt_identity()
         if current_user_identity:
-            user_id = int(current_user_identity)
+            logged_in_user_id = int(current_user_identity)
     except Exception as e:
         app.logger.error(f"Error getting user_id in get_all_links_api: {e}")
 
-    if user_id:
-        base_query_select = f"SELECT {base_query_select_fields}, uf.id AS favorite_id"
-        base_query_from += " LEFT JOIN user_favorites uf ON l.id = uf.item_id AND uf.item_type = 'link' AND uf.user_id = ?"
-        user_id_param_for_join.append(user_id)
+    # Base query components
+    base_query_select_fields_with_aliases = "l.id, l.title, l.description, l.software_id, l.version_id, l.is_external_link, l.url, l.stored_filename, l.original_filename_ref, l.file_size, l.file_type, l.created_by_user_id, u.username as uploaded_by_username, l.created_at, l.updated_by_user_id, upd_u.username as updated_by_username, l.updated_at, s.name as software_name, v.version_number as version_name"
+    
+    if logged_in_user_id:
+        select_clause = f"SELECT {base_query_select_fields_with_aliases}, uf.id AS favorite_id, (fp_dl.id IS NOT NULL) AS is_downloadable"
     else:
-        base_query_select = f"SELECT {base_query_select_fields}, NULL AS favorite_id"
-        
+        select_clause = f"SELECT {base_query_select_fields_with_aliases}, NULL AS favorite_id, 0 AS is_downloadable"
+
+    from_clause = "FROM links l JOIN software s ON l.software_id = s.id LEFT JOIN versions v ON l.version_id = v.id LEFT JOIN users u ON l.created_by_user_id = u.id LEFT JOIN users upd_u ON l.updated_by_user_id = upd_u.id"
+    
+    params = []
     filter_conditions = []
 
+    # Permission Join and Conditions
+    from_clause += " JOIN file_permissions fp ON l.id = fp.file_id AND fp.file_type = 'link'"
+    filter_conditions.append("fp.user_id = ? AND fp.can_view IS TRUE")
+    params.append(logged_in_user_id)
+        
+    # Existing Filters
     if software_id_filter:
         filter_conditions.append("l.software_id = ?")
         params.append(software_id_filter)
     if version_id_filter:
         filter_conditions.append("l.version_id = ?")
         params.append(version_id_filter)
-
     if link_type_filter:
         if link_type_filter.lower() == 'external':
             filter_conditions.append("l.is_external_link = TRUE")
         elif link_type_filter.lower() == 'uploaded':
             filter_conditions.append("l.is_external_link = FALSE")
-            # For 'uploaded', no parameter is added to params for this specific condition
-    
     if created_from_filter:
         filter_conditions.append("date(l.created_at) >= date(?)")
         params.append(created_from_filter)
@@ -1583,32 +1785,44 @@ def get_all_links_api():
     if filter_conditions:
         where_clause = " WHERE " + " AND ".join(filter_conditions)
 
-    # Database Query for Total Count
-    count_query_from_without_fav_join = "FROM links l JOIN software s ON l.software_id = s.id LEFT JOIN versions v ON l.version_id = v.id LEFT JOIN users u ON l.created_by_user_id = u.id LEFT JOIN users upd_u ON l.updated_by_user_id = upd_u.id"
-    count_query = f"SELECT COUNT(l.id) as count {count_query_from_without_fav_join}{where_clause}"
+    # Count Query
+    count_query = f"SELECT COUNT(l.id) as count {from_clause}{where_clause}"
     try:
         total_links_cursor = db.execute(count_query, tuple(params))
         total_links = total_links_cursor.fetchone()['count']
     except Exception as e:
-        app.logger.error(f"Error fetching total link count: {e}")
+        app.logger.error(f"Error fetching total link count with permissions: {e}")
         return jsonify(msg="Error fetching link count."), 500
 
-    # Calculate Pagination Details
+    # Pagination Details
     total_pages = math.ceil(total_links / per_page) if total_links > 0 else 1
     offset = (page - 1) * per_page
-
     if page > total_pages and total_links > 0:
         page = total_pages
         offset = (page - 1) * per_page
     
-    final_params = tuple(params + user_id_param_for_join + [per_page, offset])
-    final_query = f"{base_query_select} {base_query_from}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
+    # Main Data Query
+    final_from_clause_for_data = from_clause
+    final_params_for_data = list(params) # Start with filter params for view permissions
+
+    if logged_in_user_id:
+        # Add JOIN for favorite status
+        final_from_clause_for_data += " LEFT JOIN user_favorites uf ON l.id = uf.item_id AND uf.item_type = 'link' AND uf.user_id = ?"
+        final_params_for_data.append(logged_in_user_id)
+        
+        # Add JOIN for download permission status
+        final_from_clause_for_data += " LEFT JOIN file_permissions fp_dl ON l.id = fp_dl.file_id AND fp_dl.file_type = 'link' AND fp_dl.user_id = ? AND fp_dl.can_download IS TRUE"
+        final_params_for_data.append(logged_in_user_id)
+    # If no user logged_in, is_downloadable is already 0 and favorite_id is NULL in select_clause
+        
+    final_params_for_data.extend([per_page, offset]) # Add pagination params
+    final_query = f"{select_clause} {final_from_clause_for_data}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
     
     try:
-        links_cursor = db.execute(final_query, final_params)
+        links_cursor = db.execute(final_query, tuple(final_params_for_data))
         links_list = [dict(row) for row in links_cursor.fetchall()]
     except Exception as e:
-        app.logger.error(f"Error fetching paginated links: {e} with query {final_query} and params {final_params}")
+        app.logger.error(f"Error fetching paginated links with permissions: {e} with query {final_query} and params {final_params_for_data}")
         return jsonify(msg="Error fetching links."), 500
 
     return jsonify({
@@ -1667,24 +1881,35 @@ def get_all_misc_files_api():
     params = []
     user_id_param_for_join = []
 
-    user_id = None
+    # Attempt to get user_id for favorites and permissions
+    logged_in_user_id = None
     try:
         verify_jwt_in_request(optional=True)
         current_user_identity = get_jwt_identity()
         if current_user_identity:
-            user_id = int(current_user_identity)
+            logged_in_user_id = int(current_user_identity)
     except Exception as e:
         app.logger.error(f"Error getting user_id in get_all_misc_files_api: {e}")
 
-    if user_id:
-        base_query_select = f"SELECT {base_query_select_fields}, uf.id AS favorite_id"
-        base_query_from += " LEFT JOIN user_favorites uf ON mf.id = uf.item_id AND uf.item_type = 'misc_file' AND uf.user_id = ?"
-        user_id_param_for_join.append(user_id)
-    else:
-        base_query_select = f"SELECT {base_query_select_fields}, NULL AS favorite_id"
+    # Base query components
+    base_query_select_fields_with_aliases = "mf.id, mf.misc_category_id, mf.user_id, mf.user_provided_title, mf.user_provided_description, mf.original_filename, mf.stored_filename, mf.file_path, mf.file_type, mf.file_size, mf.created_by_user_id, u.username as uploaded_by_username, mf.created_at, mf.updated_by_user_id, upd_u.username as updated_by_username, mf.updated_at, mc.name as category_name"
 
+    if logged_in_user_id:
+        select_clause = f"SELECT {base_query_select_fields_with_aliases}, uf.id AS favorite_id, (fp_dl.id IS NOT NULL) AS is_downloadable"
+    else:
+        select_clause = f"SELECT {base_query_select_fields_with_aliases}, NULL AS favorite_id, 0 AS is_downloadable"
+
+    from_clause = "FROM misc_files mf JOIN misc_categories mc ON mf.misc_category_id = mc.id LEFT JOIN users u ON mf.created_by_user_id = u.id LEFT JOIN users upd_u ON mf.updated_by_user_id = upd_u.id"
+    
+    params = []
     filter_conditions = []
 
+    # Permission Join and Conditions
+    from_clause += " JOIN file_permissions fp ON mf.id = fp.file_id AND fp.file_type = 'misc_file'"
+    filter_conditions.append("fp.user_id = ? AND fp.can_view IS TRUE")
+    params.append(logged_in_user_id)
+
+    # Existing Filters
     if category_id_filter:
         filter_conditions.append("mf.misc_category_id = ?")
         params.append(category_id_filter)
@@ -1693,32 +1918,44 @@ def get_all_misc_files_api():
     if filter_conditions:
         where_clause = " WHERE " + " AND ".join(filter_conditions)
 
-    # Database Query for Total Count
-    count_query_from_without_fav_join = "FROM misc_files mf JOIN misc_categories mc ON mf.misc_category_id = mc.id LEFT JOIN users u ON mf.created_by_user_id = u.id LEFT JOIN users upd_u ON mf.updated_by_user_id = upd_u.id"
-    count_query = f"SELECT COUNT(mf.id) as count {count_query_from_without_fav_join}{where_clause}"
+    # Count Query
+    count_query = f"SELECT COUNT(mf.id) as count {from_clause}{where_clause}"
     try:
         total_misc_files_cursor = db.execute(count_query, tuple(params))
         total_misc_files = total_misc_files_cursor.fetchone()['count']
     except Exception as e:
-        app.logger.error(f"Error fetching total misc_files count: {e}")
+        app.logger.error(f"Error fetching total misc_files count with permissions: {e}")
         return jsonify(msg="Error fetching misc_files count."), 500
 
-    # Calculate Pagination Details
+    # Pagination Details
     total_pages = math.ceil(total_misc_files / per_page) if total_misc_files > 0 else 1
     offset = (page - 1) * per_page
-
     if page > total_pages and total_misc_files > 0:
         page = total_pages
         offset = (page - 1) * per_page
     
-    final_params = tuple(params + user_id_param_for_join + [per_page, offset])
-    final_query = f"{base_query_select} {base_query_from}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
+    # Main Data Query
+    final_from_clause_for_data = from_clause
+    final_params_for_data = list(params) # Start with filter params for view permissions
+
+    if logged_in_user_id:
+        # Add JOIN for favorite status
+        final_from_clause_for_data += " LEFT JOIN user_favorites uf ON mf.id = uf.item_id AND uf.item_type = 'misc_file' AND uf.user_id = ?"
+        final_params_for_data.append(logged_in_user_id)
+        
+        # Add JOIN for download permission status
+        final_from_clause_for_data += " LEFT JOIN file_permissions fp_dl ON mf.id = fp_dl.file_id AND fp_dl.file_type = 'misc_file' AND fp_dl.user_id = ? AND fp_dl.can_download IS TRUE"
+        final_params_for_data.append(logged_in_user_id)
+    # If no user logged_in, is_downloadable is already 0 and favorite_id is NULL in select_clause
+    
+    final_params_for_data.extend([per_page, offset]) # Add pagination params
+    final_query = f"{select_clause} {final_from_clause_for_data}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
     
     try:
-        misc_files_cursor = db.execute(final_query, final_params)
+        misc_files_cursor = db.execute(final_query, tuple(final_params_for_data))
         misc_files_list = [dict(row) for row in misc_files_cursor.fetchall()]
     except Exception as e:
-        app.logger.error(f"Error fetching paginated misc_files: {e} with query {final_query} and params {final_params}")
+        app.logger.error(f"Error fetching paginated misc_files with permissions: {e} with query {final_query} and params {final_params_for_data}")
         return jsonify(msg="Error fetching misc_files."), 500
 
     return jsonify({
@@ -4009,41 +4246,166 @@ def admin_delete_version(version_id):
 
 # --- File Serving Endpoints ---
 @app.route('/official_uploads/docs/<path:filename>')
+@jwt_required(optional=True) # Use optional to check identity even if no token
 def serve_official_doc_file(filename):
+    db = get_db()
+    logged_in_user_id = None
+    current_user_identity = get_jwt_identity()
+    if current_user_identity:
+        try:
+            logged_in_user_id = int(current_user_identity)
+        except ValueError:
+            app.logger.warning(f"Invalid user ID format in JWT for doc download: {current_user_identity}")
+            return jsonify(msg="Invalid user identity in token."), 401
+
+    if not logged_in_user_id:
+        return jsonify(msg="Authentication required to download this file."), 401
+
+    # Get file_id from filename
+    doc_item = db.execute("SELECT id FROM documents WHERE stored_filename = ?", (filename,)).fetchone()
+    if not doc_item:
+        return jsonify(msg="File not found in database records."), 404
+    file_id = doc_item['id']
+
+    # Check permission
+    permission = db.execute(
+        "SELECT can_download FROM file_permissions WHERE user_id = ? AND file_id = ? AND file_type = 'document'",
+        (logged_in_user_id, file_id)
+    ).fetchone()
+
+    if not permission or not permission['can_download']:
+        log_audit_action(
+            action_type='DOWNLOAD_DENIED', target_table='documents', target_id=file_id,
+            details={'filename': filename, 'reason': 'No download permission'}
+        )
+        return jsonify(msg="You do not have permission to download this file."), 403
+
     try:
-        db_conn = get_db() # Get DB connection
-        _log_download_activity(filename, 'document', db_conn)
+        _log_download_activity(filename, 'document', db) # Log before serving
     except Exception as e:
-        # Log any error from get_db() or the call itself, but do not prevent file serving
-        app.logger.error(f"Error during pre-download logging for doc '{filename}': {e}")
+        app.logger.error(f"Error during download logging for doc '{filename}': {e}")
+        # Do not necessarily prevent download if logging fails, but log the logging error.
     
     return send_from_directory(app.config['DOC_UPLOAD_FOLDER'], filename, as_attachment=True)
 
 @app.route('/official_uploads/patches/<path:filename>')
+@jwt_required(optional=True)
 def serve_official_patch_file(filename):
+    db = get_db()
+    logged_in_user_id = None
+    current_user_identity = get_jwt_identity()
+    if current_user_identity:
+        try:
+            logged_in_user_id = int(current_user_identity)
+        except ValueError:
+            app.logger.warning(f"Invalid user ID format in JWT for patch download: {current_user_identity}")
+            return jsonify(msg="Invalid user identity in token."), 401
+
+    if not logged_in_user_id:
+        return jsonify(msg="Authentication required to download this file."), 401
+
+    patch_item = db.execute("SELECT id FROM patches WHERE stored_filename = ?", (filename,)).fetchone()
+    if not patch_item:
+        return jsonify(msg="File not found in database records."), 404
+    file_id = patch_item['id']
+
+    permission = db.execute(
+        "SELECT can_download FROM file_permissions WHERE user_id = ? AND file_id = ? AND file_type = 'patch'",
+        (logged_in_user_id, file_id)
+    ).fetchone()
+
+    if not permission or not permission['can_download']:
+        log_audit_action(
+            action_type='DOWNLOAD_DENIED', target_table='patches', target_id=file_id,
+            details={'filename': filename, 'reason': 'No download permission'}
+        )
+        return jsonify(msg="You do not have permission to download this file."), 403
+    
     try:
-        db_conn = get_db()
-        _log_download_activity(filename, 'patch', db_conn)
+        _log_download_activity(filename, 'patch', db)
     except Exception as e:
-        app.logger.error(f"Error during pre-download logging for patch '{filename}': {e}")
+        app.logger.error(f"Error during download logging for patch '{filename}': {e}")
+
     return send_from_directory(app.config['PATCH_UPLOAD_FOLDER'], filename, as_attachment=True)
 
-@app.route('/official_uploads/links/<path:filename>') # For files uploaded as "Links"
-def serve_official_link_file(filename):
+@app.route('/official_uploads/links/<path:filename>') 
+@jwt_required(optional=True)
+def serve_official_link_file(filename): # Only for uploaded files via "Links"
+    db = get_db()
+    logged_in_user_id = None
+    current_user_identity = get_jwt_identity()
+    if current_user_identity:
+        try:
+            logged_in_user_id = int(current_user_identity)
+        except ValueError:
+            app.logger.warning(f"Invalid user ID format in JWT for link file download: {current_user_identity}")
+            return jsonify(msg="Invalid user identity in token."), 401
+            
+    if not logged_in_user_id:
+        return jsonify(msg="Authentication required to download this file."), 401
+
+    link_item = db.execute("SELECT id, is_external_link FROM links WHERE stored_filename = ?", (filename,)).fetchone()
+    if not link_item:
+        return jsonify(msg="File not found in database records."), 404
+    if link_item['is_external_link']: # Should not happen if filename is present, but good check
+        return jsonify(msg="Cannot download external links directly via this endpoint."), 400 
+    file_id = link_item['id']
+
+    permission = db.execute(
+        "SELECT can_download FROM file_permissions WHERE user_id = ? AND file_id = ? AND file_type = 'link'",
+        (logged_in_user_id, file_id)
+    ).fetchone()
+
+    if not permission or not permission['can_download']:
+        log_audit_action(
+            action_type='DOWNLOAD_DENIED', target_table='links', target_id=file_id,
+            details={'filename': filename, 'reason': 'No download permission'}
+        )
+        return jsonify(msg="You do not have permission to download this file."), 403
+
     try:
-        db_conn = get_db()
-        _log_download_activity(filename, 'link_file', db_conn) # 'link_file' as per previous definition
+        _log_download_activity(filename, 'link_file', db)
     except Exception as e:
-        app.logger.error(f"Error during pre-download logging for link file '{filename}': {e}")
+        app.logger.error(f"Error during download logging for link file '{filename}': {e}")
     return send_from_directory(app.config['LINK_UPLOAD_FOLDER'], filename, as_attachment=True)
 
 @app.route('/misc_uploads/<path:filename>')
+@jwt_required(optional=True)
 def serve_misc_file(filename):
+    db = get_db()
+    logged_in_user_id = None
+    current_user_identity = get_jwt_identity()
+    if current_user_identity:
+        try:
+            logged_in_user_id = int(current_user_identity)
+        except ValueError:
+            app.logger.warning(f"Invalid user ID format in JWT for misc file download: {current_user_identity}")
+            return jsonify(msg="Invalid user identity in token."), 401
+
+    if not logged_in_user_id:
+        return jsonify(msg="Authentication required to download this file."), 401
+
+    misc_item = db.execute("SELECT id FROM misc_files WHERE stored_filename = ?", (filename,)).fetchone()
+    if not misc_item:
+        return jsonify(msg="File not found in database records."), 404
+    file_id = misc_item['id']
+
+    permission = db.execute(
+        "SELECT can_download FROM file_permissions WHERE user_id = ? AND file_id = ? AND file_type = 'misc_file'",
+        (logged_in_user_id, file_id)
+    ).fetchone()
+
+    if not permission or not permission['can_download']:
+        log_audit_action(
+            action_type='DOWNLOAD_DENIED', target_table='misc_files', target_id=file_id,
+            details={'filename': filename, 'reason': 'No download permission'}
+        )
+        return jsonify(msg="You do not have permission to download this file."), 403
+    
     try:
-        db_conn = get_db()
-        _log_download_activity(filename, 'misc_file', db_conn)
+        _log_download_activity(filename, 'misc_file', db)
     except Exception as e:
-        app.logger.error(f"Error during pre-download logging for misc file '{filename}': {e}")
+        app.logger.error(f"Error during download logging for misc file '{filename}': {e}")
     return send_from_directory(app.config['MISC_UPLOAD_FOLDER'], filename, as_attachment=True)
 
 # --- Search API (Keep as is, or enhance later) ---
@@ -4060,78 +4422,111 @@ def search_api():
     # Prepare the search term for LIKE queries
     like_query_term = f"%{query_term.lower()}%"
 
-    user_id = None
+    logged_in_user_id = None
     try:
         verify_jwt_in_request(optional=True)
         current_user_identity = get_jwt_identity()
         if current_user_identity:
-            user_id = int(current_user_identity)
+            logged_in_user_id = int(current_user_identity)
     except Exception as e:
         app.logger.error(f"Error getting user_id in search: {e}")
 
     # Documents
-    sql_documents_select = "SELECT d.id, d.doc_name AS name, d.description, 'document' AS type"
-    sql_documents_from = "FROM documents d"
-    doc_params = [like_query_term, like_query_term]
-    if user_id:
-        sql_documents_select += ", uf.id AS favorite_id"
-        sql_documents_from += " LEFT JOIN user_favorites uf ON d.id = uf.item_id AND uf.item_type = 'document' AND uf.user_id = ?"
-        doc_params.append(user_id)
-    sql_documents = f"{sql_documents_select} {sql_documents_from} WHERE (LOWER(d.doc_name) LIKE ? OR LOWER(d.description) LIKE ?)"
+    doc_select_base = "SELECT d.id, d.doc_name AS name, d.description, 'document' AS type"
+    doc_from_base = "FROM documents d JOIN file_permissions fp ON d.id = fp.file_id AND fp.file_type = 'document'"
+    doc_params = [like_query_term, like_query_term, logged_in_user_id] # Param for view permission user_id
+    doc_where_base = "(LOWER(d.doc_name) LIKE ? OR LOWER(d.description) LIKE ?) AND fp.user_id = ? AND fp.can_view IS TRUE"
+    
+    if logged_in_user_id:
+        doc_select_final = f"{doc_select_base}, uf.id AS favorite_id, (fp_dl.id IS NOT NULL) AS is_downloadable"
+        doc_from_final = f"{doc_from_base} LEFT JOIN user_favorites uf ON d.id = uf.item_id AND uf.item_type = 'document' AND uf.user_id = ? LEFT JOIN file_permissions fp_dl ON d.id = fp_dl.file_id AND fp_dl.file_type = 'document' AND fp_dl.user_id = ? AND fp_dl.can_download IS TRUE"
+        doc_params.append(logged_in_user_id) # For favorites join
+        doc_params.append(logged_in_user_id) # For download permission join
+    else:
+        doc_select_final = f"{doc_select_base}, NULL AS favorite_id, 0 AS is_downloadable"
+        doc_from_final = doc_from_base # No extra joins if no user
+    
+    sql_documents = f"{doc_select_final} {doc_from_final} WHERE {doc_where_base}"
     results.extend([dict(row) for row in db.execute(sql_documents, tuple(doc_params)).fetchall()])
 
     # Patches
-    sql_patches_select = "SELECT p.id, p.patch_name AS name, p.description, 'patch' AS type"
-    sql_patches_from = "FROM patches p"
-    patch_params = [like_query_term, like_query_term]
-    if user_id:
-        sql_patches_select += ", uf.id AS favorite_id"
-        sql_patches_from += " LEFT JOIN user_favorites uf ON p.id = uf.item_id AND uf.item_type = 'patch' AND uf.user_id = ?"
-        patch_params.append(user_id)
-    sql_patches = f"{sql_patches_select} {sql_patches_from} WHERE (LOWER(p.patch_name) LIKE ? OR LOWER(p.description) LIKE ?)"
+    patch_select_base = "SELECT p.id, p.patch_name AS name, p.description, 'patch' AS type"
+    patch_from_base = "FROM patches p JOIN file_permissions fp ON p.id = fp.file_id AND fp.file_type = 'patch'"
+    patch_params = [like_query_term, like_query_term, logged_in_user_id]
+    patch_where_base = "(LOWER(p.patch_name) LIKE ? OR LOWER(p.description) LIKE ?) AND fp.user_id = ? AND fp.can_view IS TRUE"
+
+    if logged_in_user_id:
+        patch_select_final = f"{patch_select_base}, uf.id AS favorite_id, (fp_dl.id IS NOT NULL) AS is_downloadable"
+        patch_from_final = f"{patch_from_base} LEFT JOIN user_favorites uf ON p.id = uf.item_id AND uf.item_type = 'patch' AND uf.user_id = ? LEFT JOIN file_permissions fp_dl ON p.id = fp_dl.file_id AND fp_dl.file_type = 'patch' AND fp_dl.user_id = ? AND fp_dl.can_download IS TRUE"
+        patch_params.append(logged_in_user_id)
+        patch_params.append(logged_in_user_id)
+    else:
+        patch_select_final = f"{patch_select_base}, NULL AS favorite_id, 0 AS is_downloadable"
+        patch_from_final = patch_from_base
+
+    sql_patches = f"{patch_select_final} {patch_from_final} WHERE {patch_where_base}"
     results.extend([dict(row) for row in db.execute(sql_patches, tuple(patch_params)).fetchall()])
 
     # Links
-    sql_links_select = "SELECT l.id, l.title AS name, l.description, l.url, l.is_external_link, l.stored_filename, 'link' AS type" # Added is_external_link and stored_filename
-    sql_links_from = "FROM links l"
-    link_params = [like_query_term, like_query_term, like_query_term]
-    if user_id:
-        sql_links_select += ", uf.id AS favorite_id"
-        sql_links_from += " LEFT JOIN user_favorites uf ON l.id = uf.item_id AND uf.item_type = 'link' AND uf.user_id = ?"
-        link_params.append(user_id)
-    sql_links = f"{sql_links_select} {sql_links_from} WHERE (LOWER(l.title) LIKE ? OR LOWER(l.description) LIKE ? OR LOWER(l.url) LIKE ?)"
+    link_select_base = "SELECT l.id, l.title AS name, l.description, l.url, l.is_external_link, l.stored_filename, 'link' AS type"
+    link_from_base = "FROM links l JOIN file_permissions fp ON l.id = fp.file_id AND fp.file_type = 'link'"
+    link_params = [like_query_term, like_query_term, like_query_term, logged_in_user_id]
+    link_where_base = "(LOWER(l.title) LIKE ? OR LOWER(l.description) LIKE ? OR LOWER(l.url) LIKE ?) AND fp.user_id = ? AND fp.can_view IS TRUE"
+
+    if logged_in_user_id:
+        link_select_final = f"{link_select_base}, uf.id AS favorite_id, (fp_dl.id IS NOT NULL) AS is_downloadable"
+        link_from_final = f"{link_from_base} LEFT JOIN user_favorites uf ON l.id = uf.item_id AND uf.item_type = 'link' AND uf.user_id = ? LEFT JOIN file_permissions fp_dl ON l.id = fp_dl.file_id AND fp_dl.file_type = 'link' AND fp_dl.user_id = ? AND fp_dl.can_download IS TRUE"
+        link_params.append(logged_in_user_id)
+        link_params.append(logged_in_user_id)
+    else:
+        link_select_final = f"{link_select_base}, NULL AS favorite_id, 0 AS is_downloadable"
+        link_from_final = link_from_base
+        
+    sql_links = f"{link_select_final} {link_from_final} WHERE {link_where_base}"
     results.extend([dict(row) for row in db.execute(sql_links, tuple(link_params)).fetchall()])
 
     # Misc Files
-    sql_misc_files_select = "SELECT mf.id, mf.user_provided_title AS name, mf.original_filename, mf.user_provided_description AS description, mf.stored_filename, 'misc_file' AS type" # Added stored_filename
-    sql_misc_files_from = "FROM misc_files mf"
-    misc_params = [like_query_term, like_query_term, like_query_term]
-    if user_id:
-        sql_misc_files_select += ", uf.id AS favorite_id"
-        sql_misc_files_from += " LEFT JOIN user_favorites uf ON mf.id = uf.item_id AND uf.item_type = 'misc_file' AND uf.user_id = ?"
-        misc_params.append(user_id)
-    sql_misc_files = f"{sql_misc_files_select} {sql_misc_files_from} WHERE (LOWER(mf.user_provided_title) LIKE ? OR LOWER(mf.user_provided_description) LIKE ? OR LOWER(mf.original_filename) LIKE ?)"
+    misc_select_base = "SELECT mf.id, mf.user_provided_title AS name, mf.original_filename, mf.user_provided_description AS description, mf.stored_filename, 'misc_file' AS type"
+    misc_from_base = "FROM misc_files mf JOIN file_permissions fp ON mf.id = fp.file_id AND fp.file_type = 'misc_file'"
+    misc_params = [like_query_term, like_query_term, like_query_term, logged_in_user_id]
+    misc_where_base = "(LOWER(mf.user_provided_title) LIKE ? OR LOWER(mf.user_provided_description) LIKE ? OR LOWER(mf.original_filename) LIKE ?) AND fp.user_id = ? AND fp.can_view IS TRUE"
+
+    if logged_in_user_id:
+        misc_select_final = f"{misc_select_base}, uf.id AS favorite_id, (fp_dl.id IS NOT NULL) AS is_downloadable"
+        misc_from_final = f"{misc_from_base} LEFT JOIN user_favorites uf ON mf.id = uf.item_id AND uf.item_type = 'misc_file' AND uf.user_id = ? LEFT JOIN file_permissions fp_dl ON mf.id = fp_dl.file_id AND fp_dl.file_type = 'misc_file' AND fp_dl.user_id = ? AND fp_dl.can_download IS TRUE"
+        misc_params.append(logged_in_user_id)
+        misc_params.append(logged_in_user_id)
+    else:
+        misc_select_final = f"{misc_select_base}, NULL AS favorite_id, 0 AS is_downloadable"
+        misc_from_final = misc_from_base
+
+    sql_misc_files = f"{misc_select_final} {misc_from_final} WHERE {misc_where_base}"
     results.extend([dict(row) for row in db.execute(sql_misc_files, tuple(misc_params)).fetchall()])
 
-    # Software
+    # Software (No direct file_permissions, viewability depends on other factors or is public)
+    # Favorite status is still relevant for software.
     sql_software_select = "SELECT s.id, s.name, s.description, 'software' AS type"
     sql_software_from = "FROM software s"
     software_params = [like_query_term, like_query_term]
-    if user_id:
+    if logged_in_user_id: # For favorite status
         sql_software_select += ", uf.id AS favorite_id"
         sql_software_from += " LEFT JOIN user_favorites uf ON s.id = uf.item_id AND uf.item_type = 'software' AND uf.user_id = ?"
-        software_params.append(user_id)
+        software_params.append(logged_in_user_id)
+    else: # Ensure favorite_id column exists
+        sql_software_select += ", NULL AS favorite_id"
     sql_software_query = f"{sql_software_select} {sql_software_from} WHERE (LOWER(s.name) LIKE ? OR LOWER(s.description) LIKE ?)"
     results.extend([dict(row) for row in db.execute(sql_software_query, tuple(software_params)).fetchall()])
 
-    # Versions
-    sql_versions_select = "SELECT v.id, v.version_number AS name, v.changelog, v.known_bugs, v.software_id, s.name AS software_name, 'version' AS type"
-    sql_versions_from = "FROM versions v JOIN software s ON v.software_id = s.id"
+    # Versions (No direct file_permissions, viewability depends on other factors or is public)
+    sql_versions_select = "SELECT v.id, v.version_number AS name, v.changelog, v.known_bugs, v.software_id, sw.name AS software_name, 'version' AS type" # Renamed s to sw to avoid conflict
+    sql_versions_from = "FROM versions v JOIN software sw ON v.software_id = sw.id" # Renamed s to sw
     version_params = [like_query_term, like_query_term, like_query_term]
-    if user_id:
+    if logged_in_user_id: # For favorite status
         sql_versions_select += ", uf.id AS favorite_id"
         sql_versions_from += " LEFT JOIN user_favorites uf ON v.id = uf.item_id AND uf.item_type = 'version' AND uf.user_id = ?"
-        version_params.append(user_id)
+        version_params.append(logged_in_user_id)
+    else: # Ensure favorite_id column exists
+        sql_versions_select += ", NULL AS favorite_id"
     sql_versions_query = f"{sql_versions_select} {sql_versions_from} WHERE (LOWER(v.version_number) LIKE ? OR LOWER(v.changelog) LIKE ? OR LOWER(v.known_bugs) LIKE ?)"
     results.extend([dict(row) for row in db.execute(sql_versions_query, tuple(version_params)).fetchall()])
 

@@ -250,7 +250,35 @@ const PatchesView: React.FC = () => {
     { key: 'patch_by_developer', header: 'Developer', sortable: true, render: p => p.patch_by_developer || '-' },
     { key: 'description', header: 'Description', render: p => <span className="text-sm text-gray-600 block max-w-xs truncate" title={p.description||''}>{p.description||'-'}</span> },
     { key: 'release_date', header: 'Release Date', sortable: true, render: p => formatDate(p.release_date) },
-    { key: 'download_link', header: 'Link', render: p => <a href={p.download_link} target={p.is_external_link||!p.download_link?.startsWith('/')?"_blank":"_self"} rel="noopener noreferrer" className="flex items-center text-blue-600 hover:text-blue-800" onClick={e=>e.stopPropagation()}><Download size={14}className="mr-1"/>Link</a> },
+    { 
+      key: 'download_link', 
+      header: 'Link', 
+      render: (p: PatchType) => {
+        const isEffectivelyDownloadable = p.is_external_link || p.is_downloadable !== false;
+        if (!isEffectivelyDownloadable && !p.is_external_link) {
+          return (
+            <span className="flex items-center text-gray-400 cursor-not-allowed" title="Download not permitted">
+              <Download size={14} className="mr-1"/>Link
+            </span>
+          );
+        }
+        return (
+          <a 
+            href={p.download_link} 
+            target={p.is_external_link || !p.download_link?.startsWith('/') ? "_blank" : "_self"} 
+            rel="noopener noreferrer" 
+            className={`flex items-center ${isEffectivelyDownloadable ? 'text-blue-600 hover:text-blue-800' : 'text-gray-400 cursor-not-allowed'}`}
+            onClick={(e) => {
+              if (!isEffectivelyDownloadable) e.preventDefault();
+              e.stopPropagation();
+            }}
+            title={isEffectivelyDownloadable ? (p.is_external_link ? "Open external link" : "Download patch") : "Download not permitted"}
+          >
+            <Download size={14} className="mr-1"/>Link
+          </a>
+        );
+      } 
+    },
     { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: p => p.uploaded_by_username||'N/A' },
     { key: 'updated_by_username', header: 'Updated By', sortable: false, render: p => p.updated_by_username||'N/A' },
     { key: 'created_at', header: 'Created At', sortable: true, render: p => formatDate(p.created_at) },

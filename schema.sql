@@ -13,6 +13,7 @@ DROP TABLE IF EXISTS site_settings;
 DROP TABLE IF EXISTS user_security_answers;
 DROP TABLE IF EXISTS security_questions;
 DROP TABLE IF EXISTS password_reset_requests;
+DROP TABLE IF EXISTS file_permissions;
 DROP TABLE IF EXISTS system_settings;
 
 CREATE TABLE IF NOT EXISTS users (
@@ -259,6 +260,25 @@ CREATE TABLE IF NOT EXISTS password_reset_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_password_reset_requests_user_id ON password_reset_requests (user_id);
 CREATE INDEX IF NOT EXISTS idx_password_reset_requests_expires_at ON password_reset_requests (expires_at);
+
+CREATE TABLE IF NOT EXISTS file_permissions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    file_id INTEGER NOT NULL,
+    file_type TEXT NOT NULL, -- (e.g., 'document', 'patch', 'link', 'misc_file')
+    can_view BOOLEAN NOT NULL DEFAULT TRUE,
+    can_download BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    UNIQUE (user_id, file_id, file_type)
+);
+CREATE INDEX IF NOT EXISTS idx_file_permissions_user_id ON file_permissions (user_id);
+CREATE INDEX IF NOT EXISTS idx_file_permissions_file_id_file_type ON file_permissions (file_id, file_type);
+CREATE TRIGGER IF NOT EXISTS update_file_permissions_updated_at
+AFTER UPDATE ON file_permissions FOR EACH ROW BEGIN
+    UPDATE file_permissions SET updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE id = OLD.id;
+END;
 
 -- System Settings Table
 -- Stores global system-wide settings like maintenance mode.

@@ -21,6 +21,7 @@ import { FilePermission, FilePermissionUpdatePayload, UpdateUserFilePermissionsR
 
 
 import DataTable, { ColumnDef } from '../components/DataTable';
+import Modal from '../components/shared/Modal';
 
 // Define a type for the files we'll list for permission editing
 interface PermissibleFile {
@@ -76,6 +77,7 @@ const SuperAdminDashboard: React.FC = () => {
   const [isMaintenanceLoading, setIsMaintenanceLoading] = useState<boolean>(true); // Start true for initial fetch
   const [maintenanceError, setMaintenanceError] = useState<string | null>(null);
 
+
   // --- State for File Permissions Management ---
   const [selectedUserForPermissions, setSelectedUserForPermissions] = useState<User | null>(null);
   const [userFilePermissions, setUserFilePermissions] = useState<FilePermission[]>([]);
@@ -85,33 +87,37 @@ const SuperAdminDashboard: React.FC = () => {
   const [isPermissionsLoading, setIsPermissionsLoading] = useState<boolean>(false);
   const [permissionsError, setPermissionsError] = useState<string | null>(null);
   const [permissionsFeedback, setPermissionsFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [permissionSearchTerm, setPermissionSearchTerm] = useState<string>(''); // State for search term
   // --- End State for File Permissions Management ---
 
   const handlePermissionChange = (fileId: number, fileType: 'document', permissionType: 'can_view' | 'can_download', value: boolean) => {
+    console.log("handlePermissionChange: fileId", fileId, "permissionType", permissionType, "value", value, "typeof value", typeof value);
     setPermissionsToUpdate(prev => {
+      let updatedItem;
       const existingIndex = prev.findIndex(p => p.file_id === fileId && p.file_type === fileType);
       if (existingIndex > -1) {
         // Update existing permission
-        return prev.map((p, index) =>
-          index === existingIndex ? { ...p, [permissionType]: value } : p
-        );
+        const newState = prev.map((p, index) => {
+          if (index === existingIndex) {
+            updatedItem = { ...p, [permissionType]: value };
+            return updatedItem;
+          }
+          return p;
+        });
+        console.log("Updated item in permissionsToUpdate:", updatedItem);
+        return newState;
       } else {
-        // This case should ideally be handled by the initial population of permissionsToUpdate.
-        // If a file appears in allFilesForPermissions but wasn't in the initial userFilePermissions
-        // (and thus not in initial permissionsToUpdate), this adds it.
         const fileInfo = allFilesForPermissions.find(f => f.id === fileId && f.type === fileType);
         if (fileInfo) {
-            const newPerm: FilePermissionUpdatePayload = {
+            updatedItem = {
                 file_id: fileInfo.id,
-                file_type: fileInfo.type, // This is 'document'
-                can_view: permissionType === 'can_view' ? value : false,
-                can_download: permissionType === 'can_download' ? value : false,
+                file_type: fileInfo.type as 'document',
+                can_view: true, 
+                can_download: true,
             };
-            // Ensure the other permission type retains a default false if this is the first interaction
-            if (permissionType === 'can_view') newPerm.can_download = false;
-            else newPerm.can_view = false;
-            
-            return [...prev, newPerm];
+            updatedItem[permissionType] = value;
+            console.log("Added new item to permissionsToUpdate:", updatedItem);
+            return [...prev, updatedItem];
         }
       }
       return prev; 
@@ -129,24 +135,40 @@ const SuperAdminDashboard: React.FC = () => {
     setIsPermissionsLoading(true);
     setPermissionsError(null);
     setPermissionsFeedback(null);
+
+    console.log("handleSavePermissions: Payload to be sent (permissionsToUpdate):", JSON.stringify(permissionsToUpdate, null, 2));
+    // Ensure all items have boolean values for can_view and can_download
+    const validatedPayload = permissionsToUpdate.map(p => ({
+      ...p,
+      can_view: typeof p.can_view === 'boolean' ? p.can_view : false, // Default to false if not boolean
+      can_download: typeof p.can_download === 'boolean' ? p.can_download : false, // Default to false if not boolean
+    }));
+    console.log("handleSavePermissions: Validated payload being sent:", JSON.stringify(validatedPayload, null, 2));
+
+
     try {
-      const response = await updateUserFilePermissions(selectedUserForPermissions.id, permissionsToUpdate);
+      const response = await updateUserFilePermissions(selectedUserForPermissions.id, validatedPayload);
+      console.log("handleSavePermissions: Raw response from backend:", response);
       setPermissionsFeedback({ type: 'success', message: response.msg || "Permissions updated successfully!" });
       
       // Refresh userFilePermissions with the newly saved data from the response
-      setUserFilePermissions(response.permissions);
+      const backendPermissions = response.permissions || [];
+      console.log("handleSavePermissions: Permissions received from backend (response.permissions):", JSON.stringify(backendPermissions, null, 2));
+      setUserFilePermissions(backendPermissions);
       
       // Re-initialize permissionsToUpdate based on the *newly saved* permissions and allFilesForPermissions
       // This ensures the UI checkboxes correctly reflect the actual persisted state.
       const updatedPermissionsToDisplay = allFilesForPermissions.map(file => {
-        const savedPerm = response.permissions.find(p => p.file_id === file.id && p.file_type === file.type);
-        return {
+        const savedPerm = backendPermissions.find(p => p.file_id === file.id && p.file_type === file.type);
+        const newPermEntry = {
           file_id: file.id,
-          file_type: file.type as 'document', // Cast since we only handle documents now
-          can_view: savedPerm?.can_view || false,
-          can_download: savedPerm?.can_download || false,
+          file_type: file.type as 'document', 
+          can_view: savedPerm ? Boolean(savedPerm.can_view) : true, 
+          can_download: savedPerm ? Boolean(savedPerm.can_download) : true,
         };
+        return newPermEntry;
       });
+      console.log("handleSavePermissions: State permissionsToUpdate will be set to (after save):", JSON.stringify(updatedPermissionsToDisplay, null, 2));
       setPermissionsToUpdate(updatedPermissionsToDisplay);
 
     } catch (err: any) {
@@ -244,13 +266,18 @@ const SuperAdminDashboard: React.FC = () => {
           // 3. Initialize permissionsToUpdate
           const initialUpdates: FilePermissionUpdatePayload[] = documentsAsPermissibleFiles.map(file => {
             const existingPerm = fetchedPermissions.find(p => p.file_id === file.id && p.file_type === file.type);
+            // Ensure that can_view and can_download are explicitly booleans.
+            // The API might return 0/1 for SQLite booleans.
+            const canView = existingPerm ? Boolean(existingPerm.can_view) : true;
+            const canDownload = existingPerm ? Boolean(existingPerm.can_download) : true;
             return {
               file_id: file.id,
               file_type: file.type,
-              can_view: existingPerm?.can_view || false,
-              can_download: existingPerm?.can_download || false,
+              can_view: canView,
+              can_download: canDownload,
             };
           });
+          console.log("useEffect (selectedUserForPermissions): Initializing permissionsToUpdate with:", JSON.stringify(initialUpdates, null, 2));
           setPermissionsToUpdate(initialUpdates);
 
         } catch (err: any) {
@@ -841,26 +868,24 @@ const SuperAdminDashboard: React.FC = () => {
         ) : null }
       </div>
 
-      {/* Permissions Management Section */}
-      {selectedUserForPermissions && (
-        <div className="mt-12 p-6 bg-white shadow rounded-lg">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-semibold text-gray-800">
-              Manage File Permissions for: <span className="font-bold text-blue-600">{selectedUserForPermissions.username}</span>
-            </h2>
-            <button
-              onClick={() => {
-                setSelectedUserForPermissions(null);
-                setPermissionsError(null);
-                setPermissionsFeedback(null);
-              }}
-              className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
-            >
-              Close
-            </button>
+      {/* Permissions Management Section - Now a Modal */}
+      <Modal
+        isOpen={selectedUserForPermissions !== null}
+        onClose={closePermissionsSection}
+        title={selectedUserForPermissions ? `Manage File Permissions for: ${selectedUserForPermissions.username}` : ''}
+      >
+        <div className="mt-4"> {/* Added some margin for content spacing from title */}
+          <div className="mb-4">
+            <input
+              type="text"
+              placeholder="Search by file name..."
+              value={permissionSearchTerm}
+              onChange={(e) => setPermissionSearchTerm(e.target.value)}
+              className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+            />
           </div>
 
-          {isPermissionsLoading && <div className="text-sm text-gray-500">Loading permissions info...</div>}
+          {isPermissionsLoading && <div className="text-sm text-gray-500 text-center">Loading permissions info...</div>}
           {permissionsError && <div className="p-3 mb-4 rounded bg-red-100 text-red-700 text-sm">{permissionsError}</div>}
           {permissionsFeedback && (
             <div className={`p-3 mb-4 rounded text-sm ${permissionsFeedback.type === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
@@ -870,14 +895,17 @@ const SuperAdminDashboard: React.FC = () => {
 
           {!isPermissionsLoading && !permissionsError && allFilesForPermissions.length > 0 && (
             <form onSubmit={(e) => { e.preventDefault(); handleSavePermissions(); }} className="space-y-6">
-              <div className="max-h-96 overflow-y-auto border border-gray-200 rounded-md p-4 space-y-4">
-                {allFilesForPermissions.map((file) => {
+              <div className="max-h-80 overflow-y-auto border border-gray-200 rounded-md p-4 space-y-4 bg-gray-50"> {/* Adjusted max-h and added bg */}
+                {/* Iterate over filteredPermissionFiles (to be defined) */}
+                {allFilesForPermissions.filter(file => 
+                  file.name.toLowerCase().includes(permissionSearchTerm.toLowerCase())
+                ).map((file) => {
                   const currentPermission = permissionsToUpdate.find(p => p.file_id === file.id && p.file_type === file.type);
                   return (
-                    <div key={`${file.type}-${file.id}`} className="p-3 border-b border-gray-100 last:border-b-0 hover:bg-gray-50 rounded-md transition-colors duration-150">
-                      <h4 className="font-medium text-gray-700 truncate" title={file.name}>{file.name} <span className="text-xs text-gray-400">({file.type})</span></h4>
+                    <div key={`${file.type}-${file.id}`} className="p-3 border-b border-gray-200 last:border-b-0 hover:bg-white rounded-md transition-colors duration-150 bg-white shadow-sm">
+                      <h4 className="font-medium text-gray-800 truncate" title={file.name}>{file.name} <span className="text-xs text-gray-500">({file.type})</span></h4>
                       <div className="flex items-center space-x-6 mt-2">
-                        <label className="flex items-center space-x-2 cursor-pointer text-sm">
+                        <label className="flex items-center space-x-2 cursor-pointer text-sm text-gray-700">
                           <input
                             type="checkbox"
                             className="rounded text-blue-600 focus:ring-blue-500 h-4 w-4 border-gray-300"
@@ -886,7 +914,7 @@ const SuperAdminDashboard: React.FC = () => {
                           />
                           <span>Can View</span>
                         </label>
-                        <label className="flex items-center space-x-2 cursor-pointer text-sm">
+                        <label className="flex items-center space-x-2 cursor-pointer text-sm text-gray-700">
                           <input
                             type="checkbox"
                             className="rounded text-blue-600 focus:ring-blue-500 h-4 w-4 border-gray-300"
@@ -900,7 +928,8 @@ const SuperAdminDashboard: React.FC = () => {
                   );
                 })}
               </div>
-              <div className="flex justify-end pt-4">
+              {/* Save button is outside the scrollable area, but inside the form */}
+              <div className="flex justify-end pt-4"> 
                 <button
                   type="submit"
                   disabled={isPermissionsLoading}
@@ -911,11 +940,16 @@ const SuperAdminDashboard: React.FC = () => {
               </div>
             </form>
           )}
-           {!isPermissionsLoading && !permissionsError && allFilesForPermissions.length === 0 && (
-             <p className="text-sm text-gray-500">No documents found to set permissions for. Ensure documents are uploaded to the system.</p>
+           {!isPermissionsLoading && !permissionsError && 
+             allFilesForPermissions.filter(file => file.name.toLowerCase().includes(permissionSearchTerm.toLowerCase())).length === 0 && 
+             allFilesForPermissions.length > 0 && (
+             <p className="text-sm text-gray-500 text-center">No files match your search term.</p>
+           )}
+          {!isPermissionsLoading && !permissionsError && allFilesForPermissions.length === 0 && (
+             <p className="text-sm text-gray-500 text-center">No documents found to set permissions for. Ensure documents are uploaded to the system.</p>
            )}
         </div>
-      )}
+      </Modal>
     </div>
   );
 };

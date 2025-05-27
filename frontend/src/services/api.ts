@@ -25,9 +25,11 @@ import {
   UnreadNotificationCountResponse,
   PaginatedNotificationsResponse,
 } from '../types'; // Assuming '../types' will eventually export these
+import { setGlobalOfflineStatus, showErrorToast } from '../utils/toastUtils'; // Added
 export type { Software } from '../types'; // Re-exporting Software type
 
 const TOKEN_EXPIRY_SECONDS = 3600; // 1 hour, as a placeholder
+const OFFLINE_MESSAGE = "Backend is unavailable. Please check your connection."; // Added
 
 // --- Type Definitions (Ensure these are consistent with your backend and UI needs) ---
 // Base entity types (assuming these are defined in '../types' or need to be defined here)
@@ -328,6 +330,9 @@ const getAuthHeader = (): Record<string, string> => {
 
 // Generic error handler for API calls
 const handleApiError = async (response: Response, defaultMessage: string, isLoginAttempt: boolean = false) => {
+  if (response.ok) {
+    setGlobalOfflineStatus(false); // Connection successful
+  }
   if (!response.ok) {
     let errorData;
     try {
@@ -399,11 +404,13 @@ export async function fetchSoftware(): Promise<Software[]> {
         'Pragma': 'no-cache',
       },
     });
-    if (!response.ok) {
-      throw new Error(`Failed to fetch software: ${response.status}`);
+    // Using handleApiError for consistent processing (including offline status reset on success)
+    return handleApiError(response, 'Failed to fetch software');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
     }
-    return await response.json();
-  } catch (error) {
     console.error('Error fetching software:', error);
     throw error;
   }
@@ -422,7 +429,11 @@ export async function getUserFilePermissions(userId: number): Promise<FilePermis
       },
     });
     return handleApiError(response, `Failed to fetch file permissions for user ${userId}`);
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error(`Error fetching file permissions for user ${userId}:`, error);
     throw error;
   }
@@ -442,7 +453,11 @@ export async function updateUserFilePermissions(
       body: JSON.stringify(permissions),
     });
     return handleApiError(response, `Failed to update file permissions for user ${userId}`);
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error(`Error updating file permissions for user ${userId}:`, error);
     throw error;
   }
@@ -488,7 +503,11 @@ export async function bulkDeleteItems(itemIds: number[], itemType: BulkItemType)
       body: JSON.stringify({ item_ids: itemIds, item_type: itemType }),
     });
     return handleApiError(response, `Failed to bulk delete ${itemType} items`);
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error(`Error bulk deleting ${itemType} items:`, error);
     throw error;
   }
@@ -519,10 +538,14 @@ export async function bulkDownloadItems(itemIds: number[], itemType: BulkItemTyp
       // Adding a fallback throw just in case handleApiError's behavior changes or is misinterp.
       throw new Error(`Bulk download initiation failed with status ${response.status}`);
     }
-    
+    setGlobalOfflineStatus(false); // Successful response implies connection is fine
     // If response is OK, expect a blob (zip file)
     return response.blob();
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error(`Error bulk downloading ${itemType} items:`, error);
     throw error;
   }
@@ -551,7 +574,11 @@ export async function bulkMoveItems(
       }),
     });
     return handleApiError(response, `Failed to bulk move ${itemType} items`);
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error(`Error bulk moving ${itemType} items:`, error);
     throw error;
   }
@@ -586,7 +613,11 @@ export async function getUserDashboardLayout(): Promise<LayoutObject> {
     });
     // Assuming handleApiError correctly parses and returns the JSON object
     return handleApiError(response, 'Failed to fetch dashboard layout');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error fetching dashboard layout:', error);
     throw error; // Re-throw to be caught by the calling component
   }
@@ -600,7 +631,11 @@ export async function saveUserDashboardLayout(layout: LayoutObject): Promise<{ m
       body: JSON.stringify(layout),
     });
     return handleApiError(response, 'Failed to save dashboard layout');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error saving dashboard layout:', error);
     throw error; // Re-throw to be caught by the calling component
   }
@@ -620,7 +655,11 @@ export async function backupDatabase(): Promise<BackupResponse> {
       headers: { ...getAuthHeader() },
     });
     return handleApiError(response, 'Failed to create database backup');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error creating database backup:', error);
     throw error;
   }
@@ -638,7 +677,11 @@ export async function restoreDatabase(formData: FormData): Promise<RestoreRespon
       body: formData,
     });
     return handleApiError(response, 'Failed to restore database from backup');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error restoring database from backup:', error);
     throw error;
   }
@@ -653,7 +696,11 @@ export async function forceUserPasswordReset(userId: number): Promise<{ msg: str
       headers: { ...getAuthHeader() },
     });
     return handleApiError(response, 'Failed to force password reset');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error(`Error forcing password reset for user ${userId}:`, error);
     throw error;
   }
@@ -672,7 +719,11 @@ export async function fetchSystemHealth(): Promise<SystemHealth> {
       },
     });
     return handleApiError(response, 'Failed to fetch system health');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error fetching system health:', error);
     throw error;
   }
@@ -690,7 +741,11 @@ export async function getMaintenanceModeStatus(): Promise<MaintenanceStatusRespo
       },
     });
     return handleApiError(response, 'Failed to fetch maintenance mode status');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error fetching maintenance mode status:', error);
     throw error;
   }
@@ -703,7 +758,11 @@ export async function enableMaintenanceMode(): Promise<MaintenanceStatusResponse
       headers: { ...getAuthHeader() },
     });
     return handleApiError(response, 'Failed to enable maintenance mode');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error enabling maintenance mode:', error);
     throw error;
   }
@@ -716,7 +775,11 @@ export async function disableMaintenanceMode(): Promise<MaintenanceStatusRespons
       headers: { ...getAuthHeader() },
     });
     return handleApiError(response, 'Failed to disable maintenance mode');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error disabling maintenance mode:', error);
     throw error;
   }
@@ -736,7 +799,11 @@ export async function fetchAuditLogEntries(params: URLSearchParams): Promise<Aud
       },
     });
     return handleApiError(response, 'Failed to fetch audit logs');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error fetching audit logs:', error);
     throw error;
   }
@@ -755,7 +822,11 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
       },
     });
     return handleApiError(response, 'Failed to fetch dashboard statistics');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error fetching dashboard statistics:', error);
     throw error;
   }
@@ -777,7 +848,11 @@ export async function fetchSecurityQuestions(): Promise<SecurityQuestion[]> {
       },
     });
     return handleApiError(response, 'Failed to fetch security questions');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error fetching security questions:', error);
     throw error;
   }
@@ -794,7 +869,11 @@ export async function addAdminVersion(payload: AddAdminVersionPayload): Promise<
       body: JSON.stringify(payload),
     });
     return handleApiError(response, 'Failed to add software version');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error adding software version:', error);
     throw error;
   }
@@ -823,7 +902,11 @@ export async function fetchAdminVersions(
       },
     });
     return handleApiError(response, 'Failed to fetch admin software versions');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error fetching admin software versions:', error);
     throw error;
   }
@@ -840,7 +923,11 @@ export async function fetchAdminVersionById(versionId: number): Promise<AdminSof
       },
     });
     return handleApiError(response, 'Failed to fetch software version by ID');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error fetching software version by ID:', error);
     throw error;
   }
@@ -854,7 +941,11 @@ export async function updateAdminVersion(versionId: number, payload: EditAdminVe
       body: JSON.stringify(payload),
     });
     return handleApiError(response, 'Failed to update software version');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error updating software version:', error);
     throw error;
   }
@@ -867,7 +958,11 @@ export async function deleteAdminVersion(versionId: number): Promise<{ msg: stri
       headers: { ...getAuthHeader() },
     });
     return handleApiError(response, 'Failed to delete software version');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error deleting software version:', error);
     throw error;
   }
@@ -913,7 +1008,11 @@ export async function fetchLinks(
       },
     });
     return handleApiError(response, 'Failed to fetch links');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error fetching links:', error);
     throw error;
   }
@@ -960,7 +1059,11 @@ export async function fetchDocuments(
       },
     });
     return handleApiError(response, 'Failed to fetch documents');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error fetching documents:', error);
     throw error;
   }
@@ -1003,7 +1106,11 @@ export async function fetchPatches(
       },
     });
     return handleApiError(response, 'Failed to fetch patches');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error fetching patches:', error);
     throw error;
   }
@@ -1020,11 +1127,13 @@ export async function searchData(query: string): Promise<any[]> {
         'Pragma': 'no-cache',
       },
     });
-    if (!response.ok) {
-      throw new Error(`Failed to search: ${response.status}`);
+    // Using handleApiError for consistent processing
+    return handleApiError(response, 'Failed to search');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
     }
-    return await response.json();
-  } catch (error) {
     console.error('Error searching:', error);
     throw error;
   }
@@ -1041,7 +1150,11 @@ export async function fetchVersionsForSoftware(softwareId: number): Promise<Soft
       },
     });
     return handleApiError(response, 'Failed to fetch versions for software');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error fetching versions for software:', error);
     throw error;
   }
@@ -1063,7 +1176,11 @@ export async function registerUser(userData: RegisterRequest): Promise<RegisterR
     // If handleApiError returns parsed JSON, this should work.
     const data: RegisterResponse = await handleApiError(response, 'Registration failed');
     return data; 
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error during registration:', error);
     throw error;
   }
@@ -1097,6 +1214,10 @@ export async function loginUser(credentials: AuthRequest): Promise<AuthResponseT
     return data; // Return the full data object including user_id
 
   } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     // Re-throw the error to be caught by the component, which will show a toast
     // The error object should already be structured by handleApiError
     throw error;
@@ -1121,7 +1242,11 @@ export async function fetchProtectedData(): Promise<any> {
       headers: headers, 
     });
     return handleApiError(response, 'Failed to fetch protected data');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error fetching protected data:', error);
     throw error; 
   }
@@ -1137,7 +1262,11 @@ export async function addAdminDocumentWithUrl(payload: AddDocumentPayload): Prom
       body: JSON.stringify({...payload, is_external_link: true }), 
     });
     return handleApiError(response, 'Failed to add document with URL');
-  } catch (error) { 
+  } catch (error: any) { 
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error adding document with URL:', error); 
     throw error; 
   }
@@ -1151,7 +1280,11 @@ export async function uploadAdminDocumentFile(formData: FormData): Promise<Docum
       body: formData,
     });
     return handleApiError(response, 'Failed to upload document file');
-  } catch (error) { 
+  } catch (error: any) { 
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error uploading document file:', error); 
     throw error; 
   }
@@ -1168,7 +1301,13 @@ export async function addAdminPatchWithUrl(payload: AddPatchPayloadFlexible): Pr
       body: JSON.stringify(backendPayload),
     });
     return handleApiError(response, 'Failed to add patch with URL');
-  } catch (error) { console.error('Error adding admin patch with URL:', error); throw error; }
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error adding admin patch with URL:', error); throw error;
+  }
 }
 
 export async function uploadAdminPatchFile(formData: FormData): Promise<Patch> {
@@ -1177,7 +1316,13 @@ export async function uploadAdminPatchFile(formData: FormData): Promise<Patch> {
       method: 'POST', headers: { ...getAuthHeader() }, body: formData,
     });
     return handleApiError(response, 'Failed to upload patch file');
-  } catch (error) { console.error('Error uploading admin patch file:', error); throw error; }
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error uploading admin patch file:', error); throw error;
+  }
 }
 
 // --- Admin Link Functions ---
@@ -1191,7 +1336,13 @@ export async function addAdminLinkWithUrl(payload: AddLinkPayloadFlexible): Prom
       body: JSON.stringify(backendPayload),
     });
     return handleApiError(response, 'Failed to add link with URL');
-  } catch (error) { console.error('Error adding admin link with URL:', error); throw error; }
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error adding admin link with URL:', error); throw error;
+  }
 }
 export async function uploadAdminLinkFile(formData: FormData): Promise<Link> {
   try {
@@ -1199,7 +1350,13 @@ export async function uploadAdminLinkFile(formData: FormData): Promise<Link> {
       method: 'POST', headers: { ...getAuthHeader() }, body: formData,
     });
     return handleApiError(response, 'Failed to upload link file');
-  } catch (error) { console.error('Error uploading admin link file:', error); throw error; }
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error uploading admin link file:', error); throw error;
+  }
 }
 
 // --- Misc Category API Functions ---
@@ -1215,7 +1372,11 @@ export async function fetchMiscCategories(): Promise<MiscCategory[]> {
       },
     });
     return handleApiError(response, 'Failed to fetch misc categories');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error fetching misc categories:', error);
     throw error;
   }
@@ -1229,7 +1390,11 @@ export async function addAdminMiscCategory(categoryData: AddCategoryPayload): Pr
       body: JSON.stringify(categoryData),
     });
     return handleApiError(response, 'Failed to add misc category');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error adding admin misc category:', error);
     throw error;
   }
@@ -1245,7 +1410,11 @@ export async function uploadAdminMiscFile(formData: FormData): Promise<MiscFile>
       body: formData,
     });
     return handleApiError(response, 'Failed to upload misc file');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error uploading misc file:', error);
     throw error;
   }
@@ -1279,7 +1448,11 @@ export async function fetchMiscFiles(
       },
     });
     return handleApiError(response, 'Failed to fetch misc files');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error fetching misc files:', error);
     throw error;
   }
@@ -1294,7 +1467,13 @@ export async function editAdminDocumentWithUrl(documentId: number, payload: Part
       body: JSON.stringify(payload),
     });
     return handleApiError(response, 'Failed to update document with URL');
-  } catch (error) { console.error('Error updating document with URL:', error); throw error; }
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error updating document with URL:', error); throw error;
+  }
 }
 
 export async function editAdminDocumentFile(documentId: number, formData: FormData): Promise<DocumentType> {
@@ -1305,7 +1484,13 @@ export async function editAdminDocumentFile(documentId: number, formData: FormDa
       body: formData,
     });
     return handleApiError(response, 'Failed to update document with file');
-  } catch (error) { console.error('Error updating document with file:', error); throw error; }
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error updating document with file:', error); throw error;
+  }
 }
 
 export async function deleteAdminDocument(documentId: number): Promise<{ msg: string }> {
@@ -1315,7 +1500,13 @@ export async function deleteAdminDocument(documentId: number): Promise<{ msg: st
       headers: { ...getAuthHeader() },
     });
     return handleApiError(response, 'Failed to delete document');
-  } catch (error) { console.error('Error deleting document:', error); throw error; }
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error deleting document:', error); throw error;
+  }
 }
 
 
@@ -1331,7 +1522,13 @@ export async function editAdminPatchWithUrl(patchId: number, payload: EditPatchP
       body: JSON.stringify(backendPayload), 
     });
     return handleApiError(response, 'Failed to update patch with URL');
-  } catch (error) { console.error('Error updating patch with URL:', error); throw error; }
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error updating patch with URL:', error); throw error;
+  }
 }
 
 
@@ -1341,7 +1538,13 @@ export async function editAdminPatchFile(patchId: number, formData: FormData): P
       method: 'PUT', headers: { ...getAuthHeader() }, body: formData,
     });
     return handleApiError(response, 'Failed to update patch with file');
-  } catch (error) { console.error('Error updating patch with file:', error); throw error; }
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error updating patch with file:', error); throw error;
+  }
 }
 
 export async function deleteAdminPatch(patchId: number): Promise<{ msg: string }> {
@@ -1351,7 +1554,13 @@ export async function deleteAdminPatch(patchId: number): Promise<{ msg: string }
       headers: { ...getAuthHeader() },
     });
     return handleApiError(response, 'Failed to delete patch');
-  } catch (error) { console.error('Error deleting patch:', error); throw error; }
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error deleting patch:', error); throw error;
+  }
 }
 
 // --- Admin Link Edit/Delete Functions ---
@@ -1365,7 +1574,13 @@ export async function editAdminLinkWithUrl(linkId: number, payload: EditLinkPayl
       body: JSON.stringify(backendPayload),
     });
     return handleApiError(response, 'Failed to update link with URL');
-  } catch (error) { console.error('Error updating link with URL:', error); throw error; }
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error updating link with URL:', error); throw error;
+  }
 }
 
 export async function editAdminLinkFile(linkId: number, formData: FormData): Promise<Link> {
@@ -1374,7 +1589,13 @@ export async function editAdminLinkFile(linkId: number, formData: FormData): Pro
       method: 'PUT', headers: { ...getAuthHeader() }, body: formData,
     });
     return handleApiError(response, 'Failed to update link with file');
-  } catch (error) { console.error('Error updating link with file:', error); throw error; }
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error updating link with file:', error); throw error;
+  }
 }
 
 export async function deleteAdminLink(linkId: number): Promise<{ msg: string }> {
@@ -1384,7 +1605,13 @@ export async function deleteAdminLink(linkId: number): Promise<{ msg: string }> 
       headers: { ...getAuthHeader() },
     });
     return handleApiError(response, 'Failed to delete link');
-  } catch (error) { console.error('Error deleting link:', error); throw error; }
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error deleting link:', error); throw error;
+  }
 }
 
 // --- Admin Misc Category Edit/Delete Functions ---
@@ -1397,7 +1624,13 @@ export async function editAdminMiscCategory(categoryId: number, payload: EditCat
       body: JSON.stringify(payload),
     });
     return handleApiError(response, 'Failed to update misc category');
-  } catch (error) { console.error('Error updating misc category:', error); throw error; }
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error updating misc category:', error); throw error;
+  }
 }
 
 export async function deleteAdminMiscCategory(categoryId: number): Promise<{ msg: string }> {
@@ -1407,7 +1640,13 @@ export async function deleteAdminMiscCategory(categoryId: number): Promise<{ msg
       headers: { ...getAuthHeader() },
     });
     return handleApiError(response, 'Failed to delete misc category');
-  } catch (error) { console.error('Error deleting misc category:', error); throw error; }
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error deleting misc category:', error); throw error;
+  }
 }
 
 
@@ -1426,7 +1665,13 @@ export async function editAdminMiscFile(fileId: number, formData: FormData): Pro
       body: formData,
     });
     return handleApiError(response, 'Failed to update misc file');
-  } catch (error) { console.error('Error updating misc file:', error); throw error; }
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error updating misc file:', error); throw error;
+  }
 }
 
 export async function deleteAdminMiscFile(fileId: number): Promise<{ msg: string }> {
@@ -1436,7 +1681,13 @@ export async function deleteAdminMiscFile(fileId: number): Promise<{ msg: string
       headers: { ...getAuthHeader() },
     });
     return handleApiError(response, 'Failed to delete misc file');
-  } catch (error) { console.error('Error deleting misc file:', error); throw error; }
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error deleting misc file:', error); throw error;
+  }
 }
 
 // --- Favorites API Functions ---
@@ -1465,7 +1716,11 @@ export async function addFavoriteApi(itemId: number, itemType: FavoriteItemType)
       body: JSON.stringify({ item_id: itemId, item_type: itemType }),
     });
     return handleApiError(response, 'Failed to add favorite');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error adding favorite:', error);
     throw error;
   }
@@ -1480,7 +1735,11 @@ export async function removeFavoriteApi(itemId: number, itemType: FavoriteItemTy
       },
     });
     return handleApiError(response, 'Failed to remove favorite');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error removing favorite:', error);
     throw error;
   }
@@ -1503,7 +1762,11 @@ export async function getFavoriteStatusApi(itemId: number, itemType: FavoriteIte
       },
     });
     return handleApiError(response, 'Failed to get favorite status');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error getting favorite status:', error);
     throw error;
   }
@@ -1558,7 +1821,11 @@ export async function getUserFavoritesApi(
       },
     });
     return handleApiError(response, 'Failed to fetch user favorites');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error fetching user favorites:', error);
     throw error;
   }
@@ -1579,7 +1846,11 @@ export async function loginGlobal(password: string): Promise<GlobalLoginResponse
       body: JSON.stringify({ password }),
     });
     return handleApiError(response, 'Global login failed');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error during global login:', error);
     throw error;
   }
@@ -1597,7 +1868,11 @@ export async function changeGlobalPassword(payload: ChangeGlobalPasswordPayload)
       body: JSON.stringify(payload),
     });
     return handleApiError(response, 'Failed to change global password');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error changing global password:', error);
     throw error;
   }
@@ -1614,7 +1889,11 @@ export async function changePassword(payload: ChangePasswordPayload): Promise<{ 
       body: JSON.stringify(payload),
     });
     return handleApiError(response, 'Failed to change password');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error changing password:', error);
     throw error;
   }
@@ -1628,7 +1907,11 @@ export async function updateEmail(payload: UpdateEmailPayload): Promise<{ msg: s
       body: JSON.stringify(payload),
     });
     return handleApiError(response, 'Failed to update email');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error updating email:', error);
     throw error;
   }
@@ -1668,7 +1951,11 @@ export async function requestPasswordResetInfo(payload: RequestPasswordResetInfo
       body: JSON.stringify(payload),
     });
     return handleApiError(response, 'Failed to request password reset info');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error requesting password reset info:', error);
     throw error;
   }
@@ -1682,7 +1969,11 @@ export async function verifySecurityAnswers(payload: VerifySecurityAnswersPayloa
       body: JSON.stringify(payload),
     });
     return handleApiError(response, 'Failed to verify security answers');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error verifying security answers:', error);
     throw error;
   }
@@ -1696,7 +1987,11 @@ export async function resetPasswordWithToken(payload: ResetPasswordWithTokenPayl
       body: JSON.stringify(payload),
     });
     return handleApiError(response, 'Failed to reset password with token');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error resetting password with token:', error);
     throw error;
   }
@@ -1712,7 +2007,11 @@ export async function addComment(itemType: string, itemId: number, payload: AddC
       body: JSON.stringify(payload),
     });
     return handleApiError(response, `Failed to add comment to ${itemType} ID ${itemId}`);
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error(`Error adding comment to ${itemType} ID ${itemId}:`, error);
     throw error;
   }
@@ -1733,7 +2032,11 @@ export async function fetchComments(itemType: string, itemId: number, page: numb
       },
     });
     return handleApiError(response, `Failed to fetch comments for ${itemType} ID ${itemId}`);
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error(`Error fetching comments for ${itemType} ID ${itemId}:`, error);
     throw error;
   }
@@ -1747,7 +2050,11 @@ export async function updateComment(commentId: number, payload: UpdateCommentPay
       body: JSON.stringify(payload),
     });
     return handleApiError(response, `Failed to update comment ID ${commentId}`);
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error(`Error updating comment ID ${commentId}:`, error);
     throw error;
   }
@@ -1761,7 +2068,11 @@ export async function deleteComment(commentId: number): Promise<{ msg: string } 
     });
     // handleApiError will parse JSON response (e.g., { msg: "..." }) or return null for 204
     return handleApiError(response, `Failed to delete comment ID ${commentId}`);
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error(`Error deleting comment ID ${commentId}:`, error);
     throw error;
   }
@@ -1778,7 +2089,11 @@ export async function fetchUserMentionSuggestions(query: string): Promise<UserMe
       },
     });
     return handleApiError(response, 'Failed to fetch user mention suggestions');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error fetching user mention suggestions:', error);
     throw error;
   }
@@ -1812,7 +2127,11 @@ export async function listUsers(
       },
     });
     return handleApiError(response, 'Failed to list users');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error listing users:', error);
     throw error;
   }
@@ -1826,7 +2145,11 @@ export async function updateUserRole(userId: number, payload: UpdateUserRolePayl
       body: JSON.stringify(payload),
     });
     return handleApiError(response, 'Failed to update user role');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error updating user role:', error);
     throw error;
   }
@@ -1839,7 +2162,11 @@ export async function deactivateUser(userId: number): Promise<{ msg: string } | 
       headers: { ...getAuthHeader() }, 
     });
     return handleApiError(response, 'Failed to deactivate user');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error deactivating user:', error);
     throw error;
   }
@@ -1852,7 +2179,11 @@ export async function activateUser(userId: number): Promise<{ msg: string } | Us
       headers: { ...getAuthHeader() }, 
     });
     return handleApiError(response, 'Failed to activate user');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error activating user:', error);
     throw error;
   }
@@ -1865,7 +2196,11 @@ export async function deleteUser(userId: number): Promise<{ msg: string }> {
       headers: { ...getAuthHeader() },
     });
     return handleApiError(response, 'Failed to delete user');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error deleting user:', error);
     throw error;
   }
@@ -1890,7 +2225,11 @@ export async function fetchNotifications(
       headers: { ...getAuthHeader(), 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
     });
     return handleApiError(response, 'Failed to fetch notifications');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error fetching notifications:', error);
     throw error;
   }
@@ -1903,7 +2242,11 @@ export async function fetchUnreadNotificationCount(): Promise<UnreadNotification
       headers: { ...getAuthHeader(), 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
     });
     return handleApiError(response, 'Failed to fetch unread notification count');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error fetching unread notification count:', error);
     throw error;
   }
@@ -1916,7 +2259,11 @@ export async function markNotificationAsRead(notificationId: number): Promise<No
       headers: { ...getAuthHeader() },
     });
     return handleApiError(response, 'Failed to mark notification as read');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error marking notification as read:', error);
     throw error;
   }
@@ -1932,7 +2279,11 @@ export async function markAllNotificationsAsRead(): Promise<{ msg: string, count
     // If backend returns only { msg: string }, then adjust the Promise type and how response is handled.
     // For now, assuming it could include count_marked_read for better feedback.
     return handleApiError(response, 'Failed to mark all notifications as read');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error marking all notifications as read:', error);
     throw error;
   }
@@ -1946,7 +2297,11 @@ export async function clearAllNotifications(): Promise<{ msg: string, count_dele
     });
     // Similar to markAllNotificationsAsRead, assuming backend could return count_deleted.
     return handleApiError(response, 'Failed to clear all notifications');
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
     console.error('Error clearing all notifications:', error);
     throw error;
   }

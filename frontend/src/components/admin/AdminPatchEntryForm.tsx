@@ -115,7 +115,7 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { isAuthenticated, user } = useAuth();
-const role = user?.role; // Access role safely, as user can be null
+  const role = user?.role; // Access role safely, as user can be null
   const watchedSoftwareId = watch('selectedSoftwareId');
   const watchedSelectedVersionId = watch('selectedVersionId');
   const watchedInputMode = watch('inputMode');
@@ -340,7 +340,8 @@ const role = user?.role; // Access role safely, as user can be null
             {softwareList.map(sw => <option key={sw.id} value={sw.id.toString()}>{sw.name}</option>)}
           </select>
         )}
-        {errors.selectedSoftwareId && <p className="mt-1 text-sm text-red-600">{errors.selectedSoftwareId.message}</p>}
+        
+        {errors.selectedSoftwareId && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{errors.selectedSoftwareId.message}</p>}
       </div>
 
       <div>

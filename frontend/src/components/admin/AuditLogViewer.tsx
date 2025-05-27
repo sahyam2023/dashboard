@@ -110,12 +110,12 @@ const AuditLogViewer: React.FC = () => {
   };
 
   const renderDetails = (details: string | null) => {
-    if (!details) return <span className="text-gray-500">N/A</span>;
+    if (!details) return <span className="text-gray-500 dark:text-gray-400">N/A</span>;
     try {
       const parsed = JSON.parse(details);
-      return <pre className="text-xs bg-gray-100 p-2 rounded overflow-auto max-h-32">{JSON.stringify(parsed, null, 2)}</pre>;
+      return <pre className="text-xs bg-gray-100 dark:bg-gray-700 dark:text-gray-200 p-2 rounded overflow-auto max-h-32">{JSON.stringify(parsed, null, 2)}</pre>;
     } catch (e) {
-      return <span className="text-sm">{details}</span>;
+      return <span className="text-sm dark:text-gray-200">{details}</span>;
     }
   };
   

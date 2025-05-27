@@ -152,7 +152,9 @@ export interface RegisterResponse {
   user_id: number; // Made non-optional as per backend successful response
   role: string; // Added
   access_token: string; // Added
-  username: string; // Added
+  username:string; // Added
+  expires_in_seconds: number; // Added
+  password_reset_required?: boolean; // Added
 }
 
 // --- Admin Payload Base for Items with Flexible Version Handling ---

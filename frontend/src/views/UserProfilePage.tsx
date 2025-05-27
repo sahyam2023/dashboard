@@ -115,17 +115,17 @@ const UserProfilePage: React.FC = () => {
 
   return (
     <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-6">User Profile</h1>
+      <h1 className="text-2xl font-bold mb-6 text-gray-900 dark:text-white">User Profile</h1>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         {/* Change Password Form */}
-        <div className="bg-white p-6 rounded-lg shadow">
-          <h2 className="text-xl font-semibold mb-4">Change Password</h2>
-          {passwordError && <p className="text-red-500 bg-red-100 p-3 rounded mb-4">{passwordError}</p>}
-          {passwordSuccess && <p className="text-green-500 bg-green-100 p-3 rounded mb-4">{passwordSuccess}</p>}
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+          <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-gray-100">Change Password</h2>
+          {passwordError && <p className="text-red-600 dark:text-red-300 bg-red-100 dark:bg-red-900 border border-red-300 dark:border-red-700 p-3 rounded mb-4">{passwordError}</p>}
+          {passwordSuccess && <p className="text-green-600 dark:text-green-300 bg-green-100 dark:bg-green-900 border border-green-300 dark:border-green-700 p-3 rounded mb-4">{passwordSuccess}</p>}
           <form onSubmit={handlePasswordChange}>
             <div className="mb-4">
-              <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="currentPassword">
+              <label className="block text-gray-700 dark:text-gray-300 text-sm font-bold mb-2" htmlFor="currentPassword">
                 Current Password
               </label>
               <input
@@ -133,11 +133,11 @@ const UserProfilePage: React.FC = () => {
                 id="currentPassword"
                 value={currentPassword}
                 onChange={(e) => setCurrentPassword(e.target.value)}
-                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                className="shadow appearance-none border dark:border-gray-600 rounded w-full py-2 px-3 text-gray-700 dark:text-gray-200 leading-tight focus:outline-none focus:shadow-outline bg-white dark:bg-gray-700"
               />
             </div>
             <div className="mb-4">
-              <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="newPassword">
+              <label className="block text-gray-700 dark:text-gray-300 text-sm font-bold mb-2" htmlFor="newPassword">
                 New Password
               </label>
               <input
@@ -145,14 +145,14 @@ const UserProfilePage: React.FC = () => {
                 id="newPassword"
                 value={newPassword}
                 onChange={handleNewPasswordChange} // Use new handler
-                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                className="shadow appearance-none border dark:border-gray-600 rounded w-full py-2 px-3 text-gray-700 dark:text-gray-200 leading-tight focus:outline-none focus:shadow-outline bg-white dark:bg-gray-700"
               />
               {newPasswordError && (
-                <p className="mt-2 text-sm text-red-600">{newPasswordError}</p>
+                <p className="mt-2 text-sm text-red-600 dark:text-red-400">{newPasswordError}</p>
               )}
             </div>
             <div className="mb-6">
-              <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="confirmNewPassword">
+              <label className="block text-gray-700 dark:text-gray-300 text-sm font-bold mb-2" htmlFor="confirmNewPassword">
                 Confirm New Password
               </label>
               <input
@@ -160,7 +160,7 @@ const UserProfilePage: React.FC = () => {
                 id="confirmNewPassword"
                 value={confirmNewPassword}
                 onChange={(e) => setConfirmNewPassword(e.target.value)}
-                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 mb-3 leading-tight focus:outline-none focus:shadow-outline"
+                className="shadow appearance-none border dark:border-gray-600 rounded w-full py-2 px-3 text-gray-700 dark:text-gray-200 mb-3 leading-tight focus:outline-none focus:shadow-outline bg-white dark:bg-gray-700"
               />
             </div>
             <button
@@ -173,13 +173,13 @@ const UserProfilePage: React.FC = () => {
         </div>
 
         {/* Update Email Form */}
-        <div className="bg-white p-6 rounded-lg shadow">
-          <h2 className="text-xl font-semibold mb-4">Update Email</h2>
-          {emailError && <p className="text-red-500 bg-red-100 p-3 rounded mb-4">{emailError}</p>}
-          {emailSuccess && <p className="text-green-500 bg-green-100 p-3 rounded mb-4">{emailSuccess}</p>}
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+          <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-gray-100">Update Email</h2>
+          {emailError && <p className="text-red-600 dark:text-red-300 bg-red-100 dark:bg-red-900 border border-red-300 dark:border-red-700 p-3 rounded mb-4">{emailError}</p>}
+          {emailSuccess && <p className="text-green-600 dark:text-green-300 bg-green-100 dark:bg-green-900 border border-green-300 dark:border-green-700 p-3 rounded mb-4">{emailSuccess}</p>}
           <form onSubmit={handleEmailUpdate}>
             <div className="mb-4">
-              <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="newEmail">
+              <label className="block text-gray-700 dark:text-gray-300 text-sm font-bold mb-2" htmlFor="newEmail">
                 New Email
               </label>
               <input
@@ -187,11 +187,11 @@ const UserProfilePage: React.FC = () => {
                 id="newEmail"
                 value={newEmail}
                 onChange={(e) => setNewEmail(e.target.value)}
-                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                className="shadow appearance-none border dark:border-gray-600 rounded w-full py-2 px-3 text-gray-700 dark:text-gray-200 leading-tight focus:outline-none focus:shadow-outline bg-white dark:bg-gray-700"
               />
             </div>
             <div className="mb-6">
-              <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="confirmPasswordForEmail">
+              <label className="block text-gray-700 dark:text-gray-300 text-sm font-bold mb-2" htmlFor="confirmPasswordForEmail">
                 Confirm Password
               </label>
               <input
@@ -199,7 +199,7 @@ const UserProfilePage: React.FC = () => {
                 id="confirmPasswordForEmail"
                 value={confirmPasswordForEmail}
                 onChange={(e) => setConfirmPasswordForEmail(e.target.value)}
-                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 mb-3 leading-tight focus:outline-none focus:shadow-outline"
+                className="shadow appearance-none border dark:border-gray-600 rounded w-full py-2 px-3 text-gray-700 dark:text-gray-200 mb-3 leading-tight focus:outline-none focus:shadow-outline bg-white dark:bg-gray-700"
               />
             </div>
             <button

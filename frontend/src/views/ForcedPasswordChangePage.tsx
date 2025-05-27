@@ -100,6 +100,7 @@ const ForcedPasswordChangePage: React.FC = () => {
             label="Current Password"
             type={showCurrentPassword ? 'text' : 'password'}
             id="currentPassword"
+            autoComplete="current-password"
             value={currentPassword}
             onChange={(e) => setCurrentPassword(e.target.value)}
             disabled={isLoading || !!successMessage}
@@ -127,6 +128,7 @@ const ForcedPasswordChangePage: React.FC = () => {
             label="New Password"
             type={showNewPassword ? 'text' : 'password'}
             id="newPassword"
+            autoComplete="new-password"
             value={newPassword}
             onChange={(e) => {
               setNewPassword(e.target.value);
@@ -158,6 +160,7 @@ const ForcedPasswordChangePage: React.FC = () => {
             label="Confirm New Password"
             type={showConfirmNewPassword ? 'text' : 'password'}
             id="confirmNewPassword"
+            autoComplete="new-password"
             value={confirmNewPassword}
             onChange={(e) => setConfirmNewPassword(e.target.value)}
             error={newPassword !== confirmNewPassword && confirmNewPassword !== "" && !successMessage}

@@ -1,5 +1,6 @@
 // src/context/AuthContext.tsx
-import React, { createContext, useState, useContext, useEffect, ReactNode, useCallback } from 'react';
+import React, { createContext, useState, useContext, useEffect, ReactNode, useCallback, useRef } from 'react'; // Added useRef
+import { showErrorToast } from '../utils/toastUtils'; // Added for direct toast call
 
 interface TokenData {
   token: string;
@@ -69,6 +70,7 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
 
   const [isGlobalAccessGranted, setIsGlobalAccessGranted] = useState<boolean>(initialGlobalAccess);
   const [isPasswordResetRequired, setIsPasswordResetRequired] = useState<boolean>(false);
+  const sessionExpiredToastShownRef = useRef(false); // Added ref
 
   // Define logout function using useCallback to ensure stable reference
   const logout = useCallback((sessionExpiredDueToTimeout: boolean = false) => {
@@ -79,16 +81,39 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     // setSessionWarningModalOpen(false); // REMOVED: Close warning modal on logout
     
     if (sessionExpiredDueToTimeout) {
-        // Dispatch the event so App.tsx can show the toast.
-        document.dispatchEvent(new CustomEvent('tokenExpired'));
+      if (!sessionExpiredToastShownRef.current) {
+        showErrorToast("Your session has expired. Please login again.");
+        sessionExpiredToastShownRef.current = true;
+        setTimeout(() => {
+          sessionExpiredToastShownRef.current = false;
+        }, 10000); // Reset after 10 seconds
+      }
     }
   }, []);
+
+  useEffect(() => {
+    const handleApiTokenExpired = () => {
+      // Check if user is currently authenticated to prevent multiple logout calls
+      // if tokenData exists (which means logout hasn't fully processed yet from another trigger)
+      if (tokenData) { 
+        console.log('[AuthContext] Received tokenExpired event from API, initiating logout.');
+        logout(true); // Call logout with the flag to indicate it's a session expiry
+      }
+    };
+
+    document.addEventListener('tokenExpired', handleApiTokenExpired);
+    return () => {
+      document.removeEventListener('tokenExpired', handleApiTokenExpired);
+    };
+  }, [logout, tokenData]); // Depend on logout and tokenData
 
   useEffect(() => {
     const storedTokenDataString = localStorage.getItem('tokenData');
     if (storedTokenDataString) {
       try {
         const parsedTokenData: TokenData = JSON.parse(storedTokenDataString);
+        if (parsedTokenData) { // Ensure parsedTokenData is not null before logging
+        }
         // Add explicit check for user_id existence and type
         if (parsedTokenData.expiresAt > Date.now() && 
             typeof parsedTokenData.user_id === 'number' && 
@@ -166,6 +191,7 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     setTokenData(newTokenData);
     setUser({ id: newUserId, username: newUsername, role: newRole }); // Added
     setIsPasswordResetRequired(passwordResetRequired);
+    sessionExpiredToastShownRef.current = false; // Reset toast flag on login
     // setSessionWarningModalOpen(false); // REMOVED: Ensure warning modal is closed on new login
     return passwordResetRequired;
   };

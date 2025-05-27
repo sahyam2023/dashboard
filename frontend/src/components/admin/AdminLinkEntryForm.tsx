@@ -104,8 +104,9 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
   const [isFetchingSoftwareOrVersions, setIsFetchingSoftwareOrVersions] = useState(false); // For dropdown loading
   // Error and success messages will be handled by toast
 
+  const { isAuthenticated, user } = useAuth();
+  const role = user?.role; // Access role safely, as user can be null
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { isAuthenticated, role } = useAuth();
   const watchedSoftwareId = watch('selectedSoftwareId'); // RHF watch
   const watchedSelectedVersionId = watch('selectedVersionId'); // RHF watch
   const watchedInputMode = watch('inputMode'); // RHF watch
@@ -346,7 +347,8 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
             {softwareList.map(sw => <option key={sw.id} value={sw.id.toString()}>{sw.name}</option>)}
           </select>
         )}
-        {errors.selectedSoftwareId && <p className="mt-1 text-sm text-red-600">{errors.selectedSoftwareId.message}</p>}
+        
+        {errors.selectedSoftwareId && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{errors.selectedSoftwareId.message}</p>}
       </div>
 
       <div>

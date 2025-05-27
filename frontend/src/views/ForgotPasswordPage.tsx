@@ -172,7 +172,7 @@ const ForgotPasswordPage: React.FC = () => {
               id="usernameOrEmail"
               label="Username or Email"
               name="usernameOrEmail"
-              autoComplete="username"
+              autoComplete="off"
               autoFocus
               value={usernameOrEmail}
               onChange={(e) => setUsernameOrEmail(e.target.value)}
@@ -200,6 +200,7 @@ const ForgotPasswordPage: React.FC = () => {
                   label={`Answer ${index + 1}`}
                   type="text"
                   id={`answer-${q.question_id}`}
+                  autoComplete="off"
                   value={securityAnswers.find(sa => sa.question_id === q.question_id)?.answer || ''}
                   onChange={(e) => handleSecurityAnswerChange(q.question_id, e.target.value)}
                   disabled={isLoading}
@@ -225,6 +226,7 @@ const ForgotPasswordPage: React.FC = () => {
               label="New Password"
               type={showNewPassword ? 'text' : 'password'}
               id="newPassword"
+              autoComplete="new-password"
               value={newPassword}
               onChange={(e) => {
                 setNewPassword(e.target.value);
@@ -256,6 +258,7 @@ const ForgotPasswordPage: React.FC = () => {
               label="Confirm New Password"
               type={showConfirmNewPassword ? 'text' : 'password'}
               id="confirmNewPassword"
+              autoComplete="new-password"
               value={confirmNewPassword}
               onChange={(e) => setConfirmNewPassword(e.target.value)}
               error={newPassword !== confirmNewPassword && confirmNewPassword !== ""}

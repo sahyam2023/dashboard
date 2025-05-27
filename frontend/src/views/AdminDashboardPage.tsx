@@ -77,7 +77,7 @@ const initialLayoutLg: LayoutItem[] = [
   { i: WIDGET_KEYS.POPULAR_DOWNLOADS,  x: 5, y: 3, w: 7, h: 10, minH: 8, minW: 2 },
   { i: WIDGET_KEYS.MISSING_DESCRIPTIONS, x: 0, y: 4, w: 6, h: 10, minH: 8, minW: 2 },
   { i: WIDGET_KEYS.STALE_CONTENT,        x: 6, y: 4, w: 6, h: 10, minH: 8, minW: 2 },
-  { i: WIDGET_KEYS.QUICK_LINKS,          x: 0, y: 5, w: 12, h: 4, minH: 4, minW: 2 },
+  { i: WIDGET_KEYS.QUICK_LINKS,          x: 0, y: 5, w: 12, h: 5, minH: 4, minW: 2 },
 ];
 
 
@@ -129,7 +129,7 @@ const AdminDashboardPage: React.FC = () => {
   // Helper to clamp a single layout item based on its definition
   const clampLayoutItem = (layoutItem: RglLayout, definitionLayout?: LayoutItem): RglLayout => {
     if (!definitionLayout) {
-        console.warn(`No definition found for layout item ${layoutItem.i}, cannot clamp. Returning as is.`);
+        // console.warn(`No definition found for layout item ${layoutItem.i}, cannot clamp. Returning as is.`);
         return { // Ensure basic validity even if no definition
             ...layoutItem,
             x: Math.max(0, Math.round(layoutItem.x || 0)),
@@ -186,7 +186,7 @@ const AdminDashboardPage: React.FC = () => {
       const errMsg = err.response?.data?.msg || err.message || 'Failed to fetch dashboard statistics';
       if (isInitialLoad) setError(prev => prev ? `${prev}\n${errMsg}` : errMsg);
       else showErrorToast(errMsg);
-      console.error(err);
+      // console.error(err);
     } finally {
       if (isInitialLoad || statsErrorOccurred) setLoadingStats(false);
     }
@@ -199,7 +199,7 @@ const AdminDashboardPage: React.FC = () => {
       const errMsg = err.response?.data?.msg || err.message || 'Failed to fetch system health';
       if (isInitialLoad) setError(prev => prev ? `${prev}\n${errMsg}` : errMsg);
       else showErrorToast(errMsg);
-      console.error(err);
+      // console.error(err);
     } finally {
       if (isInitialLoad || healthErrorOccurred) setLoadingHealth(false);
     }
@@ -226,7 +226,7 @@ const AdminDashboardPage: React.FC = () => {
         let lgLayoutForWidgetConfigs: RglLayout[];
 
         if (userLayoutFromApi && Object.keys(userLayoutFromApi).length > 0) {
-          console.log('Fetched user layout from API (raw):', JSON.stringify(userLayoutFromApi));
+          // console.log('Fetched user layout from API (raw):', JSON.stringify(userLayoutFromApi));
           const processedApiLayouts: RglLayouts = {};
           for (const breakpointKey in userLayoutFromApi) {
             processedApiLayouts[breakpointKey] = userLayoutFromApi[breakpointKey].map(item => {
@@ -235,7 +235,7 @@ const AdminDashboardPage: React.FC = () => {
               return clampLayoutItem({ ...item, i: item.i || `unknown-${Math.random()}` }, definition?.defaultLayout);
             });
           }
-          console.log('Fetched user layout from API (clamped):', JSON.stringify(processedApiLayouts));
+          // console.log('Fetched user layout from API (clamped):', JSON.stringify(processedApiLayouts));
           finalLayoutsToSet = processedApiLayouts;
           // Use 'lg' from processed for widgetConfigs, or default if 'lg' is missing
           lgLayoutForWidgetConfigs = processedApiLayouts.lg || initialLayoutLg.map(l => ({...l}));
@@ -244,7 +244,7 @@ const AdminDashboardPage: React.FC = () => {
           // For simplicity, we often define initialLayoutLg and let RGL derive smaller breakpoints.
           // If you have specific initial layouts for other breakpoints, define them here.
           const defaultLayoutsForAllBreakpoints: RglLayouts = { lg: initialLayoutLg.map(l => ({...l})) };
-          console.log('Using default layout for all breakpoints:', JSON.stringify(defaultLayoutsForAllBreakpoints));
+          // console.log('Using default layout for all breakpoints:', JSON.stringify(defaultLayoutsForAllBreakpoints));
           finalLayoutsToSet = defaultLayoutsForAllBreakpoints;
           lgLayoutForWidgetConfigs = defaultLayoutsForAllBreakpoints.lg;
         }
@@ -277,7 +277,7 @@ const AdminDashboardPage: React.FC = () => {
 
       } catch (error) {
         showErrorToast("Failed to load dashboard layout. Using default.");
-        console.error("Failed to load dashboard layout:", error);
+        // console.error("Failed to load dashboard layout:", error);
         const defaultLgLayout = initialLayoutLg.map(l => ({...l}));
         setCurrentLayouts({ lg: defaultLgLayout }); // Set currentLayouts to default 'lg'
         
@@ -326,7 +326,7 @@ const AdminDashboardPage: React.FC = () => {
           return config; 
         });
       } catch (e) { 
-        console.error("Error parsing saved widget config from localStorage:", e); 
+        // console.error("Error parsing saved widget config from localStorage:", e); 
         // Fallback to defaultsFromDefs if parsing fails
         return defaultsFromDefs;
       }
@@ -388,7 +388,7 @@ const AdminDashboardPage: React.FC = () => {
 
   const handleLayoutChange = (newLayout: RglLayout[], allLayouts: RglLayouts) => {
     if (initialLayoutFetched) { 
-      console.log('Layout changed (handleLayoutChange):', JSON.stringify(allLayouts));
+      // console.log('Layout changed (handleLayoutChange):', JSON.stringify(allLayouts));
       setCurrentLayouts(allLayouts);
       if (isEditMode) {
         setHasUnsavedChanges(true);
@@ -421,7 +421,6 @@ const AdminDashboardPage: React.FC = () => {
   const handleSaveLayout = async () => {
     if (!currentLayouts) {
       showErrorToast("No layout data available to save.");
-      console.error("handleSaveLayout called with null currentLayouts.");
       return;
     }
 
@@ -438,11 +437,9 @@ const AdminDashboardPage: React.FC = () => {
       }
     }
     
-    console.log('Attempting to save layout (handleSaveLayout, fully clamped):', JSON.stringify(fullyClampedLayouts));
     try {
       await saveUserDashboardLayout(fullyClampedLayouts); // Save the fully clamped layout
       showSuccessToast("Dashboard layout saved successfully!", { autoClose: 2000 });
-      console.log('Layout save API call successful (frontend).');
       
       setCurrentLayouts(fullyClampedLayouts); // Reflect the exact saved state in UI
 
@@ -472,7 +469,7 @@ const AdminDashboardPage: React.FC = () => {
       setHasUnsavedChanges(false);
     } catch (error) {
       showErrorToast("Failed to save dashboard layout.");
-      console.error('Layout save API call failed (frontend):', error);
+      // console.error('Layout save API call failed (frontend):', error);
       // Optionally, revert currentLayouts to a previous stable state or re-fetch
     }
   };

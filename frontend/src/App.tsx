@@ -50,20 +50,7 @@ function AppContent() {
   } = auth;
 
   useEffect(() => {
-    const handleTokenExpiredEvent = () => {
-      // Check if the user is currently authenticated according to the context
-      // This prevents showing the toast if the user was already logged out
-      // or if the event fires multiple times during the logout process.
-      if (auth.isAuthenticated) { 
-        showErrorToast("Your session has expired. Please login again.");
-        // Logout is already called by AuthContext's own event listener.
-        // No need to call auth.logout() here again, as that's now handled within AuthContext.
-        // The navigation to /login will be handled by the routing logic below
-        // when isAuthenticated becomes false.
-      }
-    };
-
-    document.addEventListener('tokenExpired', handleTokenExpiredEvent);
+    // REMOVED tokenExpired event listener from here, it's now handled in AuthContext
 
     const handleMaintenanceEvent = (event: Event) => {
       const customEvent = event as CustomEvent<{ message: string }>;
@@ -72,10 +59,10 @@ function AppContent() {
     document.addEventListener('maintenanceModeForcedLogout', handleMaintenanceEvent);
 
     return () => {
-      document.removeEventListener('tokenExpired', handleTokenExpiredEvent);
+      // REMOVED tokenExpired event listener cleanup
       document.removeEventListener('maintenanceModeForcedLogout', handleMaintenanceEvent);
     };
-  }, [auth.isAuthenticated, auth]); // Depend on isAuthenticated and the auth object (which includes logout)
+  }, [auth]); // Removed auth.isAuthenticated from dependencies as tokenExpired listener is gone
 
   // NEW: Add this loading check
   if (auth.isLoading) {

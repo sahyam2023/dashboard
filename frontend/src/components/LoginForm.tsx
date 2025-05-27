@@ -87,7 +87,7 @@ const LoginForm: React.FC<LoginFormProps> = ({ onAuthSuccess, onToggleView }) =>
           id="login-username"
           name="username"
           type="text"
-          autoComplete="username"
+          autoComplete="off"
           required
           value={username}
           onChange={(e) => setUsername(e.target.value)}

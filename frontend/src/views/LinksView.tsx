@@ -10,14 +10,14 @@ import { Link as LinkType, Software, SoftwareVersion } from '../types'; // LinkT
 import CommentSection from '../components/comments/CommentSection'; // Added CommentSection
 import DataTable, { ColumnDef } from '../components/DataTable';
 import FilterTabs from '../components/FilterTabs';
-import LoadingState from '../components/LoadingState'; 
+import LoadingState from '../components/LoadingState';
 import ErrorState from '../components/ErrorState';
 import { useAuth } from '../context/AuthContext';
 import AdminLinkEntryForm from '../components/admin/AdminLinkEntryForm';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
 import Modal from '../components/shared/Modal';
 import { PlusCircle, Edit3, Trash2, ExternalLink, Star, Filter, ChevronUp, Link as LinkIconLucide, Download, Move, AlertTriangle, MessageSquare } from 'lucide-react'; // Added MessageSquare
-import { showErrorToast, showSuccessToast } from '../utils/toastUtils'; 
+import { showErrorToast, showSuccessToast } from '../utils/toastUtils';
 
 interface OutletContextType {
   searchTerm: string;
@@ -26,8 +26,8 @@ interface OutletContextType {
 
 const LinksView: React.FC = () => {
   const { searchTerm, setSearchTerm } = useOutletContext<OutletContextType>();
-const { isAuthenticated, user } = useAuth();
-const role = user?.role; // Access role safely, as user can be null
+  const { isAuthenticated, user } = useAuth();
+  const role = user?.role; // Access role safely, as user can be null
   const [links, setLinks] = useState<LinkType[]>([]);
   const [softwareList, setSoftwareList] = useState<Software[]>([]);
   const [versionList, setVersionList] = useState<SoftwareVersion[]>([]); // For main page filter
@@ -38,7 +38,7 @@ const role = user?.role; // Access role safely, as user can be null
   const [linkTypeFilter, setLinkTypeFilter] = useState<string>('');
   const [createdFromFilter, setCreatedFromFilter] = useState<string>('');
   const [createdToFilter, setCreatedToFilter] = useState<string>('');
-  
+
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [itemsPerPage, setItemsPerPage] = useState<number>(15); // Default
   const [totalPages, setTotalPages] = useState<number>(0);
@@ -48,7 +48,7 @@ const role = user?.role; // Access role safely, as user can be null
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
   const [isLoadingInitial, setIsLoadingInitial] = useState(true);
-  const [error, setError] = useState<string | null>(null); 
+  const [error, setError] = useState<string | null>(null);
 
   const [showAddOrEditForm, setShowAddOrEditForm] = useState(false);
   const [editingLink, setEditingLink] = useState<LinkType | null>(null);
@@ -74,7 +74,7 @@ const role = user?.role; // Access role safely, as user can be null
   // State for Comment Section
   const [selectedLinkForComments, setSelectedLinkForComments] = useState<LinkType | null>(null);
   const commentSectionRef = useRef<HTMLDivElement>(null);
-  
+
   const filtersAreActive = useMemo(() => {
     return activeSoftwareId !== null || activeVersionId !== null || linkTypeFilter !== '' || createdFromFilter !== '' || createdToFilter !== '' || searchTerm !== '';
   }, [activeSoftwareId, activeVersionId, linkTypeFilter, createdFromFilter, createdToFilter, searchTerm]);
@@ -86,10 +86,10 @@ const role = user?.role; // Access role safely, as user can be null
     setCurrentPage(1); // Reset to page 1
     // fetchAndSetLinks(1, true) will be called by useEffect
   }, [setSearchTerm]);
-  
+
   const fetchAndSetLinks = useCallback(async (pageToLoad: number, isNewQuery: boolean = false) => {
     if (isNewQuery) setIsLoadingInitial(true);
-    setError(null); 
+    setError(null);
 
     try {
       const response: PaginatedLinksResponse = await fetchLinks(
@@ -109,14 +109,14 @@ const role = user?.role; // Access role safely, as user can be null
     } catch (err: any) {
       const msg = err.response?.data?.msg || err.message || 'Failed to fetch links.';
       if (isNewQuery) { setError(msg); setLinks([]); setTotalPages(0); setTotalLinks(0); }
-      else showErrorToast(msg); 
+      else showErrorToast(msg);
     } finally {
       if (isNewQuery) setIsLoadingInitial(false);
     }
   }, [activeSoftwareId, activeVersionId, itemsPerPage, sortBy, sortOrder, linkTypeFilter, createdFromFilter, createdToFilter, isAuthenticated]);
 
   useEffect(() => { if (isAuthenticated) fetchSoftware().then(setSoftwareList).catch(err => showErrorToast("Failed to load software list.")); else setSoftwareList([]); }, [isAuthenticated]);
-  
+
   useEffect(() => {
     if (isAuthenticated) fetchAndSetLinks(1, true);
     else { setLinks([]); setIsLoadingInitial(false); }
@@ -140,12 +140,18 @@ const role = user?.role; // Access role safely, as user can be null
   const handleVersionFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => { setActiveVersionId(e.target.value ? parseInt(e.target.value) : null); setCurrentPage(1); };
   const handlePageChange = (newPage: number) => { setCurrentPage(newPage); fetchAndSetLinks(newPage, true); }; // isNewQuery = true for page changes
   const handleSort = (key: string) => { setSortBy(key); setSortOrder(prev => (sortBy === key && prev === 'asc' ? 'desc' : 'asc')); setCurrentPage(1); };
-  const handleApplyAdvancedFilters = () => { setCurrentPage(1); fetchAndSetLinks(1, true);};
+  const handleApplyAdvancedFilters = () => { setCurrentPage(1); fetchAndSetLinks(1, true); };
 
   const handleOperationSuccess = (message: string) => { setShowAddOrEditForm(false); setEditingLink(null); showSuccessToast(message); fetchAndSetLinks(1, true); };
-  const openAddForm = () => { setEditingLink(null); setShowAddOrEditForm(true); };
+  const openAddForm = () => {
+    setEditingLink(null);
+    setShowAddOrEditForm(true);
+  };
   const openEditForm = (link: LinkType) => { setEditingLink(link); setShowAddOrEditForm(true); };
-  const closeAdminForm = () => { setEditingLink(null); setShowAddOrEditForm(false); };
+  const closeAdminForm = () => {
+    setEditingLink(null);
+    setShowAddOrEditForm(false);
+  };
   const openDeleteConfirm = (link: LinkType) => { setLinkToDelete(link); setShowDeleteConfirm(true); };
   const closeDeleteConfirm = () => { setLinkToDelete(null); setShowDeleteConfirm(false); };
 
@@ -166,7 +172,7 @@ const role = user?.role; // Access role safely, as user can be null
   const filteredLinksBySearch = useMemo(() => {
     if (!searchTerm) return links;
     const lower = searchTerm.toLowerCase();
-    return links.filter(l => l.title.toLowerCase().includes(lower) || (l.description||'').toLowerCase().includes(lower) || (l.software_name||'').toLowerCase().includes(lower) || (l.version_number||'').toLowerCase().includes(lower));
+    return links.filter(l => l.title.toLowerCase().includes(lower) || (l.description || '').toLowerCase().includes(lower) || (l.software_name || '').toLowerCase().includes(lower) || (l.version_number || '').toLowerCase().includes(lower));
   }, [links, searchTerm]);
 
   const handleSelectItem = (id: number, isSelected: boolean) => setSelectedLinkIds(prev => { const n = new Set(prev); if (isSelected) n.add(id); else n.delete(id); return n; });
@@ -194,7 +200,7 @@ const role = user?.role; // Access role safely, as user can be null
     if (selectedLinkIds.size === 0) { showErrorToast("No items selected."); return; }
     const downloadableLinks = links.filter(link => selectedLinkIds.has(link.id) && !link.is_external_link && link.stored_filename);
     if (downloadableLinks.length === 0) { showErrorToast("No downloadable files among selected links. External links or links without files cannot be bulk downloaded."); return; }
-    
+
     const downloadableLinkIds = downloadableLinks.map(link => link.id);
     if (downloadableLinkIds.length < selectedLinkIds.size) {
       showSuccessToast(`Starting download for ${downloadableLinkIds.length} file-based links. External links were excluded.`);
@@ -206,11 +212,11 @@ const role = user?.role; // Access role safely, as user can be null
       const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url;
       const ts = new Date().toISOString().replace(/:/g, '-'); a.download = `bulk_download_links_${ts}.zip`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-      if (downloadableLinkIds.length === selectedLinkIds.size) showSuccessToast('Download started.'); 
+      if (downloadableLinkIds.length === selectedLinkIds.size) showSuccessToast('Download started.');
     } catch (e: any) { showErrorToast(e.message || "Bulk download failed."); }
     finally { setIsDownloadingSelected(false); }
   };
-  
+
   const handleOpenBulkMoveLinksModal = () => {
     if (selectedLinkIds.size === 0) { showErrorToast("No items selected."); return; }
     if (softwareList.length === 0) { showErrorToast("Software list unavailable."); return; }
@@ -220,8 +226,8 @@ const role = user?.role; // Access role safely, as user can be null
   const handleConfirmBulkMoveLinks = async () => {
     if (!modalSelectedSoftwareId) { showErrorToast("Select target software."); return; }
     setShowBulkMoveModal(false); setIsMovingSelected(true);
-    const targetMetadata: {target_software_id: number, target_version_id?: number | null} = { target_software_id: modalSelectedSoftwareId };
-    if (modalSelectedVersionId !== undefined) { 
+    const targetMetadata: { target_software_id: number, target_version_id?: number | null } = { target_software_id: modalSelectedSoftwareId };
+    if (modalSelectedVersionId !== undefined) {
       targetMetadata.target_version_id = modalSelectedVersionId;
     }
     try {
@@ -231,33 +237,33 @@ const role = user?.role; // Access role safely, as user can be null
     } catch (e: any) { showErrorToast(e.message || "Bulk move failed."); }
     finally { setIsMovingSelected(false); setModalSelectedSoftwareId(null); setModalSelectedVersionId(undefined); }
   };
-  
+
   const columns: ColumnDef<LinkType>[] = [
     { key: 'title', header: 'Title', sortable: true }, { key: 'software_name', header: 'Software', sortable: true },
     { key: 'version_name', header: 'Version', sortable: true, render: l => l.version_number || 'N/A' },
-    { key: 'description', header: 'Description', render: l => <span className="text-sm text-gray-600 block max-w-xs truncate" title={l.description||''}>{l.description||'-'}</span> },
-    { 
-      key: 'url', 
-      header: 'URL/File', 
+    { key: 'description', header: 'Description', render: l => <span className="text-sm text-gray-600 block max-w-xs truncate" title={l.description || ''}>{l.description || '-'}</span> },
+    {
+      key: 'url',
+      header: 'URL/File',
       render: (l: LinkType) => {
         const isEffectivelyDownloadable = l.is_external_link || l.is_downloadable !== false;
-        const linkText = l.is_external_link 
-          ? (l.url.length > 40 ? `${l.url.substring(0,37)}...` : l.url) 
+        const linkText = l.is_external_link
+          ? (l.url.length > 40 ? `${l.url.substring(0, 37)}...` : l.url)
           : (l.original_filename_ref || l.url.split('/').pop() || 'Uploaded File');
 
         if (!isEffectivelyDownloadable && !l.is_external_link) { // Uploaded file, not downloadable
           return (
             <span className="flex items-center text-gray-400 cursor-not-allowed" title="Download not permitted">
-              {l.is_external_link ? <ExternalLink size={14} className="mr-1 flex-shrink-0"/> : <Download size={14} className="mr-1 flex-shrink-0"/>}
+              {l.is_external_link ? <ExternalLink size={14} className="mr-1 flex-shrink-0" /> : <Download size={14} className="mr-1 flex-shrink-0" />}
               {linkText}
             </span>
           );
         }
         return (
-          <a 
-            href={l.url} 
-            target={l.is_external_link || !l.url?.startsWith('/') ? "_blank" : "_self"} 
-            rel="noopener noreferrer" 
+          <a
+            href={l.url}
+            target={l.is_external_link || !l.url?.startsWith('/') ? "_blank" : "_self"}
+            rel="noopener noreferrer"
             className={`flex items-center ${isEffectivelyDownloadable ? 'text-blue-600 hover:text-blue-800' : 'text-gray-400 cursor-not-allowed'}`}
             onClick={(e) => {
               if (!isEffectivelyDownloadable) e.preventDefault();
@@ -265,28 +271,28 @@ const role = user?.role; // Access role safely, as user can be null
             }}
             title={isEffectivelyDownloadable ? (l.is_external_link ? "Open external link" : "Download file") : "Download not permitted"}
           >
-            {l.is_external_link || !l.url?.startsWith('/') ? <ExternalLink size={14} className="mr-1 flex-shrink-0"/> : <Download size={14} className="mr-1 flex-shrink-0"/>}
+            {l.is_external_link || !l.url?.startsWith('/') ? <ExternalLink size={14} className="mr-1 flex-shrink-0" /> : <Download size={14} className="mr-1 flex-shrink-0" />}
             {linkText}
           </a>
         );
-      } 
+      }
     },
-    { key: 'uploaded_by_username', header: 'Added By', sortable: true, render: l => l.uploaded_by_username||'N/A' },
-    { key: 'updated_by_username', header: 'Updated By', sortable: false, render: l => l.updated_by_username||'N/A' },
-    { key: 'created_at', header: 'Created', sortable: true, render: l => l.created_at?new Date(l.created_at).toLocaleDateString('en-CA'):'-' },
-    { key: 'updated_at', header: 'Updated', sortable: true, render: l => l.updated_at?new Date(l.updated_at).toLocaleDateString('en-CA'):'-' },
-    { 
-      key: 'actions' as any, 
-      header: 'Actions', 
+    { key: 'uploaded_by_username', header: 'Added By', sortable: true, render: l => l.uploaded_by_username || 'N/A' },
+    { key: 'updated_by_username', header: 'Updated By', sortable: false, render: l => l.updated_by_username || 'N/A' },
+    { key: 'created_at', header: 'Created', sortable: true, render: l => l.created_at ? new Date(l.created_at).toLocaleDateString('en-CA') : '-' },
+    { key: 'updated_at', header: 'Updated', sortable: true, render: l => l.updated_at ? new Date(l.updated_at).toLocaleDateString('en-CA') : '-' },
+    {
+      key: 'actions' as any,
+      header: 'Actions',
       render: (l: LinkType) => (
         <div className="flex space-x-1 items-center">
           {isAuthenticated && (
-            <button 
-              onClick={(e) => { 
-                e.stopPropagation(); 
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
                 handleFavoriteToggle(l, 'link');
-              }} 
-              className={`p-1 rounded-md ${favoritedItems.get(l.id)?.favoriteId ? 'text-yellow-500 hover:text-yellow-600' : 'text-gray-400 hover:text-yellow-500'}`} 
+              }}
+              className={`p-1 rounded-md ${favoritedItems.get(l.id)?.favoriteId ? 'text-yellow-500 hover:text-yellow-600' : 'text-gray-400 hover:text-yellow-500'}`}
               title={favoritedItems.get(l.id)?.favoriteId ? "Remove Favorite" : "Add Favorite"}
             >
               <Star size={16} className={favoritedItems.get(l.id)?.favoriteId ? "fill-current" : ""} />
@@ -324,7 +330,7 @@ const role = user?.role; // Access role safely, as user can be null
       )
     },
   ];
-  
+
   const loadLinksCallback = useCallback(() => { fetchAndSetLinks(1, true); }, [fetchAndSetLinks]);
 
   const handleFavoriteToggle = async (item: LinkType, itemType: FavoriteItemType) => {
@@ -346,7 +352,7 @@ const role = user?.role; // Access role safely, as user can be null
       }
     } catch (e: any) {
       showErrorToast(e?.response?.data?.msg || e.message || "Failed to update favorite.");
-      setFavoritedItems(prev => { const n=new Map(prev); if(isCurrentlyFavorited)n.set(item.id,{favoriteId:currentStatus?.favoriteId}); else n.set(item.id,{favoriteId:undefined}); return n;});
+      setFavoritedItems(prev => { const n = new Map(prev); if (isCurrentlyFavorited) n.set(item.id, { favoriteId: currentStatus?.favoriteId }); else n.set(item.id, { favoriteId: undefined }); return n; });
     }
   };
 
@@ -355,8 +361,14 @@ const role = user?.role; // Access role safely, as user can be null
       <div className="flex justify-between items-start sm:items-center mb-6 flex-col sm:flex-row">
         <div> <h2 className="text-2xl font-bold text-gray-800 dark:text-white">Links</h2> <p className="text-gray-600 mt-1 dark:text-gray-300">Manage and browse useful links and resources.</p> </div>
         {isAuthenticated && (role === 'admin' || role === 'super_admin') && !editingLink && (
-          <button 
-            onClick={showAddOrEditForm ? closeAdminForm : openAddForm} 
+          <button
+            onClick={() => {
+              if (showAddOrEditForm) {
+                closeAdminForm();
+              } else {
+                openAddForm();
+              }
+            }}
             // Explicit classes for blue button, matching DocumentsView
             className="mt-4 sm:mt-0 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
           >
@@ -365,15 +377,15 @@ const role = user?.role; // Access role safely, as user can be null
         )}
       </div>
 
-      {showAddOrEditForm && (<div className="my-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg shadow"><AdminLinkEntryForm linkToEdit={editingLink} onLinkAdded={()=>handleOperationSuccess("Link added.")} onLinkUpdated={()=>handleOperationSuccess("Link updated.")} onCancelEdit={closeAdminForm}/></div>)}
+      {showAddOrEditForm && (<div className="my-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg shadow"><AdminLinkEntryForm linkToEdit={editingLink} onLinkAdded={() => handleOperationSuccess("Link added.")} onLinkUpdated={() => handleOperationSuccess("Link updated.")} onCancelEdit={closeAdminForm} /></div>)}
 
       {selectedLinkIds.size > 0 && (
         <div className="my-4 p-3 bg-gray-100 dark:bg-gray-700 rounded-md shadow-sm border border-gray-200 dark:border-gray-600">
           <div className="flex flex-wrap items-center gap-3">
             <span className="text-sm font-medium text-gray-700 dark:text-gray-200">{selectedLinkIds.size} item(s) selected</span>
-            {(role === 'admin' || role === 'super_admin') && (<button onClick={handleBulkDeleteLinksClick} disabled={isDeletingSelected} className="btn-danger-xs flex items-center"><Trash2 size={14} className="mr-1.5"/>Delete</button>)}
-            {isAuthenticated && (<button onClick={handleBulkDownloadLinks} disabled={isDownloadingSelected || downloadableSelectedCount === 0} className="btn-success-xs flex items-center"><Download size={14} className="mr-1.5"/>Download ({downloadableSelectedCount})</button>)}
-            {(role === 'admin' || role === 'super_admin') && (<button onClick={handleOpenBulkMoveLinksModal} disabled={isMovingSelected} className="btn-warning-xs flex items-center"><Move size={14} className="mr-1.5"/>Move</button>)}
+            {(role === 'admin' || role === 'super_admin') && (<button onClick={handleBulkDeleteLinksClick} disabled={isDeletingSelected} className="btn-danger-xs flex items-center"><Trash2 size={14} className="mr-1.5" />Delete</button>)}
+            {isAuthenticated && (<button onClick={handleBulkDownloadLinks} disabled={isDownloadingSelected || downloadableSelectedCount === 0} className="btn-success-xs flex items-center"><Download size={14} className="mr-1.5" />Download ({downloadableSelectedCount})</button>)}
+            {(role === 'admin' || role === 'super_admin') && (<button onClick={handleOpenBulkMoveLinksModal} disabled={isMovingSelected} className="btn-warning-xs flex items-center"><Move size={14} className="mr-1.5" />Move</button>)}
           </div>
         </div>
       )}
@@ -387,7 +399,7 @@ const role = user?.role; // Access role safely, as user can be null
         {activeSoftwareId && (
           <div className="flex flex-col min-w-[200px] mt-4 md:mt-0"> {/* mt-4 for small screens, md:mt-0 to align horizontally on medium+ */}
             <label htmlFor="versionFilterLinks" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Version</label>
-            <select id="versionFilterLinks" value={activeVersionId || ''} onChange={handleVersionFilterChange} className="input-class" disabled={versionList.length === 0}>
+            <select id="versionFilterLinks" value={activeVersionId || ''} onChange={handleVersionFilterChange} className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-200" disabled={versionList.length === 0}>
               <option value="">All Versions</option>
               {versionList.map(v => (<option key={v.id} value={v.id}>{v.version_number}</option>))}
             </select>
@@ -396,7 +408,7 @@ const role = user?.role; // Access role safely, as user can be null
       </div>
 
       {/* This div specifically for the Advanced Filters button, placing it directly below the above section */}
-      <div className="mb-4">
+      <div className="mb-4 mt-0"> {/* Added mt-0 to override space-y-6 parent for this specific element */}
         <button 
           onClick={() => setShowAdvancedFilters(p => !p)} 
           // Explicit classes for grey button, matching DocumentsView
@@ -411,19 +423,19 @@ const role = user?.role; // Access role safely, as user can be null
         <div className="my-4 p-4 border dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-700 space-y-4 md:space-y-0 md:flex md:flex-wrap md:items-end md:gap-4">
           <div className="flex flex-col">
             <label htmlFor="linkTypeFilterSelect" className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Link Type</label>
-            <select id="linkTypeFilterSelect" value={linkTypeFilter} onChange={(e) => setLinkTypeFilter(e.target.value)} className="input-class">
+            <select id="linkTypeFilterSelect" value={linkTypeFilter} onChange={(e) => setLinkTypeFilter(e.target.value)} className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-200">
               <option value="">All</option> <option value="external">External URL</option> <option value="uploaded">Uploaded File</option>
             </select>
           </div>
           <div className="flex flex-col">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Created Between</label>
             <div className="flex items-center gap-2">
-              <input type="date" value={createdFromFilter} onChange={(e) => setCreatedFromFilter(e.target.value)} className="input-class" />
+              <input type="date" value={createdFromFilter} onChange={(e) => setCreatedFromFilter(e.target.value)} className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-200" />
               <span className="text-gray-500 dark:text-gray-400">to</span>
-              <input type="date" value={createdToFilter} onChange={(e) => setCreatedToFilter(e.target.value)} className="input-class" />
+              <input type="date" value={createdToFilter} onChange={(e) => setCreatedToFilter(e.target.value)} className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-200" />
             </div>
           </div>
-          <div className="flex items-end gap-2 pt-5"><button onClick={handleApplyAdvancedFilters} className="btn-primary text-sm">Apply</button><button onClick={handleClearAllFiltersAndSearch} className="btn-secondary text-sm">Clear All</button></div>
+          <div className="flex items-end gap-2 pt-5"><button onClick={handleApplyAdvancedFilters} className="text-sm px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">Apply</button><button onClick={handleClearAllFiltersAndSearch} className="text-sm px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500">Clear All</button></div>
         </div>
       )}
 
@@ -456,7 +468,7 @@ const role = user?.role; // Access role safely, as user can be null
             <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">Select target Software and optionally a Version:</p>
             <div className="mb-4">
               <label htmlFor="modalSoftwareMoveLinks" className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Target Software*</label>
-              <select id="modalSoftwareMoveLinks" value={modalSelectedSoftwareId??''} onChange={e=>{setModalSelectedSoftwareId(e.target.value?parseInt(e.target.value):null); setModalSelectedVersionId(undefined);}} className="input-class w-full" disabled={isMovingSelected||softwareList.length===0}>
+              <select id="modalSoftwareMoveLinks" value={modalSelectedSoftwareId??''} onChange={e=>{setModalSelectedSoftwareId(e.target.value?parseInt(e.target.value):null); setModalSelectedVersionId(undefined);}} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-200" disabled={isMovingSelected||softwareList.length===0}>
                 <option value="">Select Software...</option>
                 {softwareList.map(sw=>(<option key={sw.id} value={sw.id}>{sw.name}</option>))}
               </select>
@@ -464,7 +476,7 @@ const role = user?.role; // Access role safely, as user can be null
             {modalSelectedSoftwareId && (
               <div className="mb-4">
                 <label htmlFor="modalVersionMoveLinks" className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Target Version (Optional)</label>
-                <select id="modalVersionMoveLinks" value={modalSelectedVersionId===null ? 'NULL_VERSION' : modalSelectedVersionId??''} onChange={e=>setModalSelectedVersionId(e.target.value === 'NULL_VERSION' ? null : (e.target.value ? parseInt(e.target.value) : undefined))} className="input-class w-full" disabled={isMovingSelected||isLoadingModalVersions}>
+                <select id="modalVersionMoveLinks" value={modalSelectedVersionId===null ? 'NULL_VERSION' : modalSelectedVersionId??''} onChange={e=>setModalSelectedVersionId(e.target.value === 'NULL_VERSION' ? null : (e.target.value ? parseInt(e.target.value) : undefined))} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-200" disabled={isMovingSelected||isLoadingModalVersions}>
                   <option value="">{isLoadingModalVersions?'Loading...':'Select Version (Optional)...'}</option>
                   <option value="NULL_VERSION">No Specific Version (Clear Association)</option>
                   {modalVersionsList.map(v=>(<option key={v.id} value={v.id}>{v.version_number}</option>))}
@@ -473,8 +485,8 @@ const role = user?.role; // Access role safely, as user can be null
               </div>
             )}
             <div className="flex justify-end space-x-3 mt-6">
-              <button type="button" onClick={()=>setShowBulkMoveModal(false)} className="btn-secondary" disabled={isMovingSelected}>Cancel</button>
-              <button type="button" onClick={handleConfirmBulkMoveLinks} className="btn-primary" disabled={isMovingSelected||!modalSelectedSoftwareId}>{isMovingSelected?'Moving...':'Confirm Move'}</button>
+              <button type="button" onClick={()=>setShowBulkMoveModal(false)} className="px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500" disabled={isMovingSelected}>Cancel</button>
+              <button type="button" onClick={handleConfirmBulkMoveLinks} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500" disabled={isMovingSelected||!modalSelectedSoftwareId}>{isMovingSelected?'Moving...':'Confirm Move'}</button>
             </div>
           </div>
         </Modal>

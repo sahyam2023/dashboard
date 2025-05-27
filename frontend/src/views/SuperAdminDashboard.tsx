@@ -747,15 +747,15 @@ const SuperAdminDashboard: React.FC = () => {
       </div>
 
       {/* Database Backup Section */}
-      <div className="mt-12 p-6 bg-white shadow rounded-lg">
-        <h2 className="text-xl font-semibold mb-4 text-gray-800">Database Backup</h2>
+      <div className="mt-12 p-6 bg-white dark:bg-gray-800 shadow rounded-lg">
+        <h2 className="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Database Backup</h2>
         {backupError && (
-          <div className="p-3 mb-4 rounded bg-red-100 text-red-700 text-sm">
+          <div className="p-3 mb-4 rounded bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 border border-red-200 dark:border-red-700 text-sm">
             {backupError}
           </div>
         )}
         {backupMessage && (
-          <div className="p-3 mb-4 rounded bg-green-100 text-green-700 text-sm">
+          <div className="p-3 mb-4 rounded bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 border border-green-200 dark:border-green-700 text-sm">
             {backupMessage}
           </div>
         )}
@@ -773,15 +773,15 @@ const SuperAdminDashboard: React.FC = () => {
       </div>
 
       {/* Database Restore Section */}
-      <div className="mt-12 p-6 bg-white shadow rounded-lg">
-        <h2 className="text-xl font-semibold mb-4 text-gray-800">Database Restore</h2>
+      <div className="mt-12 p-6 bg-white dark:bg-gray-800 shadow rounded-lg">
+        <h2 className="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Database Restore</h2>
         {restoreError && (
-          <div className="p-3 mb-4 rounded bg-red-100 text-red-700 text-sm">
+          <div className="p-3 mb-4 rounded bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 border border-red-200 dark:border-red-700 text-sm">
             {restoreError}
           </div>
         )}
         {restoreMessage && (
-          <div className="p-3 mb-4 rounded bg-green-100 text-green-700 text-sm">
+          <div className="p-3 mb-4 rounded bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 border border-green-200 dark:border-green-700 text-sm">
             {restoreMessage}
           </div>
         )}
@@ -789,7 +789,7 @@ const SuperAdminDashboard: React.FC = () => {
           <div>
             <label 
               htmlFor="restoreFile" 
-              className="block text-sm font-medium text-gray-700 mb-1"
+              className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
             >
               Select .db Backup File
             </label>
@@ -799,7 +799,7 @@ const SuperAdminDashboard: React.FC = () => {
               type="file"
               accept=".db"
               onChange={handleRestoreFileChange}
-              className="appearance-none block w-full px-3 py-2.5 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+              className="appearance-none block w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-200 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 dark:file:bg-gray-600 file:text-blue-700 dark:file:text-gray-200 hover:file:bg-blue-100 dark:hover:file:bg-gray-500"
               disabled={isRestoreLoading}
             />
           </div>
@@ -818,11 +818,11 @@ const SuperAdminDashboard: React.FC = () => {
       </div>
 
       {/* System Maintenance Mode Section */}
-      <div className="mt-12 p-6 bg-white shadow rounded-lg">
-        <h2 className="text-xl font-semibold mb-4 text-gray-800">System Maintenance Mode</h2>
+      <div className="mt-12 p-6 bg-white dark:bg-gray-800 shadow rounded-lg">
+        <h2 className="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">System Maintenance Mode</h2>
         
         {maintenanceError && (
-          <div className="p-3 mb-4 rounded bg-red-100 text-red-700 text-sm">
+          <div className="p-3 mb-4 rounded bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 border border-red-200 dark:border-red-700 text-sm">
             Error: {maintenanceError}
           </div>
         )}
@@ -845,20 +845,20 @@ const SuperAdminDashboard: React.FC = () => {
                     disabled={isMaintenanceLoading} // Disable during any loading (initial or toggle action)
                   />
                   {/* Styling for the toggle switch */}
-                  <div className={`block w-14 h-8 rounded-full transition-colors ${isMaintenanceModeActive ? 'bg-green-500' : 'bg-gray-300'}`}></div>
+                  <div className={`block w-14 h-8 rounded-full transition-colors ${isMaintenanceModeActive ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}></div>
                   <div
-                    className={`dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full shadow-md transition-transform duration-300 ease-in-out ${isMaintenanceModeActive ? 'transform translate-x-6' : ''}`}
+                    className={`dot absolute left-1 top-1 bg-white dark:bg-gray-300 w-6 h-6 rounded-full shadow-md transition-transform duration-300 ease-in-out ${isMaintenanceModeActive ? 'transform translate-x-6' : ''}`}
                   ></div>
                 </div>
               </label>
-              <span className={`text-sm font-medium ${isMaintenanceModeActive ? 'text-green-700' : 'text-gray-700'}`}>
+              <span className={`text-sm font-medium ${isMaintenanceModeActive ? 'text-green-700 dark:text-green-300' : 'text-gray-700 dark:text-gray-300'}`}>
                 Maintenance Mode is {isMaintenanceModeActive ? 'ACTIVATED' : 'DEACTIVATED'}
               </span>
               {isMaintenanceLoading && ( /* Spinner specifically for toggle action */
                 <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-blue-500"></div>
               )}
             </div>
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
               When activated, only Super Administrators can log in. All other users, including regular Admins, will be denied access and active sessions (except Super Admins) may be affected on their next API interaction.
             </p>
           </>
@@ -878,43 +878,43 @@ const SuperAdminDashboard: React.FC = () => {
               placeholder="Search by file name..."
               value={permissionSearchTerm}
               onChange={(e) => setPermissionSearchTerm(e.target.value)}
-              className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+              className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
             />
           </div>
 
-          {isPermissionsLoading && <div className="text-sm text-gray-500 text-center">Loading permissions info...</div>}
-          {permissionsError && <div className="p-3 mb-4 rounded bg-red-100 text-red-700 text-sm">{permissionsError}</div>}
+          {isPermissionsLoading && <div className="text-sm text-gray-500 dark:text-gray-400 text-center">Loading permissions info...</div>}
+          {permissionsError && <div className="p-3 mb-4 rounded bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 border border-red-200 dark:border-red-700 text-sm">{permissionsError}</div>}
           {permissionsFeedback && (
-            <div className={`p-3 mb-4 rounded text-sm ${permissionsFeedback.type === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+            <div className={`p-3 mb-4 rounded text-sm ${permissionsFeedback.type === 'success' ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 border border-green-200 dark:border-green-700' : 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 border border-red-200 dark:border-red-700'}`}>
               {permissionsFeedback.message}
             </div>
           )}
 
           {!isPermissionsLoading && !permissionsError && allFilesForPermissions.length > 0 && (
             <form onSubmit={(e) => { e.preventDefault(); handleSavePermissions(); }} className="space-y-6">
-              <div className="max-h-80 overflow-y-auto border border-gray-200 rounded-md p-4 space-y-4 bg-gray-50"> {/* Adjusted max-h and added bg */}
+              <div className="max-h-80 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-md p-4 space-y-4 bg-gray-50 dark:bg-gray-800"> {/* Adjusted max-h and added bg */}
                 {/* Iterate over filteredPermissionFiles (to be defined) */}
                 {allFilesForPermissions.filter(file => 
                   file.name.toLowerCase().includes(permissionSearchTerm.toLowerCase())
                 ).map((file) => {
                   const currentPermission = permissionsToUpdate.find(p => p.file_id === file.id && p.file_type === file.type);
                   return (
-                    <div key={`${file.type}-${file.id}`} className="p-3 border-b border-gray-200 last:border-b-0 hover:bg-white rounded-md transition-colors duration-150 bg-white shadow-sm">
-                      <h4 className="font-medium text-gray-800 truncate" title={file.name}>{file.name} <span className="text-xs text-gray-500">({file.type})</span></h4>
+                    <div key={`${file.type}-${file.id}`} className="p-3 border-b border-gray-200 dark:border-gray-700 last:border-b-0 hover:bg-white dark:hover:bg-gray-700 rounded-md transition-colors duration-150 bg-white dark:bg-gray-750 shadow-sm">
+                      <h4 className="font-medium text-gray-800 dark:text-gray-100 truncate" title={file.name}>{file.name} <span className="text-xs text-gray-500 dark:text-gray-400">({file.type})</span></h4>
                       <div className="flex items-center space-x-6 mt-2">
-                        <label className="flex items-center space-x-2 cursor-pointer text-sm text-gray-700">
+                        <label className="flex items-center space-x-2 cursor-pointer text-sm text-gray-700 dark:text-gray-300">
                           <input
                             type="checkbox"
-                            className="rounded text-blue-600 focus:ring-blue-500 h-4 w-4 border-gray-300"
+                            className="rounded text-blue-600 focus:ring-blue-500 h-4 w-4 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 checked:bg-blue-600 dark:checked:bg-blue-500"
                             checked={currentPermission?.can_view || false}
                             onChange={(e) => handlePermissionChange(file.id, file.type, 'can_view', e.target.checked)}
                           />
                           <span>Can View</span>
                         </label>
-                        <label className="flex items-center space-x-2 cursor-pointer text-sm text-gray-700">
+                        <label className="flex items-center space-x-2 cursor-pointer text-sm text-gray-700 dark:text-gray-300">
                           <input
                             type="checkbox"
-                            className="rounded text-blue-600 focus:ring-blue-500 h-4 w-4 border-gray-300"
+                            className="rounded text-blue-600 focus:ring-blue-500 h-4 w-4 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 checked:bg-blue-600 dark:checked:bg-blue-500"
                             checked={currentPermission?.can_download || false}
                             onChange={(e) => handlePermissionChange(file.id, file.type, 'can_download', e.target.checked)}
                           />
@@ -940,10 +940,10 @@ const SuperAdminDashboard: React.FC = () => {
            {!isPermissionsLoading && !permissionsError && 
              allFilesForPermissions.filter(file => file.name.toLowerCase().includes(permissionSearchTerm.toLowerCase())).length === 0 && 
              allFilesForPermissions.length > 0 && (
-             <p className="text-sm text-gray-500 text-center">No files match your search term.</p>
+             <p className="text-sm text-gray-500 dark:text-gray-400 text-center">No files match your search term.</p>
            )}
           {!isPermissionsLoading && !permissionsError && allFilesForPermissions.length === 0 && (
-             <p className="text-sm text-gray-500 text-center">No documents found to set permissions for. Ensure documents are uploaded to the system.</p>
+             <p className="text-sm text-gray-500 dark:text-gray-400 text-center">No documents found to set permissions for. Ensure documents are uploaded to the system.</p>
            )}
         </div>
       </Modal>

@@ -167,7 +167,9 @@ const RegisterForm: React.FC<RegisterFormProps> = ({ onAuthSuccess, onToggleView
       const regData: RegisterResponse = await registerUser(registrationPayload); 
       // Assuming regData from backend now includes password_reset_required (it should, based on task context)
       // If not, it will be undefined, and auth.login's default (false) will be used.
-      const requiresReset = auth.login(regData.access_token, regData.username, regData.role, 900, false); 
+      const requiresReset = auth.login(regData.access_token, regData.username, regData.role, regData.user_id, regData.expires_in_seconds || 900, regData.password_reset_required || false); 
+      console.log('[RegisterForm] After auth.login - requiresReset:', requiresReset);
+      console.log('[RegisterForm] Auth context state:', JSON.stringify(auth));
       
       showSuccessToast('Registration successful! Logging you in...');
       
@@ -191,14 +193,14 @@ const RegisterForm: React.FC<RegisterFormProps> = ({ onAuthSuccess, onToggleView
       {/* Error and success message divs are removed */}
       <div>
         <label htmlFor="register-username" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Username</label>
-        <input id="register-username" type="text" required value={username} onChange={(e) => setUsername(e.target.value)}
+        <input id="register-username" type="text" autoComplete="off" required value={username} onChange={(e) => setUsername(e.target.value)}
           className="appearance-none block w-full px-3 py-2.5 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400"
           disabled={isLoading} />
       </div>
 
       <div>
         <label htmlFor="register-email" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email (Optional)</label>
-        <input id="register-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+        <input id="register-email" type="email" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)}
           className="appearance-none block w-full px-3 py-2.5 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400"
           disabled={isLoading} />
       </div>
@@ -206,7 +208,7 @@ const RegisterForm: React.FC<RegisterFormProps> = ({ onAuthSuccess, onToggleView
       <div>
         <label htmlFor="register-password" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Password</label>
         <div className="relative">
-          <input id="register-password" type={showPassword ? 'text' : 'password'} required value={password} onChange={handlePasswordChange}
+          <input id="register-password" type={showPassword ? 'text' : 'password'} autoComplete="new-password" required value={password} onChange={handlePasswordChange}
             className="appearance-none block w-full px-3 py-2.5 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm pr-10 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400"
             disabled={isLoading} />
           <button
@@ -224,7 +226,7 @@ const RegisterForm: React.FC<RegisterFormProps> = ({ onAuthSuccess, onToggleView
        <div>
         <label htmlFor="register-confirm-password" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Confirm Password</label>
         <div className="relative">
-          <input id="register-confirm-password" type={showConfirmPassword ? 'text' : 'password'} required value={confirmPassword} onChange={handleConfirmPasswordChange}
+          <input id="register-confirm-password" type={showConfirmPassword ? 'text' : 'password'} autoComplete="new-password" required value={confirmPassword} onChange={handleConfirmPasswordChange}
             className="appearance-none block w-full px-3 py-2.5 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm pr-10 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400"
             disabled={isLoading} />
           <button
@@ -270,6 +272,7 @@ const RegisterForm: React.FC<RegisterFormProps> = ({ onAuthSuccess, onToggleView
             <input
               id={`answer-${index}`}
               type="text"
+              autoComplete="off"
               value={selectedSecurityAnswers[index].answer}
               onChange={(e) => handleSecurityAnswerChange(index, e.target.value)}
               className="appearance-none block w-full px-2.5 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400"

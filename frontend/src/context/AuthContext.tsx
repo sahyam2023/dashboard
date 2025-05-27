@@ -89,17 +89,24 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     if (storedTokenDataString) {
       try {
         const parsedTokenData: TokenData = JSON.parse(storedTokenDataString);
-        if (parsedTokenData.expiresAt > Date.now()) {
+        // Add explicit check for user_id existence and type
+        if (parsedTokenData.expiresAt > Date.now() && 
+            typeof parsedTokenData.user_id === 'number' && 
+            parsedTokenData.username && 
+            parsedTokenData.role) {
           setTokenData(parsedTokenData);
-          setUser({ id: parsedTokenData.user_id, username: parsedTokenData.username, role: parsedTokenData.role }); // Added
+          setUser({ id: parsedTokenData.user_id, username: parsedTokenData.username, role: parsedTokenData.role });
         } else {
-          localStorage.removeItem('tokenData'); // Expired
-          setUser(null); // Ensure user is cleared if token expired
+          // If token is expired or user_id is missing/invalid, treat as invalid tokenData
+          localStorage.removeItem('tokenData'); 
+          setUser(null); 
+          // Optionally call logout() if it handles other necessary cleanup
+          // logout(true); // if you want to show session expired toast for this case too
         }
       } catch (error) {
-        console.error("Failed to parse tokenData from localStorage", error);
+        console.error("Failed to parse tokenData from localStorage or tokenData invalid:", error);
         localStorage.removeItem('tokenData');
-        setUser(null); // Ensure user is cleared on parse error
+        setUser(null);
       }
     }
     setIsLoading(false);

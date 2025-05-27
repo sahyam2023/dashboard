@@ -28,7 +28,7 @@ interface NavItemConfig {
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
-  const { isAuthenticated, role } = useAuth(); // <-- Get authentication status and role
+  const { user, isAuthenticated } = useAuth(); // Updated to use user object
   type RoleType = 'admin' | 'super_admin' | 'user';
 
   const navItems: NavItemConfig[] = [
@@ -91,10 +91,10 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
     }
     if (
       item.roles !== undefined &&
-      (!isAuthenticated || (role && !item.roles.includes(role as RoleType)))
+      (!isAuthenticated || !user || (user.role && !item.roles.includes(user.role as RoleType)))
     ) {
       // Hide if item has role requirements, and user is not authenticated,
-      // or user's role is not in the allowed roles for the item.
+      // or user object is null, or user's role is not in the allowed roles for the item.
       return false;
     }
     return true; // Otherwise, show the item

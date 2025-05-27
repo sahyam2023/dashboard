@@ -34,8 +34,7 @@ interface OutletContextType {
 const DocumentsView: React.FC = () => {
   const ITEMS_PER_PAGE = 15;
   const { searchTerm, setSearchTerm } = useOutletContext<OutletContextType>(); 
-  const { isAuthenticated, user } = useAuth();
-  const role = user?.role; // Access role safely, as user can be null;
+  const { isAuthenticated, role } = useAuth();
 
   const [showAddDocumentForm, setShowAddDocumentForm] = useState(false);
   const [editingDocument, setEditingDocument] = useState<DocumentType | null>(null);
@@ -353,11 +352,15 @@ useEffect(() => {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                setSelectedDocumentForComments(d);
-                setTimeout(() => commentSectionRef.current?.scrollIntoView({ behavior: 'smooth' }), 0);
+                if (selectedDocumentForComments && selectedDocumentForComments.id === d.id) {
+                  setSelectedDocumentForComments(null);
+                } else {
+                  setSelectedDocumentForComments(d);
+                  setTimeout(() => commentSectionRef.current?.scrollIntoView({ behavior: 'smooth' }), 0);
+                }
               }}
               className="p-1 text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 rounded-md"
-              title="View Comments"
+              title={selectedDocumentForComments && selectedDocumentForComments.id === d.id ? "Hide Comments" : "View Comments"}
             >
               <MessageSquare size={16} />
               <span className="ml-1 text-xs">({d.comment_count ?? 0})</span>
@@ -477,6 +480,7 @@ useEffect(() => {
 
       {isAuthenticated && selectedDocumentForComments && (
         <div ref={commentSectionRef} className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
+          {/* The close button that might have been here is removed as per instructions */}
           <h3 className="text-xl font-semibold text-gray-800 dark:text-white mb-4">
             Comments for: <span className="font-bold text-blue-600 dark:text-blue-400">{selectedDocumentForComments.doc_name}</span>
           </h3>
@@ -487,7 +491,9 @@ useEffect(() => {
         </div>
       )}
        {!isAuthenticated && selectedDocumentForComments && (
-          <div className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700 text-center">
+          // This section might also have had a close button, ensure it's removed or was never there.
+          // Based on previous instructions, it likely had a close button.
+          <div ref={commentSectionRef} className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700 text-center">
             <p className="text-gray-600 dark:text-gray-400">Please log in to view and manage comments.</p>
           </div>
         )}

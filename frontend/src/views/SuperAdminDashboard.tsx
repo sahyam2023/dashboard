@@ -183,7 +183,7 @@ const SuperAdminDashboard: React.FC = () => {
   };
 
   const fetchUsers = useCallback(async () => {
-    if (auth.isAuthenticated && auth.role === 'super_admin') {
+    if (auth.isAuthenticated && auth.user?.role === 'super_admin') { // Updated
       setIsLoading(true);
       setError(null);
       // Feedback is not reset here to persist across page changes if it's a result of an action
@@ -202,7 +202,7 @@ const SuperAdminDashboard: React.FC = () => {
         setIsLoading(false);
       }
     }
-  }, [auth.isAuthenticated, auth.role, currentPage, itemsPerPage, sortBy, sortOrder]);
+  }, [auth.isAuthenticated, auth.user?.role, currentPage, itemsPerPage, sortBy, sortOrder]); // Updated
 
   useEffect(() => {
     fetchUsers();
@@ -210,7 +210,7 @@ const SuperAdminDashboard: React.FC = () => {
 
   useEffect(() => {
     const fetchMaintenanceStatus = async () => {
-      if (auth.isAuthenticated && auth.role === 'super_admin') {
+      if (auth.isAuthenticated && auth.user?.role === 'super_admin') { // Updated
         setIsMaintenanceLoading(true);
         setMaintenanceError(null);
         try {
@@ -226,12 +226,18 @@ const SuperAdminDashboard: React.FC = () => {
       }
     };
     fetchMaintenanceStatus();
-  }, [auth.isAuthenticated, auth.role]);
+  }, [auth.isAuthenticated, auth.user?.role]); // Updated
 
   // Effect to fetch documents and user permissions when a user is selected for permission editing
   useEffect(() => {
     if (selectedUserForPermissions) {
       const fetchDataForPermissions = async () => {
+        // Ensure user is authenticated and has super_admin role for this operation
+        if (!auth.isAuthenticated || auth.user?.role !== 'super_admin') {
+          setPermissionsError("User not authorized for this action.");
+          setIsPermissionsLoading(false);
+          return;
+        }
         setIsPermissionsLoading(true);
         setPermissionsError(null);
         setPermissionsFeedback(null);
@@ -281,14 +287,14 @@ const SuperAdminDashboard: React.FC = () => {
       };
       fetchDataForPermissions();
     }
-  }, [selectedUserForPermissions, auth.isAuthenticated, auth.role]); // Added auth dependencies
+  }, [selectedUserForPermissions, auth.isAuthenticated, auth.user?.role]); // Updated auth dependencies
 
 
   if (!auth.isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
 
-  if (auth.role !== 'super_admin') {
+  if (auth.user?.role !== 'super_admin') { // Updated
     return (
       <div className="container mx-auto p-4">
         <h1 className="text-2xl font-bold text-red-600">Unauthorized</h1>
@@ -535,7 +541,7 @@ const SuperAdminDashboard: React.FC = () => {
                 value={selectedRole}
                 onChange={(e) => setSelectedRole(e.target.value as 'user' | 'admin' | 'super_admin')}
                 className="block w-auto pl-3 pr-10 py-1 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
-                disabled={auth.username === user.username && users.filter(u => u.role === 'super_admin').length <= 1 && selectedRole !== 'super_admin'}
+                disabled={auth.user?.username === user.username && users.filter(u => u.role === 'super_admin').length <= 1 && selectedRole !== 'super_admin'} // Updated
                 onClick={(e) => e.stopPropagation()} // Prevent row click if any
               >
                 <option value="user">User</option>
@@ -560,7 +566,7 @@ const SuperAdminDashboard: React.FC = () => {
         return (
           <div className="flex items-center space-x-2">
             <span>{user.role}</span>
-            {auth.username !== user.username && (
+            {auth.user?.username !== user.username && ( // Updated
               <button 
                 onClick={(e) => { e.stopPropagation(); handleRoleChangeInitiate(user);}}
                 className="text-blue-600 hover:text-blue-800 text-xs"
@@ -568,7 +574,7 @@ const SuperAdminDashboard: React.FC = () => {
                 Edit
               </button>
             )}
-            {auth.username === user.username && user.role === 'super_admin' && users.filter(u => u.role === 'super_admin').length <= 1 && (
+            {auth.user?.username === user.username && user.role === 'super_admin' && users.filter(u => u.role === 'super_admin').length <= 1 && ( // Updated
               <span className="text-xs text-gray-400 italic">(Cannot change role - only Super Admin)</span>
             )}
           </div>
@@ -597,7 +603,7 @@ const SuperAdminDashboard: React.FC = () => {
             <button
               onClick={(e) => { e.stopPropagation(); handleDeactivate(user.id, user.username);}}
               className="text-yellow-600 hover:text-yellow-900 disabled:text-gray-400 text-xs"
-              disabled={auth.username === user.username && users.filter(u => u.role === 'super_admin' && u.is_active).length <= 1}
+              disabled={auth.user?.username === user.username && users.filter(u => u.role === 'super_admin' && u.is_active).length <= 1} // Updated
             >
               Deactivate
             </button>
@@ -612,12 +618,12 @@ const SuperAdminDashboard: React.FC = () => {
           <button
             onClick={(e) => { e.stopPropagation(); handleDelete(user.id, user.username);}}
             className="text-red-600 hover:text-red-900 disabled:text-gray-400 text-xs"
-            disabled={auth.username === user.username}
+              disabled={auth.user?.username === user.username} // Updated
           >
             Delete
           </button>
           {/* Force Password Reset Button */}
-          {user.role !== 'super_admin' && auth.username !== user.username && ( // Ensure not targeting super_admins or self
+          {user.role !== 'super_admin' && auth.user?.username !== user.username && ( // Updated: Ensure not targeting super_admins or self
             <button
               onClick={(e) => { e.stopPropagation(); handleForceResetPassword(user.id, user.username);}}
               className="text-purple-600 hover:text-purple-900 text-xs ml-2" // Added margin-left for spacing

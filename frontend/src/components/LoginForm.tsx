@@ -1,5 +1,6 @@
 // src/components/LoginForm.tsx
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom'; // Added
 import { Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { loginUser } from '../services/api';
@@ -17,6 +18,7 @@ const LoginForm: React.FC<LoginFormProps> = ({ onAuthSuccess, onToggleView }) =>
   // setError is removed, errors will be handled by toasts
   const [isLoading, setIsLoading] = useState(false);
   const auth = useAuth();
+  const navigate = useNavigate(); // Added
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,8 +44,20 @@ const LoginForm: React.FC<LoginFormProps> = ({ onAuthSuccess, onToggleView }) =>
         TOKEN_EXPIRY_SECONDS, 
         data.password_reset_required
       ); 
-      showSuccessToast("Login successful!"); // Added success toast
-      onAuthSuccess?.(requiresReset); 
+      showSuccessToast("Login successful!");
+      
+      // Call onAuthSuccess if provided (e.g., to close modal)
+      // It should ideally NOT handle navigation itself if this component does.
+      if (onAuthSuccess) {
+        onAuthSuccess(requiresReset);
+      }
+
+      // Perform navigation based on requiresReset
+      if (requiresReset) {
+        navigate('/force-change-password', { replace: true });
+      } else {
+        navigate('/', { replace: true }); // Navigate to homepage/dashboard
+      }
     } catch (err: any) {
       // Specific handling for maintenance mode
       if (err.response && err.response.status === 503 && err.response.data?.maintenance_mode_active === true) {

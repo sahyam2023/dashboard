@@ -146,11 +146,11 @@ function AppContent() {
             
             <Route 
               path="superadmin" 
-              element={auth.role === 'super_admin' ? <SuperAdminDashboard /> : <Navigate to="/documents" replace />} 
+              element={auth.user?.role === 'super_admin' ? <SuperAdminDashboard /> : <Navigate to="/documents" replace />} 
             />
             <Route 
               path="/admin" 
-              element={(auth.role === 'admin' || auth.role === 'super_admin') ? <AdminLayout /> : <Navigate to="/documents" replace />}
+              element={(auth.user?.role === 'admin' || auth.user?.role === 'super_admin') ? <AdminLayout /> : <Navigate to="/documents" replace />}
             >
               <Route path="dashboard" element={<AdminDashboardPage />} />
               <Route path="versions" element={<AdminVersionsPage />} />

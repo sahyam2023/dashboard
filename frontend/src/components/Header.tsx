@@ -17,7 +17,7 @@ interface HeaderProps {
 const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch }) => {
   const [searchValue, setSearchValue] = useState('');
   const [isFocused, setIsFocused] = useState(false);
-  const { isAuthenticated, username, role, logout, openAuthModal } = useAuth();
+  const { user, isAuthenticated, logout, openAuthModal } = useAuth(); // Updated
   const navigate = useNavigate();
   const { themeMode, toggleThemeMode } = useTheme(); // Theme context
 
@@ -105,7 +105,7 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
           {isAuthenticated ? (
             <>
               <span className="hidden sm:inline text-gray-700 dark:text-gray-300 font-medium">
-                Welcome, {username}!
+                Welcome, {user?.username || 'Guest'}!
               </span>
               <Link
                 to="/profile"
@@ -114,7 +114,7 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
                 aria-label="User Profile" 
               >
                 <User size={18} className="mr-1.5 text-gray-500 dark:text-gray-400" />
-                <span className="hidden lg:inline">{username}</span>
+                <span className="hidden lg:inline">{user?.username}</span>
               </Link>
               <Link
                 to="/profile"
@@ -123,7 +123,7 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
               >
                 <User size={22} />
               </Link>
-              {role === 'super_admin' && ( 
+              {user?.role === 'super_admin' && ( 
                 <Link
                   to="/superadmin"
                   className="px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 hidden md:inline-flex items-center focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-red-500 dark:focus:ring-red-400" 

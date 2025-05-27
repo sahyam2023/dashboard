@@ -28,8 +28,7 @@ interface OutletContextType {
 
 const MiscView: React.FC = () => {
   const { searchTerm, setSearchTerm } = useOutletContext<OutletContextType>();
-  const { isAuthenticated, user } = useAuth();
-  const role = user?.role; // Access role safely, as user can be null
+  const { isAuthenticated, role } = useAuth();
 
   const [categories, setCategories] = useState<MiscCategory[]>([]);
   const [isLoadingCategories, setIsLoadingCategories] = useState(true);
@@ -296,11 +295,15 @@ const MiscView: React.FC = () => {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                setSelectedMiscFileForComments(f);
-                setTimeout(() => commentSectionRef.current?.scrollIntoView({ behavior: 'smooth' }), 0);
+                if (selectedMiscFileForComments && selectedMiscFileForComments.id === f.id) {
+                  setSelectedMiscFileForComments(null);
+                } else {
+                  setSelectedMiscFileForComments(f);
+                  setTimeout(() => commentSectionRef.current?.scrollIntoView({ behavior: 'smooth' }), 0);
+                }
               }}
               className="p-1 text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 rounded-md"
-              title="View Comments"
+              title={selectedMiscFileForComments && selectedMiscFileForComments.id === f.id ? "Hide Comments" : "View Comments"}
             >
               <MessageSquare size={16} />
               <span className="ml-1 text-xs">({f.comment_count ?? 0})</span>
@@ -441,18 +444,10 @@ const MiscView: React.FC = () => {
       {/* Comment Section */}
       {isAuthenticated && selectedMiscFileForComments && (
         <div ref={commentSectionRef} className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-xl font-semibold text-gray-800 dark:text-white">
-              Comments for: <span className="font-bold text-blue-600 dark:text-blue-400">{selectedMiscFileForComments.user_provided_title || selectedMiscFileForComments.original_filename}</span>
-            </h3>
-            <button
-              onClick={() => setSelectedMiscFileForComments(null)}
-              className="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-              title="Close comments section"
-            >
-              Close Comments
-            </button>
-          </div>
+          {/* The close button that might have been here is removed as per instructions */}
+          <h3 className="text-xl font-semibold text-gray-800 dark:text-white mb-4">
+            Comments for: <span className="font-bold text-blue-600 dark:text-blue-400">{selectedMiscFileForComments.user_provided_title || selectedMiscFileForComments.original_filename}</span>
+          </h3>
           <CommentSection
             itemId={selectedMiscFileForComments.id}
             itemType="misc_file" // Ensure this matches backend expectations
@@ -460,15 +455,10 @@ const MiscView: React.FC = () => {
         </div>
       )}
       {!isAuthenticated && selectedMiscFileForComments && (
+        // This section might also have had a close button, ensure it's removed or was never there.
+        // Based on previous instructions, it likely had a close button.
         <div ref={commentSectionRef} className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700 text-center">
           <p className="text-gray-600 dark:text-gray-400">Please log in to view and manage comments.</p>
-          <button
-              onClick={() => setSelectedMiscFileForComments(null)}
-              className="mt-2 text-sm text-blue-500 hover:text-blue-700"
-              title="Close comments section"
-            >
-              Close
-            </button>
         </div>
       )}
     </div>

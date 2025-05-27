@@ -1,12 +1,13 @@
 // src/views/LinksView.tsx
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import {
   fetchLinks, fetchSoftware, fetchVersionsForSoftware, deleteAdminLink,
   PaginatedLinksResponse, addFavoriteApi, removeFavoriteApi, FavoriteItemType,
   bulkDeleteItems, bulkDownloadItems, bulkMoveItems, BulkItemType
 } from '../services/api';
-import { Link as LinkType, Software, SoftwareVersion } from '../types';
+import { Link as LinkType, Software, SoftwareVersion } from '../types'; // LinkType is already here
+import CommentSection from '../components/comments/CommentSection'; // Added CommentSection
 import DataTable, { ColumnDef } from '../components/DataTable';
 import FilterTabs from '../components/FilterTabs';
 import LoadingState from '../components/LoadingState'; 
@@ -15,7 +16,7 @@ import { useAuth } from '../context/AuthContext';
 import AdminLinkEntryForm from '../components/admin/AdminLinkEntryForm';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
 import Modal from '../components/shared/Modal';
-import { PlusCircle, Edit3, Trash2, ExternalLink, Star, Filter, ChevronUp, Link as LinkIconLucide, Download, Move, AlertTriangle } from 'lucide-react';
+import { PlusCircle, Edit3, Trash2, ExternalLink, Star, Filter, ChevronUp, Link as LinkIconLucide, Download, Move, AlertTriangle, MessageSquare } from 'lucide-react'; // Added MessageSquare
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils'; 
 
 interface OutletContextType {
@@ -25,7 +26,8 @@ interface OutletContextType {
 
 const LinksView: React.FC = () => {
   const { searchTerm, setSearchTerm } = useOutletContext<OutletContextType>();
-  const { isAuthenticated, role } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+const role = user?.role; // Access role safely, as user can be null
 
   const [links, setLinks] = useState<LinkType[]>([]);
   const [softwareList, setSoftwareList] = useState<Software[]>([]);
@@ -69,6 +71,10 @@ const LinksView: React.FC = () => {
   const [modalSelectedVersionId, setModalSelectedVersionId] = useState<number | null | undefined>(undefined);
   const [showBulkDeleteConfirmModal, setShowBulkDeleteConfirmModal] = useState<boolean>(false);
   const [isLoadingModalVersions, setIsLoadingModalVersions] = useState<boolean>(false);
+
+  // State for Comment Section
+  const [selectedLinkForComments, setSelectedLinkForComments] = useState<LinkType | null>(null);
+  const commentSectionRef = useRef<HTMLDivElement>(null);
   
   const filtersAreActive = useMemo(() => {
     return activeSoftwareId !== null || activeVersionId !== null || linkTypeFilter !== '' || createdFromFilter !== '' || createdToFilter !== '' || searchTerm !== '';
@@ -147,6 +153,9 @@ const LinksView: React.FC = () => {
   const handleDeleteLinkConfirm = async () => {
     if (!linkToDelete) return;
     setIsProcessingSingleItem(true);
+    if (selectedLinkForComments && selectedLinkForComments.id === linkToDelete.id) {
+      setSelectedLinkForComments(null);
+    }
     try {
       await deleteAdminLink(linkToDelete.id);
       showSuccessToast(`Link "${linkToDelete.title}" deleted.`);
@@ -167,6 +176,9 @@ const LinksView: React.FC = () => {
   const handleBulkDeleteLinksClick = () => { if (selectedLinkIds.size === 0) { showErrorToast("No items selected."); return; } setShowBulkDeleteConfirmModal(true); };
   const confirmBulkDeleteLinks = async () => {
     setShowBulkDeleteConfirmModal(false); setIsDeletingSelected(true);
+    if (selectedLinkForComments && selectedLinkIds.has(selectedLinkForComments.id)) {
+      setSelectedLinkForComments(null);
+    }
     try {
       const res = await bulkDeleteItems(Array.from(selectedLinkIds), 'link');
       showSuccessToast(res.msg || `${res.deleted_count} link(s) deleted.`);
@@ -264,7 +276,50 @@ const LinksView: React.FC = () => {
     { key: 'updated_by_username', header: 'Updated By', sortable: false, render: l => l.updated_by_username||'N/A' },
     { key: 'created_at', header: 'Created', sortable: true, render: l => l.created_at?new Date(l.created_at).toLocaleDateString('en-CA'):'-' },
     { key: 'updated_at', header: 'Updated', sortable: true, render: l => l.updated_at?new Date(l.updated_at).toLocaleDateString('en-CA'):'-' },
-    { key: 'actions' as any, header: 'Actions', render: (l: LinkType) => (<div className="flex space-x-1 items-center">{isAuthenticated&&(<button onClick={e=>{e.stopPropagation();handleFavoriteToggle(l,'link')}} className={`p-1 rounded-md ${favoritedItems.get(l.id)?.favoriteId?'text-yellow-500 hover:text-yellow-600':'text-gray-400 hover:text-yellow-500'}`} title={favoritedItems.get(l.id)?.favoriteId?"Remove Favorite":"Add Favorite"}><Star size={16} className={favoritedItems.get(l.id)?.favoriteId?"fill-current":""}/></button>)}{(role==='admin'||role==='super_admin')&&(<> <button onClick={e=>{e.stopPropagation();openEditForm(l)}} className="p-1 text-blue-600 hover:text-blue-800 rounded-md" title="Edit"><Edit3 size={16}/></button> <button onClick={e=>{e.stopPropagation();openDeleteConfirm(l)}} className="p-1 text-red-600 hover:text-red-800 rounded-md" title="Delete"><Trash2 size={16}/></button></>)}</div>)},
+    { 
+      key: 'actions' as any, 
+      header: 'Actions', 
+      render: (l: LinkType) => (
+        <div className="flex space-x-1 items-center">
+          {isAuthenticated && (
+            <button 
+              onClick={(e) => { 
+                e.stopPropagation(); 
+                handleFavoriteToggle(l, 'link');
+              }} 
+              className={`p-1 rounded-md ${favoritedItems.get(l.id)?.favoriteId ? 'text-yellow-500 hover:text-yellow-600' : 'text-gray-400 hover:text-yellow-500'}`} 
+              title={favoritedItems.get(l.id)?.favoriteId ? "Remove Favorite" : "Add Favorite"}
+            >
+              <Star size={16} className={favoritedItems.get(l.id)?.favoriteId ? "fill-current" : ""} />
+            </button>
+          )}
+          {isAuthenticated && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedLinkForComments(l);
+                setTimeout(() => commentSectionRef.current?.scrollIntoView({ behavior: 'smooth' }), 0);
+              }}
+              className="p-1 text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 rounded-md"
+              title="View Comments"
+            >
+              <MessageSquare size={16} />
+              <span className="ml-1 text-xs">({l.comment_count ?? 0})</span>
+            </button>
+          )}
+          {(role === 'admin' || role === 'super_admin') && (
+            <>
+              <button onClick={e => { e.stopPropagation(); openEditForm(l); }} className="p-1 text-blue-600 hover:text-blue-800 rounded-md" title="Edit">
+                <Edit3 size={16} />
+              </button>
+              <button onClick={e => { e.stopPropagation(); openDeleteConfirm(l); }} className="p-1 text-red-600 hover:text-red-800 rounded-md" title="Delete">
+                <Trash2 size={16} />
+              </button>
+            </>
+          )}
+        </div>
+      )
+    },
   ];
   
   const loadLinksCallback = useCallback(() => { fetchAndSetLinks(1, true); }, [fetchAndSetLinks]);
@@ -420,6 +475,40 @@ const LinksView: React.FC = () => {
             </div>
           </div>
         </Modal>
+      )}
+
+      {/* Comment Section */}
+      {isAuthenticated && selectedLinkForComments && (
+        <div ref={commentSectionRef} className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-xl font-semibold text-gray-800 dark:text-white">
+              Comments for: <span className="font-bold text-blue-600 dark:text-blue-400">{selectedLinkForComments.title}</span>
+            </h3>
+            <button
+              onClick={() => setSelectedLinkForComments(null)}
+              className="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              title="Close comments section"
+            >
+              Close Comments
+            </button>
+          </div>
+          <CommentSection
+            itemId={selectedLinkForComments.id}
+            itemType="link"
+          />
+        </div>
+      )}
+      {!isAuthenticated && selectedLinkForComments && (
+        <div ref={commentSectionRef} className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700 text-center">
+          <p className="text-gray-600 dark:text-gray-400">Please log in to view and manage comments.</p>
+           <button
+              onClick={() => setSelectedLinkForComments(null)}
+              className="mt-2 text-sm text-blue-500 hover:text-blue-700"
+              title="Close comments section"
+            >
+              Close
+            </button>
+        </div>
       )}
     </div>
   );

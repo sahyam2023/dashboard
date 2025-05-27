@@ -1,7 +1,7 @@
 // src/views/PatchesView.tsx
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { ExternalLink, PlusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Download, Move, AlertTriangle, Package as PackageIcon } from 'lucide-react';
+import { ExternalLink, PlusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Download, Move, AlertTriangle, Package as PackageIcon, MessageSquare } from 'lucide-react';
 import { 
   fetchPatches, 
   fetchSoftware, 
@@ -17,6 +17,7 @@ import {
   BulkItemType,
 } from '../services/api';
 import { Patch as PatchType, Software, SoftwareVersion } from '../types';
+import CommentSection from '../components/comments/CommentSection'; // Added CommentSection
 import DataTable, { ColumnDef } from '../components/DataTable';
 import FilterTabs from '../components/FilterTabs';
 import LoadingState from '../components/LoadingState';
@@ -34,7 +35,8 @@ interface OutletContextType {
 
 const PatchesView: React.FC = () => {
   const { searchTerm, setSearchTerm } = useOutletContext<OutletContextType>();
-  const { isAuthenticated, role } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+  const role = user?.role; // Access role safely, as user can be null
 
   const [patches, setPatches] = useState<PatchType[]>([]);
   const [softwareList, setSoftwareList] = useState<Software[]>([]);
@@ -75,6 +77,10 @@ const PatchesView: React.FC = () => {
   const [modalSelectedVersionId, setModalSelectedVersionId] = useState<number | null>(null);
   const [showBulkDeleteConfirmModal, setShowBulkDeleteConfirmModal] = useState<boolean>(false);
   const [isLoadingModalVersions, setIsLoadingModalVersions] = useState<boolean>(false);
+
+  // State for Comment Section
+  const [selectedPatchForComments, setSelectedPatchForComments] = useState<PatchType | null>(null);
+  const commentSectionRef = useRef<HTMLDivElement>(null);
 
   const filtersAreActive = useMemo(() => {
     return (
@@ -181,6 +187,9 @@ const PatchesView: React.FC = () => {
   const handleDeleteConfirm = async () => {
     if (!patchToDelete) return;
     setIsProcessingSingleItem(true);
+    if (selectedPatchForComments && selectedPatchForComments.id === patchToDelete.id) {
+      setSelectedPatchForComments(null);
+    }
     try {
       await deleteAdminPatch(patchToDelete.id);
       showSuccessToast(`Patch "${patchToDelete.patch_name}" deleted.`);
@@ -206,6 +215,9 @@ const PatchesView: React.FC = () => {
   const handleBulkDeleteClick = () => { if (selectedPatchIds.size === 0) { showErrorToast("No items selected."); return; } setShowBulkDeleteConfirmModal(true); };
   const confirmBulkDeletePatches = async () => {
     setShowBulkDeleteConfirmModal(false); setIsDeletingSelected(true);
+    if (selectedPatchForComments && selectedPatchIds.has(selectedPatchForComments.id)) {
+      setSelectedPatchForComments(null);
+    }
     try {
       const res = await bulkDeleteItems(Array.from(selectedPatchIds), 'patch');
       showSuccessToast(res.msg || `${res.deleted_count} patch(es) deleted.`);
@@ -283,7 +295,50 @@ const PatchesView: React.FC = () => {
     { key: 'updated_by_username', header: 'Updated By', sortable: false, render: p => p.updated_by_username||'N/A' },
     { key: 'created_at', header: 'Created At', sortable: true, render: p => formatDate(p.created_at) },
     { key: 'updated_at', header: 'Updated At', sortable: true, render: p => formatDate(p.updated_at) },
-    { key: 'actions' as any, header: 'Actions', render: (p: PatchType) => (<div className="flex space-x-1 items-center">{isAuthenticated&&(<button onClick={e=>{e.stopPropagation();handleFavoriteToggle(p,'patch')}} className={`p-1 rounded-md ${favoritedItems.get(p.id)?.favoriteId?'text-yellow-500 hover:text-yellow-600':'text-gray-400 hover:text-yellow-500'}`} title={favoritedItems.get(p.id)?.favoriteId?"Remove Favorite":"Add Favorite"}><Star size={16} className={favoritedItems.get(p.id)?.favoriteId?"fill-current":""}/></button>)}{(role==='admin'||role==='super_admin')&&(<> <button onClick={e=>{e.stopPropagation();openEditForm(p)}} className="p-1 text-blue-600 hover:text-blue-800 rounded-md" title="Edit"><Edit3 size={16}/></button> <button onClick={e=>{e.stopPropagation();openDeleteConfirm(p)}} className="p-1 text-red-600 hover:text-red-800 rounded-md" title="Delete"><Trash2 size={16}/></button></>)}</div>)},
+    { 
+      key: 'actions' as any, 
+      header: 'Actions', 
+      render: (p: PatchType) => (
+        <div className="flex space-x-1 items-center">
+          {isAuthenticated && (
+            <button 
+              onClick={(e) => { 
+                e.stopPropagation(); 
+                handleFavoriteToggle(p, 'patch');
+              }} 
+              className={`p-1 rounded-md ${favoritedItems.get(p.id)?.favoriteId ? 'text-yellow-500 hover:text-yellow-600' : 'text-gray-400 hover:text-yellow-500'}`} 
+              title={favoritedItems.get(p.id)?.favoriteId ? "Remove Favorite" : "Add Favorite"}
+            >
+              <Star size={16} className={favoritedItems.get(p.id)?.favoriteId ? "fill-current" : ""} />
+            </button>
+          )}
+          {isAuthenticated && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedPatchForComments(p);
+                setTimeout(() => commentSectionRef.current?.scrollIntoView({ behavior: 'smooth' }), 0);
+              }}
+              className="p-1 text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 rounded-md"
+              title="View Comments"
+            >
+              <MessageSquare size={16} />
+              <span className="ml-1 text-xs">({p.comment_count ?? 0})</span>
+            </button>
+          )}
+          {(role === 'admin' || role === 'super_admin') && (
+            <>
+              <button onClick={e => { e.stopPropagation(); openEditForm(p); }} className="p-1 text-blue-600 hover:text-blue-800 rounded-md" title="Edit">
+                <Edit3 size={16} />
+              </button>
+              <button onClick={e => { e.stopPropagation(); openDeleteConfirm(p); }} className="p-1 text-red-600 hover:text-red-800 rounded-md" title="Delete">
+                <Trash2 size={16} />
+              </button>
+            </>
+          )}
+        </div>
+      )
+    },
   ];
   
   const loadPatchesCallback = useCallback(() => { fetchAndSetPatches(1, true); }, [fetchAndSetPatches]);
@@ -395,6 +450,39 @@ const PatchesView: React.FC = () => {
             </div>
           </div>
         </Modal>
+      )}
+
+      {/* Comment Section */}
+      {isAuthenticated && selectedPatchForComments && (
+        <div ref={commentSectionRef} className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-xl font-semibold text-gray-800 dark:text-white">
+              Comments for: <span className="font-bold text-blue-600 dark:text-blue-400">{selectedPatchForComments.patch_name}</span>
+            </h3>
+            <button 
+              onClick={() => setSelectedPatchForComments(null)} 
+              className="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              title="Close comments section"
+            >
+              Close
+            </button>
+          </div>
+          <CommentSection
+            itemId={selectedPatchForComments.id}
+            itemType="patch"
+          />
+        </div>
+      )}
+      {!isAuthenticated && selectedPatchForComments && (
+        <div ref={commentSectionRef} className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700 text-center">
+          <p className="text-gray-600 dark:text-gray-400">Please log in to view and manage comments.</p>
+          <button 
+            onClick={() => setSelectedPatchForComments(null)} 
+            className="mt-2 text-sm text-blue-500 hover:text-blue-700"
+          >
+            Close
+          </button>
+        </div>
       )}
     </div>
   );

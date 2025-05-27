@@ -30,8 +30,18 @@ const LoginForm: React.FC<LoginFormProps> = ({ onAuthSuccess, onToggleView }) =>
     }
 
     try {
-      const data = await loginUser({ username, password }); 
-      const requiresReset = auth.login(data.access_token, data.username, data.role, 900, data.password_reset_required); 
+      const data = await loginUser({ username, password });
+      // TOKEN_EXPIRY_SECONDS should match the expectation in AuthContext.
+      // The backend doesn't send expiresIn, so frontend defines it for AuthContext.
+      const TOKEN_EXPIRY_SECONDS = 3600; // 1 hour
+      const requiresReset = auth.login(
+        data.access_token, 
+        data.username, 
+        data.role, 
+        data.user_id, // Pass user_id here
+        TOKEN_EXPIRY_SECONDS, 
+        data.password_reset_required
+      ); 
       showSuccessToast("Login successful!"); // Added success toast
       onAuthSuccess?.(requiresReset); 
     } catch (err: any) {

@@ -1197,6 +1197,7 @@ def login():
             access_token=access_token, 
             username=user['username'], 
             role=user['role'],
+            user_id=user['id'], # Added
             password_reset_required=password_reset_required
         ), 200
     
@@ -1452,7 +1453,7 @@ def get_all_documents_api():
         sort_order = 'asc'
 
     # Construct Base Query and Parameters for Filtering
-    base_query_select_fields = "d.id, d.software_id, d.doc_name, d.description, d.doc_type, d.is_external_link, d.download_link, d.stored_filename, d.original_filename_ref, d.file_size, d.file_type, d.created_by_user_id, u.username as uploaded_by_username, d.created_at, d.updated_by_user_id, upd_u.username as updated_by_username, d.updated_at, s.name as software_name"
+    base_query_select_fields = "d.id, d.software_id, d.doc_name, d.description, d.doc_type, d.is_external_link, d.download_link, d.stored_filename, d.original_filename_ref, d.file_size, d.file_type, d.created_by_user_id, u.username as uploaded_by_username, d.created_at, d.updated_by_user_id, upd_u.username as updated_by_username, d.updated_at, s.name as software_name, (SELECT COUNT(*) FROM comments c WHERE c.item_id = d.id AND c.item_type = 'document' AND c.parent_comment_id IS NULL) as comment_count"
     base_query_from = "FROM documents d JOIN software s ON d.software_id = s.id LEFT JOIN users u ON d.created_by_user_id = u.id LEFT JOIN users upd_u ON d.updated_by_user_id = upd_u.id"
     
     params = [] # Parameters for the WHERE clause
@@ -1469,7 +1470,7 @@ def get_all_documents_api():
         app.logger.error(f"Error getting user_id in get_all_documents_api: {e}")
 
     # Base query components
-    base_query_select_fields_with_aliases = "d.id, d.software_id, d.doc_name, d.description, d.doc_type, d.is_external_link, d.download_link, d.stored_filename, d.original_filename_ref, d.file_size, d.file_type, d.created_by_user_id, u.username as uploaded_by_username, d.created_at, d.updated_by_user_id, upd_u.username as updated_by_username, d.updated_at, s.name as software_name"
+    base_query_select_fields_with_aliases = "d.id, d.software_id, d.doc_name, d.description, d.doc_type, d.is_external_link, d.download_link, d.stored_filename, d.original_filename_ref, d.file_size, d.file_type, d.created_by_user_id, u.username as uploaded_by_username, d.created_at, d.updated_by_user_id, upd_u.username as updated_by_username, d.updated_at, s.name as software_name, (SELECT COUNT(*) FROM comments c WHERE c.item_id = d.id AND c.item_type = 'document' AND c.parent_comment_id IS NULL) as comment_count"
     
     # --- PERMISSION MODEL CHANGE ---
     # SQL conditions based on "default allow, explicit deny"
@@ -1627,7 +1628,7 @@ def get_all_patches_api():
         sort_order = 'asc'
 
     # Construct Base Query and Parameters for Filtering
-    base_query_select_fields = "p.id, p.version_id, p.patch_name, p.description, p.release_date, p.is_external_link, p.download_link, p.stored_filename, p.original_filename_ref, p.file_size, p.file_type, p.patch_by_developer, p.created_by_user_id, u.username as uploaded_by_username, p.created_at, p.updated_by_user_id, upd_u.username as updated_by_username, p.updated_at, s.name as software_name, s.id as software_id, v.version_number"
+    base_query_select_fields = "p.id, p.version_id, p.patch_name, p.description, p.release_date, p.is_external_link, p.download_link, p.stored_filename, p.original_filename_ref, p.file_size, p.file_type, p.patch_by_developer, p.created_by_user_id, u.username as uploaded_by_username, p.created_at, p.updated_by_user_id, upd_u.username as updated_by_username, p.updated_at, s.name as software_name, s.id as software_id, v.version_number, (SELECT COUNT(*) FROM comments c WHERE c.item_id = p.id AND c.item_type = 'patch' AND c.parent_comment_id IS NULL) as comment_count"
     base_query_from = "FROM patches p JOIN versions v ON p.version_id = v.id JOIN software s ON v.software_id = s.id LEFT JOIN users u ON p.created_by_user_id = u.id LEFT JOIN users upd_u ON p.updated_by_user_id = upd_u.id"
     
     params = [] 
@@ -1644,7 +1645,7 @@ def get_all_patches_api():
         app.logger.error(f"Error getting user_id in get_all_patches_api: {e}")
 
     # Base query components
-    base_query_select_fields_with_aliases = "p.id, p.version_id, p.patch_name, p.description, p.release_date, p.is_external_link, p.download_link, p.stored_filename, p.original_filename_ref, p.file_size, p.file_type, p.patch_by_developer, p.created_by_user_id, u.username as uploaded_by_username, p.created_at, p.updated_by_user_id, upd_u.username as updated_by_username, p.updated_at, s.name as software_name, s.id as software_id, v.version_number"
+    base_query_select_fields_with_aliases = "p.id, p.version_id, p.patch_name, p.description, p.release_date, p.is_external_link, p.download_link, p.stored_filename, p.original_filename_ref, p.file_size, p.file_type, p.patch_by_developer, p.created_by_user_id, u.username as uploaded_by_username, p.created_at, p.updated_by_user_id, upd_u.username as updated_by_username, p.updated_at, s.name as software_name, s.id as software_id, v.version_number, (SELECT COUNT(*) FROM comments c WHERE c.item_id = p.id AND c.item_type = 'patch' AND c.parent_comment_id IS NULL) as comment_count"
 
     # --- PERMISSION MODEL CHANGE ---
     if logged_in_user_id:
@@ -1784,7 +1785,7 @@ def get_all_links_api():
         sort_order = 'asc'
 
     # Construct Base Query and Parameters for Filtering
-    base_query_select_fields = "l.id, l.title, l.description, l.software_id, l.version_id, l.is_external_link, l.url, l.stored_filename, l.original_filename_ref, l.file_size, l.file_type, l.created_by_user_id, u.username as uploaded_by_username, l.created_at, l.updated_by_user_id, upd_u.username as updated_by_username, l.updated_at, s.name as software_name, v.version_number as version_name"
+    base_query_select_fields = "l.id, l.title, l.description, l.software_id, l.version_id, l.is_external_link, l.url, l.stored_filename, l.original_filename_ref, l.file_size, l.file_type, l.created_by_user_id, u.username as uploaded_by_username, l.created_at, l.updated_by_user_id, upd_u.username as updated_by_username, l.updated_at, s.name as software_name, v.version_number as version_name, (SELECT COUNT(*) FROM comments c WHERE c.item_id = l.id AND c.item_type = 'link' AND c.parent_comment_id IS NULL) as comment_count"
     base_query_from = "FROM links l JOIN software s ON l.software_id = s.id LEFT JOIN versions v ON l.version_id = v.id LEFT JOIN users u ON l.created_by_user_id = u.id LEFT JOIN users upd_u ON l.updated_by_user_id = upd_u.id"
     
     params = []
@@ -1801,7 +1802,7 @@ def get_all_links_api():
         app.logger.error(f"Error getting user_id in get_all_links_api: {e}")
 
     # Base query components
-    base_query_select_fields_with_aliases = "l.id, l.title, l.description, l.software_id, l.version_id, l.is_external_link, l.url, l.stored_filename, l.original_filename_ref, l.file_size, l.file_type, l.created_by_user_id, u.username as uploaded_by_username, l.created_at, l.updated_by_user_id, upd_u.username as updated_by_username, l.updated_at, s.name as software_name, v.version_number as version_name"
+    base_query_select_fields_with_aliases = "l.id, l.title, l.description, l.software_id, l.version_id, l.is_external_link, l.url, l.stored_filename, l.original_filename_ref, l.file_size, l.file_type, l.created_by_user_id, u.username as uploaded_by_username, l.created_at, l.updated_by_user_id, upd_u.username as updated_by_username, l.updated_at, s.name as software_name, v.version_number as version_name, (SELECT COUNT(*) FROM comments c WHERE c.item_id = l.id AND c.item_type = 'link' AND c.parent_comment_id IS NULL) as comment_count"
     
     # --- PERMISSION MODEL CHANGE ---
     if logged_in_user_id:
@@ -1943,7 +1944,7 @@ def get_all_misc_files_api():
         sort_order = 'asc'
 
     # Construct Base Query and Parameters for Filtering
-    base_query_select_fields = "mf.id, mf.misc_category_id, mf.user_id, mf.user_provided_title, mf.user_provided_description, mf.original_filename, mf.stored_filename, mf.file_path, mf.file_type, mf.file_size, mf.created_by_user_id, u.username as uploaded_by_username, mf.created_at, mf.updated_by_user_id, upd_u.username as updated_by_username, mf.updated_at, mc.name as category_name"
+    base_query_select_fields = "mf.id, mf.misc_category_id, mf.user_id, mf.user_provided_title, mf.user_provided_description, mf.original_filename, mf.stored_filename, mf.file_path, mf.file_type, mf.file_size, mf.created_by_user_id, u.username as uploaded_by_username, mf.created_at, mf.updated_by_user_id, upd_u.username as updated_by_username, mf.updated_at, mc.name as category_name, (SELECT COUNT(*) FROM comments c WHERE c.item_id = mf.id AND c.item_type = 'misc_file' AND c.parent_comment_id IS NULL) as comment_count"
     base_query_from = "FROM misc_files mf JOIN misc_categories mc ON mf.misc_category_id = mc.id LEFT JOIN users u ON mf.created_by_user_id = u.id LEFT JOIN users upd_u ON mf.updated_by_user_id = upd_u.id"
     
     params = []
@@ -1960,7 +1961,7 @@ def get_all_misc_files_api():
         app.logger.error(f"Error getting user_id in get_all_misc_files_api: {e}")
 
     # Base query components
-    base_query_select_fields_with_aliases = "mf.id, mf.misc_category_id, mf.user_id, mf.user_provided_title, mf.user_provided_description, mf.original_filename, mf.stored_filename, mf.file_path, mf.file_type, mf.file_size, mf.created_by_user_id, u.username as uploaded_by_username, mf.created_at, mf.updated_by_user_id, upd_u.username as updated_by_username, mf.updated_at, mc.name as category_name"
+    base_query_select_fields_with_aliases = "mf.id, mf.misc_category_id, mf.user_id, mf.user_provided_title, mf.user_provided_description, mf.original_filename, mf.stored_filename, mf.file_path, mf.file_type, mf.file_size, mf.created_by_user_id, u.username as uploaded_by_username, mf.created_at, mf.updated_by_user_id, upd_u.username as updated_by_username, mf.updated_at, mc.name as category_name, (SELECT COUNT(*) FROM comments c WHERE c.item_id = mf.id AND c.item_type = 'misc_file' AND c.parent_comment_id IS NULL) as comment_count"
 
     # --- PERMISSION MODEL CHANGE ---
     if logged_in_user_id:
@@ -4585,7 +4586,7 @@ def search_api():
         app.logger.error(f"Error getting user_id in search: {e}")
 
     # Documents
-    doc_select_base = "SELECT d.id, d.doc_name AS name, d.description, 'document' AS type"
+    doc_select_base = "SELECT d.id, d.doc_name AS name, d.description, 'document' AS type, (SELECT COUNT(*) FROM comments c WHERE c.item_id = d.id AND c.item_type = 'document' AND c.parent_comment_id IS NULL) as comment_count"
     # --- PERMISSION MODEL CHANGE for SEARCH ---
     # Using final revised explicit conditions:
     # View: (fp.id IS NULL OR fp.can_view = 1)
@@ -4613,7 +4614,7 @@ def search_api():
     results.extend([dict(row) for row in db.execute(sql_documents, tuple(doc_params)).fetchall()])
 
     # Patches
-    patch_select_base = "SELECT p.id, p.patch_name AS name, p.description, 'patch' AS type"
+    patch_select_base = "SELECT p.id, p.patch_name AS name, p.description, 'patch' AS type, (SELECT COUNT(*) FROM comments c WHERE c.item_id = p.id AND c.item_type = 'patch' AND c.parent_comment_id IS NULL) as comment_count"
     patch_from_base = "FROM patches p LEFT JOIN file_permissions fp ON p.id = fp.file_id AND fp.file_type = 'patch' AND fp.user_id = ?"
     patch_params = [logged_in_user_id, like_query_term, like_query_term]
     patch_where_base = "(fp.id IS NULL OR fp.can_view IS NOT FALSE) AND (LOWER(p.patch_name) LIKE ? OR LOWER(p.description) LIKE ?)" # Standardized view condition
@@ -4633,7 +4634,7 @@ def search_api():
     results.extend([dict(row) for row in db.execute(sql_patches, tuple(patch_params)).fetchall()])
 
     # Links
-    link_select_base = "SELECT l.id, l.title AS name, l.description, l.url, l.is_external_link, l.stored_filename, 'link' AS type"
+    link_select_base = "SELECT l.id, l.title AS name, l.description, l.url, l.is_external_link, l.stored_filename, 'link' AS type, (SELECT COUNT(*) FROM comments c WHERE c.item_id = l.id AND c.item_type = 'link' AND c.parent_comment_id IS NULL) as comment_count"
     link_from_base = "FROM links l LEFT JOIN file_permissions fp ON l.id = fp.file_id AND fp.file_type = 'link' AND fp.user_id = ?"
     link_params = [logged_in_user_id, like_query_term, like_query_term, like_query_term]
     link_where_base = "(fp.id IS NULL OR fp.can_view IS NOT FALSE) AND (LOWER(l.title) LIKE ? OR LOWER(l.description) LIKE ? OR LOWER(l.url) LIKE ?)" # Standardized view condition
@@ -4653,7 +4654,7 @@ def search_api():
     results.extend([dict(row) for row in db.execute(sql_links, tuple(link_params)).fetchall()])
 
     # Misc Files
-    misc_select_base = "SELECT mf.id, mf.user_provided_title AS name, mf.original_filename, mf.user_provided_description AS description, mf.stored_filename, 'misc_file' AS type"
+    misc_select_base = "SELECT mf.id, mf.user_provided_title AS name, mf.original_filename, mf.user_provided_description AS description, mf.stored_filename, 'misc_file' AS type, (SELECT COUNT(*) FROM comments c WHERE c.item_id = mf.id AND c.item_type = 'misc_file' AND c.parent_comment_id IS NULL) as comment_count"
     misc_from_base = "FROM misc_files mf LEFT JOIN file_permissions fp ON mf.id = fp.file_id AND fp.file_type = 'misc_file' AND fp.user_id = ?"
     misc_params = [logged_in_user_id, like_query_term, like_query_term, like_query_term]
     misc_where_base = "(fp.id IS NULL OR fp.can_view IS NOT FALSE) AND (LOWER(mf.user_provided_title) LIKE ? OR LOWER(mf.user_provided_description) LIKE ? OR LOWER(mf.original_filename) LIKE ?)" # Standardized view condition

@@ -48,7 +48,7 @@ const CommentSection: React.FC<CommentSectionProps> = ({ itemId, itemType }) => 
       setIsLoading(false);
       if (isInitialLoading) setIsInitialLoading(false);
     }
-  }, [itemId, itemType, isInitialLoading]);
+  }, [itemId, itemType]);
 
   useEffect(() => {
     setIsInitialLoading(true); // Reset for item changes

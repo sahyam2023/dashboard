@@ -49,6 +49,7 @@ export interface Document {
   is_favorited?: boolean;
   favorite_id?: number;
   is_downloadable?: boolean;
+  comment_count?: number;
 }
 
 // --- Patch Types ---
@@ -80,6 +81,7 @@ export interface Patch {
   is_favorited?: boolean;
   favorite_id?: number;
   is_downloadable?: boolean;
+  comment_count?: number;
 }
 
 // --- Link Types ---
@@ -109,6 +111,7 @@ export interface Link {
   is_favorited?: boolean;
   favorite_id?: number;
   is_downloadable?: boolean;
+  comment_count?: number;
   // category?: string; // Removed as it's not in the current backend schema for links
 }
 
@@ -140,6 +143,7 @@ export interface AuthResponse {
   access_token: string;
   username: string;
   role: string;
+  user_id: number; // Added
   password_reset_required?: boolean; // Added this line
 }
 
@@ -236,6 +240,7 @@ export interface MiscFile {
   is_favorited?: boolean;
   favorite_id?: number;
   is_downloadable?: boolean;
+  comment_count?: number;
 }
 // No specific EditMiscFilePayload type is defined here as edit operations for misc files
 // (like replacing the file or changing metadata) will likely use FormData via editAdminMiscFile.

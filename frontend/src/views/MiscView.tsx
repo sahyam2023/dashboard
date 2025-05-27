@@ -1,5 +1,5 @@
 // src/views/MiscView.tsx
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'; // Added useRef
 import { useOutletContext } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -7,7 +7,8 @@ import {
   PaginatedMiscFilesResponse, addFavoriteApi, removeFavoriteApi, FavoriteItemType,
   bulkDeleteItems, bulkDownloadItems, bulkMoveItems, BulkItemType
 } from '../services/api';
-import { MiscCategory, MiscFile } from '../types';
+import { MiscCategory, MiscFile } from '../types'; // MiscFile is already here
+import CommentSection from '../components/comments/CommentSection'; // Added CommentSection
 import DataTable, { ColumnDef } from '../components/DataTable';
 import ErrorState from '../components/ErrorState';
 import LoadingState from '../components/LoadingState';
@@ -15,7 +16,7 @@ import AdminUploadToMiscForm from '../components/admin/AdminUploadToMiscForm'; /
 import AdminMiscCategoryForm from '../components/admin/AdminMiscCategoryForm';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
 import Modal from '../components/shared/Modal';
-import { Download, FileText as FileIconLucide, PlusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Archive as ArchiveIcon, Move, AlertTriangle } from 'lucide-react';
+import { Download, FileText as FileIconLucide, PlusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Archive as ArchiveIcon, Move, AlertTriangle, MessageSquare } from 'lucide-react'; // Added MessageSquare
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils'; 
 
 const API_BASE_URL = 'http://127.0.0.1:7000'; // Not actively used for constructing URLs here
@@ -27,7 +28,8 @@ interface OutletContextType {
 
 const MiscView: React.FC = () => {
   const { searchTerm, setSearchTerm } = useOutletContext<OutletContextType>();
-  const { isAuthenticated, role } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+  const role = user?.role; // Access role safely, as user can be null
 
   const [categories, setCategories] = useState<MiscCategory[]>([]);
   const [isLoadingCategories, setIsLoadingCategories] = useState(true);
@@ -69,6 +71,10 @@ const MiscView: React.FC = () => {
   const [showBulkMoveModal, setShowBulkMoveModal] = useState<boolean>(false);
   const [modalSelectedCategoryId, setModalSelectedCategoryId] = useState<number | null>(null);
   const [showBulkDeleteConfirmModal, setShowBulkDeleteConfirmModal] = useState<boolean>(false);
+
+  // State for Comment Section
+  const [selectedMiscFileForComments, setSelectedMiscFileForComments] = useState<MiscFile | null>(null);
+  const commentSectionRef = useRef<HTMLDivElement>(null);
 
   const filtersAreActive = useMemo(() => {
     return activeCategoryId !== null || searchTerm !== '';
@@ -164,6 +170,9 @@ const MiscView: React.FC = () => {
   const handleDeleteFileConfirm = async () => {
     if (!fileToDelete) return;
     setIsProcessingSingleItem(true);
+    if (selectedMiscFileForComments && selectedMiscFileForComments.id === fileToDelete.id) {
+      setSelectedMiscFileForComments(null);
+    }
     try {
       await deleteAdminMiscFile(fileToDelete.id);
       showSuccessToast(`File "${fileToDelete.user_provided_title || fileToDelete.original_filename}" deleted.`);
@@ -184,6 +193,9 @@ const MiscView: React.FC = () => {
   const handleBulkDeleteMiscFilesClick = () => { if (selectedMiscFileIds.size === 0) { showErrorToast("No items selected."); return; } setShowBulkDeleteConfirmModal(true); };
   const confirmBulkDeleteMiscFiles = async () => {
     setShowBulkDeleteConfirmModal(false); setIsDeletingSelected(true);
+    if (selectedMiscFileForComments && selectedMiscFileIds.has(selectedMiscFileForComments.id)) {
+      setSelectedMiscFileForComments(null);
+    }
     try {
       const res = await bulkDeleteItems(Array.from(selectedMiscFileIds), 'misc_file');
       showSuccessToast(res.msg || `${res.deleted_count} file(s) deleted.`);
@@ -263,7 +275,50 @@ const MiscView: React.FC = () => {
         );
       }
     },
-    { key: 'actions' as any, header: 'Actions', render: (f: MiscFile) => (<div className="flex space-x-1 items-center">{isAuthenticated&&(<button onClick={e=>{e.stopPropagation();handleFavoriteToggle(f,'misc_file')}} className={`p-1 rounded-md ${favoritedItems.get(f.id)?.favoriteId?'text-yellow-500 hover:text-yellow-600':'text-gray-400 hover:text-yellow-500'}`} title={favoritedItems.get(f.id)?.favoriteId?"Remove Favorite":"Add Favorite"}><Star size={16} className={favoritedItems.get(f.id)?.favoriteId?"fill-current":""}/></button>)}{(role==='admin'||role==='super_admin')&&(<> <button onClick={e=>{e.stopPropagation();openAddOrEditFileForm(f)}} className="p-1 text-blue-600 hover:text-blue-800 rounded-md" title="Edit"><Edit3 size={16}/></button> <button onClick={e=>{e.stopPropagation();openDeleteFileConfirm(f)}} className="p-1 text-red-600 hover:text-red-800 rounded-md" title="Delete"><Trash2 size={16}/></button></>)}</div>)},
+    { 
+      key: 'actions' as any, 
+      header: 'Actions', 
+      render: (f: MiscFile) => (
+        <div className="flex space-x-1 items-center">
+          {isAuthenticated && (
+            <button 
+              onClick={(e) => { 
+                e.stopPropagation(); 
+                handleFavoriteToggle(f, 'misc_file');
+              }} 
+              className={`p-1 rounded-md ${favoritedItems.get(f.id)?.favoriteId ? 'text-yellow-500 hover:text-yellow-600' : 'text-gray-400 hover:text-yellow-500'}`} 
+              title={favoritedItems.get(f.id)?.favoriteId ? "Remove Favorite" : "Add Favorite"}
+            >
+              <Star size={16} className={favoritedItems.get(f.id)?.favoriteId ? "fill-current" : ""} />
+            </button>
+          )}
+          {isAuthenticated && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedMiscFileForComments(f);
+                setTimeout(() => commentSectionRef.current?.scrollIntoView({ behavior: 'smooth' }), 0);
+              }}
+              className="p-1 text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 rounded-md"
+              title="View Comments"
+            >
+              <MessageSquare size={16} />
+              <span className="ml-1 text-xs">({f.comment_count ?? 0})</span>
+            </button>
+          )}
+          {(role === 'admin' || role === 'super_admin') && (
+            <>
+              <button onClick={e => { e.stopPropagation(); openAddOrEditFileForm(f); }} className="p-1 text-blue-600 hover:text-blue-800 rounded-md" title="Edit">
+                <Edit3 size={16} />
+              </button>
+              <button onClick={e => { e.stopPropagation(); openDeleteFileConfirm(f); }} className="p-1 text-red-600 hover:text-red-800 rounded-md" title="Delete">
+                <Trash2 size={16} />
+              </button>
+            </>
+          )}
+        </div>
+      )
+    },
   ];
   const loadMiscFilesCallback = useCallback(() => { fetchAndSetMiscFiles(1, true); }, [fetchAndSetMiscFiles]);
 
@@ -381,6 +436,40 @@ const MiscView: React.FC = () => {
             </div>
           </div>
         </Modal>
+      )}
+
+      {/* Comment Section */}
+      {isAuthenticated && selectedMiscFileForComments && (
+        <div ref={commentSectionRef} className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-xl font-semibold text-gray-800 dark:text-white">
+              Comments for: <span className="font-bold text-blue-600 dark:text-blue-400">{selectedMiscFileForComments.user_provided_title || selectedMiscFileForComments.original_filename}</span>
+            </h3>
+            <button
+              onClick={() => setSelectedMiscFileForComments(null)}
+              className="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              title="Close comments section"
+            >
+              Close Comments
+            </button>
+          </div>
+          <CommentSection
+            itemId={selectedMiscFileForComments.id}
+            itemType="misc_file" // Ensure this matches backend expectations
+          />
+        </div>
+      )}
+      {!isAuthenticated && selectedMiscFileForComments && (
+        <div ref={commentSectionRef} className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700 text-center">
+          <p className="text-gray-600 dark:text-gray-400">Please log in to view and manage comments.</p>
+          <button
+              onClick={() => setSelectedMiscFileForComments(null)}
+              className="mt-2 text-sm text-blue-500 hover:text-blue-700"
+              title="Close comments section"
+            >
+              Close
+            </button>
+        </div>
       )}
     </div>
   );

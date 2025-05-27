@@ -23,6 +23,8 @@ import {
 } from '../types'; // Assuming '../types' will eventually export these
 export type { Software } from '../types'; // Re-exporting Software type
 
+const TOKEN_EXPIRY_SECONDS = 3600; // 1 hour, as a placeholder
+
 // --- Type Definitions (Ensure these are consistent with your backend and UI needs) ---
 // Base entity types (assuming these are defined in '../types' or need to be defined here)
 // For brevity, I'm showing User, DocumentType, Patch, Link, MiscFile as they are directly used in paginated responses.
@@ -1075,7 +1077,20 @@ export async function loginUser(credentials: AuthRequest): Promise<AuthResponseT
 
     // For login, we pass `isLoginAttempt = true` to handleApiError
     // This prevents the global 401 "token expired" handler from triggering for failed login attempts.
-    return handleApiError(response, 'Login failed', true) as Promise<AuthResponseTypeFromTypes>;
+    // The type assertion `as Promise<AuthResponseTypeFromTypes>` is important here
+    // if handleApiError has a more generic return type like `Promise<any>`.
+    const data = await handleApiError(response, 'Login failed', true) as AuthResponseTypeFromTypes;
+    
+    // Assuming authContext.login is available, e.g. via a hook or passed in.
+    // This part is conceptual as api.ts doesn't directly use AuthContext.
+    // The actual call to authContext.login will be in the component that uses this loginUser function.
+    // For the purpose of this subtask, we're ensuring the data structure is correct.
+    // The AuthContext will consume data.user_id.
+    // Example of what would happen in the component:
+    // const auth = useAuth(); 
+    // auth.login(data.access_token, data.username, data.role, data.user_id, TOKEN_EXPIRY_SECONDS, data.password_reset_required);
+
+    return data; // Return the full data object including user_id
 
   } catch (error: any) {
     // Re-throw the error to be caught by the component, which will show a toast

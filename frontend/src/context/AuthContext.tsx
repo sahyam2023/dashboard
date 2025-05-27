@@ -6,15 +6,15 @@ interface TokenData {
   expiresAt: number; // Timestamp in milliseconds
   username: string;
   role: string;
+  user_id: number; // Added
 }
 
 interface AuthContextType {
-  tokenData: TokenData | null; // Changed from token: string | null
-  username: string | null; // Kept for quick access, though also in tokenData
-  role: string | null; // Kept for quick access, though also in tokenData
+  tokenData: TokenData | null;
+  user: { id: number; username: string; role: string; } | null; // Added
   isAuthenticated: boolean;
-  login: (token: string, username: string, role: string, expiresInSeconds: number, password_reset_required?: boolean) => boolean; // Added expiresInSeconds
-  logout: (showSessionExpiredToast?: boolean) => void; // Added optional param
+  login: (token: string, username: string, role: string, user_id: number, expiresInSeconds: number, password_reset_required?: boolean) => boolean; // Added user_id
+  logout: (showSessionExpiredToast?: boolean) => void;
   isLoading: boolean;
   isAuthModalOpen: boolean;
   authModalView: 'login' | 'register';
@@ -38,10 +38,8 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 // REMOVED const WARNING_THRESHOLD_SECONDS = 2 * 60; // Show warning 2 minutes before expiry
 
 export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
-  // const [token, setToken] = useState<string | null>(localStorage.getItem('authToken')); // Replaced by tokenData
   const [tokenData, setTokenData] = useState<TokenData | null>(null);
-  const [username, setUsername] = useState<string | null>(localStorage.getItem('username')); // Still useful for quick display
-  const [role, setRole] = useState<string | null>(localStorage.getItem('userRole')); // Still useful for quick display
+  const [user, setUser] = useState<{ id: number; username: string; role: string; } | null>(null); // Added
   const [isLoading, setIsLoading] = useState<boolean>(true); 
   
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
@@ -75,11 +73,8 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   // Define logout function using useCallback to ensure stable reference
   const logout = useCallback((sessionExpiredDueToTimeout: boolean = false) => {
     localStorage.removeItem('tokenData');
-    localStorage.removeItem('username');
-    localStorage.removeItem('userRole');
+    setUser(null); // Added
     setTokenData(null);
-    setUsername(null);
-    setRole(null);
     setIsPasswordResetRequired(false);
     // setSessionWarningModalOpen(false); // REMOVED: Close warning modal on logout
     
@@ -96,18 +91,15 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
         const parsedTokenData: TokenData = JSON.parse(storedTokenDataString);
         if (parsedTokenData.expiresAt > Date.now()) {
           setTokenData(parsedTokenData);
-          setUsername(parsedTokenData.username); // Keep username/role in sync
-          setRole(parsedTokenData.role);
+          setUser({ id: parsedTokenData.user_id, username: parsedTokenData.username, role: parsedTokenData.role }); // Added
         } else {
           localStorage.removeItem('tokenData'); // Expired
-          localStorage.removeItem('username');
-          localStorage.removeItem('userRole');
+          setUser(null); // Ensure user is cleared if token expired
         }
       } catch (error) {
         console.error("Failed to parse tokenData from localStorage", error);
         localStorage.removeItem('tokenData');
-        localStorage.removeItem('username');
-        localStorage.removeItem('userRole');
+        setUser(null); // Ensure user is cleared on parse error
       }
     }
     setIsLoading(false);
@@ -158,17 +150,14 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     return () => clearInterval(interval);
   }, [tokenData, logout]); // Added logout to dependencies since it's used in the effect
 
-  const login = (newToken: string, newUsername: string, newRole: string, expiresInSeconds: number, passwordResetRequired: boolean = false) => {
+  const login = (newToken: string, newUsername: string, newRole: string, newUserId: number, expiresInSeconds: number, passwordResetRequired: boolean = false) => {
     const expiresAt = Date.now() + expiresInSeconds * 1000;
-    const newTokenData: TokenData = { token: newToken, expiresAt, username: newUsername, role: newRole };
+    const newTokenData: TokenData = { token: newToken, expiresAt, username: newUsername, role: newRole, user_id: newUserId }; // Added user_id
     
     localStorage.setItem('tokenData', JSON.stringify(newTokenData));
-    localStorage.setItem('username', newUsername); // For simpler access elsewhere if needed
-    localStorage.setItem('userRole', newRole);     // For simpler access elsewhere if needed
 
     setTokenData(newTokenData);
-    setUsername(newUsername);
-    setRole(newRole);
+    setUser({ id: newUserId, username: newUsername, role: newRole }); // Added
     setIsPasswordResetRequired(passwordResetRequired);
     // setSessionWarningModalOpen(false); // REMOVED: Ensure warning modal is closed on new login
     return passwordResetRequired;
@@ -206,10 +195,9 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
 
   return (
     <AuthContext.Provider value={{ 
-      tokenData, // Changed key 'token' to 'tokenData' and assigned the tokenData state variable
-      username, 
-      role, 
-      isAuthenticated: !!tokenData && tokenData.expiresAt > Date.now(), // Corrected isAuthenticated logic
+      tokenData,
+      user, // Added
+      isAuthenticated: !!tokenData && tokenData.expiresAt > Date.now(),
       login, 
       logout, 
       isLoading,

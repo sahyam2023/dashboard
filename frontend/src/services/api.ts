@@ -264,6 +264,43 @@ export interface AuditLogResponse {
 }
 // --- End of Interfaces for Audit Log ---
 
+// --- Comment Management Types ---
+export interface Comment {
+  id: number;
+  content: string;
+  user_id: number;
+  username: string; // Included from backend JOIN
+  item_id: number;
+  item_type: string;
+  parent_comment_id: number | null;
+  created_at: string; // ISO date string
+  updated_at: string; // ISO date string
+  replies?: Comment[]; // For nested replies
+}
+
+export interface PaginatedCommentsResponse {
+  comments: Comment[];
+  total_top_level_comments: number;
+  page: number;
+  per_page: number;
+  total_pages: number;
+}
+
+export interface AddCommentPayload {
+  content: string;
+  parent_comment_id?: number | null;
+}
+
+export interface UpdateCommentPayload {
+  content: string;
+}
+
+export interface UserMentionSuggestion {
+  id: number;
+  username: string;
+}
+// --- End Comment Management Types ---
+
 const API_BASE_URL = 'http://127.0.0.1:7000';
 
 // Helper to construct Authorization header
@@ -1646,6 +1683,88 @@ export async function resetPasswordWithToken(payload: ResetPasswordWithTokenPayl
   }
 }
 // --- End Password Reset API Functions ---
+
+// --- Comment Management API Functions ---
+export async function addComment(itemType: string, itemId: number, payload: AddCommentPayload): Promise<Comment> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/items/${itemType}/${itemId}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify(payload),
+    });
+    return handleApiError(response, `Failed to add comment to ${itemType} ID ${itemId}`);
+  } catch (error) {
+    console.error(`Error adding comment to ${itemType} ID ${itemId}:`, error);
+    throw error;
+  }
+}
+
+export async function fetchComments(itemType: string, itemId: number, page: number = 1, perPage: number = 20): Promise<PaginatedCommentsResponse> {
+  try {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      per_page: perPage.toString(),
+    });
+    const response = await fetch(`${API_BASE_URL}/api/items/${itemType}/${itemId}/comments?${params.toString()}`, {
+      method: 'GET',
+      headers: {
+        ...getAuthHeader(), // Optional auth for potentially user-specific details in future
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
+    });
+    return handleApiError(response, `Failed to fetch comments for ${itemType} ID ${itemId}`);
+  } catch (error) {
+    console.error(`Error fetching comments for ${itemType} ID ${itemId}:`, error);
+    throw error;
+  }
+}
+
+export async function updateComment(commentId: number, payload: UpdateCommentPayload): Promise<Comment> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/comments/${commentId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify(payload),
+    });
+    return handleApiError(response, `Failed to update comment ID ${commentId}`);
+  } catch (error) {
+    console.error(`Error updating comment ID ${commentId}:`, error);
+    throw error;
+  }
+}
+
+export async function deleteComment(commentId: number): Promise<{ msg: string } | null> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/comments/${commentId}`, {
+      method: 'DELETE',
+      headers: { ...getAuthHeader() },
+    });
+    // handleApiError will parse JSON response (e.g., { msg: "..." }) or return null for 204
+    return handleApiError(response, `Failed to delete comment ID ${commentId}`);
+  } catch (error) {
+    console.error(`Error deleting comment ID ${commentId}:`, error);
+    throw error;
+  }
+}
+
+export async function fetchUserMentionSuggestions(query: string): Promise<UserMentionSuggestion[]> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/users/mention_suggestions?q=${encodeURIComponent(query)}`, {
+      method: 'GET',
+      headers: {
+        ...getAuthHeader(),
+        'Cache-Control': 'no-cache', // Typically good for suggestion endpoints
+        'Pragma': 'no-cache',
+      },
+    });
+    return handleApiError(response, 'Failed to fetch user mention suggestions');
+  } catch (error) {
+    console.error('Error fetching user mention suggestions:', error);
+    throw error;
+  }
+}
+// --- End Comment Management API Functions ---
 
 // --- Super Admin User Management Functions ---
 

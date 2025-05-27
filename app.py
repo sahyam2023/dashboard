@@ -5637,6 +5637,25 @@ ALLOWED_FAVORITE_ITEM_TYPES = ['document', 'patch', 'link', 'misc_file', 'softwa
 # --- Bulk Action Constants ---
 ALLOWED_BULK_ITEM_TYPES = ['document', 'patch', 'link', 'misc_file']
 
+# --- Comment Item Types ---
+ALLOWED_COMMENT_ITEM_TYPES = ['document', 'patch', 'link', 'misc_file', 'software', 'version'] # Added software and version as per potential future needs, can be restricted per endpoint.
+
+# --- Helper function to check if an item exists in its respective table ---
+def check_item_exists(db, item_type, item_id):
+    """Checks if an item exists in its respective table."""
+    if item_type == 'document':
+        return db.execute("SELECT 1 FROM documents WHERE id = ?", (item_id,)).fetchone()
+    elif item_type == 'patch':
+        return db.execute("SELECT 1 FROM patches WHERE id = ?", (item_id,)).fetchone()
+    elif item_type == 'link':
+        return db.execute("SELECT 1 FROM links WHERE id = ?", (item_id,)).fetchone()
+    elif item_type == 'misc_file':
+        return db.execute("SELECT 1 FROM misc_files WHERE id = ?", (item_id,)).fetchone()
+    elif item_type == 'software': # Added for future commentability
+        return db.execute("SELECT 1 FROM software WHERE id = ?", (item_id,)).fetchone()
+    elif item_type == 'version': # Added for future commentability
+        return db.execute("SELECT 1 FROM versions WHERE id = ?", (item_id,)).fetchone()
+    return None
 
 # --- Bulk Action Endpoints ---
 
@@ -6145,3 +6164,220 @@ def bulk_move_items():
             details={'item_type': item_type, 'error': str(e), 'item_ids_requested': item_ids, 'target_metadata': target_metadata}
         )
         return jsonify(msg=f"An error occurred during bulk move: {str(e)}"), 500
+
+# --- Comment Endpoints ---
+@app.route('/api/items/<item_type>/<int:item_id>/comments', methods=['POST'])
+@jwt_required()
+def add_comment_to_item(item_type, item_id):
+    current_user_id_str = get_jwt_identity()
+    try:
+        user_id = int(current_user_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid user identity in token."), 401
+
+    if item_type not in ALLOWED_COMMENT_ITEM_TYPES:
+        return jsonify(msg=f"Invalid item_type. Allowed types: {', '.join(ALLOWED_COMMENT_ITEM_TYPES)}."), 400
+
+    db = get_db()
+    if not check_item_exists(db, item_type, item_id):
+        return jsonify(msg=f"{item_type.capitalize()} with ID {item_id} not found."), 404
+
+    data = request.get_json()
+    if not data or not data.get('content') or not data.get('content').strip():
+        return jsonify(msg="Comment content is required and cannot be empty."), 400
+    
+    content = data['content'].strip()
+    parent_comment_id = data.get('parent_comment_id')
+
+    if parent_comment_id is not None:
+        if not isinstance(parent_comment_id, int) or parent_comment_id <= 0:
+            return jsonify(msg="parent_comment_id must be a positive integer if provided."), 400
+        parent_comment = database.get_comment_by_id(db, parent_comment_id)
+        if not parent_comment:
+            return jsonify(msg=f"Parent comment with ID {parent_comment_id} not found."), 400
+        if parent_comment['item_id'] != item_id or parent_comment['item_type'] != item_type:
+            return jsonify(msg="Parent comment does not belong to the same item."), 400
+        # Ensure parent comment is not a reply itself (limit nesting to one level for now if desired)
+        # if parent_comment['parent_comment_id'] is not None:
+        #     return jsonify(msg="Cannot reply to a reply. Nesting is limited to one level."), 400
+
+
+    try:
+        comment_id = database.add_comment(db, user_id, item_id, item_type, content, parent_comment_id)
+        if comment_id:
+            log_audit_action(
+                action_type='ADD_COMMENT',
+                target_table='comments',
+                target_id=comment_id,
+                details={'item_type': item_type, 'item_id': item_id, 'parent_comment_id': parent_comment_id, 'content_length': len(content)}
+            )
+            new_comment = database.get_comment_by_id(db, comment_id)
+            if new_comment:
+                return jsonify(dict(new_comment)), 201
+            else:
+                app.logger.error(f"Failed to retrieve comment {comment_id} after creation.")
+                return jsonify(msg="Comment created but failed to retrieve details."), 500
+        else:
+            return jsonify(msg="Failed to add comment due to a database error."), 500
+    except Exception as e:
+        app.logger.error(f"Error adding comment to {item_type} ID {item_id}: {e}", exc_info=True)
+        return jsonify(msg="An unexpected server error occurred while adding comment."), 500
+
+@app.route('/api/items/<item_type>/<int:item_id>/comments', methods=['GET'])
+@jwt_required(optional=True) # Allow anonymous access, JWT enhances if present
+def get_comments_for_item_api(item_type, item_id):
+    if item_type not in ALLOWED_COMMENT_ITEM_TYPES:
+        return jsonify(msg=f"Invalid item_type. Allowed types: {', '.join(ALLOWED_COMMENT_ITEM_TYPES)}."), 400
+
+    db = get_db()
+    if not check_item_exists(db, item_type, item_id):
+        return jsonify(msg=f"{item_type.capitalize()} with ID {item_id} not found."), 404
+
+    page = request.args.get('page', default=1, type=int)
+    per_page = request.args.get('per_page', default=20, type=int)
+    if page <= 0: page = 1
+    if per_page <= 0: per_page = 20
+    if per_page > 100: per_page = 100 # Max limit
+
+    try:
+        # database.get_comments_for_item should return a dict with 'comments' list and pagination fields
+        comments_data = database.get_comments_for_item(db, item_id, item_type, page, per_page)
+        
+        # The database function already converts rows to dicts and handles structure.
+        return jsonify(comments_data), 200
+        
+    except Exception as e:
+        app.logger.error(f"Error fetching comments for {item_type} ID {item_id}: {e}", exc_info=True)
+        return jsonify(msg="An unexpected server error occurred while fetching comments."), 500
+
+@app.route('/api/comments/<int:comment_id>', methods=['PUT'])
+@jwt_required()
+def update_comment_api(comment_id):
+    current_user_id_str = get_jwt_identity()
+    try:
+        user_id = int(current_user_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid user identity in token."), 401
+
+    data = request.get_json()
+    if not data or not data.get('content') or not data.get('content').strip():
+        return jsonify(msg="Comment content is required and cannot be empty."), 400
+    
+    new_content = data['content'].strip()
+    db = get_db()
+
+    # Fetch comment to check existence and for logging old content
+    existing_comment = database.get_comment_by_id(db, comment_id)
+    if not existing_comment:
+        return jsonify(msg=f"Comment with ID {comment_id} not found."), 404
+
+    # The database.update_comment_content function handles ownership check
+    updated = database.update_comment_content(db, comment_id, user_id, new_content)
+
+    if updated:
+        log_audit_action(
+            action_type='UPDATE_COMMENT',
+            target_table='comments',
+            target_id=comment_id,
+            details={'item_type': existing_comment['item_type'], 'item_id': existing_comment['item_id'], 'old_content_snippet': existing_comment['content'][:50], 'new_content_length': len(new_content)}
+        )
+        updated_comment = database.get_comment_by_id(db, comment_id)
+        if updated_comment:
+            return jsonify(dict(updated_comment)), 200
+        else:
+            app.logger.error(f"Failed to retrieve comment {comment_id} after update.")
+            return jsonify(msg="Comment updated but failed to retrieve details."), 500
+    else:
+        # This could be due to ownership failure or other DB issue (e.g., comment deleted concurrently)
+        # Check if comment still exists to differentiate 403 from 404
+        if not database.get_comment_by_id(db, comment_id):
+             return jsonify(msg=f"Comment with ID {comment_id} not found (possibly deleted)."), 404
+        # If it exists, assume permission issue from update_comment_content
+        return jsonify(msg="Failed to update comment. You may not be the owner or a database error occurred."), 403
+
+
+@app.route('/api/comments/<int:comment_id>', methods=['DELETE'])
+@jwt_required()
+def delete_comment_api(comment_id):
+    current_user_id_str = get_jwt_identity()
+    try:
+        user_id = int(current_user_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid user identity in token."), 401
+
+    db = get_db()
+    user = find_user_by_id(user_id) # Fetch user details for role
+    if not user:
+        return jsonify(msg="User not found based on token."), 401 # Should not happen if JWT is valid
+
+    user_role = user['role']
+
+    # Fetch comment for logging and to check existence before delete attempt
+    comment_to_delete = database.get_comment_by_id(db, comment_id)
+    if not comment_to_delete:
+        return jsonify(msg=f"Comment with ID {comment_id} not found."), 404
+
+    # database.delete_comment_by_id handles ownership/admin check
+    deleted = database.delete_comment_by_id(db, comment_id, user_id, user_role)
+
+    if deleted:
+        log_audit_action(
+            action_type='DELETE_COMMENT',
+            target_table='comments',
+            target_id=comment_id,
+            details={'item_type': comment_to_delete['item_type'], 'item_id': comment_to_delete['item_id'], 'deleted_content_snippet': comment_to_delete['content'][:50]}
+        )
+        return jsonify(msg="Comment deleted successfully."), 200 # Or 204 No Content
+    else:
+        # This could be due to ownership/role failure or other DB issue
+        # Check if comment still exists to differentiate 403 from 404
+        if not database.get_comment_by_id(db, comment_id):
+             return jsonify(msg=f"Comment with ID {comment_id} not found (possibly already deleted)."), 404
+        return jsonify(msg="Failed to delete comment. You may not be the owner or an administrator, or a database error occurred."), 403
+
+@app.route('/api/users/mention_suggestions', methods=['GET'])
+@jwt_required()
+def get_mention_suggestions():
+    query_term = request.args.get('q', '').strip()
+    if not query_term: # Or if len(query_term) < N, e.g., 2 or 3 characters
+        return jsonify([]), 200 # Return empty list if query is too short or empty
+
+    db = get_db()
+    try:
+        # Query for active users whose username starts with the query_term (case-insensitive)
+        # Using LOWER() for case-insensitivity might be slow on large datasets without proper indexing.
+        # For SQLite, LIKE with a wildcard at the end can use an index if one exists on `username`.
+        # SQLite's default LIKE is case-insensitive for ASCII. For Unicode, consider `PRAGMA case_sensitive_like = OFF;` or use `LOWER()`.
+        # Assuming default SQLite behavior or `LOWER()` for broader compatibility.
+        
+        # For case-insensitive search, typically use `LOWER(username) LIKE ?`
+        # However, SQLite's `LIKE` is case-insensitive by default for ASCII characters.
+        # If full Unicode case-insensitivity is needed and PRAGMA is not set, LOWER() is better.
+        # Let's assume default behavior is sufficient or LOWER() is used if needed.
+        
+        # Using `PRAGMA case_sensitive_like = OFF;` (per connection) or `COLLATE NOCASE` in schema could also work.
+        # For this, let's use `username LIKE ?` and assume default SQLite behavior is fine.
+        # If not, `LOWER(username) LIKE LOWER(?)` would be more robust.
+
+        search_pattern = f"{query_term}%"
+        users_cursor = db.execute(
+            "SELECT id, username FROM users WHERE is_active = TRUE AND username LIKE ? ORDER BY username ASC LIMIT 10",
+            (search_pattern,)
+        )
+        # Alternative with LOWER for explicit case-insensitivity:
+        # search_pattern_lower = f"{query_term.lower()}%"
+        # users_cursor = db.execute(
+        #     "SELECT id, username FROM users WHERE is_active = TRUE AND LOWER(username) LIKE ? ORDER BY username ASC LIMIT 10",
+        #     (search_pattern_lower,)
+        # )
+        
+        suggestions = [dict(row) for row in users_cursor.fetchall()]
+        return jsonify(suggestions), 200
+        
+    except sqlite3.Error as e:
+        app.logger.error(f"Database error fetching mention suggestions for query '{query_term}': {e}")
+        return jsonify(msg="Database error while fetching suggestions."), 500
+    except Exception as e:
+        app.logger.error(f"Unexpected error fetching mention suggestions for query '{query_term}': {e}", exc_info=True)
+        return jsonify(msg="An unexpected server error occurred."), 500
+

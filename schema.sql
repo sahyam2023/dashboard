@@ -1,3 +1,4 @@
+DROP TABLE IF EXISTS comments;
 DROP TABLE IF EXISTS audit_logs;
 DROP TABLE IF EXISTS user_favorites;
 DROP TABLE IF EXISTS download_log;
@@ -15,6 +16,26 @@ DROP TABLE IF EXISTS security_questions;
 DROP TABLE IF EXISTS password_reset_requests;
 DROP TABLE IF EXISTS file_permissions;
 DROP TABLE IF EXISTS system_settings;
+
+CREATE TABLE IF NOT EXISTS comments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    item_id INTEGER NOT NULL,
+    item_type TEXT NOT NULL,
+    parent_comment_id INTEGER,
+    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    FOREIGN KEY (user_id) REFERENCES users (id),
+    FOREIGN KEY (parent_comment_id) REFERENCES comments (id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_comments_user_id ON comments (user_id);
+CREATE INDEX IF NOT EXISTS idx_comments_item_id_item_type ON comments (item_id, item_type);
+CREATE INDEX IF NOT EXISTS idx_comments_parent_comment_id ON comments (parent_comment_id);
+CREATE TRIGGER IF NOT EXISTS update_comments_updated_at
+AFTER UPDATE ON comments FOR EACH ROW BEGIN
+    UPDATE comments SET updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE id = OLD.id;
+END;
 
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

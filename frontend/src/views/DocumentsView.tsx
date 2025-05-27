@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { ExternalLink, PlusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Download, Move, AlertTriangle, FileText } from 'lucide-react'; 
+import { ExternalLink, PlusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Download, Move, AlertTriangle, FileText, MessageSquare } from 'lucide-react'; 
 import { 
   fetchDocuments, 
   fetchSoftware, 
@@ -22,8 +22,9 @@ import ErrorState from '../components/ErrorState';
 import { useAuth } from '../context/AuthContext';
 import AdminDocumentEntryForm from '../components/admin/AdminDocumentEntryForm';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
-import Modal from '../components/shared/Modal'; 
+import Modal from '../components/shared/Modal';
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils';
+import CommentSection from '../components/comments/CommentSection';
 
 interface OutletContextType {
   searchTerm: string;
@@ -72,6 +73,9 @@ const DocumentsView: React.FC = () => {
   const [isDeletingSelected, setIsDeletingSelected] = useState<boolean>(false);
   const [isDownloadingSelected, setIsDownloadingSelected] = useState<boolean>(false);
   const [isMovingSelected, setIsMovingSelected] = useState<boolean>(false);
+
+  const [selectedDocumentForComments, setSelectedDocumentForComments] = useState<DocumentType | null>(null);
+  const commentSectionRef = useRef<HTMLDivElement>(null);
 
   const filtersAreActive = useMemo(() => {
     return (
@@ -216,6 +220,10 @@ useEffect(() => {
   const handleDeleteConfirm = async () => {
     if (!documentToDelete) return;
     setIsDeleting(true);
+    // If the document being deleted is also selected for comments, clear it
+    if (selectedDocumentForComments && documentToDelete.id === selectedDocumentForComments.id) {
+      setSelectedDocumentForComments(null);
+    }
     try {
       await deleteAdminDocument(documentToDelete.id);
       showSuccessToast(`Document "${documentToDelete.doc_name}" deleted.`);
@@ -247,7 +255,12 @@ useEffect(() => {
     try {
       const res = await bulkDeleteItems(Array.from(selectedDocumentIds), 'document' as BulkItemType);
       showSuccessToast(res.msg || `${res.deleted_count} item(s) deleted.`);
-      setSelectedDocumentIds(new Set()); fetchAndSetDocuments(1, true);
+      setSelectedDocumentIds(new Set()); 
+      // If any of the bulk-deleted documents was the one selected for comments, clear it
+      if (selectedDocumentForComments && selectedDocumentIds.has(selectedDocumentForComments.id)) {
+        setSelectedDocumentForComments(null);
+      }
+      fetchAndSetDocuments(1, true);
     } catch (e: any) { showErrorToast(e.message || "Bulk delete failed."); }
     finally { setIsDeletingSelected(false); }
   };
@@ -324,7 +337,32 @@ useEffect(() => {
     { key: 'updated_by_username', header: 'Updated By', sortable: false, render: (d: DocumentType) => d.updated_by_username||'N/A' },
     { key: 'created_at', header: 'Created At', sortable: true, render: (d: DocumentType) => d.created_at?new Date(d.created_at).toLocaleDateString('en-CA'):'-' },
     { key: 'updated_at', header: 'Updated At', sortable: true, render: (d: DocumentType) => d.updated_at?new Date(d.updated_at).toLocaleDateString('en-CA'):'-' },
-    { key: 'actions' as any, header: 'Actions', render: (d: DocumentType) => (<div className="flex space-x-1 items-center">{isAuthenticated&&( <button onClick={e=>{e.stopPropagation();handleFavoriteToggle(d,'document')}} className={`p-1 rounded-md ${favoritedItems.get(d.id)?.favoriteId?'text-yellow-500 hover:text-yellow-600':'text-gray-400 hover:text-yellow-500'}`} title={favoritedItems.get(d.id)?.favoriteId?"Remove Favorite":"Add Favorite"}><Star size={16} className={favoritedItems.get(d.id)?.favoriteId?"fill-current":""}/></button>)}{(role==='admin'||role==='super_admin')&&(<> <button onClick={e=>{e.stopPropagation();openEditForm(d)}} className="p-1 text-blue-600 hover:text-blue-800 rounded-md" title="Edit"><Edit3 size={16}/></button> <button onClick={e=>{e.stopPropagation();openDeleteConfirm(d)}} className="p-1 text-red-600 hover:text-red-800 rounded-md" title="Delete"><Trash2 size={16}/></button></>)}</div>)},
+    { key: 'actions' as any, header: 'Actions', render: (d: DocumentType) => (
+      <div className="flex space-x-1 items-center">
+        {isAuthenticated && (
+          <button onClick={e => { e.stopPropagation(); handleFavoriteToggle(d, 'document')}} className={`p-1 rounded-md ${favoritedItems.get(d.id)?.favoriteId ? 'text-yellow-500 hover:text-yellow-600' : 'text-gray-400 hover:text-yellow-500'}`} title={favoritedItems.get(d.id)?.favoriteId ? "Remove Favorite" : "Add Favorite"}><Star size={16} className={favoritedItems.get(d.id)?.favoriteId ? "fill-current" : ""} /></button>
+        )}
+        {(role === 'admin' || role === 'super_admin') && (
+          <>
+            <button onClick={e => { e.stopPropagation(); openEditForm(d)}} className="p-1 text-blue-600 hover:text-blue-800 rounded-md" title="Edit"><Edit3 size={16} /></button>
+            <button onClick={e => { e.stopPropagation(); openDeleteConfirm(d)}} className="p-1 text-red-600 hover:text-red-800 rounded-md" title="Delete"><Trash2 size={16} /></button>
+          </>
+        )}
+         {isAuthenticated && ( // Comments button visible to all authenticated users
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedDocumentForComments(d);
+                setTimeout(() => commentSectionRef.current?.scrollIntoView({ behavior: 'smooth' }), 0);
+              }}
+              className="p-1 text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 rounded-md"
+              title="View Comments"
+            >
+              <MessageSquare size={16} />
+            </button>
+          )}
+      </div>
+    )},
   ];
   
   const totalPagesComputed = Math.ceil(totalDocuments / ITEMS_PER_PAGE);
@@ -434,6 +472,23 @@ useEffect(() => {
           </div>
         </Modal>
       )}
+
+      {isAuthenticated && selectedDocumentForComments && (
+        <div ref={commentSectionRef} className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
+          <h3 className="text-xl font-semibold text-gray-800 dark:text-white mb-4">
+            Comments for: <span className="font-bold text-blue-600 dark:text-blue-400">{selectedDocumentForComments.doc_name}</span>
+          </h3>
+          <CommentSection
+            itemId={selectedDocumentForComments.id}
+            itemType="document"
+          />
+        </div>
+      )}
+       {!isAuthenticated && selectedDocumentForComments && (
+          <div className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700 text-center">
+            <p className="text-gray-600 dark:text-gray-400">Please log in to view and manage comments.</p>
+          </div>
+        )}
     </div>
   );
 };

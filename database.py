@@ -277,3 +277,178 @@ def get_user_favorites(db, user_id, page, per_page, item_type_filter=None):
         # Potentially log more details about the query_sql for debugging
         print(f"Problematic Query: {query_sql}")
         return [], 0
+
+# --- Comment Management Functions ---
+
+def add_comment(db, user_id, item_id, item_type, content, parent_comment_id=None):
+    """Inserts a new comment into the comments table."""
+    try:
+        cursor = db.execute(
+            """
+            INSERT INTO comments (user_id, item_id, item_type, content, parent_comment_id)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (user_id, item_id, item_type, content, parent_comment_id)
+        )
+        db.commit()
+        return cursor.lastrowid
+    except sqlite3.Error as e:
+        print(f"DB_COMMENTS: Error adding comment for item {item_id} ({item_type}) by user {user_id}: {e}")
+        return None
+
+def get_comments_for_item(db, item_id, item_type, page=1, per_page=20):
+    """
+    Fetches comments for a specific item_id and item_type, with pagination for top-level comments
+    and nested replies.
+    """
+    comments_data = {
+        "comments": [],
+        "total_top_level_comments": 0,
+        "page": page,
+        "per_page": per_page,
+        "total_pages": 0
+    }
+    offset = (page - 1) * per_page
+
+    try:
+        # Get total count of top-level comments for pagination
+        count_cursor = db.execute(
+            """
+            SELECT COUNT(id)
+            FROM comments
+            WHERE item_id = ? AND item_type = ? AND parent_comment_id IS NULL
+            """,
+            (item_id, item_type)
+        )
+        total_top_level_comments_row = count_cursor.fetchone()
+        if total_top_level_comments_row:
+            comments_data["total_top_level_comments"] = total_top_level_comments_row[0]
+        
+        if comments_data["total_top_level_comments"] > 0:
+            comments_data["total_pages"] = (comments_data["total_top_level_comments"] + per_page - 1) // per_page
+        else:
+            comments_data["total_pages"] = 0
+
+        # Fetch top-level comments with username
+        top_level_cursor = db.execute(
+            """
+            SELECT c.id, c.content, c.user_id, u.username, c.item_id, c.item_type,
+                   c.parent_comment_id, c.created_at, c.updated_at
+            FROM comments c
+            JOIN users u ON c.user_id = u.id
+            WHERE c.item_id = ? AND c.item_type = ? AND c.parent_comment_id IS NULL
+            ORDER BY c.created_at ASC
+            LIMIT ? OFFSET ?
+            """,
+            (item_id, item_type, per_page, offset)
+        )
+        top_level_comments = top_level_cursor.fetchall()
+
+        for top_comment_row in top_level_comments:
+            top_comment = dict(top_comment_row) # Convert sqlite3.Row to dict
+            
+            # Fetch replies for each top-level comment
+            replies_cursor = db.execute(
+                """
+                SELECT c.id, c.content, c.user_id, u.username, c.item_id, c.item_type,
+                       c.parent_comment_id, c.created_at, c.updated_at
+                FROM comments c
+                JOIN users u ON c.user_id = u.id
+                WHERE c.parent_comment_id = ?
+                ORDER BY c.created_at ASC
+                """,
+                (top_comment['id'],)
+            )
+            replies = [dict(row) for row in replies_cursor.fetchall()] # Convert list of Rows to list of dicts
+            top_comment['replies'] = replies
+            comments_data['comments'].append(top_comment)
+            
+        return comments_data
+
+    except sqlite3.Error as e:
+        print(f"DB_COMMENTS: Error fetching comments for item {item_id} ({item_type}): {e}")
+        # Return the structure with empty comments list in case of error during fetching
+        # or potentially more specific error handling.
+        comments_data["comments"] = [] 
+        comments_data["total_top_level_comments"] = 0
+        comments_data["total_pages"] = 0
+        return comments_data
+
+
+def get_comment_by_id(db, comment_id):
+    """Fetches a single comment by its ID, including the commenter's username."""
+    try:
+        cursor = db.execute(
+            """
+            SELECT c.id, c.content, c.user_id, u.username, c.item_id, c.item_type,
+                   c.parent_comment_id, c.created_at, c.updated_at
+            FROM comments c
+            JOIN users u ON c.user_id = u.id
+            WHERE c.id = ?
+            """,
+            (comment_id,)
+        )
+        comment = cursor.fetchone()
+        return comment # Returns sqlite3.Row or None
+    except sqlite3.Error as e:
+        print(f"DB_COMMENTS: Error fetching comment by ID {comment_id}: {e}")
+        return None
+
+def update_comment_content(db, comment_id, user_id, new_content):
+    """Updates the content of an existing comment, verifying user ownership."""
+    try:
+        # First, verify the user owns the comment
+        comment_owner_cursor = db.execute("SELECT user_id FROM comments WHERE id = ?", (comment_id,))
+        comment_owner_row = comment_owner_cursor.fetchone()
+
+        if not comment_owner_row:
+            print(f"DB_COMMENTS: Update failed. Comment ID {comment_id} not found.")
+            return False 
+        
+        if comment_owner_row['user_id'] != user_id:
+            print(f"DB_COMMENTS: Update failed. User {user_id} does not own comment ID {comment_id}.")
+            return False
+
+        # Proceed with update
+        cursor = db.execute(
+            """
+            UPDATE comments
+            SET content = ?, updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+            WHERE id = ? AND user_id = ?
+            """,
+            (new_content, comment_id, user_id)
+        )
+        db.commit()
+        return cursor.rowcount > 0 # True if a row was updated
+    except sqlite3.Error as e:
+        print(f"DB_COMMENTS: Error updating comment ID {comment_id} by user {user_id}: {e}")
+        return False
+
+def delete_comment_by_id(db, comment_id, user_id, role):
+    """
+    Deletes a comment by its ID, verifying ownership or admin privileges.
+    Replies are deleted via CASCADE.
+    """
+    try:
+        # Verify ownership or admin role
+        comment_owner_cursor = db.execute("SELECT user_id FROM comments WHERE id = ?", (comment_id,))
+        comment_owner_row = comment_owner_cursor.fetchone()
+
+        if not comment_owner_row:
+            print(f"DB_COMMENTS: Delete failed. Comment ID {comment_id} not found.")
+            return False
+
+        is_owner = comment_owner_row['user_id'] == user_id
+        is_admin = role in ('admin', 'super_admin')
+
+        if not (is_owner or is_admin):
+            print(f"DB_COMMENTS: Delete failed. User {user_id} (role: {role}) is not authorized to delete comment ID {comment_id}.")
+            return False
+        
+        # Proceed with deletion
+        cursor = db.execute("DELETE FROM comments WHERE id = ?", (comment_id,))
+        db.commit()
+        return cursor.rowcount > 0 # True if a row (and its replies) were deleted
+    except sqlite3.Error as e:
+        print(f"DB_COMMENTS: Error deleting comment ID {comment_id} by user {user_id} (role: {role}): {e}")
+        return False

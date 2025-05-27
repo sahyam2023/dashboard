@@ -35,8 +35,8 @@ interface OutletContextType {
 
 const PatchesView: React.FC = () => {
   const { searchTerm, setSearchTerm } = useOutletContext<OutletContextType>();
-  const { isAuthenticated, role } = useAuth();
-
+const { isAuthenticated, user } = useAuth();
+const role = user?.role; // Access role safely, as user can be null
   const [patches, setPatches] = useState<PatchType[]>([]);
   const [softwareList, setSoftwareList] = useState<Software[]>([]);
   const [selectedSoftwareId, setSelectedSoftwareId] = useState<number | null>(null);

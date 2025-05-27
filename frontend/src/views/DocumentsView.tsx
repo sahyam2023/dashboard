@@ -34,8 +34,8 @@ interface OutletContextType {
 const DocumentsView: React.FC = () => {
   const ITEMS_PER_PAGE = 15;
   const { searchTerm, setSearchTerm } = useOutletContext<OutletContextType>(); 
-  const { isAuthenticated, role } = useAuth();
-
+const { isAuthenticated, user } = useAuth();
+const role = user?.role; // Access role safely, as user can be null
   const [showAddDocumentForm, setShowAddDocumentForm] = useState(false);
   const [editingDocument, setEditingDocument] = useState<DocumentType | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);

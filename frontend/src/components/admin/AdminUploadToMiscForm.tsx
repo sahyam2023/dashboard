@@ -73,7 +73,8 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
   // error and successMessage states removed
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { isAuthenticated, role } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+const role = user?.role; // Access role safely, as user can be null
   const watchedSelectedFile = watch('selectedFile');
 
   // Fetch categories for the dropdown

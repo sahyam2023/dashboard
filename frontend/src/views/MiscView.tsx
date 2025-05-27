@@ -28,8 +28,8 @@ interface OutletContextType {
 
 const MiscView: React.FC = () => {
   const { searchTerm, setSearchTerm } = useOutletContext<OutletContextType>();
-  const { isAuthenticated, role } = useAuth();
-
+const { isAuthenticated, user } = useAuth();
+const role = user?.role; // Access role safely, as user can be null
   const [categories, setCategories] = useState<MiscCategory[]>([]);
   const [isLoadingCategories, setIsLoadingCategories] = useState(true);
   const [errorCategories, setErrorCategories] = useState<string | null>(null);

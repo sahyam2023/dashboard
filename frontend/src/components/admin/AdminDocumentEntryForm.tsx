@@ -93,7 +93,8 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
   // Error and success messages will be handled by toast
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { isAuthenticated, role } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+const role = user?.role; // Access role safely, as user can be null
   const watchedInputMode = watch('inputMode');
   const watchedSelectedFile = watch('selectedFile');
 

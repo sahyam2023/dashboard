@@ -43,7 +43,8 @@ const AdminMiscCategoryForm: React.FC<AdminMiscCategoryFormProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   // Removed error and successMessage state
 
-  const { isAuthenticated, role } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+const role = user?.role; // Access role safely, as user can be null
 
   useEffect(() => {
     if (isEditMode && categoryToEdit) {

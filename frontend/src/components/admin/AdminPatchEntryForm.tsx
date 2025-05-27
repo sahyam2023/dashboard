@@ -114,7 +114,8 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
   // error and successMessage states will be removed, replaced by toast
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { isAuthenticated, role } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+const role = user?.role; // Access role safely, as user can be null
   const watchedSoftwareId = watch('selectedSoftwareId');
   const watchedSelectedVersionId = watch('selectedVersionId');
   const watchedInputMode = watch('inputMode');

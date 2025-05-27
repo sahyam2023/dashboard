@@ -26,8 +26,8 @@ interface OutletContextType {
 
 const LinksView: React.FC = () => {
   const { searchTerm, setSearchTerm } = useOutletContext<OutletContextType>();
-  const { isAuthenticated, role } = useAuth();
-
+const { isAuthenticated, user } = useAuth();
+const role = user?.role; // Access role safely, as user can be null
   const [links, setLinks] = useState<LinkType[]>([]);
   const [softwareList, setSoftwareList] = useState<Software[]>([]);
   const [versionList, setVersionList] = useState<SoftwareVersion[]>([]); // For main page filter

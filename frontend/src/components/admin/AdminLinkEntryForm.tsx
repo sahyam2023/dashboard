@@ -105,8 +105,7 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
   // Error and success messages will be handled by toast
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { isAuthenticated, user } = useAuth();
-const role = user?.role; // Access role safely, as user can be null
+  const { isAuthenticated, role } = useAuth();
   const watchedSoftwareId = watch('selectedSoftwareId'); // RHF watch
   const watchedSelectedVersionId = watch('selectedVersionId'); // RHF watch
   const watchedInputMode = watch('inputMode'); // RHF watch

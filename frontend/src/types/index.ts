@@ -270,3 +270,29 @@ export interface UpdateUserFilePermissionsResponse {
   msg: string;
   permissions: FilePermission[];
 }
+
+// --- Notification Types ---
+export interface Notification {
+  id: number;
+  user_id: number; // The ID of the user who received the notification
+  type: string; // e.g., 'mention', 'reply', 'new_file_document'
+  message: string;
+  item_id?: number | null; // ID of the related item (comment, document, etc.)
+  item_type?: string | null; // Type of the related item
+  is_read: boolean;
+  created_at: string; // ISO date string, e.g., "2023-10-27T10:00:00Z"
+  // Potentially add 'updated_at' if the backend sends it and it's useful
+}
+
+export interface UnreadNotificationCountResponse {
+  count: number;
+}
+
+export interface PaginatedNotificationsResponse {
+  notifications: Notification[];
+  page: number;
+  per_page: number;
+  total_notifications: number;
+  total_pages: number;
+  status_filter?: string; // To reflect the filter applied in the request
+}

@@ -20,6 +20,10 @@ import {
   FilePermission,
   FilePermissionUpdatePayload,
   UpdateUserFilePermissionsResponse,
+  // Notification Types
+  Notification,
+  UnreadNotificationCountResponse,
+  PaginatedNotificationsResponse,
 } from '../types'; // Assuming '../types' will eventually export these
 export type { Software } from '../types'; // Re-exporting Software type
 
@@ -354,7 +358,7 @@ const handleApiError = async (response: Response, defaultMessage: string, isLogi
       // We don't throw an error here because the event handler will navigate away.
       // Returning a promise that never resolves can prevent further processing in the calling function.
       // Or, ensure calling functions are robust to this. For now, we'll let it proceed to throw,
-      // but the navigation should ideally prevent component errors.
+      // but the UI should be redirected by the event.
       // A more robust solution might involve a dedicated error type that calling code can ignore.
       // For now, we throw to ensure the calling code's catch block is triggered if it needs to cleanup,
       // but the UI should be redirected by the event.
@@ -1866,3 +1870,85 @@ export async function deleteUser(userId: number): Promise<{ msg: string }> {
     throw error;
   }
 }
+
+// --- Notification API Functions ---
+export async function fetchNotifications(
+  page: number = 1, 
+  perPage: number = 10, 
+  status?: 'all' | 'read' | 'unread' // Optional status filter
+): Promise<PaginatedNotificationsResponse> {
+  try {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      per_page: perPage.toString(),
+    });
+    if (status) {
+      params.append('status', status);
+    }
+    const response = await fetch(`${API_BASE_URL}/api/notifications?${params.toString()}`, {
+      method: 'GET',
+      headers: { ...getAuthHeader(), 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+    });
+    return handleApiError(response, 'Failed to fetch notifications');
+  } catch (error) {
+    console.error('Error fetching notifications:', error);
+    throw error;
+  }
+}
+
+export async function fetchUnreadNotificationCount(): Promise<UnreadNotificationCountResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/notifications/unread_count`, {
+      method: 'GET',
+      headers: { ...getAuthHeader(), 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+    });
+    return handleApiError(response, 'Failed to fetch unread notification count');
+  } catch (error) {
+    console.error('Error fetching unread notification count:', error);
+    throw error;
+  }
+}
+
+export async function markNotificationAsRead(notificationId: number): Promise<Notification> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/notifications/${notificationId}/read`, {
+      method: 'PUT',
+      headers: { ...getAuthHeader() },
+    });
+    return handleApiError(response, 'Failed to mark notification as read');
+  } catch (error) {
+    console.error('Error marking notification as read:', error);
+    throw error;
+  }
+}
+
+export async function markAllNotificationsAsRead(): Promise<{ msg: string, count_marked_read?: number }> { 
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/notifications/mark_all_read`, {
+      method: 'PUT',
+      headers: { ...getAuthHeader() },
+    });
+    // Assuming backend returns { msg: string, count_marked_read: number }
+    // If backend returns only { msg: string }, then adjust the Promise type and how response is handled.
+    // For now, assuming it could include count_marked_read for better feedback.
+    return handleApiError(response, 'Failed to mark all notifications as read');
+  } catch (error) {
+    console.error('Error marking all notifications as read:', error);
+    throw error;
+  }
+}
+
+export async function clearAllNotifications(): Promise<{ msg: string, count_deleted?: number }> { 
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/notifications/clear_all`, {
+      method: 'DELETE',
+      headers: { ...getAuthHeader() },
+    });
+    // Similar to markAllNotificationsAsRead, assuming backend could return count_deleted.
+    return handleApiError(response, 'Failed to clear all notifications');
+  } catch (error) {
+    console.error('Error clearing all notifications:', error);
+    throw error;
+  }
+}
+// --- End Notification API Functions ---

@@ -2070,7 +2070,9 @@ def _admin_handle_file_upload_and_db_insert(
     metadata_fields, required_form_fields, sql_insert_query, sql_params_tuple,
     resolved_fks: dict = None
 ):
-    current_user_id = int(get_jwt_identity()) # Ensure this is correctly used for created_by_user_id
+    current_user_id = int(get_jwt_identity()) 
+    uploader_user = find_user_by_id(current_user_id) 
+    uploader_username = uploader_user['username'] if uploader_user else "Unknown User"
     if resolved_fks is None:
         resolved_fks = {}
 
@@ -2141,7 +2143,7 @@ def _admin_handle_file_upload_and_db_insert(
             app.logger.info(f"_admin_helper: Successfully prepared insert for {table_name}, new ID: {new_id}")
 
             # Conditional Audit Logging for Misc Files creation
-            if table_name == 'misc_files':
+            if table_name == 'misc_files': 
                 log_audit_action(
                     action_type='CREATE_MISC_FILE',
                     target_table='misc_files',
@@ -2287,11 +2289,15 @@ def _admin_add_item_with_external_link(
     table_name, data, required_fields, sql_insert_query, sql_params_tuple
 ):
     current_user_id_str = get_jwt_identity()
+    adder_username = "Unknown User"
     try:
         current_user_id = int(current_user_id_str)
+        adder_user = find_user_by_id(current_user_id)
+        if adder_user:
+            adder_username = adder_user['username']
     except ValueError:
         app.logger.error(f"ADMIN_HELPER_LINK: Invalid user ID format in JWT: {current_user_id_str} for table {table_name}")
-        return jsonify(msg="Invalid user identity in token"), 400 # Or 401/403
+        return jsonify(msg="Invalid user identity in token"), 400
 
     if not data:
         app.logger.warning(f"ADMIN_HELPER_LINK: Missing JSON data for table {table_name}")
@@ -6171,8 +6177,15 @@ def bulk_move_items():
 @jwt_required()
 def add_comment_to_item(item_type, item_id):
     current_user_id_str = get_jwt_identity()
+    comment_author_username = "Unknown" 
     try:
         user_id = int(current_user_id_str)
+        commenting_user = find_user_by_id(user_id)
+        if commenting_user:
+            comment_author_username = commenting_user['username']
+        else: # Should not happen if JWT is valid and user exists
+            app.logger.error(f"ADD_COMMENT: User ID {user_id} from JWT not found in DB.")
+            return jsonify(msg="Commenting user not found."), 404
     except ValueError:
         return jsonify(msg="Invalid user identity in token."), 401
 
@@ -6189,6 +6202,7 @@ def add_comment_to_item(item_type, item_id):
     
     content = data['content'].strip()
     parent_comment_id = data.get('parent_comment_id')
+    parent_comment_author_id = None
 
     if parent_comment_id is not None:
         if not isinstance(parent_comment_id, int) or parent_comment_id <= 0:
@@ -6198,9 +6212,7 @@ def add_comment_to_item(item_type, item_id):
             return jsonify(msg=f"Parent comment with ID {parent_comment_id} not found."), 400
         if parent_comment['item_id'] != item_id or parent_comment['item_type'] != item_type:
             return jsonify(msg="Parent comment does not belong to the same item."), 400
-        # Ensure parent comment is not a reply itself (limit nesting to one level for now if desired)
-        # if parent_comment['parent_comment_id'] is not None:
-        #     return jsonify(msg="Cannot reply to a reply. Nesting is limited to one level."), 400
+        parent_comment_author_id = parent_comment['user_id']
 
 
     try:
@@ -6212,6 +6224,57 @@ def add_comment_to_item(item_type, item_id):
                 target_id=comment_id,
                 details={'item_type': item_type, 'item_id': item_id, 'parent_comment_id': parent_comment_id, 'content_length': len(content)}
             )
+            
+            # --- Notification Logic ---
+            item_name_for_notification = _get_item_name_for_notification(db, item_type, item_id)
+
+            # Reply Notification
+            if parent_comment_author_id and parent_comment_author_id != user_id:
+                try:
+                    database.create_notification(
+                        db,
+                        user_id=parent_comment_author_id,
+                        type='reply',
+                        message=f"{comment_author_username} replied to your comment on {item_type} '{item_name_for_notification}'.",
+                        item_id=comment_id, 
+                        item_type='comment' 
+                    )
+                    app.logger.info(f"Reply notification created for user {parent_comment_author_id} for comment {comment_id}")
+                except Exception as e_notify_reply:
+                    app.logger.error(f"Failed to create reply notification: {e_notify_reply}")
+
+            # Mention Notification
+            mentioned_usernames = set(re.findall(r'@(\w+)', content))
+            if mentioned_usernames: 
+                app.logger.info(f"Potential mentions found: {mentioned_usernames}")
+            for mentioned_username_match in mentioned_usernames:
+                
+                if mentioned_username_match.lower() == comment_author_username.lower(): 
+                    app.logger.info(f"Skipping self-mention for {comment_author_username}")
+                    continue
+                
+                mentioned_user = find_user_by_username(mentioned_username_match) 
+                
+                if mentioned_user and mentioned_user['is_active'] and mentioned_user['id'] != user_id:
+                    try:
+                        database.create_notification(
+                            db,
+                            user_id=mentioned_user['id'],
+                            type='mention',
+                            message=f"{comment_author_username} mentioned you in a comment on {item_type} '{item_name_for_notification}'.",
+                            item_id=comment_id, 
+                            item_type='comment'
+                        )
+                        app.logger.info(f"Mention notification created for user {mentioned_user['id']} (username: {mentioned_username_match}) for comment {comment_id}")
+                    except Exception as e_notify_mention:
+                        app.logger.error(f"Failed to create mention notification for @{mentioned_username_match}: {e_notify_mention}")
+                elif mentioned_user:
+                     app.logger.info(f"Skipping mention notification for @{mentioned_username_match} (inactive or self). User active: {mentioned_user['is_active']}, User ID: {mentioned_user['id']}, Current User ID: {user_id}")
+                else:
+                    app.logger.info(f"Mentioned username @{mentioned_username_match} not found or invalid.")
+
+            # --- End Notification Logic ---
+
             new_comment = database.get_comment_by_id(db, comment_id)
             if new_comment:
                 return jsonify(dict(new_comment)), 201
@@ -6223,6 +6286,32 @@ def add_comment_to_item(item_type, item_id):
     except Exception as e:
         app.logger.error(f"Error adding comment to {item_type} ID {item_id}: {e}", exc_info=True)
         return jsonify(msg="An unexpected server error occurred while adding comment."), 500
+
+def _get_item_name_for_notification(db, item_type, item_id):
+    """Helper to get a display name for an item for notification messages."""
+    name = f"item (ID: {item_id})" # Default
+    query = None
+    if item_type == 'document': query = "SELECT doc_name as name FROM documents WHERE id = ?"
+    elif item_type == 'patch': query = "SELECT patch_name as name FROM patches WHERE id = ?"
+    elif item_type == 'link': query = "SELECT title as name FROM links WHERE id = ?"
+    elif item_type == 'misc_file': query = "SELECT COALESCE(user_provided_title, original_filename) as name FROM misc_files WHERE id = ?"
+    elif item_type == 'software': query = "SELECT name FROM software WHERE id = ?"
+    elif item_type == 'version': query = "SELECT version_number as name FROM versions WHERE id = ?"
+    elif item_type == 'comment': 
+        comment_for_name = database.get_comment_by_id(db, item_id)
+        if comment_for_name:
+            return _get_item_name_for_notification(db, comment_for_name['item_type'], comment_for_name['item_id'])
+        else: 
+            return f"a deleted comment (ID: {item_id})"
+    
+    if query:
+        try:
+            row = db.execute(query, (item_id,)).fetchone()
+            if row and row['name']:
+                name = row['name']
+        except Exception as e:
+            app.logger.error(f"Error fetching item name for notification ({item_type} ID {item_id}): {e}")
+    return name
 
 @app.route('/api/items/<item_type>/<int:item_id>/comments', methods=['GET'])
 @jwt_required(optional=True) # Allow anonymous access, JWT enhances if present
@@ -6382,3 +6471,154 @@ def get_mention_suggestions():
         app.logger.error(f"Unexpected error fetching mention suggestions for query '{query_term}': {e}", exc_info=True)
         return jsonify(msg="An unexpected server error occurred."), 500
 
+# --- Notification Endpoints ---
+
+@app.route('/api/notifications', methods=['GET'])
+@jwt_required()
+def get_notifications_api():
+    current_user_id_str = get_jwt_identity()
+    try:
+        user_id = int(current_user_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid user identity in token."), 401
+
+    page = request.args.get('page', default=1, type=int)
+    per_page = request.args.get('per_page', default=10, type=int)
+    status_filter = request.args.get('status', default='all', type=str).lower()
+
+    if page <= 0: page = 1
+    if per_page <= 0: per_page = 10
+    if per_page > 100: per_page = 100
+
+    db = get_db()
+    notifications_list = []
+    total_notifications = 0
+
+    try:
+        if status_filter == 'unread':
+            # Current database.get_unread_notifications doesn't support full pagination.
+            # Fetch all unread and manually paginate for this endpoint.
+            unread_notifications_all = database.get_unread_notifications(db, user_id)
+            total_notifications = len(unread_notifications_all)
+            start_index = (page - 1) * per_page
+            end_index = start_index + per_page
+            notifications_list = [dict(n) for n in unread_notifications_all[start_index:end_index]]
+        elif status_filter == 'all': # Explicitly check for 'all'
+            notifications_rows, total_notifications_count = database.get_all_notifications(db, user_id, page, per_page)
+            notifications_list = [dict(n) for n in notifications_rows]
+            total_notifications = total_notifications_count
+        else: # Handle invalid status filters
+             app.logger.info(f"Notification API: Received invalid status_filter '{status_filter}', returning empty list.")
+             # Or, could default to 'all' or return a 400 error. For now, empty list.
+             notifications_list = []
+             total_notifications = 0
+
+
+        total_pages = math.ceil(total_notifications / per_page) if total_notifications > 0 else 1
+        
+        return jsonify({
+            "notifications": notifications_list,
+            "page": page,
+            "per_page": per_page,
+            "total_notifications": total_notifications,
+            "total_pages": total_pages,
+            "status_filter": status_filter 
+        }), 200
+
+    except Exception as e:
+        app.logger.error(f"Error fetching notifications for user {user_id} (status: {status_filter}): {e}", exc_info=True)
+        return jsonify(msg="An error occurred while fetching notifications."), 500
+
+@app.route('/api/notifications/unread_count', methods=['GET'])
+@jwt_required()
+def get_unread_notification_count_api():
+    current_user_id_str = get_jwt_identity()
+    try:
+        user_id = int(current_user_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid user identity in token."), 401
+    
+    db = get_db()
+    try:
+        unread_notifications = database.get_unread_notifications(db, user_id)
+        return jsonify({"count": len(unread_notifications)}), 200
+    except Exception as e:
+        app.logger.error(f"Error fetching unread notification count for user {user_id}: {e}", exc_info=True)
+        return jsonify(msg="An error occurred while fetching unread notification count."), 500
+
+@app.route('/api/notifications/<int:notification_id>/read', methods=['PUT'])
+@jwt_required()
+def mark_notification_as_read_api(notification_id):
+    current_user_id_str = get_jwt_identity()
+    try:
+        user_id = int(current_user_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid user identity in token."), 401
+
+    db = get_db()
+    
+    success = database.mark_notification_as_read(db, notification_id, user_id)
+
+    if success:
+        log_audit_action(
+            action_type='NOTIFICATION_MARKED_READ',
+            target_table='notifications',
+            target_id=notification_id,
+            details={'notification_id': notification_id}
+        )
+        updated_notification = database.get_notification_by_id(db, notification_id)
+        if updated_notification:
+            return jsonify(dict(updated_notification)), 200
+        else:
+            app.logger.error(f"Failed to retrieve notification {notification_id} after marking as read.")
+            return jsonify(msg="Notification marked as read, but failed to retrieve updated details."), 500
+    else:
+        notification_check = database.get_notification_by_id(db, notification_id)
+        if not notification_check:
+            return jsonify(msg="Notification not found."), 404
+        if notification_check['user_id'] != user_id:
+             return jsonify(msg="You do not have permission to mark this notification as read."), 403
+        return jsonify(msg="Failed to mark notification as read. It may have already been read or another error occurred."), 400
+
+
+@app.route('/api/notifications/mark_all_read', methods=['PUT'])
+@jwt_required()
+def mark_all_user_notifications_as_read_api():
+    current_user_id_str = get_jwt_identity()
+    try:
+        user_id = int(current_user_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid user identity in token."), 401
+
+    db = get_db()
+    try:
+        count_marked_read = database.mark_all_notifications_as_read(db, user_id)
+        log_audit_action(
+            action_type='NOTIFICATIONS_MARKED_ALL_READ',
+            details={'count_marked_read': count_marked_read}
+        )
+        return jsonify(msg=f"Successfully marked {count_marked_read} notification(s) as read."), 200
+    except Exception as e:
+        app.logger.error(f"Error marking all notifications as read for user {user_id}: {e}", exc_info=True)
+        return jsonify(msg="An error occurred while marking all notifications as read."), 500
+
+@app.route('/api/notifications/clear_all', methods=['DELETE'])
+@jwt_required()
+def clear_all_user_notifications_api():
+    current_user_id_str = get_jwt_identity()
+    try:
+        user_id = int(current_user_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid user identity in token."), 401
+
+    db = get_db()
+    try:
+        count_deleted = database.clear_all_notifications(db, user_id)
+        log_audit_action(
+            action_type='NOTIFICATIONS_CLEARED_ALL',
+            details={'count_deleted': count_deleted}
+        )
+        return jsonify(msg=f"Successfully deleted {count_deleted} notification(s)."), 200
+    except Exception as e:
+        app.logger.error(f"Error clearing all notifications for user {user_id}: {e}", exc_info=True)
+        return jsonify(msg="An error occurred while clearing all notifications."), 500

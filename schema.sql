@@ -16,6 +16,7 @@ DROP TABLE IF EXISTS security_questions;
 DROP TABLE IF EXISTS password_reset_requests;
 DROP TABLE IF EXISTS file_permissions;
 DROP TABLE IF EXISTS system_settings;
+DROP TABLE IF EXISTS notifications;
 
 CREATE TABLE IF NOT EXISTS comments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -323,3 +324,22 @@ INSERT INTO system_settings (setting_name, is_enabled) VALUES ('maintenance_mode
 ON CONFLICT(setting_name) DO NOTHING;
 -- 'ON CONFLICT' ensures this doesn't error if schema is run multiple times,
 -- though for a fresh DB it's just an insert.
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    type TEXT NOT NULL,
+    message TEXT NOT NULL,
+    item_id INTEGER,
+    item_type TEXT,
+    is_read BOOLEAN DEFAULT FALSE NOT NULL,
+    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    FOREIGN KEY (user_id) REFERENCES users (id)
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications (user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_item_id_item_type ON notifications (item_id, item_type);
+CREATE TRIGGER IF NOT EXISTS update_notifications_updated_at
+AFTER UPDATE ON notifications FOR EACH ROW BEGIN
+    UPDATE notifications SET updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE id = OLD.id;
+END;

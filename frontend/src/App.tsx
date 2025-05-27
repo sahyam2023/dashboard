@@ -175,10 +175,17 @@ function AppContent() {
 }
 
 // Main App component now just sets up BrowserRouter
+import { AuthProvider } from './context/AuthContext'; // Import AuthProvider
+import { NotificationProvider } from './context/NotificationContext'; // Import NotificationProvider
+
 function App() {
   return (
     <BrowserRouter>
-      <AppContent />
+      <AuthProvider>
+        <NotificationProvider>
+          <AppContent />
+        </NotificationProvider>
+      </AuthProvider>
     </BrowserRouter>
   );
 }

@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Menu, Search, X, LogOut, User, LogIn } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext'; // Import useTheme
+import NotificationBell from './notifications/NotificationBell'; // Added NotificationBell import
 import { IconButton } from '@mui/material'; // Import IconButton
 import Brightness4Icon from '@mui/icons-material/Brightness4'; // Dark mode icon
 import Brightness7Icon from '@mui/icons-material/Brightness7'; // Light mode icon
@@ -95,6 +96,7 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
 
         {/* Right Section: Auth Controls & Theme Toggle */}
         <div className="flex items-center space-x-2 sm:space-x-3"> {/* Adjusted space-x for new icon button */}
+          <NotificationBell /> {/* Added NotificationBell component here */}
           <IconButton 
             sx={{ ml: 1, color: 'text.primary' }} // Use theme text color
             onClick={toggleThemeMode} 

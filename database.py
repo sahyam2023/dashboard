@@ -452,3 +452,135 @@ def delete_comment_by_id(db, comment_id, user_id, role):
     except sqlite3.Error as e:
         print(f"DB_COMMENTS: Error deleting comment ID {comment_id} by user {user_id} (role: {role}): {e}")
         return False
+
+# --- Notification Management Functions ---
+
+def create_notification(db, user_id, type, message, item_id=None, item_type=None):
+    """Inserts a new notification into the notifications table."""
+    try:
+        cursor = db.execute(
+            """
+            INSERT INTO notifications (user_id, type, message, item_id, item_type)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (user_id, type, message, item_id, item_type)
+        )
+        db.commit()
+        return cursor.lastrowid
+    except sqlite3.Error as e:
+        print(f"DB_NOTIFICATIONS: Error creating notification for user {user_id}: {e}")
+        return None
+
+def get_unread_notifications(db, user_id, limit=None):
+    """Fetches unread notifications for a user, optionally limited."""
+    try:
+        query = """
+            SELECT id, user_id, type, message, item_id, item_type, is_read, created_at, updated_at
+            FROM notifications
+            WHERE user_id = ? AND is_read = FALSE
+            ORDER BY created_at DESC
+        """
+        params = (user_id,)
+        if limit is not None:
+            query += " LIMIT ?"
+            params += (limit,)
+        
+        cursor = db.execute(query, params)
+        return cursor.fetchall() # List of Row objects
+    except sqlite3.Error as e:
+        print(f"DB_NOTIFICATIONS: Error fetching unread notifications for user {user_id}: {e}")
+        return []
+
+def get_all_notifications(db, user_id, page, per_page):
+    """Fetches all notifications for a user with pagination."""
+    offset = (page - 1) * per_page
+    try:
+        # Fetch items for the current page
+        items_cursor = db.execute(
+            """
+            SELECT id, user_id, type, message, item_id, item_type, is_read, created_at, updated_at
+            FROM notifications
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+            """,
+            (user_id, per_page, offset)
+        )
+        notifications = items_cursor.fetchall()
+
+        # Fetch total count of notifications for the user
+        count_cursor = db.execute(
+            "SELECT COUNT(id) FROM notifications WHERE user_id = ?",
+            (user_id,)
+        )
+        total_count_row = count_cursor.fetchone()
+        total_notifications = total_count_row[0] if total_count_row else 0
+        
+        return notifications, total_notifications
+    except sqlite3.Error as e:
+        print(f"DB_NOTIFICATIONS: Error fetching all notifications for user {user_id}: {e}")
+        return [], 0
+
+def mark_notification_as_read(db, notification_id, user_id):
+    """Marks a specific notification as read, ensuring user ownership."""
+    try:
+        # Verify the user owns the notification before marking as read
+        owner_cursor = db.execute("SELECT user_id FROM notifications WHERE id = ?", (notification_id,))
+        owner_row = owner_cursor.fetchone()
+
+        if not owner_row:
+            print(f"DB_NOTIFICATIONS: Mark as read failed. Notification ID {notification_id} not found.")
+            return False
+        
+        if owner_row['user_id'] != user_id:
+            print(f"DB_NOTIFICATIONS: Mark as read failed. User {user_id} does not own notification ID {notification_id}.")
+            return False
+
+        cursor = db.execute(
+            "UPDATE notifications SET is_read = TRUE, updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE id = ? AND user_id = ?",
+            (notification_id, user_id)
+        )
+        db.commit()
+        return cursor.rowcount > 0
+    except sqlite3.Error as e:
+        print(f"DB_NOTIFICATIONS: Error marking notification {notification_id} as read for user {user_id}: {e}")
+        return False
+
+def mark_all_notifications_as_read(db, user_id):
+    """Marks all unread notifications for a user as read."""
+    try:
+        cursor = db.execute(
+            "UPDATE notifications SET is_read = TRUE, updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE user_id = ? AND is_read = FALSE",
+            (user_id,)
+        )
+        db.commit()
+        return cursor.rowcount
+    except sqlite3.Error as e:
+        print(f"DB_NOTIFICATIONS: Error marking all notifications as read for user {user_id}: {e}")
+        return 0
+
+def clear_all_notifications(db, user_id):
+    """Deletes all notifications for a specific user."""
+    try:
+        cursor = db.execute("DELETE FROM notifications WHERE user_id = ?", (user_id,))
+        db.commit()
+        return cursor.rowcount
+    except sqlite3.Error as e:
+        print(f"DB_NOTIFICATIONS: Error clearing all notifications for user {user_id}: {e}")
+        return 0
+
+def get_notification_by_id(db, notification_id):
+    """Fetches a single notification by its ID."""
+    try:
+        cursor = db.execute(
+            """
+            SELECT id, user_id, type, message, item_id, item_type, is_read, created_at, updated_at
+            FROM notifications
+            WHERE id = ?
+            """,
+            (notification_id,)
+        )
+        return cursor.fetchone() # Returns sqlite3.Row or None
+    except sqlite3.Error as e:
+        print(f"DB_NOTIFICATIONS: Error fetching notification by ID {notification_id}: {e}")
+        return None

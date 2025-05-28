@@ -101,18 +101,16 @@ const AdminVersionsPage: React.FC = () => {
       {/* Feedback messages are now handled by toasts, so the feedbackMessage div is removed */}
 
       <div className="mb-6 flex justify-between items-center">
-        <button
-          onClick={handleOpenAddForm}
-          className="px-6 py-2 text-white bg-indigo-600 hover:bg-indigo-700 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-        >
-          Add New Version
-        </button>
-        
-        { !isLoadingSoftwareList && !errorLoadingSoftwareList && softwareList.length > 0 && (
-          <div className="w-1/4">
-            <label htmlFor="softwareFilter" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Filter by Software:</label>
-            <select
-              id="softwareFilter"
+        <div>
+          {/* Optional: Placeholder for any content to remain on the left, or can be empty */}
+        </div>
+        <div className="flex items-center space-x-4"> {/* New grouping div */}
+          {/* Filter by Software Dropdown */}
+          { !isLoadingSoftwareList && !errorLoadingSoftwareList && softwareList.length > 0 && (
+            <div className="min-w-[200px]"> {/* Adjusted width class */}
+              <label htmlFor="softwareFilter" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Filter by Software:</label>
+              <select
+                id="softwareFilter"
               value={selectedSoftwareFilter || ''}
               onChange={(e) => {
                 setSelectedSoftwareFilter(e.target.value ? Number(e.target.value) : null);
@@ -126,7 +124,15 @@ const AdminVersionsPage: React.FC = () => {
               ))}
             </select>
           </div>
-        )}
+          )}
+          {/* Add New Version Button */}
+          <button
+            onClick={handleOpenAddForm}
+            className="px-6 py-2 text-white bg-indigo-600 hover:bg-indigo-700 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+          >
+            Add New Version
+          </button>
+        </div>
       </div>
       
       {/* AdminVersionsTable will handle its own loading and error states internally,

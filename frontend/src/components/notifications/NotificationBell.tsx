@@ -90,25 +90,56 @@ const NotificationBell: React.FC = () => {
     }
   };
   
-  // Function to generate a link for a notification (basic example)
+  // Function to generate a link for a notification
   const getNotificationLink = (notification: Notification): string | undefined => {
     if (!notification.item_type || notification.item_id === null || typeof notification.item_id === 'undefined') {
       return undefined;
     }
-    // This is a simplified example. You'll need a more robust way to generate links
-    // based on your application's routing structure.
+
+    let basePath = '';
+
     switch (notification.item_type) {
       case 'comment':
-        // Ideally, you'd link to the comment itself or the item the comment is on.
-        // This might require more info (e.g., parent item's ID and type for a comment).
-        // For now, just a placeholder.
-        return `/some-item-view/${notification.item_id}`; // Placeholder
+        if (notification.original_item_type && typeof notification.original_item_id === 'number') {
+          let pluralType = '';
+          switch (notification.original_item_type) {
+            case 'document': pluralType = 'documents'; break;
+            case 'patch': pluralType = 'patches'; break;
+            case 'link': pluralType = 'links'; break;
+            case 'misc_file': pluralType = 'misc'; break; // Assuming '/misc' is the route for misc_files list view
+            case 'software': pluralType = 'software'; break; // Route for software list or individual software
+            case 'version': pluralType = 'versions'; break; // Route for versions list or individual version
+            default:
+              console.warn(`Unknown original_item_type for comment notification: ${notification.original_item_type}`);
+              return undefined;
+          }
+          // Ensure notification.item_id (the comment_id itself) is valid
+          if (typeof notification.item_id !== 'number') {
+            console.warn('Comment notification is missing its own item_id (comment_id):', notification);
+            return undefined;
+          }
+          return `/${pluralType}?item_id=${notification.original_item_id}&comment_id=${notification.item_id}`;
+        } else {
+          console.warn('Comment notification is missing original item type or ID:', notification);
+          return undefined;
+        }
+      // Direct notifications (not about comments on items) - these links might also need review
+      // to see if they should point to a specific item page or a list view with highlighting.
+      // For now, keeping them as they were, but they might also benefit from /type/id structure if available.
       case 'document':
-        return `/documents?highlight=${notification.item_id}`; // Example
+        return `/documents?item_id=${notification.item_id}`; // Changed from highlight to item_id for consistency
       case 'patch':
-        return `/patches?highlight=${notification.item_id}`; // Example
-      // Add other item types as needed
+        return `/patches?item_id=${notification.item_id}`;   // Changed from highlight to item_id
+      case 'link':
+        return `/links?item_id=${notification.item_id}`;     // Changed from highlight to item_id
+      case 'misc_file':
+        return `/misc?item_id=${notification.item_id}`;      // Changed from highlight to item_id
+      case 'software':
+        return `/software?item_id=${notification.item_id}`;  // Changed from highlight to item_id
+      case 'version':
+        return `/versions?item_id=${notification.item_id}`;  // Changed from highlight to item_id
       default:
+        console.warn(`Unknown notification item_type: ${notification.item_type}`);
         return undefined;
     }
   };
@@ -161,8 +192,8 @@ const NotificationBell: React.FC = () => {
                       if (!getNotificationLink(notification)) e.preventDefault(); 
                     }}
                     className="block"
-                    target={getNotificationLink(notification) ? "_blank" : "_self"} // Open in new tab if actual link
-                    rel={getNotificationLink(notification) ? "noopener noreferrer" : ""}
+                    target="_self" // Always open in the same tab for internal navigation
+                    // rel attribute removed as it's not needed for _self
                   >
                     <div className="flex justify-between items-start">
                       <p className="text-sm text-gray-700 dark:text-gray-300 break-words mr-2">{notification.message}</p>

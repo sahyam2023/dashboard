@@ -37,11 +37,12 @@ DOC_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'official_uploads', 'docu
 PATCH_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'official_uploads', 'patches')
 LINK_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'official_uploads', 'links')
 MISC_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'misc_uploads')
+PROFILE_PICTURES_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'profile_pictures') # Added
 STATIC_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'frontend', 'dist')
 
 
 # Ensure all upload folders exist
-for folder in [DOC_UPLOAD_FOLDER, PATCH_UPLOAD_FOLDER, LINK_UPLOAD_FOLDER, MISC_UPLOAD_FOLDER]:
+for folder in [DOC_UPLOAD_FOLDER, PATCH_UPLOAD_FOLDER, LINK_UPLOAD_FOLDER, MISC_UPLOAD_FOLDER, PROFILE_PICTURES_UPLOAD_FOLDER]: # Added PROFILE_PICTURES_UPLOAD_FOLDER
     if not os.path.exists(folder):
         os.makedirs(folder, exist_ok=True) # exist_ok=True is helpful
 
@@ -99,6 +100,7 @@ app.config['DOC_UPLOAD_FOLDER'] = DOC_UPLOAD_FOLDER
 app.config['PATCH_UPLOAD_FOLDER'] = PATCH_UPLOAD_FOLDER
 app.config['LINK_UPLOAD_FOLDER'] = LINK_UPLOAD_FOLDER
 app.config['MISC_UPLOAD_FOLDER'] = MISC_UPLOAD_FOLDER
+app.config['PROFILE_PICTURES_UPLOAD_FOLDER'] = PROFILE_PICTURES_UPLOAD_FOLDER # Added
 app.config['INSTANCE_FOLDER_PATH'] = INSTANCE_FOLDER_PATH # Added for DB backup
 
 bcrypt = Bcrypt(app)
@@ -155,22 +157,22 @@ def close_db(exception):
         db.close()
 
 def find_user_by_id(user_id):
-    return get_db().execute("SELECT id, username, password_hash, email, role, is_active, created_at, password_reset_required FROM users WHERE id = ?", (user_id,)).fetchone()
+    return get_db().execute("SELECT id, username, password_hash, email, role, is_active, created_at, password_reset_required, profile_picture_filename FROM users WHERE id = ?", (user_id,)).fetchone()
 
 def find_user_by_username(username):
-    return get_db().execute("SELECT id, username, password_hash, email, role, is_active, created_at, password_reset_required FROM users WHERE username = ?", (username,)).fetchone()
+    return get_db().execute("SELECT id, username, password_hash, email, role, is_active, created_at, password_reset_required, profile_picture_filename FROM users WHERE username = ?", (username,)).fetchone()
 
 def find_user_by_email(email):
     if not email or not email.strip(): return None
     return get_db().execute("SELECT * FROM users WHERE email = ?", (email.strip(),)).fetchone()
 
-def create_user_in_db(username, password, email=None, role='user'): # Added role, default to 'user'
+def create_user_in_db(username, password, email=None, role='user', profile_picture_filename=None):
     hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
     actual_email = email.strip() if email and email.strip() else None
     try:
         cursor = get_db().execute(
-            "INSERT INTO users (username, password_hash, email, role) VALUES (?, ?, ?, ?)", # Added role column
-            (username, hashed_password, actual_email, role) # Added role value
+            "INSERT INTO users (username, password_hash, email, role, profile_picture_filename) VALUES (?, ?, ?, ?, ?)",
+            (username, hashed_password, actual_email, role, profile_picture_filename)
         )
         get_db().commit()
         user_id = cursor.lastrowid
@@ -1052,12 +1054,30 @@ def update_user_file_permissions(user_id):
 # --- Authentication Endpoints ---
 @app.route('/api/auth/register', methods=['POST'])
 def register():
-    data = request.get_json()
-    if not data: return jsonify(msg="Missing JSON data"), 400
-    username, password, email = data.get('username'), data.get('password'), data.get('email')
-    security_answers = data.get('security_answers')
+    # Handle multipart/form-data for profile picture upload
+    if 'profile_picture' in request.files:
+        username = request.form.get('username')
+        password = request.form.get('password')
+        email = request.form.get('email')
+        security_answers_str = request.form.get('security_answers')
+        profile_picture_file = request.files.get('profile_picture')
+    else: # Fallback to JSON if no file part, though frontend should always use FormData now
+        data = request.get_json()
+        if not data: return jsonify(msg="Missing form data or JSON data"), 400
+        username = data.get('username')
+        password = data.get('password')
+        email = data.get('email')
+        security_answers_str = data.get('security_answers') # Assuming it's a JSON string if sent this way
+        profile_picture_file = None
 
     if not username or not password: return jsonify(msg="Missing username or password"), 400
+    if not security_answers_str: return jsonify(msg="Missing security_answers"), 400
+
+    try:
+        security_answers = json.loads(security_answers_str) if isinstance(security_answers_str, str) else security_answers_str
+    except json.JSONDecodeError:
+        return jsonify(msg="Invalid format for security_answers. Must be a valid JSON string if not an object."), 400
+
 
     # --- Security Answers Validation ---
     if not security_answers or not isinstance(security_answers, list) or len(security_answers) != 3:
@@ -1076,17 +1096,14 @@ def register():
     if len(set(question_ids)) != 3:
         return jsonify(msg="All three 'question_id's must be unique."), 400
     
-    # Optional: Validate question_ids exist in DB
-    db = get_db() # Ensure db is available for this check
+    db = get_db()
     placeholders = ','.join(['?'] * len(question_ids))
     query = f"SELECT COUNT(*) FROM security_questions WHERE id IN ({placeholders})"
     cursor = db.execute(query, question_ids)
     count_row = cursor.fetchone()
     if count_row is None or count_row[0] != 3:
         return jsonify(msg="One or more provided security question IDs are invalid."), 400
-    # --- End Security Answers Validation ---
 
-    # Password strength check
     is_strong, strength_msg = is_password_strong(password)
     if not is_strong:
         return jsonify(msg=strength_msg), 400
@@ -1094,64 +1111,96 @@ def register():
     if find_user_by_username(username): return jsonify(msg="Username already exists"), 409
     if email and find_user_by_email(email): return jsonify(msg="Email address already registered"), 409
 
-    # Need to get actual_email from create_user_in_db or pass it to log_audit_action
-    # For simplicity, let's prepare actual_email as it would be in create_user_in_db
     actual_email_for_log = email.strip() if email and email.strip() else None
-
-    # Determine role based on existing user count
-    # db = get_db() # db is already fetched for question ID validation
     user_count_cursor = db.execute("SELECT COUNT(*) as count FROM users")
     user_count = user_count_cursor.fetchone()['count']
     role_to_assign = 'super_admin' if user_count == 0 else 'user'
 
-    user_id, assigned_role = create_user_in_db(username, password, email, role_to_assign) # This commits the user creation
+    profile_picture_filename = None
+    profile_picture_saved = False
+    if profile_picture_file and profile_picture_file.filename != '':
+        if allowed_file(profile_picture_file.filename): # You might want more specific image extension check
+            original_filename = secure_filename(profile_picture_file.filename)
+            ext = original_filename.rsplit('.', 1)[1].lower() if '.' in original_filename else ''
+            profile_picture_filename = f"{uuid.uuid4().hex}.{ext}"
+            file_save_path = os.path.join(app.config['PROFILE_PICTURES_UPLOAD_FOLDER'], profile_picture_filename)
+            try:
+                profile_picture_file.save(file_save_path)
+                profile_picture_saved = True
+            except Exception as e:
+                app.logger.error(f"Error saving profile picture: {e}")
+                return jsonify(msg="Error saving profile picture."), 500
+        else:
+            return jsonify(msg="Invalid profile picture file type."), 400
+
+    user_id, assigned_role = create_user_in_db(username, password, email, role_to_assign, profile_picture_filename)
     
     if user_id:
         try:
-            # Hash and store security answers
             for ans in security_answers:
                 hashed_answer = bcrypt.generate_password_hash(ans['answer']).decode('utf-8')
                 db.execute(
                     "INSERT INTO user_security_answers (user_id, question_id, answer_hash) VALUES (?, ?, ?)",
                     (user_id, ans['question_id'], hashed_answer)
                 )
-            db.commit() # Commit security answers
+            db.commit()
             
             log_audit_action(
                 action_type='CREATE_USER',
                 target_table='users',
                 target_id=user_id,
-                details={'username': username, 'email': actual_email_for_log, 'role': assigned_role, 'security_questions_set': True},
+                details={
+                    'username': username, 
+                    'email': actual_email_for_log, 
+                    'role': assigned_role, 
+                    'security_questions_set': True,
+                    'profile_picture_set': profile_picture_saved 
+                },
                 user_id=user_id, 
                 username=username
             )
-            # Generate access token for automatic login
             access_token = create_access_token(identity=str(user_id))
+            # Construct profile_picture_url if filename exists
+            profile_picture_url = f"/profile_pictures/{profile_picture_filename}" if profile_picture_filename else None
+            
             return jsonify(
                 msg="User created successfully", 
                 user_id=user_id, 
                 role=assigned_role,
                 access_token=access_token,
-                username=username
+                username=username,
+                profile_picture_url=profile_picture_url # Include in response
             ), 201
         except sqlite3.IntegrityError as e:
-            # This might happen if somehow (user_id, question_id) is duplicated despite prior validation,
-            # or if a question_id is invalid and not caught by optional check.
-            # Since user is already created, this is a partial failure state.
-            # For now, log and return error. A more robust solution might rollback user creation.
-            db.rollback() # Rollback security answer insertions
+            db.rollback() 
             app.logger.error(f"DB IntegrityError storing security answers for user '{username}': {e}")
-            # Consider deleting the created user if security questions are mandatory for all users
-            # db.execute("DELETE FROM users WHERE id = ?", (user_id,))
-            # db.commit()
-            # app.logger.info(f"Rolled back user creation for {username} due to security answer storage failure.")
+            # If user creation was successful but security answers failed, and a profile picture was saved,
+            # we might want to delete the orphaned profile picture.
+            if profile_picture_filename and os.path.exists(os.path.join(app.config['PROFILE_PICTURES_UPLOAD_FOLDER'], profile_picture_filename)):
+                try:
+                    os.remove(os.path.join(app.config['PROFILE_PICTURES_UPLOAD_FOLDER'], profile_picture_filename))
+                    app.logger.info(f"Cleaned up orphaned profile picture {profile_picture_filename} for user {username} after DB error.")
+                except Exception as e_clean:
+                    app.logger.error(f"Error cleaning up orphaned profile picture {profile_picture_filename}: {e_clean}")
             return jsonify(msg="User created, but failed to store security answers due to a database conflict."), 500
         except Exception as e:
-            db.rollback() # Rollback security answer insertions
+            db.rollback()
             app.logger.error(f"General Exception storing security answers for user '{username}': {e}")
-            # Similarly, consider user rollback.
+            if profile_picture_filename and os.path.exists(os.path.join(app.config['PROFILE_PICTURES_UPLOAD_FOLDER'], profile_picture_filename)):
+                 try:
+                    os.remove(os.path.join(app.config['PROFILE_PICTURES_UPLOAD_FOLDER'], profile_picture_filename))
+                    app.logger.info(f"Cleaned up orphaned profile picture {profile_picture_filename} for user {username} after general error.")
+                 except Exception as e_clean:
+                    app.logger.error(f"Error cleaning up orphaned profile picture {profile_picture_filename}: {e_clean}")
             return jsonify(msg="User created, but failed to store security answers due to a server error."), 500
-    else: # user_id was None from create_user_in_db
+    else: # user_id was None from create_user_in_db (meaning user creation failed)
+        # If profile picture was saved before user creation failed, delete it.
+        if profile_picture_filename and os.path.exists(os.path.join(app.config['PROFILE_PICTURES_UPLOAD_FOLDER'], profile_picture_filename)):
+            try:
+                os.remove(os.path.join(app.config['PROFILE_PICTURES_UPLOAD_FOLDER'], profile_picture_filename))
+                app.logger.info(f"Cleaned up profile picture {profile_picture_filename} after failed user creation for {username}.")
+            except Exception as e_clean:
+                app.logger.error(f"Error cleaning up profile picture {profile_picture_filename} after failed user creation: {e_clean}")
         return jsonify(msg="Failed to create user due to a database issue."), 500
 
 @app.route('/api/auth/login', methods=['POST'])
@@ -1206,12 +1255,18 @@ def login():
         password_reset_required = user['password_reset_required'] if 'password_reset_required' in user.keys() and user['password_reset_required'] is not None else False
         app.logger.debug(f"[Login Debug] Calculated password_reset_required for JSON response: {password_reset_required}")
         app.logger.debug(f"[Login Debug] Type of calculated password_reset_required for JSON response: {type(password_reset_required).__name__}")
+        
+        profile_picture_url = None
+        if user['profile_picture_filename']:
+            profile_picture_url = f"/profile_pictures/{user['profile_picture_filename']}"
+
         return jsonify(
             access_token=access_token, 
             username=user['username'], 
             role=user['role'],
-            user_id=user['id'], # Added
-            password_reset_required=password_reset_required
+            user_id=user['id'], 
+            password_reset_required=password_reset_required,
+            profile_picture_url=profile_picture_url # Added
         ), 200
     
     # Log failed login attempt (bad username or password)
@@ -1230,6 +1285,66 @@ def login():
     return jsonify(msg="Bad username or password"), 401
 
 # --- User Profile Management Endpoints ---
+
+@app.route('/api/user/profile/upload-picture', methods=['POST'])
+@jwt_required()
+def upload_profile_picture():
+    current_user_id = int(get_jwt_identity())
+    user = find_user_by_id(current_user_id)
+    if not user:
+        return jsonify(msg="User not found."), 404
+
+    if 'profile_picture' not in request.files:
+        return jsonify(msg="No profile picture file part in request."), 400
+    
+    file = request.files['profile_picture']
+    if file.filename == '':
+        return jsonify(msg="No selected file for profile picture."), 400
+
+    if file and allowed_file(file.filename): # Add more specific image validation if needed
+        original_filename = secure_filename(file.filename)
+        ext = original_filename.rsplit('.', 1)[1].lower() if '.' in original_filename else ''
+        new_filename = f"{uuid.uuid4().hex}.{ext}"
+        save_path = os.path.join(app.config['PROFILE_PICTURES_UPLOAD_FOLDER'], new_filename)
+
+        try:
+            # Delete old profile picture if it exists
+            old_filename = user['profile_picture_filename']
+            if old_filename:
+                old_file_path = os.path.join(app.config['PROFILE_PICTURES_UPLOAD_FOLDER'], old_filename)
+                if os.path.exists(old_file_path):
+                    os.remove(old_file_path)
+                    app.logger.info(f"Deleted old profile picture {old_filename} for user {current_user_id}")
+
+            file.save(save_path)
+
+            db = get_db()
+            db.execute("UPDATE users SET profile_picture_filename = ? WHERE id = ?", (new_filename, current_user_id))
+            db.commit()
+
+            log_audit_action(
+                action_type='PROFILE_PICTURE_UPDATED',
+                target_table='users',
+                target_id=current_user_id,
+                details={'new_filename': new_filename, 'old_filename': old_filename}
+            )
+            
+            profile_picture_url = f"/profile_pictures/{new_filename}"
+            return jsonify(msg="Profile picture updated successfully.", profile_picture_url=profile_picture_url), 200
+
+        except Exception as e:
+            app.logger.error(f"Error uploading profile picture for user {current_user_id}: {e}")
+            # Attempt to clean up newly saved file if DB update fails or other error occurs mid-process
+            if os.path.exists(save_path):
+                try:
+                    os.remove(save_path)
+                except Exception as e_clean:
+                    app.logger.error(f"Error cleaning up partially saved profile picture {save_path}: {e_clean}")
+            return jsonify(msg="Server error during profile picture upload."), 500
+    else:
+        return jsonify(msg="Invalid file type for profile picture."), 400
+
+
 @app.route('/api/user/profile/change-password', methods=['POST'])
 @jwt_required()
 def change_password():
@@ -2987,10 +3102,10 @@ def admin_upload_link_file():
 @app.route('/api/admin/patches/<int:patch_id>/edit_url', methods=['PUT'])
 @jwt_required()
 @admin_required
-def admin_edit_patch_url(patch_id_from_url): # Renamed to avoid conflict with variable 'patch_id'
+def admin_edit_patch_url(patch_id):
     current_user_id = int(get_jwt_identity())
     db = get_db()
-    patch = db.execute("SELECT * FROM patches WHERE id = ?", (patch_id_from_url,)).fetchone()
+    patch = db.execute("SELECT * FROM patches WHERE id = ?", (patch_id,)).fetchone()
     if not patch: return jsonify(msg="Patch not found"), 404
 
     data = request.get_json()
@@ -3064,11 +3179,11 @@ def admin_edit_patch_url(patch_id_from_url): # Renamed to avoid conflict with va
             original_filename_ref = NULL, file_size = NULL, file_type = NULL,
             updated_by_user_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
             (final_version_id, patch_name, description, release_date, download_link, patch_by_developer,
-             current_user_id, patch_id_from_url))
+             current_user_id, patch_id))
         log_audit_action(
             action_type='UPDATE_PATCH_URL',
             target_table='patches',
-            target_id=patch_id_from_url,
+            target_id=patch_id,
             details=log_details
         )
         db.commit()
@@ -3081,13 +3196,13 @@ def admin_edit_patch_url(patch_id_from_url): # Renamed to avoid conflict with va
             JOIN software s ON v.software_id = s.id
             LEFT JOIN users cr_u ON p.created_by_user_id = cr_u.id
             LEFT JOIN users upd_u ON p.updated_by_user_id = upd_u.id
-            WHERE p.id = ?""", (patch_id_from_url,)).fetchone()
+            WHERE p.id = ?""", (patch_id,)).fetchone()
         
         if updated_item_row:
             return jsonify(dict(updated_item_row)), 200
         else:
             # This case should ideally not be reached if the update was successful.
-            app.logger.error(f"Failed to fetch patch with ID {patch_id_from_url} after edit_url.")
+            app.logger.error(f"Failed to fetch patch with ID {patch_id} after edit_url.")
             return jsonify(msg="Patch updated but failed to retrieve full details."), 500
             
     except sqlite3.IntegrityError as e: db.rollback(); return jsonify(msg=f"DB error: {e}"), 409
@@ -5707,6 +5822,11 @@ def disable_maintenance_mode():
         db.rollback()
         app.logger.error(f"Unexpected error disabling maintenance mode: {e}", exc_info=True)
         return jsonify({"msg": "An unexpected server error occurred", "error": str(e)}), 500
+
+# --- Profile Picture Serving Endpoint ---
+@app.route('/profile_pictures/<path:filename>')
+def serve_profile_picture(filename):
+    return send_from_directory(app.config['PROFILE_PICTURES_UPLOAD_FOLDER'], filename)
 
 # --- User Favorites Endpoints ---
 ALLOWED_FAVORITE_ITEM_TYPES = ['document', 'patch', 'link', 'misc_file', 'software', 'version']

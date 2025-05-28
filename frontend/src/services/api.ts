@@ -1162,18 +1162,13 @@ export async function fetchVersionsForSoftware(softwareId: number): Promise<Soft
 
 // --- Authentication Functions ---
 
-export async function registerUser(userData: RegisterRequest): Promise<RegisterResponse> {
+export async function registerUser(formData: FormData): Promise<RegisterResponse> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(userData),
+      // Content-Type header is automatically set by the browser when using FormData
+      body: formData,
     });
-    // Ensure the response is correctly typed and handled, especially if handleApiError
-    // already parses JSON and might not return the full structure needed.
-    // If handleApiError returns parsed JSON, this should work.
     const data: RegisterResponse = await handleApiError(response, 'Registration failed');
     return data; 
   } catch (error: any) {
@@ -1916,6 +1911,34 @@ export async function updateEmail(payload: UpdateEmailPayload): Promise<{ msg: s
     throw error;
   }
 }
+
+// --- User Profile Picture Upload ---
+export interface UploadProfilePictureResponse {
+  msg: string; // Success message from backend
+  profile_picture_url: string; // The new URL of the profile picture
+}
+
+export async function uploadUserProfilePicture(formData: FormData): Promise<UploadProfilePictureResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/user/profile/upload-picture`, {
+      method: 'POST',
+      headers: {
+        ...getAuthHeader(), // Authorization token
+        // Content-Type is not set here, browser sets it for FormData
+      },
+      body: formData,
+    });
+    return handleApiError(response, 'Failed to upload profile picture');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error uploading profile picture:', error);
+    throw error;
+  }
+}
+
 
 // --- Password Reset API Functions ---
 export interface RequestPasswordResetInfoPayload {

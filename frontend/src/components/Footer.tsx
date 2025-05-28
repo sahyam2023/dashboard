@@ -11,7 +11,7 @@ const Footer: React.FC = () => {
         // Use theme palette for background and text for consistency
         backgroundColor: (theme) => theme.palette.mode === 'light' 
             ? theme.palette.grey[200] 
-            : theme.palette.grey[800], 
+            : theme.palette.background.paper, 
         textAlign: 'center',
         borderTop: (theme) => `1px solid ${theme.palette.divider}` // Optional: adds a subtle top border
       }}
@@ -24,3 +24,4 @@ const Footer: React.FC = () => {
 };
 
 export default Footer;
+ 

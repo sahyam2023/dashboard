@@ -329,51 +329,72 @@ def get_comments_for_item(db, item_id, item_type, page=1, per_page=20):
         else:
             comments_data["total_pages"] = 0
 
-        # Fetch top-level comments with username
-        top_level_cursor = db.execute(
+        # Fetch ALL comments for the item, ordered by creation time to maintain threading logic.
+        all_comments_cursor = db.execute(
             """
             SELECT c.id, c.content, c.user_id, u.username, c.item_id, c.item_type,
                    c.parent_comment_id, c.created_at, c.updated_at
             FROM comments c
             JOIN users u ON c.user_id = u.id
-            WHERE c.item_id = ? AND c.item_type = ? AND c.parent_comment_id IS NULL
+            WHERE c.item_id = ? AND c.item_type = ?
             ORDER BY c.created_at ASC
-            LIMIT ? OFFSET ?
             """,
-            (item_id, item_type, per_page, offset)
+            (item_id, item_type)
         )
-        top_level_comments = top_level_cursor.fetchall()
+        all_comment_rows = all_comments_cursor.fetchall()
+        
+        # Convert all rows to dictionaries
+        all_comments_list = [dict(row) for row in all_comment_rows]
 
-        for top_comment_row in top_level_comments:
-            top_comment = dict(top_comment_row) # Convert sqlite3.Row to dict
-            
-            # Fetch replies for each top-level comment
-            replies_cursor = db.execute(
-                """
-                SELECT c.id, c.content, c.user_id, u.username, c.item_id, c.item_type,
-                       c.parent_comment_id, c.created_at, c.updated_at
-                FROM comments c
-                JOIN users u ON c.user_id = u.id
-                WHERE c.parent_comment_id = ?
-                ORDER BY c.created_at ASC
-                """,
-                (top_comment['id'],)
-            )
-            replies = [dict(row) for row in replies_cursor.fetchall()] # Convert list of Rows to list of dicts
-            top_comment['replies'] = replies
-            comments_data['comments'].append(top_comment)
+        # Build the hierarchy from the flat list
+        # This helper function will return only top-level comments, with replies nested.
+        hierarchical_comments = _build_comment_hierarchy(all_comments_list)
+        
+        # Update total_top_level_comments based on the actual number of top-level items after hierarchy build
+        comments_data["total_top_level_comments"] = len(hierarchical_comments)
+        
+        if comments_data["total_top_level_comments"] > 0:
+            comments_data["total_pages"] = (comments_data["total_top_level_comments"] + per_page - 1) // per_page
+        else:
+            comments_data["total_pages"] = 0 # Ensure it's 0 if no comments
+
+        # Apply pagination to the top-level comments
+        paginated_top_level_comments = hierarchical_comments[offset : offset + per_page]
+        comments_data['comments'] = paginated_top_level_comments
             
         return comments_data
 
     except sqlite3.Error as e:
         print(f"DB_COMMENTS: Error fetching comments for item {item_id} ({item_type}): {e}")
-        # Return the structure with empty comments list in case of error during fetching
-        # or potentially more specific error handling.
         comments_data["comments"] = [] 
         comments_data["total_top_level_comments"] = 0
         comments_data["total_pages"] = 0
         return comments_data
 
+def _build_comment_hierarchy(all_comments_list: list) -> list:
+    """
+    Builds a nested comment hierarchy from a flat list of comment dictionaries.
+    Each comment dictionary in the input list should have 'id', 'parent_comment_id',
+    and will have a 'replies' list added/populated.
+    """
+    comment_map = {}
+    top_level_comments = []
+
+    # Initialize each comment with an empty 'replies' list and map them by ID
+    for comment in all_comments_list:
+        comment['replies'] = []
+        comment_map[comment['id']] = comment
+
+    # Build the hierarchy
+    for comment in all_comments_list:
+        parent_id = comment.get('parent_comment_id')
+        if parent_id and parent_id in comment_map:
+            parent_comment = comment_map[parent_id]
+            parent_comment['replies'].append(comment)
+        elif not parent_id: # It's a top-level comment
+            top_level_comments.append(comment)
+            
+    return top_level_comments
 
 def get_comment_by_id(db, comment_id):
     """Fetches a single comment by its ID, including the commenter's username."""
@@ -486,10 +507,78 @@ def get_unread_notifications(db, user_id, limit=None):
             params += (limit,)
         
         cursor = db.execute(query, params)
-        return cursor.fetchall() # List of Row objects
+        notifications_rows = cursor.fetchall() # List of Row objects
+        
+        enriched_notifications = []
+        for row in notifications_rows:
+            notification_dict = dict(row) # Convert row to dict
+            enriched_notifications.append(_enrich_comment_notification(db, notification_dict))
+            
+        return enriched_notifications
     except sqlite3.Error as e:
         print(f"DB_NOTIFICATIONS: Error fetching unread notifications for user {user_id}: {e}")
         return []
+
+def _get_original_item_name(db, item_type, item_id):
+    """Helper to get a display name for an item for notification enrichment."""
+    name = None # Default to None if not found or type is unknown
+    query = None
+    name_col = "name" # Default column name for the item's "name"
+
+    if item_type == 'document':
+        query = "SELECT doc_name as name FROM documents WHERE id = ?"
+    elif item_type == 'patch':
+        query = "SELECT patch_name as name FROM patches WHERE id = ?"
+    elif item_type == 'link':
+        query = "SELECT title as name FROM links WHERE id = ?"
+    elif item_type == 'misc_file':
+        # misc_files might use user_provided_title or original_filename
+        # This query prioritizes user_provided_title
+        query = "SELECT COALESCE(user_provided_title, original_filename) as name FROM misc_files WHERE id = ?"
+    elif item_type == 'software': # For completeness, if software items can be commented on directly
+        query = "SELECT name FROM software WHERE id = ?"
+    elif item_type == 'version': # For completeness
+        query = "SELECT version_number as name FROM versions WHERE id = ?"
+    # 'comment' type is handled by the caller by looking up the comment's parent item.
+
+    if query:
+        try:
+            row = db.execute(query, (item_id,)).fetchone()
+            if row and row[name_col]: # Check if row exists and the name column is not null
+                name = row[name_col]
+        except sqlite3.Error as e:
+            print(f"DB_NOTIFICATIONS_ENRICH: Error fetching original item name for {item_type} ID {item_id}: {e}")
+        except KeyError: # If the alias 'name' is not found for some reason
+            print(f"DB_NOTIFICATIONS_ENRICH: KeyError fetching original item name for {item_type} ID {item_id}. Alias 'name' might be missing in query.")
+    return name
+
+
+def _enrich_comment_notification(db, notification_dict):
+    """
+    Enriches a notification dictionary with details about the original item
+    if the notification is related to a comment.
+    """
+    if notification_dict.get('item_type') == 'comment' and notification_dict.get('item_id'):
+        comment_id = notification_dict['item_id']
+        comment = get_comment_by_id(db, comment_id) # This already returns a dict-like Row or None
+
+        if comment:
+            original_item_id = comment['item_id']
+            original_item_type = comment['item_type']
+            
+            notification_dict['original_item_id'] = original_item_id
+            notification_dict['original_item_type'] = original_item_type
+            
+            # Fetch the name of the original item
+            original_item_name = _get_original_item_name(db, original_item_type, original_item_id)
+            notification_dict['original_item_name'] = original_item_name if original_item_name else "N/A"
+        else:
+            # Comment not found, set original item details to indicate this
+            notification_dict['original_item_id'] = None
+            notification_dict['original_item_type'] = None
+            notification_dict['original_item_name'] = "Comment Deleted"
+            
+    return notification_dict
 
 def get_all_notifications(db, user_id, page, per_page):
     """Fetches all notifications for a user with pagination."""
@@ -506,7 +595,12 @@ def get_all_notifications(db, user_id, page, per_page):
             """,
             (user_id, per_page, offset)
         )
-        notifications = items_cursor.fetchall()
+        notifications_rows = items_cursor.fetchall()
+
+        enriched_notifications = []
+        for row in notifications_rows:
+            notification_dict = dict(row) # Convert row to dict
+            enriched_notifications.append(_enrich_comment_notification(db, notification_dict))
 
         # Fetch total count of notifications for the user
         count_cursor = db.execute(
@@ -516,7 +610,7 @@ def get_all_notifications(db, user_id, page, per_page):
         total_count_row = count_cursor.fetchone()
         total_notifications = total_count_row[0] if total_count_row else 0
         
-        return notifications, total_notifications
+        return enriched_notifications, total_notifications
     except sqlite3.Error as e:
         print(f"DB_NOTIFICATIONS: Error fetching all notifications for user {user_id}: {e}")
         return [], 0

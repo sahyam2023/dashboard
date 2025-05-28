@@ -1,6 +1,6 @@
 // src/views/MiscView.tsx
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'; // Added useRef
-import { useOutletContext } from 'react-router-dom';
+import { useOutletContext, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
   fetchMiscCategories, fetchMiscFiles, deleteAdminMiscCategory, deleteAdminMiscFile,
@@ -19,7 +19,7 @@ import Modal from '../components/shared/Modal';
 import { Download, FileText as FileIconLucide, PlusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Archive as ArchiveIcon, Move, AlertTriangle, MessageSquare } from 'lucide-react'; // Added MessageSquare
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils'; 
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7000';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7000'; // Not actively used for constructing URLs here
 
 interface OutletContextType {
   searchTerm: string;
@@ -74,6 +74,7 @@ const role = user?.role; // Access role safely, as user can be null
   // State for Comment Section
   const [selectedMiscFileForComments, setSelectedMiscFileForComments] = useState<MiscFile | null>(null);
   const commentSectionRef = useRef<HTMLDivElement>(null);
+  const location = useLocation(); // Added useLocation
 
   const filtersAreActive = useMemo(() => {
     return activeCategoryId !== null || searchTerm !== '';
@@ -96,6 +97,33 @@ const role = user?.role; // Access role safely, as user can be null
   }, []);
 
   useEffect(() => { if (isAuthenticated) loadMiscCategories(); else setCategories([]); }, [isAuthenticated, loadMiscCategories]);
+
+  // Effect to handle focusing on a comment if item_id and comment_id are in URL
+  useEffect(() => {
+    const queryParams = new URLSearchParams(location.search);
+    const itemIdStr = queryParams.get('item_id');
+    const commentIdStr = queryParams.get('comment_id');
+
+    if (itemIdStr && commentIdStr && miscFiles.length > 0) {
+      const targetMiscFileId = parseInt(itemIdStr, 10);
+
+      if (!isNaN(targetMiscFileId)) {
+        const targetMiscFile = miscFiles.find(file => file.id === targetMiscFileId);
+
+        if (targetMiscFile) {
+          if (!selectedMiscFileForComments || selectedMiscFileForComments.id !== targetMiscFile.id) {
+            setSelectedMiscFileForComments(targetMiscFile);
+          }
+          setTimeout(() => {
+            commentSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }, 100);
+        } else {
+          console.warn(`MiscView: MiscFile with item_id ${targetMiscFileId} not found in the current list.`);
+        }
+      }
+    }
+  }, [location.search, miscFiles, selectedMiscFileForComments]);
+
 
   const fetchAndSetMiscFiles = useCallback(async (pageToLoad: number, isNewQuery: boolean = false) => {
     if (isNewQuery) setIsLoadingInitial(true);

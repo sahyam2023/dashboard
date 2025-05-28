@@ -7,15 +7,17 @@ interface TokenData {
   expiresAt: number; // Timestamp in milliseconds
   username: string;
   role: string;
-  user_id: number; // Added
+  user_id: number; 
+  profile_picture_url?: string | null; // Added for profile picture
 }
 
 interface AuthContextType {
   tokenData: TokenData | null;
-  user: { id: number; username: string; role: string; } | null; // Added
+  user: { id: number; username: string; role: string; profile_picture_url?: string | null; } | null; // Added profile_picture_url
   isAuthenticated: boolean;
-  login: (token: string, username: string, role: string, user_id: number, expiresInSeconds: number, password_reset_required?: boolean) => boolean; // Added user_id
+  login: (token: string, username: string, role: string, user_id: number, expiresInSeconds: number, password_reset_required?: boolean, profile_picture_url?: string | null) => boolean; // Added profile_picture_url
   logout: (showSessionExpiredToast?: boolean) => void;
+  updateUserProfilePictureUrl: (newUrl: string | null) => void; // Added for updating profile picture
   isLoading: boolean;
   isAuthModalOpen: boolean;
   authModalView: 'login' | 'register';
@@ -40,7 +42,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   const [tokenData, setTokenData] = useState<TokenData | null>(null);
-  const [user, setUser] = useState<{ id: number; username: string; role: string; } | null>(null); // Added
+  const [user, setUser] = useState<{ id: number; username: string; role: string; profile_picture_url?: string | null; } | null>(null); // Added profile_picture_url
   const [isLoading, setIsLoading] = useState<boolean>(true); 
   
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
@@ -120,13 +122,15 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
             parsedTokenData.username && 
             parsedTokenData.role) {
           setTokenData(parsedTokenData);
-          setUser({ id: parsedTokenData.user_id, username: parsedTokenData.username, role: parsedTokenData.role });
+          setUser({ 
+            id: parsedTokenData.user_id, 
+            username: parsedTokenData.username, 
+            role: parsedTokenData.role,
+            profile_picture_url: parsedTokenData.profile_picture_url || null // Load profile picture URL
+          });
         } else {
-          // If token is expired or user_id is missing/invalid, treat as invalid tokenData
           localStorage.removeItem('tokenData'); 
           setUser(null); 
-          // Optionally call logout() if it handles other necessary cleanup
-          // logout(true); // if you want to show session expired toast for this case too
         }
       } catch (error) {
         console.error("Failed to parse tokenData from localStorage or tokenData invalid:", error);
@@ -182,17 +186,28 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     return () => clearInterval(interval);
   }, [tokenData, logout]); // Added logout to dependencies since it's used in the effect
 
-  const login = (newToken: string, newUsername: string, newRole: string, newUserId: number, expiresInSeconds: number, passwordResetRequired: boolean = false) => {
+  const login = (newToken: string, newUsername: string, newRole: string, newUserId: number, expiresInSeconds: number, passwordResetRequired: boolean = false, profile_picture_url?: string | null) => {
     const expiresAt = Date.now() + expiresInSeconds * 1000;
-    const newTokenData: TokenData = { token: newToken, expiresAt, username: newUsername, role: newRole, user_id: newUserId }; // Added user_id
+    const newTokenData: TokenData = { 
+      token: newToken, 
+      expiresAt, 
+      username: newUsername, 
+      role: newRole, 
+      user_id: newUserId,
+      profile_picture_url: profile_picture_url || null // Store profile picture URL
+    }; 
     
     localStorage.setItem('tokenData', JSON.stringify(newTokenData));
 
     setTokenData(newTokenData);
-    setUser({ id: newUserId, username: newUsername, role: newRole }); // Added
+    setUser({ 
+      id: newUserId, 
+      username: newUsername, 
+      role: newRole,
+      profile_picture_url: profile_picture_url || null // Set profile picture URL in user state
+    });
     setIsPasswordResetRequired(passwordResetRequired);
-    sessionExpiredToastShownRef.current = false; // Reset toast flag on login
-    // setSessionWarningModalOpen(false); // REMOVED: Ensure warning modal is closed on new login
+    sessionExpiredToastShownRef.current = false; 
     return passwordResetRequired;
   };
   
@@ -226,31 +241,43 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     setIsAuthModalOpen(false);
   };
 
+  const updateUserProfilePictureUrl = (newUrl: string | null) => {
+    setUser(prevUser => {
+      if (prevUser) {
+        const updatedUser = { ...prevUser, profile_picture_url: newUrl };
+        // Also update tokenData in localStorage if it's stored there directly
+        setTokenData(prevTokenData => {
+          if (prevTokenData) {
+            const updatedTokenData = { ...prevTokenData, profile_picture_url: newUrl };
+            localStorage.setItem('tokenData', JSON.stringify(updatedTokenData));
+            return updatedTokenData;
+          }
+          return null;
+        });
+        return updatedUser;
+      }
+      return null;
+    });
+  };
+
   return (
     <AuthContext.Provider value={{ 
       tokenData,
-      user, // Added
+      user, 
       isAuthenticated: !!tokenData && tokenData.expiresAt > Date.now(),
       login, 
       logout, 
+      updateUserProfilePictureUrl, // Added function to context
       isLoading,
-      // Provide modal state and functions
       isAuthModalOpen,
       authModalView,
       openAuthModal,
       closeAuthModal,
-      // Provide global access state and functions
       isGlobalAccessGranted,
       grantGlobalAccess,
       revokeGlobalAccess,
-      // Provide forced password reset state and functions
       isPasswordResetRequired,
       clearPasswordResetRequiredFlag,
-      // Session Timeout Warning - REMOVED
-      // isSessionWarningModalOpen,
-      // setSessionWarningModalOpen,
-      // sessionWarningCountdown,
-      // refreshSession,
     }}>
       {children}
     </AuthContext.Provider>

@@ -1,6 +1,6 @@
 // src/views/PatchesView.tsx
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { useOutletContext, useLocation } from 'react-router-dom';
 import { ExternalLink, PlusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Download, Move, AlertTriangle, Package as PackageIcon, MessageSquare } from 'lucide-react';
 import { 
   fetchPatches, 
@@ -44,6 +44,11 @@ const role = user?.role; // Access role safely, as user can be null
   const [releaseFromFilter, setReleaseFromFilter] = useState<string>('');
   const [releaseToFilter, setReleaseToFilter] = useState<string>('');
   const [patchedByDeveloperFilter, setPatchedByDeveloperFilter] = useState<string>('');
+
+  // Debounced filter states
+  const [debouncedReleaseFromFilter, setDebouncedReleaseFromFilter] = useState<string>('');
+  const [debouncedReleaseToFilter, setDebouncedReleaseToFilter] = useState<string>('');
+  const [debouncedPatchedByDeveloperFilter, setDebouncedPatchedByDeveloperFilter] = useState<string>('');
   
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [itemsPerPage, setItemsPerPage] = useState<number>(15); // Default items per page
@@ -80,6 +85,7 @@ const role = user?.role; // Access role safely, as user can be null
   // State for Comment Section
   const [selectedPatchForComments, setSelectedPatchForComments] = useState<PatchType | null>(null);
   const commentSectionRef = useRef<HTMLDivElement>(null);
+  const location = useLocation(); // Added useLocation
 
   const filtersAreActive = useMemo(() => {
     return (
@@ -118,7 +124,7 @@ const role = user?.role; // Access role safely, as user can be null
     try {
       const response: PaginatedPatchesResponse = await fetchPatches(
         selectedSoftwareId ?? undefined, pageToLoad, itemsPerPage, sortBy, sortOrder,
-        releaseFromFilter || undefined, releaseToFilter || undefined, patchedByDeveloperFilter || undefined
+        debouncedReleaseFromFilter || undefined, debouncedReleaseToFilter || undefined, debouncedPatchedByDeveloperFilter || undefined
       );
       setPatches(response.patches);
       setTotalPages(response.total_pages);
@@ -140,15 +146,57 @@ const role = user?.role; // Access role safely, as user can be null
     } finally {
       if (isNewQuery) setIsLoadingInitial(false);
     }
-  }, [selectedSoftwareId, itemsPerPage, sortBy, sortOrder, releaseFromFilter, releaseToFilter, patchedByDeveloperFilter, isAuthenticated]);
+  }, [selectedSoftwareId, itemsPerPage, sortBy, sortOrder, debouncedReleaseFromFilter, debouncedReleaseToFilter, debouncedPatchedByDeveloperFilter, isAuthenticated]);
+
+// Debounce effects for filter inputs
+useEffect(() => {
+  const handler = setTimeout(() => setDebouncedReleaseFromFilter(releaseFromFilter), 500);
+  return () => clearTimeout(handler);
+}, [releaseFromFilter]);
+
+useEffect(() => {
+  const handler = setTimeout(() => setDebouncedReleaseToFilter(releaseToFilter), 500);
+  return () => clearTimeout(handler);
+}, [releaseToFilter]);
+
+useEffect(() => {
+  const handler = setTimeout(() => setDebouncedPatchedByDeveloperFilter(patchedByDeveloperFilter), 500);
+  return () => clearTimeout(handler);
+}, [patchedByDeveloperFilter]);
   
   useEffect(() => {
     if (isAuthenticated) fetchAndSetPatches(1, true);
     else { setPatches([]); setIsLoadingInitial(false); }
-  }, [isAuthenticated, selectedSoftwareId, sortBy, sortOrder, releaseFromFilter, releaseToFilter, patchedByDeveloperFilter, fetchAndSetPatches]);
+  }, [isAuthenticated, selectedSoftwareId, sortBy, sortOrder, debouncedReleaseFromFilter, debouncedReleaseToFilter, debouncedPatchedByDeveloperFilter, searchTerm, fetchAndSetPatches]); // Added searchTerm
+
+  // Effect to handle focusing on a comment if item_id and comment_id are in URL
+  useEffect(() => {
+    const queryParams = new URLSearchParams(location.search);
+    const itemIdStr = queryParams.get('item_id');
+    const commentIdStr = queryParams.get('comment_id');
+
+    if (itemIdStr && commentIdStr && patches.length > 0) {
+      const targetPatchId = parseInt(itemIdStr, 10);
+
+      if (!isNaN(targetPatchId)) {
+        const targetPatch = patches.find(patch => patch.id === targetPatchId);
+
+        if (targetPatch) {
+          if (!selectedPatchForComments || selectedPatchForComments.id !== targetPatch.id) {
+            setSelectedPatchForComments(targetPatch);
+          }
+          setTimeout(() => {
+            commentSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }, 100);
+        } else {
+          console.warn(`PatchesView: Patch with item_id ${targetPatchId} not found in the current list.`);
+        }
+      }
+    }
+  }, [location.search, patches, selectedPatchForComments]); // Added selectedPatchForComments to dependencies to re-evaluate if it changes externally
 
   useEffect(() => { setSelectedPatchIds(new Set()); }, 
-    [selectedSoftwareId, sortBy, sortOrder, releaseFromFilter, releaseToFilter, patchedByDeveloperFilter, searchTerm, currentPage]
+    [selectedSoftwareId, sortBy, sortOrder, debouncedReleaseFromFilter, debouncedReleaseToFilter, debouncedPatchedByDeveloperFilter, searchTerm, currentPage]
   );
 
   useEffect(() => {

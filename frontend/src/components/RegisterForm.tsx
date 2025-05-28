@@ -37,6 +37,7 @@ const RegisterForm: React.FC<RegisterFormProps> = ({ onAuthSuccess, onToggleView
   // successMessage state is removed, will use toasts
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
+  const [profilePicture, setProfilePicture] = useState<FileList | null>(null); // Added state for profile picture
   const auth = useAuth();
 
   useEffect(() => {
@@ -156,25 +157,40 @@ const RegisterForm: React.FC<RegisterFormProps> = ({ onAuthSuccess, onToggleView
       answer: sa.answer.trim(),
     }));
 
-    const registrationPayload: RegisterRequest = {
-        username,
-        email: email || undefined, // Send undefined if email is empty, as backend expects optional
-        password,
-        security_answers: securityAnswersPayload,
-    };
+    const formData = new FormData();
+    formData.append('username', username);
+    formData.append('password', password);
+    if (email) {
+      formData.append('email', email);
+    }
+    formData.append('security_answers', JSON.stringify(securityAnswersPayload));
+
+    if (profilePicture && profilePicture.length > 0) {
+      formData.append('profile_picture', profilePicture[0]);
+    }
 
     try {
-      const regData: RegisterResponse = await registerUser(registrationPayload); 
-      // Assuming regData from backend now includes password_reset_required (it should, based on task context)
-      // If not, it will be undefined, and auth.login's default (false) will be used.
-      const requiresReset = auth.login(regData.access_token, regData.username, regData.role, regData.user_id, regData.expires_in_seconds || 900, regData.password_reset_required || false); 
+      // registerUser now expects FormData
+      const regData: RegisterResponse = await registerUser(formData); 
+      
+      // The backend response now includes profile_picture_url
+      const requiresReset = auth.login(
+        regData.access_token, 
+        regData.username, 
+        regData.role, 
+        regData.user_id, 
+        900, // expires_in_seconds placeholder, as it was removed from RegisterResponse type
+        regData.password_reset_required || false,
+        regData.profile_picture_url // Pass to auth context
+      ); 
+      
       console.log('[RegisterForm] After auth.login - requiresReset:', requiresReset);
-      console.log('[RegisterForm] Auth context state:', JSON.stringify(auth));
+      console.log('[RegisterForm] Auth context state after login:', JSON.stringify(auth.user)); // Log updated user state
       
       showSuccessToast('Registration successful! Logging you in...');
       
       if (onAuthSuccess) {
-        onAuthSuccess(requiresReset); // Call immediately with the reset flag
+        onAuthSuccess(requiresReset);
       }
     } catch (err: any) {
       if (err.response && err.response.data && err.response.data.msg) {

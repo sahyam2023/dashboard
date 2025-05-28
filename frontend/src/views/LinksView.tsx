@@ -1,6 +1,6 @@
 // src/views/LinksView.tsx
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { useOutletContext, useLocation } from 'react-router-dom';
 import {
   fetchLinks, fetchSoftware, fetchVersionsForSoftware, deleteAdminLink,
   PaginatedLinksResponse, addFavoriteApi, removeFavoriteApi, FavoriteItemType,
@@ -39,6 +39,10 @@ const LinksView: React.FC = () => {
   const [createdFromFilter, setCreatedFromFilter] = useState<string>('');
   const [createdToFilter, setCreatedToFilter] = useState<string>('');
 
+  // Debounced filter states
+  const [debouncedCreatedFromFilter, setDebouncedCreatedFromFilter] = useState<string>('');
+  const [debouncedCreatedToFilter, setDebouncedCreatedToFilter] = useState<string>('');
+
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [itemsPerPage, setItemsPerPage] = useState<number>(15); // Default
   const [totalPages, setTotalPages] = useState<number>(0);
@@ -74,6 +78,7 @@ const LinksView: React.FC = () => {
   // State for Comment Section
   const [selectedLinkForComments, setSelectedLinkForComments] = useState<LinkType | null>(null);
   const commentSectionRef = useRef<HTMLDivElement>(null);
+  const location = useLocation(); // Added useLocation
 
   const filtersAreActive = useMemo(() => {
     return activeSoftwareId !== null || activeVersionId !== null || linkTypeFilter !== '' || createdFromFilter !== '' || createdToFilter !== '' || searchTerm !== '';
@@ -95,7 +100,7 @@ const LinksView: React.FC = () => {
       const response: PaginatedLinksResponse = await fetchLinks(
         activeSoftwareId || undefined, activeVersionId || undefined,
         pageToLoad, itemsPerPage, sortBy, sortOrder,
-        linkTypeFilter || undefined, createdFromFilter || undefined, createdToFilter || undefined
+        linkTypeFilter || undefined, debouncedCreatedFromFilter || undefined, debouncedCreatedToFilter || undefined
       );
       setLinks(response.links);
       setTotalPages(response.total_pages);
@@ -113,21 +118,58 @@ const LinksView: React.FC = () => {
     } finally {
       if (isNewQuery) setIsLoadingInitial(false);
     }
-  }, [activeSoftwareId, activeVersionId, itemsPerPage, sortBy, sortOrder, linkTypeFilter, createdFromFilter, createdToFilter, isAuthenticated]);
+  }, [activeSoftwareId, activeVersionId, itemsPerPage, sortBy, sortOrder, linkTypeFilter, debouncedCreatedFromFilter, debouncedCreatedToFilter, isAuthenticated]);
+
+  // Debounce effects for date filters
+  useEffect(() => {
+    const handler = setTimeout(() => setDebouncedCreatedFromFilter(createdFromFilter), 500);
+    return () => clearTimeout(handler);
+  }, [createdFromFilter]);
+
+  useEffect(() => {
+    const handler = setTimeout(() => setDebouncedCreatedToFilter(createdToFilter), 500);
+    return () => clearTimeout(handler);
+  }, [createdToFilter]);
 
   useEffect(() => { if (isAuthenticated) fetchSoftware().then(setSoftwareList).catch(err => showErrorToast("Failed to load software list.")); else setSoftwareList([]); }, [isAuthenticated]);
 
   useEffect(() => {
     if (isAuthenticated) fetchAndSetLinks(1, true);
     else { setLinks([]); setIsLoadingInitial(false); }
-  }, [isAuthenticated, activeSoftwareId, activeVersionId, sortBy, sortOrder, linkTypeFilter, createdFromFilter, createdToFilter, fetchAndSetLinks]);
+  }, [isAuthenticated, activeSoftwareId, activeVersionId, sortBy, sortOrder, linkTypeFilter, debouncedCreatedFromFilter, debouncedCreatedToFilter, searchTerm, fetchAndSetLinks]); // Added searchTerm
 
-  useEffect(() => { setSelectedLinkIds(new Set()); }, [activeSoftwareId, activeVersionId, sortBy, sortOrder, linkTypeFilter, createdFromFilter, createdToFilter, searchTerm, currentPage]);
+  useEffect(() => { setSelectedLinkIds(new Set()); }, [activeSoftwareId, activeVersionId, sortBy, sortOrder, linkTypeFilter, debouncedCreatedFromFilter, debouncedCreatedToFilter, searchTerm, currentPage]);
 
   useEffect(() => {
     if (activeSoftwareId) fetchVersionsForSoftware(activeSoftwareId).then(setVersionList).catch(() => { showErrorToast("Failed to load versions for filter."); setVersionList([]); });
     else setVersionList([]);
   }, [activeSoftwareId]);
+  
+  // Effect to handle focusing on a comment if item_id and comment_id are in URL
+  useEffect(() => {
+    const queryParams = new URLSearchParams(location.search);
+    const itemIdStr = queryParams.get('item_id');
+    const commentIdStr = queryParams.get('comment_id');
+
+    if (itemIdStr && commentIdStr && links.length > 0) {
+      const targetLinkId = parseInt(itemIdStr, 10);
+
+      if (!isNaN(targetLinkId)) {
+        const targetLink = links.find(link => link.id === targetLinkId);
+
+        if (targetLink) {
+          if (!selectedLinkForComments || selectedLinkForComments.id !== targetLink.id) {
+            setSelectedLinkForComments(targetLink);
+          }
+          setTimeout(() => {
+            commentSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }, 100);
+        } else {
+          console.warn(`LinksView: Link with item_id ${targetLinkId} not found in the current list.`);
+        }
+      }
+    }
+  }, [location.search, links, selectedLinkForComments]);
 
   useEffect(() => {
     if (modalSelectedSoftwareId) {

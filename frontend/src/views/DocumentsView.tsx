@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { useOutletContext, useLocation } from 'react-router-dom';
 import { ExternalLink, PlusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Download, Move, AlertTriangle, FileText, MessageSquare } from 'lucide-react'; 
 import { 
   fetchDocuments, 
@@ -66,6 +66,13 @@ const role = user?.role; // Access role safely, as user can be null
   const [updatedFromFilter, setUpdatedFromFilter] = useState<string>('');
   const [updatedToFilter, setUpdatedToFilter] = useState<string>('');
 
+  // Debounced filter states
+  const [debouncedDocTypeFilter, setDebouncedDocTypeFilter] = useState<string>('');
+  const [debouncedCreatedFromFilter, setDebouncedCreatedFromFilter] = useState<string>('');
+  const [debouncedCreatedToFilter, setDebouncedCreatedToFilter] = useState<string>('');
+  const [debouncedUpdatedFromFilter, setDebouncedUpdatedFromFilter] = useState<string>('');
+  const [debouncedUpdatedToFilter, setDebouncedUpdatedToFilter] = useState<string>('');
+
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<Set<number>>(new Set());
   const [showBulkMoveModal, setShowBulkMoveModal] = useState<boolean>(false);
   const [targetSoftwareForMove, setTargetSoftwareForMove] = useState<number | null>(null);
@@ -76,6 +83,7 @@ const role = user?.role; // Access role safely, as user can be null
 
   const [selectedDocumentForComments, setSelectedDocumentForComments] = useState<DocumentType | null>(null);
   const commentSectionRef = useRef<HTMLDivElement>(null);
+  const location = useLocation(); // Added useLocation
 
   const filtersAreActive = useMemo(() => {
     return (
@@ -114,8 +122,8 @@ const fetchAndSetDocuments = useCallback(async (pageToLoad: number, isNewQuery: 
     const response: PaginatedDocumentsResponse = await fetchDocuments(
       selectedSoftwareId === null ? undefined : selectedSoftwareId,
       pageToLoad, ITEMS_PER_PAGE, sortBy, sortOrder,
-      docTypeFilter || undefined, createdFromFilter || undefined, createdToFilter || undefined,
-      updatedFromFilter || undefined, updatedToFilter || undefined
+      debouncedDocTypeFilter || undefined, debouncedCreatedFromFilter || undefined, debouncedCreatedToFilter || undefined,
+      debouncedUpdatedFromFilter || undefined, debouncedUpdatedToFilter || undefined
     );
     const newDocs = response.documents;
     setDocuments(prevDocuments => {
@@ -160,26 +168,64 @@ const fetchAndSetDocuments = useCallback(async (pageToLoad: number, isNewQuery: 
     else setIsLoadingMore(false);
   }
 }, [
-  selectedSoftwareId, ITEMS_PER_PAGE, sortBy, sortOrder, docTypeFilter, 
-  createdFromFilter, createdToFilter, updatedFromFilter, updatedToFilter, 
+  selectedSoftwareId, ITEMS_PER_PAGE, sortBy, sortOrder, 
+  debouncedDocTypeFilter, debouncedCreatedFromFilter, debouncedCreatedToFilter, 
+  debouncedUpdatedFromFilter, debouncedUpdatedToFilter, 
   isAuthenticated
 ]);
+
+// Debounce effects for each filter input
+useEffect(() => {
+  const handler = setTimeout(() => setDebouncedDocTypeFilter(docTypeFilter), 500);
+  return () => clearTimeout(handler);
+}, [docTypeFilter]);
+
+useEffect(() => {
+  const handler = setTimeout(() => setDebouncedCreatedFromFilter(createdFromFilter), 500);
+  return () => clearTimeout(handler);
+}, [createdFromFilter]);
+
+useEffect(() => {
+  const handler = setTimeout(() => setDebouncedCreatedToFilter(createdToFilter), 500);
+  return () => clearTimeout(handler);
+}, [createdToFilter]);
+
+useEffect(() => {
+  const handler = setTimeout(() => setDebouncedUpdatedFromFilter(updatedFromFilter), 500);
+  return () => clearTimeout(handler);
+}, [updatedFromFilter]);
+
+useEffect(() => {
+  const handler = setTimeout(() => setDebouncedUpdatedToFilter(updatedToFilter), 500);
+  return () => clearTimeout(handler);
+}, [updatedToFilter]);
   
 useEffect(() => {
   if (!isAuthenticated) {
     setDocuments([]); setFavoritedItems(new Map()); setCurrentPage(1);
     setHasMore(false); setIsLoadingInitial(false); return;
   }
+  // searchTerm is expected to be debounced from context or handled separately if needed
   fetchAndSetDocuments(1, true); 
 }, [
   isAuthenticated, selectedSoftwareId, sortBy, sortOrder, 
-  docTypeFilter, createdFromFilter, createdToFilter, updatedFromFilter, updatedToFilter,
-  fetchAndSetDocuments 
+  debouncedDocTypeFilter, debouncedCreatedFromFilter, debouncedCreatedToFilter, 
+  debouncedUpdatedFromFilter, debouncedUpdatedToFilter, searchTerm, // Added searchTerm here
+  fetchAndSetDocuments // fetchAndSetDocuments itself depends on these debounced values
 ]);
 
 useEffect(() => {
   setSelectedDocumentIds(new Set());
-}, [selectedSoftwareId, sortBy, sortOrder, docTypeFilter, createdFromFilter, createdToFilter, updatedFromFilter, updatedToFilter, searchTerm, currentPage]);
+  // This effect clears selections when any primary filter changes.
+  // It should also depend on the debounced versions of filters if instantaneous clearing
+  // upon typing is not desired (though for selection clearing, it might be fine).
+  // For consistency with data fetching, let's use debounced values here too.
+}, [
+  selectedSoftwareId, sortBy, sortOrder, 
+  debouncedDocTypeFilter, debouncedCreatedFromFilter, debouncedCreatedToFilter, 
+  debouncedUpdatedFromFilter, debouncedUpdatedToFilter, 
+  searchTerm, currentPage
+]);
 
 useEffect(() => {
     const loadSoftwareForFilters = async () => {
@@ -193,6 +239,40 @@ useEffect(() => {
     };
     if (isAuthenticated) loadSoftwareForFilters();
   }, [isAuthenticated]);
+
+  // Effect to handle focusing on a comment if item_id and comment_id are in URL
+  useEffect(() => {
+    const queryParams = new URLSearchParams(location.search);
+    const itemIdStr = queryParams.get('item_id');
+    const commentIdStr = queryParams.get('comment_id');
+
+    if (itemIdStr && commentIdStr && documents.length > 0) {
+      const targetDocId = parseInt(itemIdStr, 10);
+      // const commentId = parseInt(commentIdStr, 10); // Not directly used for scrolling to comment yet
+
+      if (!isNaN(targetDocId)) {
+        const targetDocument = documents.find(doc => doc.id === targetDocId);
+
+        if (targetDocument) {
+          if (!selectedDocumentForComments || selectedDocumentForComments.id !== targetDocument.id) {
+            setSelectedDocumentForComments(targetDocument);
+          }
+          // Scroll after a short delay to ensure the comment section is rendered
+          setTimeout(() => {
+            commentSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            // TODO: Pass commentId to CommentSection and implement scroll-to-comment there
+            // For now, this scrolls the whole section into view.
+          }, 100); // Adjust delay if needed
+        } else {
+          console.warn(`DocumentsView: Document with item_id ${targetDocId} not found in the current list.`);
+          // Optionally, clear selectedDocumentForComments if a different one was open
+          // setSelectedDocumentForComments(null); 
+        }
+      }
+    }
+  // Dependency array: location.search and documents list are key.
+  // selectedDocumentForComments is not included to prevent loops if it's set within this effect.
+  }, [location.search, documents]);
 
   const handleFilterChange = (softwareId: number | null) => setSelectedSoftwareId(softwareId);
   const handleSort = (columnKey: string) => {

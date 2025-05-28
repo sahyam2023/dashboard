@@ -1,10 +1,22 @@
-import React, { useState } from 'react';
-import { changePassword, updateEmail } from '../services/api';
+import React, { useState, useEffect } from 'react';
+import { changePassword, updateEmail, uploadUserProfilePicture} from '../services/api'; // Added uploadUserProfilePicture and API_BASE_URL
 import { useAuth } from '../context/AuthContext';
 import { Navigate } from 'react-router-dom';
+import { Camera } from 'lucide-react'; // For icon
+import { showSuccessToast } from '../utils/toastUtils';
+
 
 const UserProfilePage: React.FC = () => {
   const auth = useAuth();
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7000';
+  // State for Profile Picture
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
+
 
   // State for Change Password form
   const [currentPassword, setCurrentPassword] = useState('');
@@ -97,7 +109,6 @@ const UserProfilePage: React.FC = () => {
       setEmailError('Both email and password are required.');
       return;
     }
-    // Basic email format validation
     if (!/\S+@\S+\.\S+/.test(newEmail)) {
       setEmailError('Invalid email format.');
       return;
@@ -113,9 +124,108 @@ const UserProfilePage: React.FC = () => {
     }
   };
 
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      setSelectedFile(file);
+      setPreviewUrl(URL.createObjectURL(file));
+      setUploadError(null); // Clear previous errors
+      setUploadSuccess(null);
+    } else {
+      setSelectedFile(null);
+      setPreviewUrl(null);
+    }
+  };
+
+  const handlePictureUpload = async () => {
+    if (!selectedFile) {
+      showErrorToast("Please select a file first."); // Use toast
+      return;
+    }
+    setIsUploading(true);
+    setUploadError(null); // Clear local error state if any
+    // setUploadSuccess(null); // Success is handled by toast
+
+    const formData = new FormData();
+    formData.append('profile_picture', selectedFile);
+
+    try {
+      const response = await uploadUserProfilePicture(formData);
+      showSuccessToast(response.msg || "Profile picture updated successfully!"); // Use toast
+      if (auth.user && response.profile_picture_url) {
+        auth.updateUserProfilePictureUrl(response.profile_picture_url);
+      }
+      setSelectedFile(null);
+      setPreviewUrl(null); 
+    } catch (error: any) {
+      showErrorToast(error.message || "Failed to upload profile picture."); // Use toast
+      console.error("Profile picture upload error:", error);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+  
+  // Effect to update preview if auth user's profile picture changes (e.g., after upload)
+  useEffect(() => {
+    if (auth.user?.profile_picture_url && !previewUrl && !selectedFile) {
+      // No local preview active, so show the one from context
+    }
+  }, [auth.user?.profile_picture_url, previewUrl, selectedFile]);
+
+
   return (
     <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-6 text-gray-900 dark:text-white">User Profile</h1>
+      <h1 className="text-2xl font-bold mb-8 text-gray-900 dark:text-white">User Profile</h1>
+
+      {/* Profile Picture Section */}
+      <div className="mb-8 p-6 bg-white dark:bg-gray-800 rounded-lg shadow">
+        <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-gray-100">Profile Picture</h2>
+        <div className="flex items-center space-x-6">
+          <div className="shrink-0">
+            <img 
+              className="h-24 w-24 object-cover rounded-full" 
+              src={previewUrl || (auth.user?.profile_picture_url ? `${API_BASE_URL}${auth.user.profile_picture_url}` : `https://ui-avatars.com/api/?name=${encodeURIComponent(auth.user?.username || 'User')}&background=random&size=128`)}
+              alt="Profile" 
+            />
+          </div>
+          <label htmlFor="profile-picture-upload" className="block">
+            <span className="sr-only">Choose profile photo</span>
+            <input 
+              type="file" 
+              id="profile-picture-upload"
+              accept="image/png, image/jpeg, image/gif"
+              onChange={handleFileChange}
+              className="block w-full text-sm text-gray-500 dark:text-gray-400
+                         file:mr-4 file:py-2 file:px-4
+                         file:rounded-lg file:border-0
+                         file:text-sm file:font-semibold
+                         file:bg-indigo-50 dark:file:bg-indigo-800 file:text-indigo-600 dark:file:text-indigo-300
+                         hover:file:bg-indigo-100 dark:hover:file:bg-indigo-700
+                         disabled:opacity-50"
+              disabled={isUploading}
+            />
+          </label>
+        </div>
+        {selectedFile && (
+          <div className="mt-4">
+            <button
+              onClick={handlePictureUpload}
+              disabled={isUploading || !selectedFile}
+              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+            >
+              {isUploading ? (
+                <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white mr-2"></div>
+              ) : (
+                <Camera size={16} className="mr-2" />
+              )}
+              Upload New Picture
+            </button>
+          </div>
+        )}
+        {/* {uploadError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{uploadError}</p>} */}{/* Replaced by toast */}
+        {/* {uploadSuccess && <p className="mt-2 text-sm text-green-600 dark:text-green-400">{uploadSuccess}</p>} */}{/* Replaced by toast */}
+      </div>
+
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         {/* Change Password Form */}
@@ -216,3 +326,7 @@ const UserProfilePage: React.FC = () => {
 };
 
 export default UserProfilePage;
+function showErrorToast(arg0: any) {
+  throw new Error('Function not implemented.');
+}
+

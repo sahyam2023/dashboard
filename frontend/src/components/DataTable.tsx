@@ -99,15 +99,15 @@ const DataTable = <T extends { id: number }>({
   return (
     <div className="flex flex-col">
       <div className="overflow-x-auto">
-        <table className="min-w-full bg-white rounded-lg shadow-sm">
+        <table className="min-w-full bg-white dark:bg-gray-800 rounded-lg shadow-sm">
           <thead>
-            <tr className="bg-gray-50 border-b border-gray-200">
+            <tr className="bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600">
               {isSelectionEnabled && (
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                   <input
                     type="checkbox"
                     ref={selectAllCheckboxRef}
-                    className="form-checkbox h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    className="form-checkbox h-4 w-4 text-blue-600 border-gray-300 dark:border-gray-600 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:checked:bg-blue-600 dark:checked:border-transparent"
                     onChange={(e) => {
                       if (onSelectAllItems) {
                         // If indeterminate or unchecked, next state is checked (select all)
@@ -122,12 +122,12 @@ const DataTable = <T extends { id: number }>({
               {columns.map((column) => (
                 <th
                   key={column.key as string}
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"
                 >
                   {column.sortable ? (
                     <button
                       onClick={() => onSort(column.key as string)}
-                      className="flex items-center space-x-1 hover:text-gray-700 focus:outline-none"
+                      className="flex items-center space-x-1 hover:text-gray-700 dark:hover:text-gray-100 focus:outline-none"
                     >
                       <span>{column.header}</span>
                       {sortColumn === column.key && (
@@ -141,7 +141,7 @@ const DataTable = <T extends { id: number }>({
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-200">
+          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
             {data.map((item, index) => {
               const customRowClass = typeof rowClassName === 'function' 
                 ? rowClassName(item, index) 
@@ -153,13 +153,13 @@ const DataTable = <T extends { id: number }>({
                 key={item.id || index} 
                 className={`transition-colors 
                             ${customRowClass || ''} 
-                            ${isSelected ? 'bg-sky-50 hover:bg-sky-100' : 'hover:bg-gray-50'}`}
+                            ${isSelected ? 'bg-sky-100 dark:bg-sky-800 hover:bg-sky-200 dark:hover:bg-sky-700' : 'hover:bg-gray-50 dark:hover:bg-gray-700'}`}
               >
                 {isSelectionEnabled && (
                   <td className="px-4 py-4 whitespace-nowrap">
                     <input
                       type="checkbox"
-                      className="form-checkbox h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                      className="form-checkbox h-4 w-4 text-blue-600 border-gray-300 dark:border-gray-600 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:checked:bg-blue-600 dark:checked:border-transparent"
                       checked={isSelected}
                       onChange={(e) => {
                         if (onSelectItem) {
@@ -171,7 +171,7 @@ const DataTable = <T extends { id: number }>({
                   </td>
                 )}
                 {columns.map((column) => (
-                  <td key={column.key as string} className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                  <td key={column.key as string} className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
                     {column.render ? column.render(item) : String(item[column.key as keyof T] ?? '')}
                   </td>
                 ))}
@@ -182,28 +182,28 @@ const DataTable = <T extends { id: number }>({
         </table>
       </div>
 
-      {/* Pagination UI and Logic (remains unchanged) */}
+      {/* Pagination UI and Logic */}
       {totalPages > 0 && (
-        <div className="py-4 flex items-center justify-between bg-white px-4 rounded-b-lg shadow-sm border-t border-gray-200">
+        <div className="py-4 flex items-center justify-between bg-white dark:bg-gray-800 px-4 rounded-b-lg shadow-sm border-t border-gray-200 dark:border-gray-700">
           <div className="flex-1 flex justify-between sm:hidden">
             <button
               onClick={() => onPageChange(currentPage - 1)}
               disabled={currentPage <= 1}
-              className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+              className="relative inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50"
             >
               Previous
             </button>
             <button
               onClick={() => onPageChange(currentPage + 1)}
               disabled={currentPage >= totalPages}
-              className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+              className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50"
             >
               Next
             </button>
           </div>
           <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
             <div>
-              <p className="text-sm text-gray-700">
+              <p className="text-sm text-gray-700 dark:text-gray-300">
                 Page <span className="font-medium">{currentPage}</span> of <span className="font-medium">{totalPages}</span>
                 {totalItems && itemsPerPage && (
                      <span className="ml-2">
@@ -218,7 +218,7 @@ const DataTable = <T extends { id: number }>({
                 <button
                   onClick={() => onPageChange(currentPage - 1)}
                   disabled={currentPage <= 1}
-                  className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50"
+                  className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm font-medium text-gray-500 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50"
                 >
                   <span className="sr-only">Previous</span>
                   <ChevronLeft className="h-5 w-5" aria-hidden="true" />
@@ -239,8 +239,8 @@ const DataTable = <T extends { id: number }>({
                             aria-current={currentPage === pageNum ? 'page' : undefined}
                             className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium
                                 ${currentPage === pageNum 
-                                    ? 'z-10 bg-blue-50 border-blue-500 text-blue-600' 
-                                    : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'
+                                    ? 'z-10 bg-blue-50 dark:bg-blue-800 border-blue-500 dark:border-blue-700 text-blue-600 dark:text-blue-300' 
+                                    : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'
                                 }`}
                          >
                             {pageNum}
@@ -250,7 +250,7 @@ const DataTable = <T extends { id: number }>({
                 <button
                   onClick={() => onPageChange(currentPage + 1)}
                   disabled={currentPage >= totalPages}
-                  className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50"
+                  className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm font-medium text-gray-500 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50"
                 >
                   <span className="sr-only">Next</span>
                   <ChevronRight className="h-5 w-5" aria-hidden="true" />

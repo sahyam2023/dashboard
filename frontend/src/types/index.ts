@@ -132,6 +132,7 @@ export interface RegisterRequest extends AuthRequest {
   password: string; // Make password required
   password_hash?: never;
   security_answers: SecurityAnswerPayload[];
+  profile_picture?: FileList | null; // For the form data, can also be 'any'
 }
 
 export interface LoginRequest extends AuthRequest {
@@ -145,6 +146,7 @@ export interface AuthResponse {
   role: string;
   user_id: number; // Added
   password_reset_required?: boolean; // Added this line
+  profile_picture_url?: string | null; // Added for login response
 }
 
 export interface RegisterResponse {
@@ -153,8 +155,9 @@ export interface RegisterResponse {
   role: string; // Added
   access_token: string; // Added
   username:string; // Added
-  expires_in_seconds: number; // Added
+  // expires_in_seconds: number; // This was in the original type, but not in the backend response for register. Removing for now.
   password_reset_required?: boolean; // Added
+  profile_picture_url?: string | null; // Added for register response
 }
 
 // --- Admin Payload Base for Items with Flexible Version Handling ---
@@ -284,6 +287,9 @@ export interface Notification {
   is_read: boolean;
   created_at: string; // ISO date string, e.g., "2023-10-27T10:00:00Z"
   // Potentially add 'updated_at' if the backend sends it and it's useful
+  original_item_id?: number;
+  original_item_type?: string;
+  original_item_name?: string;
 }
 
 export interface UnreadNotificationCountResponse {

@@ -5636,7 +5636,8 @@ if __name__ == '__main__':
         else: 
             print(f"Skipping global password initialization as database file {db_path} was not successfully created/initialized.")
 
-    app.run(host='0.0.0.0', port=7000, debug=True) # Changed port to 7000
+    flask_port = int(os.environ.get('FLASK_RUN_PORT', 7000))
+    app.run(host='0.0.0.0', port=flask_port, debug=True)
 
 # --- Maintenance Mode Endpoints (Super Admin) ---
 @app.route('/api/admin/maintenance-mode', methods=['GET'])

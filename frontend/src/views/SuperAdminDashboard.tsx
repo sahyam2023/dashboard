@@ -48,7 +48,7 @@ const SuperAdminDashboard: React.FC = () => {
   const [sortBy, setSortBy] = useState<string>('username'); // Default sort column
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc'); // Default sort order
 
-  // Feedback and UI state
+  // Feedback and UI state - Main page feedback
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [editingRoleForUser, setEditingRoleForUser] = useState<number | null>(null);
   const [selectedRole, setSelectedRole] = useState<'user' | 'admin' | 'super_admin'>('user');
@@ -62,20 +62,20 @@ const SuperAdminDashboard: React.FC = () => {
 
   // State for Database Backup
   const [isBackupLoading, setIsBackupLoading] = useState<boolean>(false);
-  const [backupMessage, setBackupMessage] = useState<string | null>(null);
-  const [backupError, setBackupError] = useState<string | null>(null);
+  const [backupMessage, setBackupMessage] = useState<string | null>(null); // Specific for backup section
+  const [backupError, setBackupError] = useState<string | null>(null); // Specific for backup section
 
   // State for Database Restore
   const [isRestoreLoading, setIsRestoreLoading] = useState<boolean>(false);
-  const [restoreMessage, setRestoreMessage] = useState<string | null>(null);
-  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [restoreMessage, setRestoreMessage] = useState<string | null>(null); // Specific for restore section
+  const [restoreError, setRestoreError] = useState<string | null>(null); // Specific for restore section
   const [selectedRestoreFile, setSelectedRestoreFile] = useState<File | null>(null);
   const [restoreFileKey, setRestoreFileKey] = useState<number>(Date.now()); // For resetting file input
 
   // State for Maintenance Mode
   const [isMaintenanceModeActive, setIsMaintenanceModeActive] = useState<boolean>(false);
   const [isMaintenanceLoading, setIsMaintenanceLoading] = useState<boolean>(true); // Start true for initial fetch
-  const [maintenanceError, setMaintenanceError] = useState<string | null>(null);
+  const [maintenanceError, setMaintenanceError] = useState<string | null>(null); // Specific for maintenance section
 
 
   // --- State for File Permissions Management ---
@@ -120,13 +120,13 @@ const SuperAdminDashboard: React.FC = () => {
       return prev; 
     });
     // Clear feedback when user starts making changes
-    if (permissionsFeedback) setPermissionsFeedback(null);
-    if (permissionsError) setPermissionsError(null);
+    if (permissionsFeedback) setPermissionsFeedback(null); // Clear modal-specific feedback
+    if (permissionsError) setPermissionsError(null); // Clear modal-specific error
   };
 
   const handleSavePermissions = async () => {
     if (!selectedUserForPermissions) {
-      setPermissionsFeedback({ type: 'error', message: "No user selected." });
+      setPermissionsFeedback({ type: 'error', message: "No user selected." }); // Use modal-specific feedback
       return;
     }
     setIsPermissionsLoading(true);
@@ -166,8 +166,8 @@ const SuperAdminDashboard: React.FC = () => {
     } catch (err: any) {
       console.error("Error saving permissions:", err);
       const errMsg = err.response?.data?.msg || err.message || "Failed to save permissions.";
-      setPermissionsError(errMsg); 
-      setPermissionsFeedback({ type: 'error', message: errMsg });
+      setPermissionsError(errMsg);  // Use modal-specific error
+      setPermissionsFeedback({ type: 'error', message: errMsg }); // Use modal-specific feedback
     } finally {
       setIsPermissionsLoading(false);
     }
@@ -178,15 +178,16 @@ const SuperAdminDashboard: React.FC = () => {
     setUserFilePermissions([]);
     setAllFilesForPermissions([]);
     setPermissionsToUpdate([]);
-    setPermissionsError(null);
-    setPermissionsFeedback(null);
+    setPermissionsError(null); // Clear modal-specific error
+    setPermissionsFeedback(null); // Clear modal-specific feedback
+    setPermissionSearchTerm(''); // Clear search term on close
   };
 
   const fetchUsers = useCallback(async () => {
-    if (auth.isAuthenticated && auth.user?.role === 'super_admin') { // Updated
+    if (auth.isAuthenticated && auth.user?.role === 'super_admin') { 
       setIsLoading(true);
-      setError(null);
-      // Feedback is not reset here to persist across page changes if it's a result of an action
+      setError(null); // Clear general error related to user fetching
+      // Main page feedback is not reset here to persist across page changes if it's a result of an action on the main list
       try {
         const response: PaginatedUsersResponse = await listUsers(currentPage, itemsPerPage, sortBy, sortOrder);
         setUsers(response.users);
@@ -218,8 +219,10 @@ const SuperAdminDashboard: React.FC = () => {
           setIsMaintenanceModeActive(response.maintenance_mode_enabled);
         } catch (err: any) {
           console.error("Failed to fetch maintenance mode status:", err);
-          setMaintenanceError(err.response?.data?.msg || err.message || "Failed to fetch maintenance status.");
-          // Feedback is not set here as this is an initial load error, not action feedback
+        const apiError = err.response?.data?.msg || err.message || "Failed to fetch maintenance status.";
+        setMaintenanceError(apiError); // Set specific error for the section
+        // Main page feedback could also be set if this is considered a critical initial load failure
+        // setFeedback({ type: 'error', message: apiError }); 
         } finally {
           setIsMaintenanceLoading(false);
         }
@@ -232,23 +235,19 @@ const SuperAdminDashboard: React.FC = () => {
   useEffect(() => {
     if (selectedUserForPermissions) {
       const fetchDataForPermissions = async () => {
-        // Ensure user is authenticated and has super_admin role for this operation
         if (!auth.isAuthenticated || auth.user?.role !== 'super_admin') {
-          setPermissionsError("User not authorized for this action.");
+          setPermissionsError("User not authorized for this action."); // Use modal-specific error
           setIsPermissionsLoading(false);
           return;
         }
         setIsPermissionsLoading(true);
-        setPermissionsError(null);
-        setPermissionsFeedback(null);
-        setUserFilePermissions([]); // Clear previous user's permissions
-        setAllFilesForPermissions([]); // Clear previous files
-        setPermissionsToUpdate([]); // Clear previous updates
+        setPermissionsError(null); // Clear modal-specific error
+        setPermissionsFeedback(null); // Clear modal-specific feedback
+        setUserFilePermissions([]); 
+        setAllFilesForPermissions([]);
+        setPermissionsToUpdate([]);
 
         try {
-          // 1. Fetch all documents (first page for now)
-          // TODO: Handle pagination for documents if necessary, or fetch all.
-          // For now, fetching first page (e.g., up to 100 docs as a practical limit for UI)
           const docsResponse: PaginatedDocumentsResponse = await fetchDocuments(undefined, 1, 100); 
           const documentsAsPermissibleFiles: PermissibleFile[] = docsResponse.documents.map(doc => ({
             id: doc.id,
@@ -257,17 +256,13 @@ const SuperAdminDashboard: React.FC = () => {
           }));
           setAllFilesForPermissions(documentsAsPermissibleFiles);
 
-          // 2. Fetch selected user's current permissions
           const fetchedPermissions = await getUserFilePermissions(selectedUserForPermissions.id);
           setUserFilePermissions(fetchedPermissions);
           
-          // 3. Initialize permissionsToUpdate
           const initialUpdates: FilePermissionUpdatePayload[] = documentsAsPermissibleFiles.map(file => {
             const existingPerm = fetchedPermissions.find(p => p.file_id === file.id && p.file_type === file.type);
-            // Ensure that can_view and can_download are explicitly booleans.
-            // The API might return 0/1 for SQLite booleans.
-            const canView = existingPerm ? Boolean(existingPerm.can_view) : true;
-            const canDownload = existingPerm ? Boolean(existingPerm.can_download) : true;
+            const canView = existingPerm ? Boolean(existingPerm.can_view) : true; // Default to true (permissive)
+            const canDownload = existingPerm ? Boolean(existingPerm.can_download) : true; // Default to true
             return {
               file_id: file.id,
               file_type: file.type,
@@ -279,15 +274,16 @@ const SuperAdminDashboard: React.FC = () => {
 
         } catch (err: any) {
           console.error("Error fetching data for permissions:", err);
-          setPermissionsError(err.message || "Failed to fetch data for permissions.");
-          setPermissionsFeedback({ type: 'error', message: err.message || "Failed to fetch data for permissions." });
+          const errMsg = err.message || "Failed to fetch data for permissions.";
+          setPermissionsError(errMsg); // Use modal-specific error
+          setPermissionsFeedback({ type: 'error', message: errMsg }); // Use modal-specific feedback
         } finally {
           setIsPermissionsLoading(false);
         }
       };
       fetchDataForPermissions();
     }
-  }, [selectedUserForPermissions, auth.isAuthenticated, auth.user?.role]); // Updated auth dependencies
+  }, [selectedUserForPermissions, auth.isAuthenticated, auth.user?.role]);
 
 
   if (!auth.isAuthenticated) {
@@ -540,9 +536,9 @@ const SuperAdminDashboard: React.FC = () => {
               <select
                 value={selectedRole}
                 onChange={(e) => setSelectedRole(e.target.value as 'user' | 'admin' | 'super_admin')}
-                className="block w-auto pl-3 pr-10 py-1 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
-                disabled={auth.user?.username === user.username && users.filter(u => u.role === 'super_admin').length <= 1 && selectedRole !== 'super_admin'} // Updated
-                onClick={(e) => e.stopPropagation()} // Prevent row click if any
+                className="block w-auto pl-3 pr-10 py-1.5 text-sm border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-blue-500 focus:border-blue-500 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-200"
+                disabled={auth.user?.username === user.username && users.filter(u => u.role === 'super_admin').length <= 1 && selectedRole !== 'super_admin'}
+                onClick={(e) => e.stopPropagation()}
               >
                 <option value="user">User</option>
                 <option value="admin">Admin</option>
@@ -550,13 +546,13 @@ const SuperAdminDashboard: React.FC = () => {
               </select>
               <button
                 onClick={(e) => { e.stopPropagation(); handleRoleUpdate(user.id); }}
-                className="px-2 py-1 border border-transparent text-xs font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700"
+                className="px-3 py-1 border border-transparent text-xs font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
               >
                 Save
               </button>
               <button
                 onClick={(e) => { e.stopPropagation(); setEditingRoleForUser(null); }}
-                className="px-2 py-1 border border-gray-300 text-xs font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                className="px-3 py-1 border border-gray-300 dark:border-gray-500 text-xs font-medium rounded-md text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 shadow-sm"
               >
                 Cancel
               </button>
@@ -566,16 +562,16 @@ const SuperAdminDashboard: React.FC = () => {
         return (
           <div className="flex items-center space-x-2">
             <span>{user.role}</span>
-            {auth.user?.username !== user.username && ( // Updated
+            {auth.user?.username !== user.username && (
               <button 
                 onClick={(e) => { e.stopPropagation(); handleRoleChangeInitiate(user);}}
-                className="text-blue-600 hover:text-blue-800 text-xs"
+                className="text-blue-600 hover:text-blue-700 text-xs font-medium"
               >
                 Edit
               </button>
             )}
-            {auth.user?.username === user.username && user.role === 'super_admin' && users.filter(u => u.role === 'super_admin').length <= 1 && ( // Updated
-              <span className="text-xs text-gray-400 italic">(Cannot change role - only Super Admin)</span>
+            {auth.user?.username === user.username && user.role === 'super_admin' && users.filter(u => u.role === 'super_admin').length <= 1 && (
+              <span className="text-xs text-gray-400 dark:text-gray-500 italic">(Cannot change role - only Super Admin)</span>
             )}
           </div>
         );
@@ -586,8 +582,8 @@ const SuperAdminDashboard: React.FC = () => {
       header: 'Status', 
       sortable: true, 
       render: (user) => (
-        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-          user.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+        <span className={`px-2.5 py-0.5 inline-flex text-xs leading-5 font-semibold rounded-full ${
+          user.is_active ? 'bg-green-100 text-green-800 dark:bg-green-700 dark:text-green-100' : 'bg-red-100 text-red-800 dark:bg-red-700 dark:text-red-100'
         }`}>
           {user.is_active ? 'Active' : 'Inactive'}
         </span>
@@ -598,45 +594,43 @@ const SuperAdminDashboard: React.FC = () => {
       key: 'actions',
       header: 'Actions',
       render: (user) => (
-        <div className="space-x-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+        <div className="flex items-center space-x-3 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
           {user.is_active ? (
             <button
               onClick={(e) => { e.stopPropagation(); handleDeactivate(user.id, user.username);}}
-              className="text-yellow-600 hover:text-yellow-900 disabled:text-gray-400 text-xs"
-              disabled={auth.user?.username === user.username && users.filter(u => u.role === 'super_admin' && u.is_active).length <= 1} // Updated
+              className="text-yellow-600 hover:text-yellow-700 disabled:text-gray-400 dark:disabled:text-gray-500 text-xs font-medium"
+              disabled={auth.user?.username === user.username && users.filter(u => u.role === 'super_admin' && u.is_active).length <= 1}
             >
               Deactivate
             </button>
           ) : (
             <button
               onClick={(e) => { e.stopPropagation(); handleActivate(user.id, user.username);}}
-              className="text-green-600 hover:text-green-900 text-xs"
+              className="text-green-600 hover:text-green-700 text-xs font-medium"
             >
               Activate
             </button>
           )}
           <button
             onClick={(e) => { e.stopPropagation(); handleDelete(user.id, user.username);}}
-            className="text-red-600 hover:text-red-900 disabled:text-gray-400 text-xs"
-              disabled={auth.user?.username === user.username} // Updated
+            className="text-red-600 hover:text-red-700 disabled:text-gray-400 dark:disabled:text-gray-500 text-xs font-medium"
+            disabled={auth.user?.username === user.username}
           >
             Delete
           </button>
-          {/* Force Password Reset Button */}
-          {user.role !== 'super_admin' && auth.user?.username !== user.username && ( // Updated: Ensure not targeting super_admins or self
+          {user.role !== 'super_admin' && auth.user?.username !== user.username && (
             <button
               onClick={(e) => { e.stopPropagation(); handleForceResetPassword(user.id, user.username);}}
-              className="text-purple-600 hover:text-purple-900 text-xs ml-2" // Added margin-left for spacing
+              className="text-purple-600 hover:text-purple-700 text-xs font-medium"
             >
               Force Reset
             </button>
           )}
-           {/* Manage Permissions Button */}
            <button
               onClick={(e) => { e.stopPropagation(); setSelectedUserForPermissions(user); }}
-              className="text-teal-600 hover:text-teal-900 text-xs ml-2"
+              className="text-teal-600 hover:text-teal-700 text-xs font-medium"
             >
-              Manage Permissions
+              Permissions
             </button>
         </div>
       )
@@ -644,88 +638,78 @@ const SuperAdminDashboard: React.FC = () => {
   ];
 
   return (
-    <div className="container mx-auto p-4 space-y-8"> {/* Added space-y-8 for overall spacing */}
-      <div> {/* Wrapper for User Management Section */}
-        <h1 className="text-2xl font-bold mb-6">Super Admin Dashboard - User Management</h1>
+    <div className="container mx-auto p-4 md:p-6 lg:p-8 space-y-10 md:space-y-12">
+      {/* User Management Section */}
+      <section className="bg-white dark:bg-gray-800 shadow-xl rounded-xl p-6 md:p-8">
+        <h1 className="text-2xl md:text-3xl font-bold mb-6 text-gray-900 dark:text-gray-100">User Management</h1>
         
         {feedback && (
-          <div className={`p-3 mb-4 rounded ${feedback.type === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+          <div className={`p-4 mb-6 rounded-lg text-sm ${feedback.type === 'success' ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200 border border-green-200 dark:border-green-700' : 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200 border border-red-200 dark:border-red-700'}`}>
             {feedback.message}
           </div>
         )}
-        {/* Display general error if users array is empty and not loading */}
-        {error && users.length === 0 && !isLoading && <div className="text-red-500 bg-red-100 p-3 rounded mb-4">Error: {error}</div>}
+        {error && users.length === 0 && !isLoading && <div className="text-red-500 bg-red-100 dark:bg-red-900 dark:text-red-200 p-4 rounded-lg mb-6 text-sm">Error: {error}</div>}
 
         <DataTable
           columns={columns}
           data={users}
-          rowClassName="group" // Added group class for row hover effect
-        isLoading={isLoading}
-        currentPage={currentPage}
-        totalPages={totalPages}
-        onPageChange={handlePageChange}
-        itemsPerPage={itemsPerPage}
-        totalItems={totalUsers}
-        sortColumn={sortBy}
-        sortOrder={sortOrder}
-        onSort={handleSort}
-      />
-      </div>
+          rowClassName="group hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors" 
+          isLoading={isLoading}
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onPageChange={handlePageChange}
+          itemsPerPage={itemsPerPage}
+          totalItems={totalUsers}
+          sortColumn={sortBy}
+          sortOrder={sortOrder}
+          onSort={handleSort}
+        />
+      </section>
 
       {/* Global Site Password Management Section */}
-      <div className="mt-12 p-6 bg-white shadow rounded-lg">
-        <h2 className="text-xl font-semibold mb-4 text-gray-800">Global Site Password Management</h2>
+      <section className="bg-white dark:bg-gray-800 shadow-xl rounded-xl p-6 md:p-8">
+        <h2 className="text-xl font-semibold mb-6 text-gray-800 dark:text-gray-100">Global Site Password</h2>
         
         {globalPasswordError && (
-          <div className="p-3 mb-4 rounded bg-red-100 text-red-700 text-sm">
+          <div className="p-3 mb-4 rounded-md bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 border border-red-200 dark:border-red-700 text-sm">
             {globalPasswordError}
           </div>
         )}
         {globalPasswordSuccess && (
-          <div className="p-3 mb-4 rounded bg-green-100 text-green-700 text-sm">
+          <div className="p-3 mb-4 rounded-md bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 border border-green-200 dark:border-green-700 text-sm">
             {globalPasswordSuccess}
           </div>
         )}
 
         <form onSubmit={handleGlobalPasswordChangeSubmit} className="space-y-4">
           <div>
-            <label 
-              htmlFor="newGlobalPassword" 
-              className="block text-sm font-medium text-gray-700 mb-1"
-            >
-              New Global Password
-            </label>
+            <label htmlFor="newGlobalPassword" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">New Global Password</label>
             <input
               id="newGlobalPassword"
               type="password"
               value={newGlobalPassword}
               onChange={(e) => {
                 setNewGlobalPassword(e.target.value);
-                if (globalPasswordError) setGlobalPasswordError(null); // Clear error on change
+                if (globalPasswordError) setGlobalPasswordError(null); 
                 if (globalPasswordSuccess) setGlobalPasswordSuccess(null); 
               }}
-              className="appearance-none block w-full px-3 py-2.5 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+              className="block w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
               required
               disabled={isGlobalPasswordLoading}
             />
           </div>
           <div>
-            <label 
-              htmlFor="confirmNewGlobalPassword" 
-              className="block text-sm font-medium text-gray-700 mb-1"
-            >
-              Confirm New Global Password
-            </label>
+            <label htmlFor="confirmNewGlobalPassword" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Confirm New Global Password</label>
             <input
               id="confirmNewGlobalPassword"
               type="password"
               value={confirmNewGlobalPassword}
               onChange={(e) => {
                 setConfirmNewGlobalPassword(e.target.value);
-                if (globalPasswordError) setGlobalPasswordError(null); // Clear error on change
+                if (globalPasswordError) setGlobalPasswordError(null);
                  if (globalPasswordSuccess) setGlobalPasswordSuccess(null);
               }}
-              className="appearance-none block w-full px-3 py-2.5 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+              className="block w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
               required
               disabled={isGlobalPasswordLoading}
             />
@@ -734,216 +718,161 @@ const SuperAdminDashboard: React.FC = () => {
             <button
               type="submit"
               disabled={isGlobalPasswordLoading}
-              className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-60 transition-colors"
+              className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-60 transition-colors"
             >
-              {isGlobalPasswordLoading ? (
-                <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white"></div>
-              ) : (
-                'Change Global Password'
-              )}
+              {isGlobalPasswordLoading ? <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white"></div> : 'Change Global Password'}
             </button>
           </div>
         </form>
-      </div>
+      </section>
 
       {/* Database Backup Section */}
-      <div className="mt-12 p-6 bg-white dark:bg-gray-800 shadow rounded-lg">
-        <h2 className="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Database Backup</h2>
-        {backupError && (
-          <div className="p-3 mb-4 rounded bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 border border-red-200 dark:border-red-700 text-sm">
-            {backupError}
-          </div>
-        )}
-        {backupMessage && (
-          <div className="p-3 mb-4 rounded bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 border border-green-200 dark:border-green-700 text-sm">
-            {backupMessage}
-          </div>
-        )}
+      <section className="bg-white dark:bg-gray-800 shadow-xl rounded-xl p-6 md:p-8">
+        <h2 className="text-xl font-semibold mb-6 text-gray-800 dark:text-gray-100">Database Backup</h2>
+        {backupError && <div className="p-3 mb-4 rounded-md bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 border border-red-200 dark:border-red-700 text-sm">{backupError}</div>}
+        {backupMessage && <div className="p-3 mb-4 rounded-md bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 border border-green-200 dark:border-green-700 text-sm">{backupMessage}</div>}
         <button
           onClick={handleBackupDatabase}
           disabled={isBackupLoading}
-          className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-60 transition-colors"
+          className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-60 transition-colors"
         >
-          {isBackupLoading ? (
-            <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white"></div>
-          ) : (
-            'Create Backup'
-          )}
+          {isBackupLoading ? <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white"></div> : 'Create Backup'}
         </button>
-      </div>
+      </section>
 
       {/* Database Restore Section */}
-      <div className="mt-12 p-6 bg-white dark:bg-gray-800 shadow rounded-lg">
-        <h2 className="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Database Restore</h2>
-        {restoreError && (
-          <div className="p-3 mb-4 rounded bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 border border-red-200 dark:border-red-700 text-sm">
-            {restoreError}
-          </div>
-        )}
-        {restoreMessage && (
-          <div className="p-3 mb-4 rounded bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 border border-green-200 dark:border-green-700 text-sm">
-            {restoreMessage}
-          </div>
-        )}
+      <section className="bg-white dark:bg-gray-800 shadow-xl rounded-xl p-6 md:p-8">
+        <h2 className="text-xl font-semibold mb-6 text-gray-800 dark:text-gray-100">Database Restore</h2>
+        {restoreError && <div className="p-3 mb-4 rounded-md bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 border border-red-200 dark:border-red-700 text-sm">{restoreError}</div>}
+        {restoreMessage && <div className="p-3 mb-4 rounded-md bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 border border-green-200 dark:border-green-700 text-sm">{restoreMessage}</div>}
         <div className="space-y-4">
           <div>
-            <label 
-              htmlFor="restoreFile" 
-              className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-            >
-              Select .db Backup File
-            </label>
+            <label htmlFor="restoreFile" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Select .db Backup File</label>
             <input
               id="restoreFile"
-              key={restoreFileKey} // Used to reset the input
+              key={restoreFileKey}
               type="file"
               accept=".db"
               onChange={handleRestoreFileChange}
-              className="appearance-none block w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-200 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 dark:file:bg-gray-600 file:text-blue-700 dark:file:text-gray-200 hover:file:bg-blue-100 dark:hover:file:bg-gray-500"
+              className="block w-full text-sm text-gray-700 dark:text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 dark:file:bg-gray-600 file:text-blue-700 dark:file:text-gray-200 hover:file:bg-blue-100 dark:hover:file:bg-gray-500 border border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white dark:bg-gray-700"
               disabled={isRestoreLoading}
             />
           </div>
           <button
             onClick={handleRestoreDatabase}
             disabled={isRestoreLoading || !selectedRestoreFile}
-            className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-orange-600 hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:opacity-50 transition-colors"
+            className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-orange-600 hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:opacity-50 transition-colors"
           >
-            {isRestoreLoading ? (
-              <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white"></div>
-            ) : (
-              'Restore from Backup'
-            )}
+            {isRestoreLoading ? <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white"></div> : 'Restore from Backup'}
           </button>
         </div>
-      </div>
+      </section>
 
       {/* System Maintenance Mode Section */}
-      <div className="mt-12 p-6 bg-white dark:bg-gray-800 shadow rounded-lg">
-        <h2 className="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">System Maintenance Mode</h2>
+      <section className="bg-white dark:bg-gray-800 shadow-xl rounded-xl p-6 md:p-8">
+        <h2 className="text-xl font-semibold mb-6 text-gray-800 dark:text-gray-100">System Maintenance Mode</h2>
         
-        {maintenanceError && (
-          <div className="p-3 mb-4 rounded bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 border border-red-200 dark:border-red-700 text-sm">
-            Error: {maintenanceError}
-          </div>
-        )}
+        {maintenanceError && <div className="p-3 mb-4 rounded-md bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 border border-red-200 dark:border-red-700 text-sm">Error: {maintenanceError}</div>}
 
-        {isMaintenanceLoading && users.length === 0 && !maintenanceError && ( /* Condition for initial loading of status */
-          <div className="text-sm text-gray-500">Loading maintenance status...</div>
-        )}
+        {isMaintenanceLoading && !users.length && !maintenanceError && <div className="text-sm text-gray-500 dark:text-gray-400">Loading maintenance status...</div>}
 
-        {!isMaintenanceLoading || users.length > 0 || maintenanceError ? ( /* Show toggle once initial load attempt is done or if users loaded (meaning page is generally ready) */
+        {(!isMaintenanceLoading || users.length > 0 || maintenanceError) && (
           <>
-            <div className="flex items-center space-x-4 mb-2">
+            <div className="flex items-center space-x-4 mb-3">
               <label htmlFor="maintenanceToggle" className="flex items-center cursor-pointer">
                 <div className="relative">
-                  <input
-                    type="checkbox"
-                    id="maintenanceToggle"
-                    className="sr-only"
-                    checked={isMaintenanceModeActive}
-                    onChange={handleToggleMaintenanceMode}
-                    disabled={isMaintenanceLoading} // Disable during any loading (initial or toggle action)
-                  />
-                  {/* Styling for the toggle switch */}
+                  <input type="checkbox" id="maintenanceToggle" className="sr-only" checked={isMaintenanceModeActive} onChange={handleToggleMaintenanceMode} disabled={isMaintenanceLoading} />
                   <div className={`block w-14 h-8 rounded-full transition-colors ${isMaintenanceModeActive ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}></div>
-                  <div
-                    className={`dot absolute left-1 top-1 bg-white dark:bg-gray-300 w-6 h-6 rounded-full shadow-md transition-transform duration-300 ease-in-out ${isMaintenanceModeActive ? 'transform translate-x-6' : ''}`}
-                  ></div>
+                  <div className={`dot absolute left-1 top-1 bg-white dark:bg-gray-300 w-6 h-6 rounded-full shadow-md transition-transform duration-300 ease-in-out ${isMaintenanceModeActive ? 'transform translate-x-6' : ''}`}></div>
                 </div>
               </label>
               <span className={`text-sm font-medium ${isMaintenanceModeActive ? 'text-green-700 dark:text-green-300' : 'text-gray-700 dark:text-gray-300'}`}>
                 Maintenance Mode is {isMaintenanceModeActive ? 'ACTIVATED' : 'DEACTIVATED'}
               </span>
-              {isMaintenanceLoading && ( /* Spinner specifically for toggle action */
-                <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-blue-500"></div>
-              )}
+              {isMaintenanceLoading && <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-blue-500"></div>}
             </div>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              When activated, only Super Administrators can log in. All other users, including regular Admins, will be denied access and active sessions (except Super Admins) may be affected on their next API interaction.
+            <p className="text-xs text-gray-600 dark:text-gray-400 mt-2">
+              When activated, only Super Administrators can log in. Other users will be denied access.
             </p>
           </>
-        ) : null }
-      </div>
+        )}
+      </section>
 
-      {/* Permissions Management Section - Now a Modal */}
+      {/* Permissions Management Section - Modal */}
       <Modal
         isOpen={selectedUserForPermissions !== null}
         onClose={closePermissionsSection}
-        title={selectedUserForPermissions ? `Manage File Permissions for: ${selectedUserForPermissions.username}` : ''}
+        title={selectedUserForPermissions ? `File Permissions: ${selectedUserForPermissions.username}` : ''}
       >
-        <div className="mt-4"> {/* Added some margin for content spacing from title */}
+        <div className="mt-4">
           <div className="mb-4">
             <input
               type="text"
-              placeholder="Search by file name..."
+              placeholder="Search files..."
               value={permissionSearchTerm}
               onChange={(e) => setPermissionSearchTerm(e.target.value)}
-              className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
+              className="block w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
             />
           </div>
 
-          {isPermissionsLoading && <div className="text-sm text-gray-500 dark:text-gray-400 text-center">Loading permissions info...</div>}
-          {permissionsError && <div className="p-3 mb-4 rounded bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 border border-red-200 dark:border-red-700 text-sm">{permissionsError}</div>}
+          {isPermissionsLoading && <div className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">Loading permissions...</div>}
+          {permissionsError && <div className="p-3 mb-4 rounded-md bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 border border-red-200 dark:border-red-700 text-sm">{permissionsError}</div>}
           {permissionsFeedback && (
-            <div className={`p-3 mb-4 rounded text-sm ${permissionsFeedback.type === 'success' ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 border border-green-200 dark:border-green-700' : 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 border border-red-200 dark:border-red-700'}`}>
+            <div className={`p-3 mb-4 rounded-md text-sm ${permissionsFeedback.type === 'success' ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 border border-green-200 dark:border-green-700' : 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 border border-red-200 dark:border-red-700'}`}>
               {permissionsFeedback.message}
             </div>
           )}
 
           {!isPermissionsLoading && !permissionsError && allFilesForPermissions.length > 0 && (
-            <form onSubmit={(e) => { e.preventDefault(); handleSavePermissions(); }} className="space-y-6">
-              <div className="max-h-80 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-md p-4 space-y-4 bg-gray-50 dark:bg-gray-800"> {/* Adjusted max-h and added bg */}
-                {/* Iterate over filteredPermissionFiles (to be defined) */}
+            <form onSubmit={(e) => { e.preventDefault(); handleSavePermissions(); }} className="space-y-4">
+              <div className="max-h-96 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg p-1 bg-gray-50 dark:bg-gray-800/50">
                 {allFilesForPermissions.filter(file => 
                   file.name.toLowerCase().includes(permissionSearchTerm.toLowerCase())
                 ).map((file) => {
                   const currentPermission = permissionsToUpdate.find(p => p.file_id === file.id && p.file_type === file.type);
                   return (
-                    <div key={`${file.type}-${file.id}`} className="p-3 border-b border-gray-200 dark:border-gray-700 last:border-b-0 hover:bg-white dark:hover:bg-gray-700 rounded-md transition-colors duration-150 bg-white dark:bg-gray-750 shadow-sm">
-                      <h4 className="font-medium text-gray-800 dark:text-gray-100 truncate" title={file.name}>{file.name} <span className="text-xs text-gray-500 dark:text-gray-400">({file.type})</span></h4>
-                      <div className="flex items-center space-x-6 mt-2">
+                    <div key={`${file.type}-${file.id}`} className="p-3 border-b border-gray-200 dark:border-gray-600 last:border-b-0 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md transition-colors duration-150 bg-white dark:bg-gray-700 shadow-sm my-1">
+                      <h4 className="font-medium text-gray-800 dark:text-gray-100 truncate" title={file.name}>{file.name} <span className="text-xs text-gray-500 dark:text-gray-400">({file.type.replace('_', ' ')})</span></h4>
+                      <div className="flex items-center space-x-6 mt-2.5">
                         <label className="flex items-center space-x-2 cursor-pointer text-sm text-gray-700 dark:text-gray-300">
                           <input
                             type="checkbox"
-                            className="rounded text-blue-600 focus:ring-blue-500 h-4 w-4 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 checked:bg-blue-600 dark:checked:bg-blue-500"
-                            checked={currentPermission?.can_view || false}
+                            className="rounded text-blue-600 focus:ring-blue-500 h-4 w-4 border-gray-300 dark:border-gray-500 bg-gray-100 dark:bg-gray-600 checked:bg-blue-600 dark:checked:bg-blue-500"
+                            checked={currentPermission?.can_view ?? true} // Default to true if undefined
                             onChange={(e) => handlePermissionChange(file.id, file.type, 'can_view', e.target.checked)}
                           />
-                          <span>Can View</span>
+                          <span>View</span>
                         </label>
                         <label className="flex items-center space-x-2 cursor-pointer text-sm text-gray-700 dark:text-gray-300">
                           <input
                             type="checkbox"
-                            className="rounded text-blue-600 focus:ring-blue-500 h-4 w-4 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 checked:bg-blue-600 dark:checked:bg-blue-500"
-                            checked={currentPermission?.can_download || false}
+                            className="rounded text-blue-600 focus:ring-blue-500 h-4 w-4 border-gray-300 dark:border-gray-500 bg-gray-100 dark:bg-gray-600 checked:bg-blue-600 dark:checked:bg-blue-500"
+                            checked={currentPermission?.can_download ?? true} // Default to true if undefined
                             onChange={(e) => handlePermissionChange(file.id, file.type, 'can_download', e.target.checked)}
                           />
-                          <span>Can Download</span>
+                          <span>Download</span>
                         </label>
                       </div>
                     </div>
                   );
                 })}
               </div>
-              {/* Save button is outside the scrollable area, but inside the form */}
-              <div className="flex justify-end pt-4"> 
+              <div className="flex justify-end pt-3"> 
                 <button
                   type="submit"
                   disabled={isPermissionsLoading}
-                  className="px-6 py-2.5 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                  className="px-6 py-2.5 border border-transparent text-sm font-medium rounded-lg shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-blue-500 disabled:opacity-50"
                 >
                   {isPermissionsLoading ? 'Saving...' : 'Save Permissions'}
                 </button>
               </div>
             </form>
           )}
-           {!isPermissionsLoading && !permissionsError && 
-             allFilesForPermissions.filter(file => file.name.toLowerCase().includes(permissionSearchTerm.toLowerCase())).length === 0 && 
-             allFilesForPermissions.length > 0 && (
-             <p className="text-sm text-gray-500 dark:text-gray-400 text-center">No files match your search term.</p>
+           {!isPermissionsLoading && !permissionsError && allFilesForPermissions.filter(file => file.name.toLowerCase().includes(permissionSearchTerm.toLowerCase())).length === 0 && allFilesForPermissions.length > 0 && (
+             <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">No files match your search term.</p>
            )}
           {!isPermissionsLoading && !permissionsError && allFilesForPermissions.length === 0 && (
-             <p className="text-sm text-gray-500 dark:text-gray-400 text-center">No documents found to set permissions for. Ensure documents are uploaded to the system.</p>
+             <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">No documents found to set permissions for. Ensure documents are uploaded.</p>
            )}
         </div>
       </Modal>

@@ -37,6 +37,8 @@ DOC_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'official_uploads', 'docu
 PATCH_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'official_uploads', 'patches')
 LINK_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'official_uploads', 'links')
 MISC_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'misc_uploads')
+STATIC_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'frontend', 'dist')
+
 
 # Ensure all upload folders exist
 for folder in [DOC_UPLOAD_FOLDER, PATCH_UPLOAD_FOLDER, LINK_UPLOAD_FOLDER, MISC_UPLOAD_FOLDER]:
@@ -67,13 +69,25 @@ INLINE_PRONE_EXTENSIONS = {
     'md' # Markdown files
 }
 
-app = Flask(__name__, instance_relative_config=True) # instance_relative_config=True is good practice
+# app = Flask(__name__, instance_relative_config=True) # instance_relative_config=True is good practice
 
-# CORS Configuration (Restrict origins in production)
-CORS(app, resources={r"/api/*": {"origins": "http://localhost:5173"}}, # Adjust frontend origin
-     supports_credentials=True,
-     allow_headers=["Content-Type", "Authorization", "Cache-Control", "Pragma"],
-     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
+app = Flask(__name__, 
+            instance_relative_config=True,
+            static_folder=STATIC_FOLDER,
+            static_url_path='')
+
+CORS(app, resources={
+    r"/api/*": {
+        "origins": [
+            "http://localhost:5173",
+            "http://localhost:7000",
+            "http://127.0.0.1:7000"
+        ]
+    }
+},
+supports_credentials=True,
+allow_headers=["Content-Type", "Authorization", "Cache-Control", "Pragma"],
+methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
 # App Configuration
 app.config['DATABASE'] = os.path.join(INSTANCE_FOLDER_PATH, 'software_dashboard.db') # DB in instance folder
@@ -5541,9 +5555,40 @@ def get_dashboard_stats():
         app.logger.error(f"Unexpected error in get_dashboard_stats: {e}", exc_info=True)
         return jsonify(error="An unexpected error occurred", details=str(e)), 500
 
-# # --- Main Execution ---
-# if __name__ == '__main__':
-#     app.run(host='0.0.0.0', port=5000, debug=True)
+# --- Helper function for Global Password Initialization ---
+def _initialize_global_password(db: sqlite3.Connection):
+    try:
+        cursor = db.execute("SELECT setting_value FROM site_settings WHERE setting_key = 'global_password_hash'")
+        existing_setting = cursor.fetchone()
+        if not existing_setting:
+            print("Initializing default global password...")
+            default_password = "Admin@123"
+            hashed_password = bcrypt.generate_password_hash(default_password).decode('utf-8')
+            db.execute("INSERT INTO site_settings (setting_key, setting_value) VALUES (?, ?)", ('global_password_hash', hashed_password))
+            db.commit()
+            print("Default global password initialized.")
+        else:
+            print("Global password already set.")
+    except sqlite3.Error as e: print(f"SQLite error during global password initialization: {e}")
+    except Exception as e: print(f"An unexpected error occurred during global password initialization: {e}")
+
+# --- CLI Command ---
+@app.cli.command('init-db')
+def init_db_command():
+    database.init_db(app.config['DATABASE'])
+    print('Initialized the database.')
+    try:
+        db = get_db() 
+        _initialize_global_password(db)
+    except Exception as e: print(f"Error during global password initialization in init_db_command: {e}")
+
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve_react_app(path):
+    if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
+        return send_from_directory(app.static_folder, path)
+    else:
+        return send_from_directory(app.static_folder, 'index.html')
 
 if __name__ == '__main__':
     db_path = app.config.get('DATABASE')
@@ -5551,23 +5596,39 @@ if __name__ == '__main__':
         print("ERROR: DATABASE configuration not found in app.config. Cannot initialize DB.")
     else:
         db_dir = os.path.dirname(db_path)
-        if db_dir and not os.path.exists(db_dir): # Check if db_dir is not empty
+        if db_dir and not os.path.exists(db_dir):
             try:
                 os.makedirs(db_dir, exist_ok=True)
                 print(f"Created instance directory: {db_dir}")
             except OSError as e:
                 print(f"Error creating instance directory {db_dir}: {e}")
+        
         if not os.path.exists(db_path):
-            print(f"Database file not found at {db_path}. Initializing database...")
+            print(f"Database file not found at {db_path}. Initializing database schema...")
             try:
-                init_db(db_path)
-                print(f"Database initialized successfully at {db_path}.")
+                database.init_db(db_path) 
+                print(f"Database schema initialized successfully at {db_path}.")
             except Exception as e:
-                print(f"An error occurred during database initialization: {e}")
+                print(f"An error occurred during database schema initialization: {e}")
         else:
-            print(f"Database file already exists at {db_path}. Skipping initialization.")
+            print(f"Database file already exists at {db_path}. Skipping schema initialization.")
 
-    app.run(host='0.0.0.0', port=5000, debug=True)
+        if os.path.exists(db_path):
+            temp_conn = None
+            try:
+                temp_conn = database.get_db_connection(db_path)
+                _initialize_global_password(temp_conn) 
+            except sqlite3.OperationalError as e_op:
+                 print(f"SQLite OperationalError during global password initialization in __main__: {e_op}")
+            except Exception as e_global_pw:
+                print(f"Error during global password initialization in __main__: {e_global_pw}")
+            finally:
+                if temp_conn:
+                    temp_conn.close()
+        else: 
+            print(f"Skipping global password initialization as database file {db_path} was not successfully created/initialized.")
+
+    app.run(host='0.0.0.0', port=7000, debug=True) # Changed port to 7000
 
 # --- Maintenance Mode Endpoints (Super Admin) ---
 @app.route('/api/admin/maintenance-mode', methods=['GET'])

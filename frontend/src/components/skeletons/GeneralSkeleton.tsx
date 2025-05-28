@@ -4,16 +4,20 @@ interface GeneralSkeletonProps {
   blocks?: number;
 }
 
-const GeneralSkeleton: React.FC<GeneralSkeletonProps> = ({ blocks = 3 }) => {
+const GeneralSkeleton: React.FC<GeneralSkeletonProps> = ({ blocks = 5 }) => {
   return (
-    <div className="p-4 w-full mx-auto rounded-md shadow">
-      <div className="animate-pulse flex flex-col space-y-4">
+    <div className="w-full px-4 max-w-lg mx-auto py-4">
+      <div className="animate-pulse space-y-4">
         {Array.from({ length: blocks }).map((_, index) => (
-          <div key={index} className="space-y-3 py-2"> {/* Added py-2 for spacing between blocks */}
-            <div className="h-10 bg-gray-300 rounded w-5/6"></div>
-            <div className="h-6 bg-gray-200 rounded w-full"></div>
-            <div className="h-6 bg-gray-200 rounded w-3/4"></div>
-          </div>
+          // In light mode: bg-gray-200. In dark mode: dark:bg-gray-700.
+          // This ensures the skeleton bars are light gray on light background,
+          // and darker gray on dark background.
+          <div
+            key={index}
+            className={`h-6 rounded ${
+              index % 2 === 0 ? 'w-full' : 'w-5/6'
+            } bg-gray-200 dark:bg-gray-700`}
+          ></div>
         ))}
       </div>
     </div>

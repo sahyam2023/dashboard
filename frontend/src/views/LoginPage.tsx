@@ -1,4 +1,3 @@
-// src/views/LoginPage.tsx
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom'; // Import useNavigate
 import LoginForm from '../components/LoginForm';
@@ -16,14 +15,14 @@ const LoginPage: React.FC = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 to-slate-700 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8 p-10 bg-white rounded-xl shadow-2xl">
+      <div className="max-w-md w-full space-y-8 p-10 bg-white rounded-xl shadow-2xl dark:bg-gray-800"> {/* Added dark:bg-gray-800 */}
         <div className="text-center">
-          <h2 className="mt-6 text-3xl font-bold text-gray-900">
+          <h2 className="mt-6 text-3xl font-bold text-gray-900 dark:text-white"> {/* Added dark:text-white */}
             Sign in to your account
           </h2>
-          <p className="mt-2 text-sm text-gray-600">
+          <p className="mt-2 text-sm text-gray-600 dark:text-gray-300"> {/* Added dark:text-gray-300 */}
             Or{' '}
-            <Link to="/register" className="font-medium text-indigo-600 hover:text-indigo-500">
+            <Link to="/register" className="font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300"> {/* Added dark:text-indigo-400 */}
               create a new account
             </Link>
           </p>
@@ -31,7 +30,7 @@ const LoginPage: React.FC = () => {
         {/* Removed the inner white card, the outer card now serves this purpose */}
         <LoginForm onAuthSuccess={handleLoginSuccess} /> 
         <div className="mt-6 text-center text-sm"> 
-          <Link to="/forgot-password" className="font-medium text-indigo-600 hover:text-indigo-500">
+          <Link to="/forgot-password" className="font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300"> {/* Added dark:text-indigo-400 */}
             Forgot Password?
           </Link>
         </div>

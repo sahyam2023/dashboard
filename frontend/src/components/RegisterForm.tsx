@@ -37,7 +37,7 @@ const RegisterForm: React.FC<RegisterFormProps> = ({ onAuthSuccess, onToggleView
   // successMessage state is removed, will use toasts
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
-  const [profilePicture, setProfilePicture] = useState<FileList | null>(null); // Added state for profile picture
+  // const [profilePicture, setProfilePicture] = useState<FileList | null>(null); // Removed profile picture state
   const auth = useAuth();
 
   useEffect(() => {
@@ -157,21 +157,21 @@ const RegisterForm: React.FC<RegisterFormProps> = ({ onAuthSuccess, onToggleView
       answer: sa.answer.trim(),
     }));
 
-    const formData = new FormData();
-    formData.append('username', username);
-    formData.append('password', password);
-    if (email) {
-      formData.append('email', email);
-    }
-    formData.append('security_answers', JSON.stringify(securityAnswersPayload));
+    const registrationData: RegisterRequest = {
+      username,
+      password,
+      security_answers: securityAnswersPayload,
+    };
 
-    if (profilePicture && profilePicture.length > 0) {
-      formData.append('profile_picture', profilePicture[0]);
+    if (email) {
+      registrationData.email = email;
     }
+
+    // Removed FormData creation and profile_picture appending
 
     try {
-      // registerUser now expects FormData
-      const regData: RegisterResponse = await registerUser(formData); 
+      // registerUser now expects RegisterRequest object
+      const regData: RegisterResponse = await registerUser(registrationData); 
       
       // The backend response now includes profile_picture_url
       const requiresReset = auth.login(

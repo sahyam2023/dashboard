@@ -12,6 +12,10 @@ import secrets # Added for secure token generation
 import shutil # For file operations if needed, though .backup is preferred for DB
 import click # For CLI arguments
 from functools import wraps
+# import cProfile # Removed
+# import pstats # Removed
+# import io # Removed
+import random
 import zipfile
 import tempfile
 from flask import Flask, request, g, jsonify, send_from_directory
@@ -1054,6 +1058,10 @@ def update_user_file_permissions(user_id):
 # --- Authentication Endpoints ---
 @app.route('/api/auth/register', methods=['POST'])
 def register():
+    app.logger.info(f"Register request Content-Type: {request.headers.get('Content-Type')}")
+    if 'profile_picture' in request.files:
+        profile_picture_file_log = request.files['profile_picture']
+        app.logger.info(f"Profile picture filename: {profile_picture_file_log.filename}, content_type: {profile_picture_file_log.content_type}")
     # Handle multipart/form-data for profile picture upload
     if 'profile_picture' in request.files:
         username = request.form.get('username')
@@ -1061,14 +1069,15 @@ def register():
         email = request.form.get('email')
         security_answers_str = request.form.get('security_answers')
         profile_picture_file = request.files.get('profile_picture')
-    else: # Fallback to JSON if no file part, though frontend should always use FormData now
+    else: # Logic for JSON request
         data = request.get_json()
-        if not data: return jsonify(msg="Missing form data or JSON data"), 400
+        if not data: return jsonify(msg="Missing JSON data"), 400
         username = data.get('username')
         password = data.get('password')
-        email = data.get('email')
-        security_answers_str = data.get('security_answers') # Assuming it's a JSON string if sent this way
-        profile_picture_file = None
+        email = data.get('email') # Optional
+        security_answers_str = data.get('security_answers')
+        # profile_picture_file is not expected in JSON, will be handled by random assignment
+        # profile_picture_file = None # No longer needed for JSON path
 
     if not username or not password: return jsonify(msg="Missing username or password"), 400
     if not security_answers_str: return jsonify(msg="Missing security_answers"), 400
@@ -1116,25 +1125,30 @@ def register():
     user_count = user_count_cursor.fetchone()['count']
     role_to_assign = 'super_admin' if user_count == 0 else 'user'
 
-    profile_picture_filename = None
-    profile_picture_saved = False
-    if profile_picture_file and profile_picture_file.filename != '':
-        if allowed_file(profile_picture_file.filename): # You might want more specific image extension check
+    # For FormData (profile_picture_file might exist)
+    profile_picture_filename_from_upload = None
+    # profile_picture_saved_from_upload = False # Not strictly needed
+
+    if 'profile_picture' in request.files and profile_picture_file and profile_picture_file.filename != '': # This is the FormData path
+        # This part handles FormData with an uploaded profile picture
+        if allowed_file(profile_picture_file.filename):
             original_filename = secure_filename(profile_picture_file.filename)
             ext = original_filename.rsplit('.', 1)[1].lower() if '.' in original_filename else ''
-            profile_picture_filename = f"{uuid.uuid4().hex}.{ext}"
-            file_save_path = os.path.join(app.config['PROFILE_PICTURES_UPLOAD_FOLDER'], profile_picture_filename)
+            profile_picture_filename_from_upload = f"{uuid.uuid4().hex}.{ext}"
+            file_save_path = os.path.join(app.config['PROFILE_PICTURES_UPLOAD_FOLDER'], profile_picture_filename_from_upload)
             try:
                 profile_picture_file.save(file_save_path)
-                profile_picture_saved = True
             except Exception as e:
-                app.logger.error(f"Error saving profile picture: {e}")
+                app.logger.error(f"Error saving profile picture during FormData upload: {e}")
                 return jsonify(msg="Error saving profile picture."), 500
         else:
             return jsonify(msg="Invalid profile picture file type."), 400
+        # User is created with the uploaded picture filename
+        user_id, assigned_role = create_user_in_db(username, password, email, role_to_assign, profile_picture_filename_from_upload)
+    else: # JSON request path (or FormData without a profile picture file)
+        # User is created with NO profile picture filename initially
+        user_id, assigned_role = create_user_in_db(username, password, email, role_to_assign, None)
 
-    user_id, assigned_role = create_user_in_db(username, password, email, role_to_assign, profile_picture_filename)
-    
     if user_id:
         try:
             for ans in security_answers:
@@ -1143,8 +1157,31 @@ def register():
                     "INSERT INTO user_security_answers (user_id, question_id, answer_hash) VALUES (?, ?, ?)",
                     (user_id, ans['question_id'], hashed_answer)
                 )
-            db.commit()
+            db.commit() # Commit security answers
+
+            # profile_picture_filename_to_assign will hold the final filename for the user
+            profile_picture_filename_to_assign = profile_picture_filename_from_upload # None if JSON or no file in FormData
+
+            if not profile_picture_filename_to_assign: # True for JSON path or if FormData had no picture
+                # Implement random picture assignment logic
+                profile_pics_dir = app.config['PROFILE_PICTURES_UPLOAD_FOLDER']
+                try:
+                    available_pics = [f for f in os.listdir(profile_pics_dir) if os.path.isfile(os.path.join(profile_pics_dir, f)) and f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif'))]
+                except FileNotFoundError:
+                    app.logger.warning(f"Profile pictures directory not found: {profile_pics_dir}. Cannot assign random picture.")
+                    available_pics = []
+
+                if available_pics:
+                    profile_picture_filename_to_assign = random.choice(available_pics)
+                    # Update the user record with the randomly assigned picture
+                    db.execute("UPDATE users SET profile_picture_filename = ? WHERE id = ?", (profile_picture_filename_to_assign, user_id))
+                    db.commit() 
+                    app.logger.info(f"Assigned random profile picture '{profile_picture_filename_to_assign}' to user_id {user_id}")
+                else:
+                    app.logger.warning(f"No suitable profile pictures found in {profile_pics_dir} to assign randomly to user_id {user_id}. User will have no profile picture.")
             
+            # Ensure actual_email_for_log is defined for audit logging
+            actual_email_for_log = email.strip() if email and email.strip() else None # Defined here for clarity
             log_audit_action(
                 action_type='CREATE_USER',
                 target_table='users',
@@ -1154,14 +1191,14 @@ def register():
                     'email': actual_email_for_log, 
                     'role': assigned_role, 
                     'security_questions_set': True,
-                    'profile_picture_set': profile_picture_saved 
+                    'profile_picture_assigned': profile_picture_filename_to_assign if profile_picture_filename_to_assign else 'None'
                 },
                 user_id=user_id, 
                 username=username
             )
             access_token = create_access_token(identity=str(user_id))
-            # Construct profile_picture_url if filename exists
-            profile_picture_url = f"/profile_pictures/{profile_picture_filename}" if profile_picture_filename else None
+            # Update profile_picture_url construction
+            profile_picture_url = f"/profile_pictures/{profile_picture_filename_to_assign}" if profile_picture_filename_to_assign else None
             
             return jsonify(
                 msg="User created successfully", 
@@ -1169,38 +1206,30 @@ def register():
                 role=assigned_role,
                 access_token=access_token,
                 username=username,
-                profile_picture_url=profile_picture_url # Include in response
+                profile_picture_url=profile_picture_url
             ), 201
         except sqlite3.IntegrityError as e:
             db.rollback() 
             app.logger.error(f"DB IntegrityError storing security answers for user '{username}': {e}")
-            # If user creation was successful but security answers failed, and a profile picture was saved,
-            # we might want to delete the orphaned profile picture.
-            if profile_picture_filename and os.path.exists(os.path.join(app.config['PROFILE_PICTURES_UPLOAD_FOLDER'], profile_picture_filename)):
-                try:
-                    os.remove(os.path.join(app.config['PROFILE_PICTURES_UPLOAD_FOLDER'], profile_picture_filename))
-                    app.logger.info(f"Cleaned up orphaned profile picture {profile_picture_filename} for user {username} after DB error.")
-                except Exception as e_clean:
-                    app.logger.error(f"Error cleaning up orphaned profile picture {profile_picture_filename}: {e_clean}")
+            # No os.remove needed here for JSON path, as no file was directly uploaded and saved *before* this try block.
+            # If it was FormData with a file, the file (profile_picture_filename_from_upload) is associated with the created user.
+            # If security answers fail, the user and their (uploaded) picture persist. This is acceptable.
             return jsonify(msg="User created, but failed to store security answers due to a database conflict."), 500
         except Exception as e:
             db.rollback()
             app.logger.error(f"General Exception storing security answers for user '{username}': {e}")
-            if profile_picture_filename and os.path.exists(os.path.join(app.config['PROFILE_PICTURES_UPLOAD_FOLDER'], profile_picture_filename)):
-                 try:
-                    os.remove(os.path.join(app.config['PROFILE_PICTURES_UPLOAD_FOLDER'], profile_picture_filename))
-                    app.logger.info(f"Cleaned up orphaned profile picture {profile_picture_filename} for user {username} after general error.")
-                 except Exception as e_clean:
-                    app.logger.error(f"Error cleaning up orphaned profile picture {profile_picture_filename}: {e_clean}")
+            # Similarly, no os.remove needed here for JSON path for reasons stated above.
             return jsonify(msg="User created, but failed to store security answers due to a server error."), 500
     else: # user_id was None from create_user_in_db (meaning user creation failed)
-        # If profile picture was saved before user creation failed, delete it.
-        if profile_picture_filename and os.path.exists(os.path.join(app.config['PROFILE_PICTURES_UPLOAD_FOLDER'], profile_picture_filename)):
+        # This block is for when create_user_in_db itself fails.
+        # If a profile picture was uploaded via FormData and saved (profile_picture_filename_from_upload exists),
+        # but then create_user_in_db failed, then that uploaded picture is orphaned and should be deleted.
+        if profile_picture_filename_from_upload and os.path.exists(os.path.join(app.config['PROFILE_PICTURES_UPLOAD_FOLDER'], profile_picture_filename_from_upload)):
             try:
-                os.remove(os.path.join(app.config['PROFILE_PICTURES_UPLOAD_FOLDER'], profile_picture_filename))
-                app.logger.info(f"Cleaned up profile picture {profile_picture_filename} after failed user creation for {username}.")
+                os.remove(os.path.join(app.config['PROFILE_PICTURES_UPLOAD_FOLDER'], profile_picture_filename_from_upload))
+                app.logger.info(f"Cleaned up orphaned profile picture {profile_picture_filename_from_upload} after failed user creation for {username}.")
             except Exception as e_clean:
-                app.logger.error(f"Error cleaning up profile picture {profile_picture_filename} after failed user creation: {e_clean}")
+                app.logger.error(f"Error cleaning up orphaned profile picture {profile_picture_filename_from_upload} after failed user creation: {e_clean}")
         return jsonify(msg="Failed to create user due to a database issue."), 500
 
 @app.route('/api/auth/login', methods=['POST'])
@@ -1540,6 +1569,9 @@ def get_versions_for_software_api():
 
 @app.route('/api/documents', methods=['GET'])
 def get_all_documents_api():
+    # profiler = cProfile.Profile() # Removed
+    # profiler.enable() # Removed
+
     db = get_db()
 
     # Get and validate query parameters for pagination and sorting
@@ -3112,33 +3144,47 @@ def admin_edit_patch_url(patch_id):
     if not data: return jsonify(msg="Missing JSON data"), 400
 
     software_id_str = data.get('software_id') # Used if version string is changing
-    provided_version_id_str = data.get('version_id') # If user picks existing version
+    provided_version_id_payload = data.get('version_id') # Can be int, string, or None
     typed_version_string = data.get('typed_version_string') # If user types/changes version string
 
     # Determine the version_id to update with
     final_version_id = patch['version_id'] # Default to existing version_id
-    if provided_version_id_str and provided_version_id_str.strip():
-        try:
-            final_version_id = int(provided_version_id_str)
-        except ValueError: return jsonify(msg="Invalid format for provided version_id."), 400
-    elif typed_version_string and typed_version_string.strip(): # If a new/different version string is typed
-        if not software_id_str: # Need software_id to make sense of the typed version string
-            # If software_id isn't sent, but we need it to process typed_version_string,
-            # we might need to fetch the software_id of the patch's current version.
+
+    version_id_from_payload = None
+    if isinstance(provided_version_id_payload, str):
+        if provided_version_id_payload.strip():
+            try:
+                version_id_from_payload = int(provided_version_id_payload.strip())
+            except ValueError:
+                return jsonify(msg="Invalid format for provided version_id string."), 400
+    elif isinstance(provided_version_id_payload, int):
+        version_id_from_payload = provided_version_id_payload
+    
+    if version_id_from_payload is not None:
+        if version_id_from_payload > 0: # Assuming version IDs must be positive
+            final_version_id = version_id_from_payload
+        else:
+             return jsonify(msg=f"Invalid value for provided version_id: {version_id_from_payload}. Must be a positive integer if provided."), 400
+    elif typed_version_string and typed_version_string.strip():
+        # software_id_str is needed if typed_version_string is used to create/find a version
+        if not software_id_str: 
+            # Fallback to current patch's version's software_id if not provided in payload
             # This assumes software_id is always sent by frontend if typed_version_string is active.
             current_version_details = db.execute("SELECT software_id FROM versions WHERE id = ?", (patch['version_id'],)).fetchone()
             if not current_version_details:
                  return jsonify(msg="Cannot determine software for the current patch version."), 500
             software_id_for_version_logic = current_version_details['software_id']
-        else:
+        else: # software_id_str is provided
             try:
                 software_id_for_version_logic = int(software_id_str)
             except ValueError: return jsonify(msg="Invalid software_id format."), 400
 
         resolved_id = get_or_create_version_id(db, software_id_for_version_logic, typed_version_string, current_user_id)
         if resolved_id is None:
-            return jsonify(msg=f"Failed to process version '{typed_version_string}'."), 500
+            return jsonify(msg=f"Failed to process version '{typed_version_string}' for software ID {software_id_for_version_logic}."), 500
         final_version_id = resolved_id
+    # If neither provided_version_id_payload nor typed_version_string leads to a valid ID,
+    # final_version_id remains patch['version_id'] (no change to version).
 
     # Get other fields for update
     patch_name = data.get('patch_name', patch['patch_name'])

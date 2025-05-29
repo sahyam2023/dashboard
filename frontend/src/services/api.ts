@@ -1162,15 +1162,17 @@ export async function fetchVersionsForSoftware(softwareId: number): Promise<Soft
 
 // --- Authentication Functions ---
 
-export async function registerUser(formData: FormData): Promise<RegisterResponse> {
+export async function registerUser(data: RegisterRequest): Promise<RegisterResponse> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
       method: 'POST',
-      // Content-Type header is automatically set by the browser when using FormData
-      body: formData,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
     });
-    const data: RegisterResponse = await handleApiError(response, 'Registration failed');
-    return data; 
+    const responseData: RegisterResponse = await handleApiError(response, 'Registration failed');
+    return responseData; 
   } catch (error: any) {
     if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
       setGlobalOfflineStatus(true);

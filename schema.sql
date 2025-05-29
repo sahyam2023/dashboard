@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS users (
     is_active BOOLEAN DEFAULT TRUE NOT NULL,
     password_reset_required BOOLEAN DEFAULT FALSE NOT NULL,
     dashboard_layout_prefs TEXT DEFAULT NULL,
+    profile_picture_filename TEXT, 
     created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 CREATE INDEX IF NOT EXISTS idx_users_username ON users (username);

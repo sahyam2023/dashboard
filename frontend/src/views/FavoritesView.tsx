@@ -106,7 +106,7 @@ const FavoritesView: React.FC = () => {
       setIsLoadingData(false);
       if (isInitialLoad) setIsInitialLoad(false); // Ensure initial load is false even on error
     }
-  }, [isAuthenticated, currentPage, itemsPerPage, isInitialLoad]);
+  }, [isAuthenticated, currentPage, itemsPerPage]);
 
   useEffect(() => {
     if (!isAuthLoading) { 

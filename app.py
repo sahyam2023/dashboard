@@ -1628,6 +1628,7 @@ def get_all_documents_api():
             logged_in_user_id = int(current_user_identity)
     except Exception as e:
         app.logger.error(f"Error getting user_id in get_all_documents_api: {e}")
+    # app.logger.info(f"API Call - Logged in user ID: {logged_in_user_id}")
 
     # Base query components
     base_query_select_fields_with_aliases = "d.id, d.software_id, d.doc_name, d.description, d.doc_type, d.is_external_link, d.download_link, d.stored_filename, d.original_filename_ref, d.file_size, d.file_type, d.created_by_user_id, u.username as uploaded_by_username, d.created_at, d.updated_by_user_id, upd_u.username as updated_by_username, d.updated_at, s.name as software_name, (SELECT COUNT(*) FROM comments c WHERE c.item_id = d.id AND c.item_type = 'document' AND c.parent_comment_id IS NULL) as comment_count"
@@ -1690,6 +1691,7 @@ def get_all_documents_api():
     # For count_query, the logged_in_user_id for the permission join must also be included.
     count_params = permission_join_params + params # Combine params for join and filters
     count_query = f"SELECT COUNT(d.id) as count {from_clause}{where_clause}"
+    
     try:
         # app.logger.info(f"Documents Count Query for user {logged_in_user_id}: {count_query}") # Removed
         # app.logger.info(f"Documents Count Params: {tuple(count_params)}") # Removed
@@ -1727,7 +1729,8 @@ def get_all_documents_api():
     final_params_for_data.extend([per_page, offset]) # Add pagination params
     
     final_query = f"{select_clause} {final_from_clause_for_data}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
-    
+    # app.logger.info(f"Final documents query: {final_query}")
+    # app.logger.info(f"Final documents params: {tuple(final_params_for_data)}")
     try:
         # app.logger.info(f"Documents Data Query for user {logged_in_user_id}: {final_query}") # Removed
         # app.logger.info(f"Documents Data Params: {tuple(final_params_for_data)}") # Removed

@@ -329,7 +329,36 @@ useEffect(() => {
       const res = await bulkMoveItems(Array.from(selectedPatchIds), 'patch', { target_version_id: modalSelectedVersionId });
       showSuccessToast(res.msg || `${res.moved_count} patch(es) moved.`);
       setSelectedPatchIds(new Set()); fetchAndSetPatches(1, true);
-    } catch (e: any) { showErrorToast(e.message || "Bulk move failed."); }
+    } catch (e: any) {
+      if (
+        e.response &&
+        e.response.data &&
+        e.response.data.conflicted_items &&
+        Array.isArray(e.response.data.conflicted_items) &&
+        e.response.data.conflicted_items.length > 0 &&
+        (e.response.status === 400 || e.response.status === 207)
+      ) {
+        let detailedErrorMessage = "Bulk move could not be completed for some patches due to naming conflicts. ";
+        const conflicts = e.response.data.conflicted_items;
+        const conflictSummaries = conflicts.slice(0, 3).map((item: { name: string; id: number }) => `"${item.name}" (ID ${item.id})`).join(', ');
+        detailedErrorMessage += `Conflicting items: ${conflictSummaries}`;
+        if (conflicts.length > 3) {
+          detailedErrorMessage += ` and ${conflicts.length - 3} more.`;
+        }
+        detailedErrorMessage += " Please rename the patches or check the target version.";
+        showErrorToast(detailedErrorMessage);
+        // Also log the original backend message for more context in console
+        if (e.response.data.msg) {
+            // console.warn('[PatchesView] Backend message for conflict:', e.response.data.msg); // Removed
+        }
+      } else if (e.message) {
+        showErrorToast(e.message);
+      } else {
+        showErrorToast("Bulk move failed due to an unexpected error.");
+      }
+      // It's good practice to also log the full error for debugging purposes
+      // console.error('[PatchesView] Full error object during bulk move:', e); // Removed
+    }
     finally { setIsMovingSelected(false); setModalSelectedSoftwareId(null); setModalSelectedVersionId(null); }
   };
 

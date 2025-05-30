@@ -42,7 +42,8 @@ const LoginForm: React.FC<LoginFormProps> = ({ onAuthSuccess, onToggleView }) =>
         data.role, 
         data.user_id, // Pass user_id here
         TOKEN_EXPIRY_SECONDS, 
-        data.password_reset_required
+        data.password_reset_required,
+        data.profile_picture_url // Pass the profile_picture_url from the API response
       ); 
       showSuccessToast("Login successful!");
       

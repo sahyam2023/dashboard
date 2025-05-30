@@ -107,23 +107,40 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
           {isAuthenticated ? (
             <>
               <span className="hidden sm:inline text-gray-700 dark:text-gray-300 font-medium">
-                Welcome, {user?.username || 'Guest'}!
+                Welcome {user?.username || ''},
               </span>
+              {/* Profile link for larger screens */}
               <Link
                 to="/profile"
-                className="hidden sm:flex items-center text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:focus:ring-indigo-400 rounded-sm"
+                className="hidden sm:flex items-center focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 rounded-full"
                 title="User Profile"
-                aria-label="User Profile" 
-              >
-                <User size={18} className="mr-1.5 text-gray-500 dark:text-gray-400" />
-                <span className="hidden lg:inline">{user?.username}</span>
-              </Link>
-              <Link
-                to="/profile"
-                className="sm:hidden p-2 rounded-md text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:focus:ring-indigo-400"
                 aria-label="User Profile"
               >
-                <User size={22} />
+                {user?.profile_picture_url ? (
+                  <img
+                    src={user.profile_picture_url}
+                    alt={`${user?.username || 'User'}'s profile picture`}
+                    className="h-8 w-8 rounded-full object-cover text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600"
+                  />
+                ) : (
+                  <User size={24} className="h-8 w-8 text-gray-500 dark:text-gray-400" />
+                )}
+              </Link>
+              {/* Profile link for smaller screens */}
+              <Link
+                to="/profile"
+                className="sm:hidden p-0.5 rounded-full text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500"
+                aria-label="User Profile"
+              >
+                {user?.profile_picture_url ? (
+                  <img
+                    src={user.profile_picture_url}
+                    alt={`${user?.username || 'User'}'s profile picture`}
+                    className="h-7 w-7 rounded-full object-cover text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600"
+                  />
+                ) : (
+                  <User size={22} className="h-7 w-7" />
+                )}
               </Link>
               {user?.role === 'super_admin' && ( 
                 <Link

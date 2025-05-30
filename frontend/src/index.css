@@ -2,3 +2,89 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Default styling for react-toastify icons if needed - check if icons are SVGs */
+/* This ensures icons adapt to text color by default, unless overridden */
+.Toastify__toast-icon svg {
+  fill: currentColor; 
+}
+
+/* Dark mode overrides for react-toastify success toasts */
+html.dark .Toastify__toast--success {
+  background-color: #1F2937 !important; /* A dark gray, tailwind gray-800. Use pure black #000 if preferred. */
+  color: #F9FAFB !important; /* A light gray/white for text, tailwind gray-50 */
+}
+
+/* Ensure the success icon (tick) remains green in dark mode */
+/* This selector targets the default SVG icon used in react-toastify v8+ */
+/* If using an older version or custom icons, this selector might need adjustment. */
+html.dark .Toastify__toast--success .Toastify__toast-icon > svg:not(.Toastify__spinner) {
+  fill: #34D399 !important; /* A common green, tailwind green-400. Adjust if specific green is needed. */
+}
+
+/* Adjust border color for dark mode if toasts have borders */
+html.dark .Toastify__toast--success {
+  border-color: #374151; /* Example: tailwind gray-700 */
+}
+
+/* Optional: Adjust progress bar for dark mode success toasts if needed */
+html.dark .Toastify__progress-bar--success {
+  background: #10B981 !important; /* A slightly darker or more vibrant green for progress bar */
+}
+
+/* Example for error toasts in dark mode (red icon, dark background) */
+html.dark .Toastify__toast--error {
+  background-color: #1F2937 !important; /* Dark gray */
+  color: #F9FAFB !important; /* Light text */
+}
+html.dark .Toastify__toast--error .Toastify__toast-icon > svg:not(.Toastify__spinner) {
+  fill: #EF4444 !important; /* Red icon, tailwind red-500 */
+}
+html.dark .Toastify__toast--error {
+  border-color: #374151;
+}
+html.dark .Toastify__progress-bar--error {
+  background: #F87171 !important; /* Lighter/vibrant red for progress */
+}
+
+/* General toast body text color for dark mode if not covered by specific types */
+/* This is useful if some toasts don't have a specific type class or use default styling */
+html.dark .Toastify__toast-body {
+    color: #F9FAFB; /* Default to light text for any toast type in dark mode */
+}
+
+/* Ensure default toast (no type) also gets dark background and light text */
+html.dark .Toastify__toast--default {
+  background-color: #1F2937 !important;
+  color: #F9FAFB !important;
+  border-color: #374151;
+}
+html.dark .Toastify__progress-bar--default {
+  background: #6B7280 !important; /* tailwind gray-500 */
+}
+
+/* Info toast */
+html.dark .Toastify__toast--info {
+  background-color: #1F2937 !important;
+  color: #F9FAFB !important;
+  border-color: #374151;
+}
+html.dark .Toastify__toast--info .Toastify__toast-icon > svg:not(.Toastify__spinner) {
+  fill: #3B82F6 !important; /* tailwind blue-500 */
+}
+html.dark .Toastify__progress-bar--info {
+  background: #60A5FA !important; /* tailwind blue-400 */
+}
+
+/* Warning toast */
+html.dark .Toastify__toast--warning {
+  background-color: #1F2937 !important;
+  color: #F9FAFB !important;
+  border-color: #374151;
+}
+html.dark .Toastify__toast--warning .Toastify__toast-icon > svg:not(.Toastify__spinner) {
+  fill: #F59E0B !important; /* tailwind amber-500 */
+}
+html.dark .Toastify__progress-bar--warning {
+  background: #FBBF24 !important; /* tailwind amber-400 */
+}

@@ -42,11 +42,12 @@ PATCH_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'official_uploads', 'pa
 LINK_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'official_uploads', 'links')
 MISC_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'misc_uploads')
 PROFILE_PICTURES_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'profile_pictures') # Added
+DEFAULT_PROFILE_PICTURES_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'default_profile_pictures') # New
 STATIC_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'frontend', 'dist')
 
 
 # Ensure all upload folders exist
-for folder in [DOC_UPLOAD_FOLDER, PATCH_UPLOAD_FOLDER, LINK_UPLOAD_FOLDER, MISC_UPLOAD_FOLDER, PROFILE_PICTURES_UPLOAD_FOLDER]: # Added PROFILE_PICTURES_UPLOAD_FOLDER
+for folder in [DOC_UPLOAD_FOLDER, PATCH_UPLOAD_FOLDER, LINK_UPLOAD_FOLDER, MISC_UPLOAD_FOLDER, PROFILE_PICTURES_UPLOAD_FOLDER, DEFAULT_PROFILE_PICTURES_FOLDER]: # Added PROFILE_PICTURES_UPLOAD_FOLDER and DEFAULT_PROFILE_PICTURES_FOLDER
     if not os.path.exists(folder):
         os.makedirs(folder, exist_ok=True) # exist_ok=True is helpful
 
@@ -105,6 +106,7 @@ app.config['PATCH_UPLOAD_FOLDER'] = PATCH_UPLOAD_FOLDER
 app.config['LINK_UPLOAD_FOLDER'] = LINK_UPLOAD_FOLDER
 app.config['MISC_UPLOAD_FOLDER'] = MISC_UPLOAD_FOLDER
 app.config['PROFILE_PICTURES_UPLOAD_FOLDER'] = PROFILE_PICTURES_UPLOAD_FOLDER # Added
+app.config['DEFAULT_PROFILE_PICTURES_FOLDER'] = DEFAULT_PROFILE_PICTURES_FOLDER # New
 app.config['INSTANCE_FOLDER_PATH'] = INSTANCE_FOLDER_PATH # Added for DB backup
 
 bcrypt = Bcrypt(app)
@@ -1163,22 +1165,39 @@ def register():
             profile_picture_filename_to_assign = profile_picture_filename_from_upload # None if JSON or no file in FormData
 
             if not profile_picture_filename_to_assign: # True for JSON path or if FormData had no picture
-                # Implement random picture assignment logic
-                profile_pics_dir = app.config['PROFILE_PICTURES_UPLOAD_FOLDER']
+                # Implement random picture assignment logic (revised)
+                default_pics_dir = app.config['DEFAULT_PROFILE_PICTURES_FOLDER']
+                user_pics_dir = app.config['PROFILE_PICTURES_UPLOAD_FOLDER'] # User-specific pictures
+                available_default_pics = []
                 try:
-                    available_pics = [f for f in os.listdir(profile_pics_dir) if os.path.isfile(os.path.join(profile_pics_dir, f)) and f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif'))]
+                    available_default_pics = [f for f in os.listdir(default_pics_dir) if os.path.isfile(os.path.join(default_pics_dir, f)) and f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif'))]
                 except FileNotFoundError:
-                    app.logger.warning(f"Profile pictures directory not found: {profile_pics_dir}. Cannot assign random picture.")
-                    available_pics = []
-
-                if available_pics:
-                    profile_picture_filename_to_assign = random.choice(available_pics)
-                    # Update the user record with the randomly assigned picture
-                    db.execute("UPDATE users SET profile_picture_filename = ? WHERE id = ?", (profile_picture_filename_to_assign, user_id))
-                    db.commit() 
-                    app.logger.info(f"Assigned random profile picture '{profile_picture_filename_to_assign}' to user_id {user_id}")
+                    app.logger.warning(f"Default profile pictures directory not found: {default_pics_dir}. Cannot assign random picture.")
+                
+                if available_default_pics:
+                    chosen_default_pic_name = random.choice(available_default_pics)
+                    original_default_pic_path = os.path.join(default_pics_dir, chosen_default_pic_name)
+                    
+                    # Create a new unique filename for this user's copy of the default avatar
+                    ext = chosen_default_pic_name.rsplit('.', 1)[1].lower() if '.' in chosen_default_pic_name else 'jpg' # default to jpg
+                    new_user_specific_filename = f"{uuid.uuid4().hex}.{ext}"
+                    new_user_specific_path = os.path.join(user_pics_dir, new_user_specific_filename)
+                    
+                    try:
+                        shutil.copy2(original_default_pic_path, new_user_specific_path)
+                        profile_picture_filename_to_assign = new_user_specific_filename
+                        # Update the user record with the new user-specific filename (copy of default)
+                        db.execute("UPDATE users SET profile_picture_filename = ? WHERE id = ?", 
+                                   (profile_picture_filename_to_assign, user_id))
+                        db.commit() 
+                        app.logger.info(f"Assigned a copy of default profile picture '{chosen_default_pic_name}' as '{profile_picture_filename_to_assign}' to user_id {user_id}")
+                    except Exception as e_copy:
+                        app.logger.error(f"Error copying default profile picture '{chosen_default_pic_name}' to '{new_user_specific_filename}' for user_id {user_id}: {e_copy}")
+                        # User will have no profile picture in this error case
+                        profile_picture_filename_to_assign = None 
                 else:
-                    app.logger.warning(f"No suitable profile pictures found in {profile_pics_dir} to assign randomly to user_id {user_id}. User will have no profile picture.")
+                    app.logger.warning(f"No suitable default profile pictures found in {default_pics_dir} to assign randomly to user_id {user_id}. User will have no profile picture.")
+                    profile_picture_filename_to_assign = None # Ensure it's None if no pic assigned
             
             # Ensure actual_email_for_log is defined for audit logging
             actual_email_for_log = email.strip() if email and email.strip() else None # Defined here for clarity

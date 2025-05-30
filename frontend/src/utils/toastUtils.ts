@@ -12,6 +12,9 @@ const defaultOptions: ToastOptions = {
   theme: "colored",
 };
 
+const GLOBAL_TOAST_DEBOUNCE_DURATION_MS = 500;
+let lastAnyToastTimestamp: number = 0;
+
 let lastErrorMessage: string | null = null;
 let lastErrorToastTimestamp: number = 0;
 const ERROR_DEBOUNCE_DURATION_MS = 5000; // 5 seconds
@@ -49,79 +52,111 @@ export const setGlobalOfflineStatus = (status: boolean) => {
 
 export const showSuccessToast = (message: string, options?: ToastOptions) => {
   const now = Date.now();
-  if (message === lastSuccessMessage && (now - lastSuccessToastTimestamp) < SUCCESS_DEBOUNCE_DURATION_MS) {
-    // console.log("Duplicate success toast suppressed:", message); // Optional: for debugging
+
+  // Global debounce check (new)
+  if ((now - lastAnyToastTimestamp) < GLOBAL_TOAST_DEBOUNCE_DURATION_MS) {
+    // console.log("Global success toast suppressed by global_debounce:", message); // Optional
     return; 
   }
+
+  // Existing message-specific debounce check
+  if (message === lastSuccessMessage && (now - lastSuccessToastTimestamp) < SUCCESS_DEBOUNCE_DURATION_MS) {
+    // console.log("Duplicate success toast suppressed by message_debounce:", message); // Optional
+    return; 
+  }
+
   toast.success(message, { ...defaultOptions, ...options });
   lastSuccessMessage = message;
   lastSuccessToastTimestamp = now;
+  lastAnyToastTimestamp = now; // Update global timestamp
 };
 
 export const showErrorToast = (message: string, options?: ToastOptions) => {
   const now = Date.now();
 
-  // Note: Offline check should happen before standard debounce for other errors
   if (isGloballyOffline) {
     if (message === OFFLINE_MESSAGE_TEXT) {
-      // This is the specific offline message
       if (offlineToastId !== null) {
-        return; // Offline toast already active, do nothing
+        return; 
       }
-      // Show the offline toast and store its ID
-      // Use different options for the offline toast, like no autoClose
       const offlineToastOptions: ToastOptions = { ...defaultOptions, ...options, autoClose: false, closeOnClick: false, draggable: false };
       offlineToastId = toast.error(message, offlineToastOptions);
-      lastErrorMessage = message; // Still apply debounce logic for this specific message
+      lastErrorMessage = message; 
       lastErrorToastTimestamp = now;
+      lastAnyToastTimestamp = now; // Offline toast also updates global timestamp
       return;
     } else {
-      // Different error message while offline, suppress it
-      return;
+      return; // Different error message while offline, suppress it
     }
   }
 
-  // Standard error handling (not offline, or connection just came back)
-  // This debounce is for non-offline related errors.
+  // Global debounce check (new) - for non-offline errors
+  if (message !== OFFLINE_MESSAGE_TEXT && (now - lastAnyToastTimestamp) < GLOBAL_TOAST_DEBOUNCE_DURATION_MS) {
+    // console.log("Global error toast suppressed by global_debounce:", message); // Optional
+    return;
+  }
+
+  // Standard error message debounce (existing)
   if (message === lastErrorMessage && (now - lastErrorToastTimestamp) < ERROR_DEBOUNCE_DURATION_MS) {
-    // console.log("Duplicate error toast suppressed:", message); // Optional: for debugging
-    return; // Do not show the toast
+    // console.log("Duplicate error toast suppressed by message_debounce:", message); // Optional
+    return; 
   }
   toast.error(message, { ...defaultOptions, ...options });
   lastErrorMessage = message;
   lastErrorToastTimestamp = now;
+  lastAnyToastTimestamp = now; // Update global timestamp
 };
 
 export const showInfoToast = (message: string, options?: ToastOptions) => {
   const now = Date.now();
+
+  // Global debounce check (new)
+  if ((now - lastAnyToastTimestamp) < GLOBAL_TOAST_DEBOUNCE_DURATION_MS) {
+    // console.log("Global info toast suppressed by global_debounce:", message); // Optional
+    return; 
+  }
+
+  // Existing message-specific debounce check
   if (message === lastInfoMessage && (now - lastInfoToastTimestamp) < INFO_DEBOUNCE_DURATION_MS) {
-    // console.log("Duplicate info toast suppressed:", message); // Optional: for debugging
+    // console.log("Duplicate info toast suppressed by message_debounce:", message); // Optional
     return;
   }
   toast.info(message, { ...defaultOptions, ...options });
   lastInfoMessage = message;
   lastInfoToastTimestamp = now;
+  lastAnyToastTimestamp = now; // Update global timestamp
 };
 
 export const showWarningToast = (message: string, options?: ToastOptions) => {
   const now = Date.now();
+
+  // Global debounce check (new)
+  if ((now - lastAnyToastTimestamp) < GLOBAL_TOAST_DEBOUNCE_DURATION_MS) {
+    // console.log("Global warning toast suppressed by global_debounce:", message); // Optional
+    return; 
+  }
+
+  // Existing message-specific debounce check
   if (message === lastWarningMessage && (now - lastWarningToastTimestamp) < WARNING_DEBOUNCE_DURATION_MS) {
-    // console.log("Duplicate warning toast suppressed:", message); // Optional: for debugging
+    // console.log("Duplicate warning toast suppressed by message_debounce:", message); // Optional
     return;
   }
   toast.warn(message, { ...defaultOptions, ...options });
   lastWarningMessage = message;
   lastWarningToastTimestamp = now;
+  lastAnyToastTimestamp = now; // Update global timestamp
 };
 
 export const resetAllToastDebounces = () => { // Renamed and generalized
   lastErrorMessage = null;
   lastErrorToastTimestamp = 0;
+  lastAnyToastTimestamp = 0; // Reset global timestamp
   lastSuccessMessage = null;
   lastSuccessToastTimestamp = 0;
   lastInfoMessage = null;
   lastInfoToastTimestamp = 0;
   lastWarningMessage = null;
   lastWarningToastTimestamp = 0;
+  lastAnyToastTimestamp = 0; // Ensure it's reset here as well, if not already covered
   // console.log("All toast debounces reset."); // Optional log
 };

@@ -365,16 +365,47 @@ useEffect(() => {
   };
 
   const handleBulkDownload = async () => {
-    if (selectedDocumentIds.size === 0) { showErrorToast("No items selected."); return; }
+    if (selectedDocumentIds.size === 0) { 
+      showErrorToast("No items selected."); 
+      return; 
+    }
+
+    const downloadableDocs = documents.filter(doc => 
+      selectedDocumentIds.has(doc.id) && 
+      !doc.is_external_link && 
+      doc.is_downloadable !== false
+    );
+
+    if (downloadableDocs.length === 0) {
+      showErrorToast("No downloadable files selected. External links or non-downloadable items cannot be bulk downloaded.");
+      return;
+    }
+
+    const downloadableDocIds = downloadableDocs.map(doc => doc.id);
+
     setIsDownloadingSelected(true); 
     try {
-      const blob = await bulkDownloadItems(Array.from(selectedDocumentIds), 'document' as BulkItemType);
-      const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url;
-      const ts = new Date().toISOString().replace(/:/g, '-'); a.download = `bulk_download_document_${ts}.zip`;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-      showSuccessToast('Download started.');
-    } catch (e: any) { showErrorToast(e.message || "Bulk download failed."); }
-    finally { setIsDownloadingSelected(false); }
+      const blob = await bulkDownloadItems(downloadableDocIds, 'document' as BulkItemType);
+      const url = URL.createObjectURL(blob); 
+      const a = document.createElement('a'); 
+      a.href = url;
+      const ts = new Date().toISOString().replace(/:/g, '-'); 
+      a.download = `bulk_download_documents_${ts}.zip`; // Corrected filename
+      document.body.appendChild(a); 
+      a.click(); 
+      document.body.removeChild(a); 
+      URL.revokeObjectURL(url);
+
+      if (downloadableDocIds.length === selectedDocumentIds.size) {
+        showSuccessToast('Download started for all selected downloadable documents.');
+      } else {
+        showSuccessToast(`Starting download for ${downloadableDocIds.length} file(s). External links or non-downloadable items were excluded.`);
+      }
+    } catch (e: any) { 
+      showErrorToast(e.message || "Bulk download failed."); 
+    } finally { 
+      setIsDownloadingSelected(false); 
+    }
   };
   
   const handleOpenBulkMoveModal = () => {
@@ -585,7 +616,7 @@ useEffect(() => {
             <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">Select target software:</p>
             <div className="mb-4">
               <label htmlFor="targetSoftware" className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Target Software</label>
-              <select id="targetSoftware" value={targetSoftwareForMove??''} onChange={e=>setTargetSoftwareForMove(e.target.value?parseInt(e.target.value):null)} className="input-class w-full" disabled={softwareList.length===0||isMovingSelected}>
+              <select id="targetSoftware" value={targetSoftwareForMove??''} onChange={e=>setTargetSoftwareForMove(e.target.value?parseInt(e.target.value):null)} className="input-class w-full dark:bg-gray-700 dark:text-white dark:border-gray-600" disabled={softwareList.length===0||isMovingSelected}>
                 <option value="">Select Software...</option>
                 {softwareList.map(sw=>(<option key={sw.id} value={sw.id}>{sw.name}</option>))}
               </select>

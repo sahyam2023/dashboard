@@ -442,9 +442,9 @@ const LinksView: React.FC = () => {
         <div className="my-4 p-3 bg-gray-100 dark:bg-gray-700 rounded-md shadow-sm border border-gray-200 dark:border-gray-600">
           <div className="flex flex-wrap items-center gap-3">
             <span className="text-sm font-medium text-gray-700 dark:text-gray-200">{selectedLinkIds.size} item(s) selected</span>
-            {(role === 'admin' || role === 'super_admin') && (<button onClick={handleBulkDeleteLinksClick} disabled={isDeletingSelected} className="btn-danger-xs flex items-center"><Trash2 size={14} className="mr-1.5" />Delete</button>)}
-            {isAuthenticated && (<button onClick={handleBulkDownloadLinks} disabled={isDownloadingSelected || downloadableSelectedCount === 0} className="btn-success-xs flex items-center"><Download size={14} className="mr-1.5" />Download ({downloadableSelectedCount})</button>)}
-            {(role === 'admin' || role === 'super_admin') && (<button onClick={handleOpenBulkMoveLinksModal} disabled={isMovingSelected} className="btn-warning-xs flex items-center"><Move size={14} className="mr-1.5" />Move</button>)}
+            {(role === 'admin' || role === 'super_admin') && (<button onClick={handleBulkDeleteLinksClick} disabled={isDeletingSelected} className="px-3 py-1.5 text-xs font-medium rounded-md shadow-sm flex items-center focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 text-white bg-red-600 hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-800 focus:ring-red-500 disabled:opacity-50"><Trash2 size={14} className="mr-1.5" />Delete</button>)}
+            {isAuthenticated && (<button onClick={handleBulkDownloadLinks} disabled={isDownloadingSelected || downloadableSelectedCount === 0} className="px-3 py-1.5 text-xs font-medium rounded-md shadow-sm flex items-center focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 text-white bg-green-500 hover:bg-green-600 dark:bg-green-600 dark:hover:bg-green-700 focus:ring-green-500 disabled:opacity-50"><Download size={14} className="mr-1.5" />Download ({downloadableSelectedCount})</button>)}
+            {(role === 'admin' || role === 'super_admin') && (<button onClick={handleOpenBulkMoveLinksModal} disabled={isMovingSelected} className="px-3 py-1.5 text-xs font-medium rounded-md shadow-sm flex items-center focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 text-white bg-blue-500 hover:bg-blue-600 dark:bg-blue-600 dark:hover:bg-blue-700 focus:ring-blue-500 disabled:opacity-50"><Move size={14} className="mr-1.5" />Move</button>)}
           </div>
         </div>
       )}
@@ -527,7 +527,7 @@ const LinksView: React.FC = () => {
             <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">Select target Software and optionally a Version:</p>
             <div className="mb-4">
               <label htmlFor="modalSoftwareMoveLinks" className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Target Software*</label>
-              <select id="modalSoftwareMoveLinks" value={modalSelectedSoftwareId??''} onChange={e=>{setModalSelectedSoftwareId(e.target.value?parseInt(e.target.value):null); setModalSelectedVersionId(undefined);}} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-200" disabled={isMovingSelected||softwareList.length===0}>
+              <select id="modalSoftwareMoveLinks" value={modalSelectedSoftwareId??''} onChange={e=>{setModalSelectedSoftwareId(e.target.value?parseInt(e.target.value):null); setModalSelectedVersionId(undefined);}} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white" disabled={isMovingSelected||softwareList.length===0}>
                 <option value="">Select Software...</option>
                 {softwareList.map(sw=>(<option key={sw.id} value={sw.id}>{sw.name}</option>))}
               </select>
@@ -535,7 +535,7 @@ const LinksView: React.FC = () => {
             {modalSelectedSoftwareId && (
               <div className="mb-4">
                 <label htmlFor="modalVersionMoveLinks" className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Target Version (Optional)</label>
-                <select id="modalVersionMoveLinks" value={modalSelectedVersionId===null ? 'NULL_VERSION' : modalSelectedVersionId??''} onChange={e=>setModalSelectedVersionId(e.target.value === 'NULL_VERSION' ? null : (e.target.value ? parseInt(e.target.value) : undefined))} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-200" disabled={isMovingSelected||isLoadingModalVersions}>
+                <select id="modalVersionMoveLinks" value={modalSelectedVersionId===null ? 'NULL_VERSION' : modalSelectedVersionId??''} onChange={e=>setModalSelectedVersionId(e.target.value === 'NULL_VERSION' ? null : (e.target.value ? parseInt(e.target.value) : undefined))} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white" disabled={isMovingSelected||isLoadingModalVersions}>
                   <option value="">{isLoadingModalVersions?'Loading...':'Select Version (Optional)...'}</option>
                   <option value="NULL_VERSION">No Specific Version (Clear Association)</option>
                   {modalVersionsList.map(v=>(<option key={v.id} value={v.id}>{v.version_number}</option>))}

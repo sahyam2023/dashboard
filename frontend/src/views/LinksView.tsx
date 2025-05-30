@@ -206,7 +206,7 @@ const LinksView: React.FC = () => {
     setEditingLink(null);
     setShowAddOrEditForm(true);
   };
-  const openEditForm = (link: LinkType) => { setEditingLink(link); setShowAddOrEditForm(true); };
+  const openEditForm = (link: LinkType) => { setEditingLink(link); setShowAddOrEditForm(true); window.scrollTo({ top: 0, behavior: 'smooth' }); };
   const closeAdminForm = () => {
     setEditingLink(null);
     setShowAddOrEditForm(false);

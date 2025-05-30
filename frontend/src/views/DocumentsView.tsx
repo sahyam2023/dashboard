@@ -311,7 +311,7 @@ useEffect(() => {
     fetchAndSetDocuments(1, true);
   };
 
-  const openEditForm = (doc: DocumentType) => { setShowAddDocumentForm(false); setEditingDocument(doc); };
+  const openEditForm = (doc: DocumentType) => { setShowAddDocumentForm(false); setEditingDocument(doc); window.scrollTo({ top: 0, behavior: 'smooth' }); };
   const closeEditForm = () => setEditingDocument(null);
   const openDeleteConfirm = (doc: DocumentType) => { setDocumentToDelete(doc); setShowDeleteConfirm(true); };
   const closeDeleteConfirm = () => { setDocumentToDelete(null); setShowDeleteConfirm(false); };

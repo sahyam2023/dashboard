@@ -226,7 +226,7 @@ useEffect(() => {
   };
   
   const openAddForm = () => { setEditingPatch(null); setShowAddOrEditForm(true); };
-  const openEditForm = (patch: PatchType) => { setEditingPatch(patch); setShowAddOrEditForm(true); };
+  const openEditForm = (patch: PatchType) => { setEditingPatch(patch); setShowAddOrEditForm(true); window.scrollTo({ top: 0, behavior: 'smooth' }); };
   const closeAdminForm = () => { setEditingPatch(null); setShowAddOrEditForm(false); };
   const openDeleteConfirm = (patch: PatchType) => { setPatchToDelete(patch); setShowDeleteConfirm(true); };
   const closeDeleteConfirm = () => { setPatchToDelete(null); setShowDeleteConfirm(false); };

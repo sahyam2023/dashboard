@@ -274,16 +274,47 @@ useEffect(() => {
   };
 
   const handleBulkDownloadPatches = async () => {
-    if (selectedPatchIds.size === 0) { showErrorToast("No items selected."); return; }
+    if (selectedPatchIds.size === 0) { 
+      showErrorToast("No items selected."); 
+      return; 
+    }
+
+    const downloadablePatches = patches.filter(patch =>
+      selectedPatchIds.has(patch.id) &&
+      !patch.is_external_link &&
+      patch.is_downloadable !== false
+    );
+
+    if (downloadablePatches.length === 0) {
+      showErrorToast("No downloadable patch files selected. External links or non-downloadable items cannot be bulk downloaded.");
+      return;
+    }
+
+    const downloadablePatchIds = downloadablePatches.map(patch => patch.id);
+
     setIsDownloadingSelected(true);
     try {
-      const blob = await bulkDownloadItems(Array.from(selectedPatchIds), 'patch');
-      const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url;
-      const ts = new Date().toISOString().replace(/:/g, '-'); a.download = `bulk_download_patches_${ts}.zip`;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-      showSuccessToast('Download started.');
-    } catch (e: any) { showErrorToast(e.message || "Bulk download failed."); }
-    finally { setIsDownloadingSelected(false); }
+      const blob = await bulkDownloadItems(downloadablePatchIds, 'patch' as BulkItemType);
+      const url = URL.createObjectURL(blob); 
+      const a = document.createElement('a'); 
+      a.href = url;
+      const ts = new Date().toISOString().replace(/:/g, '-'); 
+      a.download = `bulk_download_patches_${ts}.zip`;
+      document.body.appendChild(a); 
+      a.click(); 
+      document.body.removeChild(a); 
+      URL.revokeObjectURL(url);
+
+      if (downloadablePatchIds.length === selectedPatchIds.size) {
+        showSuccessToast('Download started for all selected downloadable patches.');
+      } else {
+        showSuccessToast(`Starting download for ${downloadablePatchIds.length} patch file(s). External links or non-downloadable items were excluded.`);
+      }
+    } catch (e: any) { 
+      showErrorToast(e.message || "Bulk download failed."); 
+    } finally { 
+      setIsDownloadingSelected(false); 
+    }
   };
   
   const handleOpenBulkMovePatchesModal = () => {
@@ -434,9 +465,9 @@ useEffect(() => {
         <div className="my-4 p-3 bg-gray-100 dark:bg-gray-700 rounded-md shadow-sm border border-gray-200 dark:border-gray-600">
           <div className="flex flex-wrap items-center gap-3">
             <span className="text-sm font-medium text-gray-700 dark:text-gray-200">{selectedPatchIds.size} item(s) selected</span>
-            {(role === 'admin' || role === 'super_admin') && (<button onClick={handleBulkDeleteClick} disabled={isDeletingSelected} className="btn-danger-xs flex items-center"><Trash2 size={14} className="mr-1.5"/>Delete</button>)}
-            {isAuthenticated && (<button onClick={handleBulkDownloadPatches} disabled={isDownloadingSelected} className="btn-success-xs flex items-center"><Download size={14} className="mr-1.5"/>Download</button>)}
-            {(role === 'admin' || role === 'super_admin') && (<button onClick={handleOpenBulkMovePatchesModal} disabled={isMovingSelected} className="btn-warning-xs flex items-center"><Move size={14} className="mr-1.5"/>Move</button>)}
+            {(role === 'admin' || role === 'super_admin') && (<button onClick={handleBulkDeleteClick} disabled={isDeletingSelected} className="px-3 py-1.5 text-xs font-medium rounded-md shadow-sm flex items-center focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 text-white bg-red-600 hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-800 focus:ring-red-500 disabled:opacity-50"><Trash2 size={14} className="mr-1.5"/>Delete</button>)}
+            {isAuthenticated && (<button onClick={handleBulkDownloadPatches} disabled={isDownloadingSelected} className="px-3 py-1.5 text-xs font-medium rounded-md shadow-sm flex items-center focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 text-white bg-green-500 hover:bg-green-600 dark:bg-green-600 dark:hover:bg-green-700 focus:ring-green-500 disabled:opacity-50"><Download size={14} className="mr-1.5"/>Download</button>)}
+            {(role === 'admin' || role === 'super_admin') && (<button onClick={handleOpenBulkMovePatchesModal} disabled={isMovingSelected} className="px-3 py-1.5 text-xs font-medium rounded-md shadow-sm flex items-center focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 text-white bg-blue-500 hover:bg-blue-600 dark:bg-blue-600 dark:hover:bg-blue-700 focus:ring-blue-500 disabled:opacity-50"><Move size={14} className="mr-1.5"/>Move</button>)}
           </div>
         </div>
       )}
@@ -480,7 +511,7 @@ useEffect(() => {
             <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">Select target Software and Version:</p>
             <div className="mb-4">
               <label htmlFor="modalSoftwareMove" className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Target Software</label>
-              <select id="modalSoftwareMove" value={modalSelectedSoftwareId??''} onChange={e=>{setModalSelectedSoftwareId(e.target.value?parseInt(e.target.value):null); setModalSelectedVersionId(null);}} className="input-class w-full" disabled={isMovingSelected||softwareList.length===0}>
+              <select id="modalSoftwareMove" value={modalSelectedSoftwareId??''} onChange={e=>{setModalSelectedSoftwareId(e.target.value?parseInt(e.target.value):null); setModalSelectedVersionId(null);}} className="input-class w-full dark:bg-gray-700 dark:text-white dark:border-gray-600" disabled={isMovingSelected||softwareList.length===0}>
                 <option value="">Select Software...</option>
                 {softwareList.map(sw=>(<option key={sw.id} value={sw.id}>{sw.name}</option>))}
               </select>
@@ -488,7 +519,7 @@ useEffect(() => {
             {modalSelectedSoftwareId && (
               <div className="mb-4">
                 <label htmlFor="modalVersionMove" className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Target Version</label>
-                <select id="modalVersionMove" value={modalSelectedVersionId??''} onChange={e=>setModalSelectedVersionId(e.target.value?parseInt(e.target.value):null)} className="input-class w-full" disabled={isMovingSelected||isLoadingModalVersions||modalVersionsList.length===0}>
+                <select id="modalVersionMove" value={modalSelectedVersionId??''} onChange={e=>setModalSelectedVersionId(e.target.value?parseInt(e.target.value):null)} className="input-class w-full dark:bg-gray-700 dark:text-white dark:border-gray-600" disabled={isMovingSelected||isLoadingModalVersions||modalVersionsList.length===0}>
                   <option value="">{isLoadingModalVersions?'Loading...':'Select Version...'}</option>
                   {modalVersionsList.map(v=>(<option key={v.id} value={v.id}>{v.version_number}</option>))}
                 </select>

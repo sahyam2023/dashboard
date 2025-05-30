@@ -2,3 +2,9 @@ flask
 flask-cors
 flask-bcrypt
 flask-jwt-extended
+python-dotenv
+requests
+SQLAlchemy
+Flask-SQLAlchemy
+Werkzeug
+flask_bcrypt

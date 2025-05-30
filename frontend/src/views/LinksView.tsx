@@ -449,15 +449,19 @@ const LinksView: React.FC = () => {
         </div>
       )}
 
-      {/* REVISED STRUCTURE FOR FILTERS START */}
+            {/* REVISED STRUCTURE FOR FILTERS START */}
       {/* This div contains the FilterTabs AND the Version dropdown side-by-side (on md screens) */}
-      <div className="flex flex-col md:flex-row md:items-end md:gap-4">  
+      <div className="flex flex-col md:flex-row md:items-center md:gap-4 -mt-20">
         {softwareList.length > 0 && (
-          <FilterTabs software={softwareList} selectedSoftwareId={activeSoftwareId} onSelectFilter={handleSoftwareFilterChange} />
+          // Added w-fit to ensure this wrapper only takes the necessary width of FilterTabs
+          <div className="w-fit flex-shrink-0">
+            <FilterTabs software={softwareList} selectedSoftwareId={activeSoftwareId} onSelectFilter={handleSoftwareFilterChange} />
+          </div>
         )}
         {activeSoftwareId && (
-          <div className="flex flex-col min-w-[200px] mt-4 md:mt-0"> {/* mt-4 for small screens, md:mt-0 to align horizontally on medium+ */}
-            <label htmlFor="versionFilterLinks" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Version</label>
+          // This div's classes are already correct from previous steps
+          <div className="flex items-center gap-2 min-w-[200px] mt-4 md:mt-0 flex-shrink-0">
+            <label htmlFor="versionFilterLinks" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Version</label>
             <select id="versionFilterLinks" value={activeVersionId || ''} onChange={handleVersionFilterChange} className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-200" disabled={versionList.length === 0}>
               <option value="">All Versions</option>
               {versionList.map(v => (<option key={v.id} value={v.id}>{v.version_number}</option>))}
@@ -467,9 +471,10 @@ const LinksView: React.FC = () => {
       </div>
 
       {/* This div specifically for the Advanced Filters button, placing it directly below the above section */}
-      <div className="mb-4 mt-0"> {/* Added mt-0 to override space-y-6 parent for this specific element */}
-        <button 
-          onClick={() => setShowAdvancedFilters(p => !p)} 
+      {/* This div already has mt-0, keeping it close to the filter row */}
+      <div className="mb-4 mt-0">
+        <button
+          onClick={() => setShowAdvancedFilters(p => !p)}
           // Explicit classes for grey button, matching DocumentsView
           className="flex items-center px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-md text-sm font-medium"
         >

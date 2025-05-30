@@ -341,6 +341,7 @@ const handleApiError = async (response: Response, defaultMessage: string, isLogi
       // If parsing errorData fails, use a generic message
       errorData = { msg: `${defaultMessage}: ${response.status} ${response.statusText}` };
     }
+    // Removed conditional logging block for /api/bulk/move 400 errors
 
     // Check for 503 Maintenance Mode and if a token was used (i.e., not a login attempt)
     if (response.status === 503 && errorData?.maintenance_mode_active === true && !isLoginAttempt && localStorage.getItem('tokenData')) {
@@ -563,6 +564,7 @@ export async function bulkMoveItems(
   itemType: BulkItemType, 
   targetMetadata: Record<string, any>
 ): Promise<BulkMoveResponse> {
+  // console.log('[api.ts] bulkMoveItems: Sending payload:', { item_ids: itemIds, item_type: itemType, target_metadata: targetMetadata }); // Removed
   try {
     const response = await fetch(`${API_BASE_URL}/api/bulk/move`, {
       method: 'POST',

@@ -6319,17 +6319,23 @@ def bulk_download_items():
 def bulk_move_items():
     data = request.get_json()
     if not data:
+        app.logger.debug(f"bulk_move_items: Returning error status=400, msg='Missing JSON data'")
         return jsonify(msg="Missing JSON data"), 400
 
     item_ids = data.get('item_ids')
     item_type = data.get('item_type')
     target_metadata = data.get('target_metadata')
 
+    app.logger.debug(f"bulk_move_items: Received item_ids={item_ids}, item_type='{item_type}', target_metadata={target_metadata}")
+
     if not isinstance(item_ids, list) or not item_ids or not all(isinstance(i, int) and i > 0 for i in item_ids):
+        app.logger.debug(f"bulk_move_items: Returning error status=400, msg='item_ids must be a non-empty list of positive integers.'")
         return jsonify(msg="item_ids must be a non-empty list of positive integers."), 400
     if not item_type or item_type not in ALLOWED_BULK_ITEM_TYPES:
+        app.logger.debug(f"bulk_move_items: Returning error status=400, msg='item_type is required and must be one of: {', '.join(ALLOWED_BULK_ITEM_TYPES)}.'")
         return jsonify(msg=f"item_type is required and must be one of: {', '.join(ALLOWED_BULK_ITEM_TYPES)}."), 400
     if not isinstance(target_metadata, dict):
+        app.logger.debug(f"bulk_move_items: Returning error status=400, msg='target_metadata (object) is required.'")
         return jsonify(msg="target_metadata (object) is required."), 400
 
     current_user_id = int(get_jwt_identity())
@@ -6376,19 +6382,24 @@ def bulk_move_items():
     }
 
     if item_type not in item_type_config_map:
+        app.logger.debug(f"bulk_move_items: Returning error status=400, msg='Invalid item_type '{item_type}' for bulk move.'")
         return jsonify(msg=f"Invalid item_type '{item_type}' for bulk move."), 400
 
     config = item_type_config_map[item_type]
+    app.logger.debug(f"bulk_move_items: Using config={config}")
     
     # Validate presence of required target_metadata fields
     for req_target in config['required_targets']:
         if req_target not in target_metadata or target_metadata[req_target] is None: # Ensure it's not None if required
+            app.logger.debug(f"bulk_move_items: Returning error status=400, msg='Missing required target_metadata field for {item_type}: {req_target}'")
             return jsonify(msg=f"Missing required target_metadata field for {item_type}: {req_target}"), 400
         try:
             # Ensure required target IDs are positive integers
             if not (isinstance(target_metadata[req_target], int) and target_metadata[req_target] > 0):
+                 app.logger.debug(f"bulk_move_items: Returning error status=400, msg='Invalid value for {req_target}. Must be a positive integer.'")
                  return jsonify(msg=f"Invalid value for {req_target}. Must be a positive integer."), 400
         except Exception: # Broad exception for type issues if not int
+            app.logger.debug(f"bulk_move_items: Returning error status=400, msg='Invalid type for {req_target}. Must be an integer.'")
             return jsonify(msg=f"Invalid type for {req_target}. Must be an integer."), 400
 
 
@@ -6400,19 +6411,24 @@ def bulk_move_items():
 
         if target_id_value is not None: # If a value is provided (even for optional fields)
             if not (isinstance(target_id_value, int) and target_id_value > 0):
+                 app.logger.debug(f"bulk_move_items: Returning error status=400, msg='Invalid value for {target_key}. Must be a positive integer if provided.'")
                  return jsonify(msg=f"Invalid value for {target_key}. Must be a positive integer if provided."), 400
             
             target_exists_query = f"SELECT 1 FROM {target_val_details['table']} WHERE {target_val_details['col']} = ?"
             if not db.execute(target_exists_query, (target_id_value,)).fetchone():
+                app.logger.debug(f"bulk_move_items: Returning error status=404, msg='Target {target_val_details['table']} with ID {target_id_value} for {target_key} not found.'")
                 return jsonify(msg=f"Target {target_val_details['table']} with ID {target_id_value} for {target_key} not found."), 404
             valid_targets[config['fk_map'][target_key]] = target_id_value # Store actual DB column name and value
         elif not is_optional and target_key in config['required_targets']: # Should have been caught above, but double check
+             app.logger.debug(f"bulk_move_items: Returning error status=400, msg='Required target_metadata field {target_key} is missing or null.'")
              return jsonify(msg=f"Required target_metadata field {target_key} is missing or null."), 400
         elif is_optional: # If optional and not provided, set to NULL for update
             valid_targets[config['fk_map'][target_key]] = None
 
+    app.logger.debug(f"bulk_move_items: Validated targets: {valid_targets}")
 
     if not valid_targets: # No valid FKs to update based on input
+        app.logger.debug(f"bulk_move_items: Returning error status=400, msg='No valid target metadata provided for update.'")
         return jsonify(msg="No valid target metadata provided for update."), 400
 
     # Special validation for 'link' type: if target_version_id is provided, it must belong to target_software_id
@@ -6421,6 +6437,7 @@ def bulk_move_items():
         target_version_id_for_link = valid_targets['version_id']
         
         if not target_software_id_for_link: # Should be caught by required_targets but good check
+            app.logger.debug(f"bulk_move_items: Returning error status=400, msg='target_software_id is required when target_version_id is specified for a link.'")
             return jsonify(msg="target_software_id is required when target_version_id is specified for a link."), 400
 
         version_belongs_to_software = db.execute(
@@ -6428,6 +6445,7 @@ def bulk_move_items():
             (target_version_id_for_link, target_software_id_for_link)
         ).fetchone()
         if not version_belongs_to_software:
+            app.logger.debug(f"bulk_move_items: Returning error status=400, msg='Target version ID {target_version_id_for_link} does not belong to target software ID {target_software_id_for_link}.'")
             return jsonify(msg=f"Target version ID {target_version_id_for_link} does not belong to target software ID {target_software_id_for_link}."), 400
     
     # Special validation for 'patch' type: target_version_id implies a specific software_id.
@@ -6447,19 +6465,23 @@ def bulk_move_items():
 
             if not old_item:
                 failed_items_details.append({'id': item_id, 'error': 'not_found'})
+                app.logger.debug(f"bulk_move_items: Item ID {item_id} not found in table {config['table']}.")
                 processed_ids_audit_details.append({'id': item_id, 'status': 'not_found'})
                 continue
             
             old_associations = {db_col: old_item[db_col] for db_col in valid_targets.keys()}
+            app.logger.debug(f"bulk_move_items: Processing item_id={item_id}, old_item_name='{old_item[config['name_col']]}', current_fks={old_associations}, is_external={(old_item['is_external_link'] if 'is_external_link' in old_item else 'N/A')})")
 
             # Conflict check for patches
             if item_type == 'patch':
                 target_version_id = valid_targets.get('version_id')
                 patch_name_to_check = old_item['patch_name']
                 if target_version_id is not None and patch_name_to_check:
+                    app.logger.debug(f"bulk_move_items: Conflict check for patch_id={item_id}, name='{patch_name_to_check}', target_version_id={target_version_id}")
                     conflict_query = "SELECT 1 FROM patches WHERE version_id = ? AND patch_name = ? AND id != ?"
                     # Exclude the current patch being moved from the conflict check if it's already in the target version (though this logic is for moving to a *different* version)
                     existing_patch_in_target = db.execute(conflict_query, (target_version_id, patch_name_to_check, item_id)).fetchone()
+                    app.logger.debug(f"bulk_move_items: Conflict found for patch_id={item_id}: {bool(existing_patch_in_target)}")
                     if existing_patch_in_target:
                         conflicted_items.append({'id': item_id, 'name': patch_name_to_check})
                         processed_ids_audit_details.append({'id': item_id, 'status': 'conflict', 'name': patch_name_to_check, 'target_version_id': target_version_id})
@@ -6478,6 +6500,7 @@ def bulk_move_items():
             update_query = f"UPDATE {config['table']} SET {', '.join(set_clauses)} WHERE {config['id_col']} = ?"
             update_params.append(item_id)
 
+            app.logger.debug(f"bulk_move_items: Attempting to update item_id={item_id} with params: {valid_targets}")
             update_cursor = db.execute(update_query, tuple(update_params))
 
             if update_cursor.rowcount > 0:
@@ -6504,30 +6527,50 @@ def bulk_move_items():
                 processed_ids_audit_details.append({'id': item_id, 'status': 'db_update_failed'})
                 app.logger.error(f"Bulk move: DB update command affected 0 rows for {item_type} ID {item_id}.")
 
-        if not failed_items_details : # All items processed successfully
-            db.commit()
+        # Refined message logic
+        if success_count == 0 and len(conflicted_items) > 0 and len(failed_items_details) == 0:
+            # Scenario 1: All items conflicted
+            if item_type == 'patch':
+                msg = "Bulk move failed: All selected patches conflict with existing patch names in the target version."
+            else:
+                msg = f"Bulk move failed: All selected {item_type} items conflict with existing names in the target location."
+            db.rollback() # Ensure rollback if all conflicted and no other failures
+        elif success_count > 0 and len(conflicted_items) > 0:
+            # Scenario 2: Partial success with some conflicts
+            if item_type == 'patch':
+                 msg = f"Bulk move partially successful. {success_count} patch(es) moved. {len(conflicted_items)} patch(es) were not moved due to naming conflicts in the target version."
+            else:
+                 msg = f"Bulk move partially successful. {success_count} {item_type}(s) moved. {len(conflicted_items)} {item_type}(s) were not moved due to naming conflicts in the target location."
+            db.commit() # Commit successful moves
+        elif success_count == 0 and len(conflicted_items) == 0 and len(failed_items_details) > 0:
+            # Scenario 3 & 5: All items failed for reasons other than conflict OR all not found
+            all_not_found = all(item.get('error') == 'not_found' for item in failed_items_details)
+            if all_not_found and len(failed_items_details) == len(item_ids):
+                msg = f"Bulk move failed: None of the selected {item_type} items could be found."
+            else:
+                msg = f"Bulk move failed: {len(failed_items_details)} {item_type}(s) could not be processed (e.g., not found or database error). No items were moved."
+            db.rollback() # Rollback as no items were successfully processed
+        elif success_count == 0 and len(conflicted_items) > 0 and len(failed_items_details) > 0:
+            # Scenario 4: Mixed failures (conflicts and other errors) with no successes
+            msg = f"Bulk move failed: {len(failed_items_details)} {item_type}(s) could not be processed, and {len(conflicted_items)} {item_type}(s) conflict with existing names. No items were moved."
+            db.rollback() # Rollback due to failures
+        elif success_count > 0 and len(conflicted_items) == 0 and len(failed_items_details) == 0:
+            # All successful, no conflicts, no other failures
             msg = f"Successfully moved {success_count} {item_type}(s)."
-            # If some items were not found, success_count might be less than len(item_ids)
-            items_not_found_count = sum(1 for detail in processed_ids_audit_details if detail['status'] == 'not_found')
-            if items_not_found_count > 0:
-                 msg += f" ({items_not_found_count} items not found)."
-        else: # Some items failed (either not found or DB update failed for a found item)
-            # Decide on atomicity: if any DB update failed for a *found* item, rollback all.
-            # Items not found don't necessarily cause a rollback if others succeed.
+            db.commit()
+        else: # Default catch-all, should ideally be covered by above, or represents mixed success/failures not fully captured yet
+            # This handles cases like: some success, some not_found, no conflicts.
+            # Or some success, some db_update_failures (which would lead to rollback if db_update_failures > 0).
             db_update_failures = sum(1 for detail in processed_ids_audit_details if detail['status'] == 'db_update_failed')
             if db_update_failures > 0:
                 db.rollback()
                 msg = f"Bulk move for {item_type} failed for {db_update_failures} items due to database update issues. No items were moved."
-                # Reset success_count as all changes are rolled back
-                success_count = 0 
-            else: # Only "not_found" errors or conflicts that were skipped, so commit the successful moves
-                db.commit()
+                success_count = 0 # Reset success_count as all changes are rolled back
+            else: # Only "not_found" errors or other non-DB-update failures among failed_items_details, with some successes and no conflicts
+                db.commit() # Commit successes
                 msg = f"Successfully moved {success_count} {item_type}(s)."
-                items_not_found_count = sum(1 for detail in processed_ids_audit_details if detail['status'] == 'not_found')
-                if items_not_found_count > 0:
-                    msg += f" {items_not_found_count} item(s) not found."
-                if conflicted_items:
-                    msg += f" {len(conflicted_items)} patch(es) were not moved due to naming conflicts: {', '.join([ci['name'] for ci in conflicted_items])}."
+                if len(failed_items_details) > 0:
+                    msg += f" {len(failed_items_details)} item(s) could not be processed (e.g., not found)."
 
         log_audit_action(
             action_type='BULK_MOVE_COMPLETE',
@@ -6557,18 +6600,18 @@ def bulk_move_items():
             "failed_items": failed_items_details, # Items that failed for reasons other than conflict (e.g. not found, db update error)
             "conflicted_items": conflicted_items # Items that specifically failed due to name conflict
         }
+        app.logger.debug(f"bulk_move_items: Returning status={status_code}, payload={response_payload}")
         return jsonify(response_payload), status_code
 
     except Exception as e:
         db.rollback()
         app.logger.error(f"Exception during bulk move for {item_type}: {e}", exc_info=True)
+        # Log before returning error
+        error_payload = {'item_type': item_type, 'error': str(e), 'item_ids_requested': item_ids, 'target_metadata': target_metadata}
+        app.logger.debug(f"bulk_move_items: Returning error status=500, payload={error_payload}")
         log_audit_action(
             action_type='BULK_MOVE_FAILED',
-            details={'item_type': item_type, 'error': str(e), 'item_ids_requested': item_ids, 'target_metadata': target_metadata}
-        )
-        log_audit_action(
-            action_type='BULK_MOVE_FAILED',
-            details={'item_type': item_type, 'error': str(e), 'item_ids_requested': item_ids, 'target_metadata': target_metadata}
+            details=error_payload
         )
         return jsonify(msg=f"An error occurred during bulk move: {str(e)}"), 500
 

@@ -97,7 +97,7 @@ export interface Link {
 
   // Version related fields (MANDATORY for Links) from backend JOINs
   version_id: number;    // Actual FK to 'versions' table (v.id)
-  version_number: string;// Display string like "1.2.3" (v.version_number)
+  version_name: string;// Display string like "1.2.3" (v.version_number) - Changed from version_number
 
   is_external_link: boolean; // Should always be present
   stored_filename?: string | null;

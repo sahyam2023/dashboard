@@ -1710,22 +1710,26 @@ def get_all_documents_api():
     
     # Main Data Query
     final_from_clause_for_data = from_clause 
-    final_params_for_data = list(permission_join_params) 
-    final_params_for_data.extend(params) 
+    # final_params_for_data = list(permission_join_params) 
+    # final_params_for_data.extend(params) 
+
+    # New logic for assembling final_params_for_data
+    final_params_for_data = list(permission_join_params)  # Start with permission join params
 
     if logged_in_user_id:
         # Add JOIN for favorite status
         final_from_clause_for_data += " LEFT JOIN user_favorites uf ON d.id = uf.item_id AND uf.item_type = 'document' AND uf.user_id = ?"
-        final_params_for_data.append(logged_in_user_id)
+        final_params_for_data.append(logged_in_user_id) # Param for uf join
         
         # Add separate LEFT JOIN for download permission (fp_dl)
         final_from_clause_for_data += " LEFT JOIN file_permissions fp_dl ON d.id = fp_dl.file_id AND fp_dl.file_type = 'document' AND fp_dl.user_id = ?"
-        final_params_for_data.append(logged_in_user_id) 
+        final_params_for_data.append(logged_in_user_id) # Param for fp_dl join
     else:
         # Add fp_dl join for anonymous users as well
         final_from_clause_for_data += " LEFT JOIN file_permissions fp_dl ON d.id = fp_dl.file_id AND fp_dl.file_type = 'document' AND fp_dl.user_id = ?"
-        final_params_for_data.append(None) 
+        final_params_for_data.append(None) # Param for fp_dl join (None for anonymous)
 
+    final_params_for_data.extend(params) # Add WHERE clause filter parameters
     final_params_for_data.extend([per_page, offset]) # Add pagination params
     
     final_query = f"{select_clause} {final_from_clause_for_data}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
@@ -1868,24 +1872,26 @@ def get_all_patches_api():
     
     # Main Data Query
     final_from_clause_for_data = from_clause # from_clause already includes the LEFT JOIN for view permissions (fp)
-    final_params_for_data = list(permission_join_params) # Start with user_id for the view permission JOIN (fp)
-    final_params_for_data.extend(params) # Add other filter params
+    # final_params_for_data = list(permission_join_params) # Start with user_id for the view permission JOIN (fp)
+    # final_params_for_data.extend(params) # Add other filter params
 
+    # New logic for assembling final_params_for_data
+    final_params_for_data = list(permission_join_params)  # Start with permission join params
 
     if logged_in_user_id:
         # Add JOIN for favorite status
         final_from_clause_for_data += " LEFT JOIN user_favorites uf ON p.id = uf.item_id AND uf.item_type = 'patch' AND uf.user_id = ?"
-        final_params_for_data.append(logged_in_user_id)
+        final_params_for_data.append(logged_in_user_id) # Param for uf join
         
         # Add separate LEFT JOIN for download permission (fp_dl)
         final_from_clause_for_data += " LEFT JOIN file_permissions fp_dl ON p.id = fp_dl.file_id AND fp_dl.file_type = 'patch' AND fp_dl.user_id = ?"
-        final_params_for_data.append(logged_in_user_id)
+        final_params_for_data.append(logged_in_user_id) # Param for fp_dl join
     else:
         # Add fp_dl join for anonymous users as well
         final_from_clause_for_data += " LEFT JOIN file_permissions fp_dl ON p.id = fp_dl.file_id AND fp_dl.file_type = 'patch' AND fp_dl.user_id = ?"
-        final_params_for_data.append(None)
+        final_params_for_data.append(None) # Param for fp_dl join (None for anonymous)
 
-
+    final_params_for_data.extend(params) # Add WHERE clause filter parameters
     final_params_for_data.extend([per_page, offset]) # Add pagination params
     final_query = f"{select_clause} {final_from_clause_for_data}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
     
@@ -2029,22 +2035,26 @@ def get_all_links_api():
     
     # Main Data Query
     final_from_clause_for_data = from_clause # from_clause already includes the LEFT JOIN for view permissions (fp)
-    final_params_for_data = list(permission_join_params) # Start with user_id for the view permission JOIN (fp)
-    final_params_for_data.extend(params) # Add other filter params
+    # final_params_for_data = list(permission_join_params) # Start with user_id for the view permission JOIN (fp)
+    # final_params_for_data.extend(params) # Add other filter params
+
+    # New logic for assembling final_params_for_data
+    final_params_for_data = list(permission_join_params)  # Start with permission join params
 
     if logged_in_user_id:
         # Add JOIN for favorite status
         final_from_clause_for_data += " LEFT JOIN user_favorites uf ON l.id = uf.item_id AND uf.item_type = 'link' AND uf.user_id = ?"
-        final_params_for_data.append(logged_in_user_id)
+        final_params_for_data.append(logged_in_user_id) # Param for uf join
         
         # Add separate LEFT JOIN for download permission (fp_dl)
         final_from_clause_for_data += " LEFT JOIN file_permissions fp_dl ON l.id = fp_dl.file_id AND fp_dl.file_type = 'link' AND fp_dl.user_id = ?"
-        final_params_for_data.append(logged_in_user_id)
+        final_params_for_data.append(logged_in_user_id) # Param for fp_dl join
     else:
         # Add fp_dl join for anonymous users
         final_from_clause_for_data += " LEFT JOIN file_permissions fp_dl ON l.id = fp_dl.file_id AND fp_dl.file_type = 'link' AND fp_dl.user_id = ?"
-        final_params_for_data.append(None)
+        final_params_for_data.append(None) # Param for fp_dl join (None for anonymous)
         
+    final_params_for_data.extend(params) # Add WHERE clause filter parameters
     final_params_for_data.extend([per_page, offset]) # Add pagination params
     final_query = f"{select_clause} {final_from_clause_for_data}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
     
@@ -2174,22 +2184,26 @@ def get_all_misc_files_api():
     
     # Main Data Query
     final_from_clause_for_data = from_clause # from_clause already includes the LEFT JOIN for view permissions (fp)
-    final_params_for_data = list(permission_join_params) # Start with user_id for the view permission JOIN (fp)
-    final_params_for_data.extend(params) # Add other filter params
+    # final_params_for_data = list(permission_join_params) # Start with user_id for the view permission JOIN (fp)
+    # final_params_for_data.extend(params) # Add other filter params
+
+    # New logic for assembling final_params_for_data
+    final_params_for_data = list(permission_join_params)  # Start with permission join params
 
     if logged_in_user_id:
         # Add JOIN for favorite status
         final_from_clause_for_data += " LEFT JOIN user_favorites uf ON mf.id = uf.item_id AND uf.item_type = 'misc_file' AND uf.user_id = ?"
-        final_params_for_data.append(logged_in_user_id)
+        final_params_for_data.append(logged_in_user_id) # Param for uf join
         
         # Add separate LEFT JOIN for download permission (fp_dl)
         final_from_clause_for_data += " LEFT JOIN file_permissions fp_dl ON mf.id = fp_dl.file_id AND fp_dl.file_type = 'misc_file' AND fp_dl.user_id = ?"
-        final_params_for_data.append(logged_in_user_id)
+        final_params_for_data.append(logged_in_user_id) # Param for fp_dl join
     else:
         # Add fp_dl join for anonymous users
         final_from_clause_for_data += " LEFT JOIN file_permissions fp_dl ON mf.id = fp_dl.file_id AND fp_dl.file_type = 'misc_file' AND fp_dl.user_id = ?"
-        final_params_for_data.append(None)
+        final_params_for_data.append(None) # Param for fp_dl join (None for anonymous)
     
+    final_params_for_data.extend(params) # Add WHERE clause filter parameters
     final_params_for_data.extend([per_page, offset]) # Add pagination params
     final_query = f"{select_clause} {final_from_clause_for_data}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
     

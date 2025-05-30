@@ -184,7 +184,24 @@ const LinksView: React.FC = () => {
   const handleSort = (key: string) => { setSortBy(key); setSortOrder(prev => (sortBy === key && prev === 'asc' ? 'desc' : 'asc')); setCurrentPage(1); };
   const handleApplyAdvancedFilters = () => { setCurrentPage(1); fetchAndSetLinks(1, true); };
 
-  const handleOperationSuccess = (message: string) => { setShowAddOrEditForm(false); setEditingLink(null); showSuccessToast(message); fetchAndSetLinks(1, true); };
+  const handleOperationSuccess = async (message: string) => { // Made async
+    setShowAddOrEditForm(false); 
+    setEditingLink(null); 
+    showSuccessToast(message); 
+    await fetchAndSetLinks(1, true); // Await this
+
+    // After successful link addition/update, refresh versionList if a software filter is active
+    if (activeSoftwareId) {
+      try {
+        const versions = await fetchVersionsForSoftware(activeSoftwareId);
+        setVersionList(versions);
+      } catch (err) {
+        console.error("Error refreshing version list after operation:", err);
+        showErrorToast("Failed to refresh version list for the current software filter.");
+        // versionList will retain its old state, which is acceptable.
+      }
+    }
+  };
   const openAddForm = () => {
     setEditingLink(null);
     setShowAddOrEditForm(true);
@@ -214,7 +231,7 @@ const LinksView: React.FC = () => {
   const filteredLinksBySearch = useMemo(() => {
     if (!searchTerm) return links;
     const lower = searchTerm.toLowerCase();
-    return links.filter(l => l.title.toLowerCase().includes(lower) || (l.description || '').toLowerCase().includes(lower) || (l.software_name || '').toLowerCase().includes(lower) || (l.version_number || '').toLowerCase().includes(lower));
+    return links.filter(l => l.title.toLowerCase().includes(lower) || (l.description || '').toLowerCase().includes(lower) || (l.software_name || '').toLowerCase().includes(lower) || (l.version_name || '').toLowerCase().includes(lower));
   }, [links, searchTerm]);
 
   const handleSelectItem = (id: number, isSelected: boolean) => setSelectedLinkIds(prev => { const n = new Set(prev); if (isSelected) n.add(id); else n.delete(id); return n; });
@@ -282,7 +299,7 @@ const LinksView: React.FC = () => {
 
   const columns: ColumnDef<LinkType>[] = [
     { key: 'title', header: 'Title', sortable: true }, { key: 'software_name', header: 'Software', sortable: true },
-    { key: 'version_name', header: 'Version', sortable: true, render: l => l.version_number || 'N/A' },
+    { key: 'version_name', header: 'Version', sortable: true, render: l => l.version_name  || 'N/A' },
     { key: 'description', header: 'Description', render: l => <span className="text-sm text-gray-600 block max-w-xs truncate" title={l.description || ''}>{l.description || '-'}</span> },
     {
       key: 'url',

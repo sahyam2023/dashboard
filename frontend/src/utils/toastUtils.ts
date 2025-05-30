@@ -12,7 +12,7 @@ const defaultOptions: ToastOptions = {
   theme: "colored",
 };
 
-const GLOBAL_TOAST_DEBOUNCE_DURATION_MS = 500;
+const GLOBAL_TOAST_DEBOUNCE_DURATION_MS = 1500;
 let lastAnyToastTimestamp: number = 0;
 
 let lastErrorMessage: string | null = null;

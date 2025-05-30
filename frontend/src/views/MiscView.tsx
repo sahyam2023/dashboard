@@ -174,7 +174,7 @@ const role = user?.role; // Access role safely, as user can be null
   };
   const handleCategoryOperationSuccess = (message: string) => { setShowCategoryForm(false); setEditingCategory(null); showSuccessToast(message); loadMiscCategories(); };
   
-  const openAddOrEditFileForm = (file?: MiscFile) => { setEditingMiscFile(file || null); setShowAddOrEditForm(true); setShowCategoryForm(false); };
+  const openAddOrEditFileForm = (file?: MiscFile) => { setEditingMiscFile(file || null); setShowAddOrEditForm(true); setShowCategoryForm(false); if (file) { window.scrollTo({ top: 0, behavior: 'smooth' }); } };
   const closeAdminFileForm = () => { setEditingMiscFile(null); setShowAddOrEditForm(false); };
   const openAddCategoryForm = () => { setEditingCategory(null); setShowCategoryForm(true); setShowAddOrEditForm(false); };
   const closeCategoryForm = () => { setEditingCategory(null); setShowCategoryForm(false); };

@@ -166,7 +166,7 @@ const role = user?.role; // Access role safely, as user can be null
 
   const handleMiscFileAddedOrUpdated = (file: MiscFile, isEdit: boolean) => {
     setShowAddOrEditForm(false); setEditingMiscFile(null);
-    showSuccessToast(`File "${file.user_provided_title || file.original_filename}" ${isEdit ? 'updated' : 'uploaded'}.`);
+    /* showSuccessToast(`File "${file.user_provided_title || file.original_filename}" ${isEdit ? 'updated' : 'uploaded'}.`); */
     fetchAndSetMiscFiles(1, true);
     // If the file's category matches the active filter or if no filter is active, it will appear.
     // If it was moved to a new category, and that category is not active, the user might need to change filters.

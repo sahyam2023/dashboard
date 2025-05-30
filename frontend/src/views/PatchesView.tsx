@@ -222,7 +222,7 @@ useEffect(() => {
   const handlePageChange = (newPage: number) => fetchAndSetPatches(newPage, true);
 
   const handleOperationSuccess = (message: string) => {
-    setShowAddOrEditForm(false); setEditingPatch(null); showSuccessToast(message); fetchAndSetPatches(1, true);
+    setShowAddOrEditForm(false); setEditingPatch(null); /* showSuccessToast(message); */ fetchAndSetPatches(1, true);
   };
   
   const openAddForm = () => { setEditingPatch(null); setShowAddOrEditForm(true); };

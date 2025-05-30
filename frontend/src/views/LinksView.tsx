@@ -187,7 +187,7 @@ const LinksView: React.FC = () => {
   const handleOperationSuccess = async (message: string) => { // Made async
     setShowAddOrEditForm(false); 
     setEditingLink(null); 
-    showSuccessToast(message); 
+    /* showSuccessToast(message); */
     await fetchAndSetLinks(1, true); // Await this
 
     // After successful link addition/update, refresh versionList if a software filter is active

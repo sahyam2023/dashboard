@@ -2,6 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { AdminSoftwareVersion, AddAdminVersionPayload, EditAdminVersionPayload, Software } from '../../../services/api'; // Adjust path as needed
 import { addAdminVersion, updateAdminVersion, fetchSoftware } from '../../../services/api'; // Adjust path as needed
 
+const getTodayDateString = () => {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0'); // Months are 0-indexed
+  const day = String(today.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 interface AdminVersionFormProps {
   initialData?: AdminSoftwareVersion | null;
   onSubmitSuccess: () => void;
@@ -11,7 +19,7 @@ interface AdminVersionFormProps {
 const AdminVersionForm: React.FC<AdminVersionFormProps> = ({ initialData, onSubmitSuccess, onCancel }) => {
   const [softwareId, setSoftwareId] = useState<number | ''>(initialData?.software_id || '');
   const [versionNumber, setVersionNumber] = useState<string>(initialData?.version_number || '');
-  const [releaseDate, setReleaseDate] = useState<string>(initialData?.release_date?.substring(0, 10) || ''); // YYYY-MM-DD
+  const [releaseDate, setReleaseDate] = useState<string>(initialData?.release_date?.substring(0, 10) || getTodayDateString()); // Default to today if no initialData
   const [mainDownloadLink, setMainDownloadLink] = useState<string>(initialData?.main_download_link || '');
   const [changelog, setChangelog] = useState<string>(initialData?.changelog || '');
   const [knownBugs, setKnownBugs] = useState<string>(initialData?.known_bugs || '');
@@ -50,7 +58,7 @@ const AdminVersionForm: React.FC<AdminVersionFormProps> = ({ initialData, onSubm
       // Reset form for 'add' mode
       setSoftwareId('');
       setVersionNumber('');
-      setReleaseDate('');
+      setReleaseDate(getTodayDateString()); // Default to today
       setMainDownloadLink('');
       setChangelog('');
       setKnownBugs('');

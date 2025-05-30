@@ -196,17 +196,17 @@ const FavoritesView: React.FC = () => {
           }} 
           className="bg-white dark:bg-gray-800 rounded-lg shadow-sm my-6">
           <Star size={48} className="text-yellow-500 dark:text-yellow-400 mb-4" /> {/* Changed color to yellow and added centering styles */}
-          <Typography variant="h6" color="text.secondary" sx={{ mb: 1 }}>
+          <Typography variant="h6" color="text.secondary" sx={{ mb: 1 }} className="dark:text-gray-400">
             You haven't favorited any items yet.
           </Typography>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="text.secondary" className="dark:text-gray-400">
             Start exploring and mark your favorites by clicking the star icon!
           </Typography>
         </Box>
       ) : (
         <div className="space-y-4">
           {favorites.map(item => (
-            <div key={item.favorite_id} className="bg-white shadow-sm rounded-lg p-4 flex items-center justify-between hover:shadow-md transition-shadow">
+            <div key={item.favorite_id} className="bg-white dark:bg-gray-800 shadow-sm rounded-lg p-4 flex items-center justify-between hover:shadow-md transition-shadow dark:border dark:border-gray-700">
               <div className="flex items-center">
                 {mapItemTypeToIcon(item.item_type)}
                 <div>
@@ -214,23 +214,23 @@ const FavoritesView: React.FC = () => {
                     to={getItemPageLink(item)} 
                     target={item.item_type === 'link' && (item.name.startsWith('http://') || item.name.startsWith('https://')) ? '_blank' : '_self'}
                     rel={item.item_type === 'link' && (item.name.startsWith('http://') || item.name.startsWith('https://')) ? 'noopener noreferrer' : ''}
-                    className="text-lg font-semibold text-blue-600 hover:underline"
+                    className="text-lg font-semibold text-blue-600 hover:underline dark:text-blue-400 dark:hover:underline"
                   >
                     {item.name}
                   </Link>
-                  <p className="text-xs text-gray-500 capitalize">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 capitalize">
                     Type: {item.item_type.replace('_', ' ')}
                     {item.software_name && ` • Software: ${item.software_name}`}
                     {item.version_number && ` • Version: ${item.version_number}`}
                   </p>
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
                     Favorited on: {new Date(item.favorited_at).toLocaleDateString()}
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => handleFavoriteToggle(item)}
-                className="p-2 rounded-full text-yellow-500 hover:text-yellow-600 focus:outline-none"
+                className="p-2 rounded-full text-yellow-500 hover:text-yellow-600 dark:text-yellow-400 dark:hover:text-yellow-500 focus:outline-none"
                 title="Remove from Favorites"
               >
                 <Star size={20} className="fill-current" />
@@ -242,11 +242,11 @@ const FavoritesView: React.FC = () => {
 
       {totalPages > 1 && (
         <div className="flex justify-between items-center mt-8">
-          <button onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))} disabled={currentPage === 1 || isLoadingData} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 disabled:opacity-50">
+          <button onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))} disabled={currentPage === 1 || isLoadingData} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 disabled:opacity-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600">
             Previous
           </button>
-          <span className="text-sm text-gray-700"> Page {currentPage} of {totalPages} (Total: {totalFavorites} items) </span>
-          <button onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))} disabled={currentPage === totalPages || isLoadingData} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 disabled:opacity-50">
+          <span className="text-sm text-gray-700 dark:text-gray-400"> Page {currentPage} of {totalPages} (Total: {totalFavorites} items) </span>
+          <button onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))} disabled={currentPage === totalPages || isLoadingData} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 disabled:opacity-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600">
             Next
           </button>
         </div>

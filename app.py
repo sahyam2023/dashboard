@@ -1481,6 +1481,85 @@ def update_email():
         app.logger.error(f"Error updating email for user {current_user_id}: {e}")
         return jsonify(msg="Failed to update email due to a server error."), 500
 
+@app.route('/api/user/profile/update-username', methods=['PUT'])
+@jwt_required()
+def update_username():
+    current_user_id_str = get_jwt_identity()
+    try:
+        current_user_id = int(current_user_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid user identity in token."), 401
+
+    user = find_user_by_id(current_user_id)
+    if not user:
+        return jsonify(msg="User not found."), 404
+
+    data = request.get_json()
+    if not data:
+        return jsonify(msg="Missing JSON data"), 400
+
+    new_username = data.get('new_username')
+    current_password = data.get('current_password')
+
+    if not new_username or not current_password:
+        return jsonify(msg="Missing new_username or current_password"), 400
+    
+    new_username = new_username.strip()
+    if not new_username:
+        return jsonify(msg="New username cannot be empty."), 400
+
+    if not bcrypt.check_password_hash(user['password_hash'], current_password):
+        log_audit_action(
+            action_type='UPDATE_USERNAME_FAILED', target_table='users', target_id=current_user_id,
+            details={'reason': 'Incorrect password', 'attempted_new_username': new_username}
+        )
+        return jsonify(msg="Incorrect password."), 401
+
+    # Check username availability (case-insensitive)
+    db = get_db()
+    existing_user_with_new_username = db.execute(
+        "SELECT id FROM users WHERE LOWER(username) = LOWER(?) AND id != ?",
+        (new_username, current_user_id)
+    ).fetchone()
+
+    if existing_user_with_new_username:
+        log_audit_action(
+            action_type='UPDATE_USERNAME_FAILED', target_table='users', target_id=current_user_id,
+            details={'reason': 'Username already taken', 'attempted_new_username': new_username}
+        )
+        return jsonify(msg="Username already taken"), 409
+
+    try:
+        old_username = user['username']
+        db.execute("UPDATE users SET username = ? WHERE id = ?", (new_username, current_user_id))
+        log_audit_action(
+            action_type='USERNAME_UPDATED',
+            target_table='users',
+            target_id=current_user_id,
+            details={'old_username': old_username, 'new_username': new_username}
+        )
+        db.commit()
+        # Re-fetch user to confirm and potentially get updated details if needed by frontend immediately
+        # Though for username change, the new username is already known.
+        # Consider if the JWT needs to be re-issued if username is part of its payload claims (not by default with user_id as identity).
+        return jsonify(msg="Username updated successfully", new_username=new_username), 200
+    except sqlite3.IntegrityError as e: # Should be caught by the check above, but as a safeguard
+        db.rollback()
+        app.logger.error(f"DB IntegrityError updating username for user {current_user_id}: {e}")
+        log_audit_action(
+            action_type='UPDATE_USERNAME_FAILED', target_table='users', target_id=current_user_id,
+            details={'reason': f'Database integrity error: {e}', 'attempted_new_username': new_username}
+        )
+        return jsonify(msg="Username already taken or database error."), 409
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"Error updating username for user {current_user_id}: {e}")
+        log_audit_action(
+            action_type='UPDATE_USERNAME_FAILED', target_table='users', target_id=current_user_id,
+            details={'reason': f'Server error: {e}', 'attempted_new_username': new_username}
+        )
+        return jsonify(msg="Failed to update username due to a server error."), 500
+
 # --- User Dashboard Layout Preferences Endpoints ---
 @app.route('/api/user/dashboard-layout', methods=['GET'])
 @jwt_required()
@@ -2675,18 +2754,22 @@ def admin_add_patch_with_url():
 
     final_version_id = None
 
-    if provided_version_id_str and provided_version_id_str.strip():
-        try:
-            final_version_id = int(provided_version_id_str)
-            # Optional: Verify this version_id belongs to software_id if software_id is also sent
-            # and is required even when version_id is directly provided.
-            # if software_id_str:
-            #     temp_sw_id = int(software_id_str)
-            #     ver_check = db.execute("SELECT id FROM versions WHERE id = ? AND software_id = ?", (final_version_id, temp_sw_id)).fetchone()
-            #     if not ver_check:
-            #         return jsonify(msg="Provided version_id does not match the provided software_id."), 400
-        except ValueError:
-            return jsonify(msg="Invalid format for provided version_id."), 400
+    if provided_version_id_str is not None: # Check if it's not None first
+        # Convert to string to safely call .strip() and handle if it was sent as int
+        version_id_val_str = str(provided_version_id_str) 
+        if version_id_val_str.strip(): # Now it's safe to strip
+            try:
+                parsed_id = int(version_id_val_str)
+                if parsed_id > 0: # Assuming version IDs must be positive
+                    final_version_id = parsed_id
+                else:
+                    # Optional: Log or handle non-positive ID if it's considered invalid
+                    app.logger.warning(f"Provided version_id '{parsed_id}' is not positive. Treating as not provided.")
+            except ValueError:
+                app.logger.warning(f"Invalid format for provided version_id: '{version_id_val_str}'. Could not convert to int.")
+                # Depending on strictness, could return a 400 error here.
+    
+    # Then, the existing logic for typed_version_string:
     elif typed_version_string and typed_version_string.strip():
         if not software_id_str: # software_id is required to create/find a version by string
             return jsonify(msg="software_id is required when using typed_version_string."), 400
@@ -6173,10 +6256,22 @@ def bulk_download_items():
         @after_this_request
         def cleanup_zip(response):
             try:
+                # Attempt to explicitly close the file stream if response.response is a file wrapper
+                # This is to help release any lock held by the response stream, especially on Windows.
+                if hasattr(response, 'response') and hasattr(response.response, 'close') and callable(response.response.close):
+                    try:
+                        response.response.close()
+                        app.logger.info(f"Cleanup_zip: Explicitly closed response.response for {zip_filepath}")
+                    except Exception as e_resp_close:
+                        # Log warning if closing the response stream fails, but don't let it stop cleanup.
+                        app.logger.warning(f"Cleanup_zip: Error closing response.response for {zip_filepath}: {e_resp_close}")
+
                 if zip_filepath and os.path.exists(zip_filepath):
                     os.remove(zip_filepath)
                     app.logger.info(f"Successfully cleaned up temporary zip file: {zip_filepath}")
-            except Exception as e_cleanup:
+            except PermissionError as e_perm: # Catch PermissionError specifically for more targeted logging
+                app.logger.error(f"PermissionError cleaning up temporary zip file {zip_filepath}: {e_perm}. This is often a timing issue on Windows. The file may be cleaned up later or require manual deletion.", exc_info=True)
+            except Exception as e_cleanup: # Catch other potential exceptions during cleanup
                 app.logger.error(f"Error cleaning up temporary zip file {zip_filepath}: {e_cleanup}", exc_info=True)
             return response
 
@@ -6321,6 +6416,7 @@ def bulk_move_items():
 
     success_count = 0
     failed_items_details = [] # Store {id, error_reason}
+    conflicted_items = [] # Added to store items with conflicts
     processed_ids_audit_details = []
 
     db.execute("BEGIN")
@@ -6336,6 +6432,19 @@ def bulk_move_items():
                 continue
             
             old_associations = {db_col: old_item[db_col] for db_col in valid_targets.keys()}
+
+            # Conflict check for patches
+            if item_type == 'patch':
+                target_version_id = valid_targets.get('version_id')
+                patch_name_to_check = old_item['patch_name']
+                if target_version_id is not None and patch_name_to_check:
+                    conflict_query = "SELECT 1 FROM patches WHERE version_id = ? AND patch_name = ? AND id != ?"
+                    # Exclude the current patch being moved from the conflict check if it's already in the target version (though this logic is for moving to a *different* version)
+                    existing_patch_in_target = db.execute(conflict_query, (target_version_id, patch_name_to_check, item_id)).fetchone()
+                    if existing_patch_in_target:
+                        conflicted_items.append({'id': item_id, 'name': patch_name_to_check})
+                        processed_ids_audit_details.append({'id': item_id, 'status': 'conflict', 'name': patch_name_to_check, 'target_version_id': target_version_id})
+                        continue # Skip this item
 
             set_clauses = []
             update_params = []
@@ -6392,16 +6501,23 @@ def bulk_move_items():
                 msg = f"Bulk move for {item_type} failed for {db_update_failures} items due to database update issues. No items were moved."
                 # Reset success_count as all changes are rolled back
                 success_count = 0 
-            else: # Only "not_found" errors, so commit the successful moves
+            else: # Only "not_found" errors or conflicts that were skipped, so commit the successful moves
                 db.commit()
-                msg = f"Successfully moved {success_count} {item_type}(s). {len(failed_items_details) - db_update_failures} items were not found."
-        
+                msg = f"Successfully moved {success_count} {item_type}(s)."
+                items_not_found_count = sum(1 for detail in processed_ids_audit_details if detail['status'] == 'not_found')
+                if items_not_found_count > 0:
+                    msg += f" {items_not_found_count} item(s) not found."
+                if conflicted_items:
+                    msg += f" {len(conflicted_items)} patch(es) were not moved due to naming conflicts: {', '.join([ci['name'] for ci in conflicted_items])}."
+
         log_audit_action(
             action_type='BULK_MOVE_COMPLETE',
             details={
                 'item_type': item_type,
                 'requested_count': len(item_ids),
                 'moved_count': success_count,
+                'conflicted_count': len(conflicted_items),
+                'conflicted_items_details': conflicted_items,
                 'target_metadata_applied': valid_targets, # Log what was applied
                 'processed_details': processed_ids_audit_details
             }
@@ -6409,16 +6525,28 @@ def bulk_move_items():
         
         # Determine overall status code
         status_code = 200
-        if success_count == 0 and len(item_ids) > 0: # No items moved at all
-            status_code = 400 # Or 404 if all were "not_found"
-        elif success_count < len(item_ids): # Partial success
+        # if success_count == 0 and len(item_ids) > 0 and not conflicted_items: # No items moved at all, and no conflicts (e.g. all not found or all failed DB update)
+        #     status_code = 400 
+        if success_count < (len(item_ids) - len(conflicted_items)): # Partial success (excluding conflicts as they are handled separately)
             status_code = 207 # Multi-Status
-
-        return jsonify(msg=msg, moved_count=success_count, failed_items=failed_items_details), status_code
+        elif success_count == 0 and len(item_ids) > 0 : # No items moved at all
+            status_code = 400 # if all were not found or failed db update. If all were conflicts, conflicted_items would exist.
+        
+        response_payload = {
+            "msg": msg, 
+            "moved_count": success_count, 
+            "failed_items": failed_items_details, # Items that failed for reasons other than conflict (e.g. not found, db update error)
+            "conflicted_items": conflicted_items # Items that specifically failed due to name conflict
+        }
+        return jsonify(response_payload), status_code
 
     except Exception as e:
         db.rollback()
         app.logger.error(f"Exception during bulk move for {item_type}: {e}", exc_info=True)
+        log_audit_action(
+            action_type='BULK_MOVE_FAILED',
+            details={'item_type': item_type, 'error': str(e), 'item_ids_requested': item_ids, 'target_metadata': target_metadata}
+        )
         log_audit_action(
             action_type='BULK_MOVE_FAILED',
             details={'item_type': item_type, 'error': str(e), 'item_ids_requested': item_ids, 'target_metadata': target_metadata}

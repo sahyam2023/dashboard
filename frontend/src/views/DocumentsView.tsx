@@ -520,9 +520,31 @@ useEffect(() => {
         <div className="my-4 p-3 bg-gray-100 dark:bg-gray-700 rounded-md shadow-sm border border-gray-200 dark:border-gray-600">
           <div className="flex flex-wrap items-center gap-3">
             <span className="text-sm font-medium text-gray-700 dark:text-gray-200">{selectedDocumentIds.size} item(s) selected</span>
-            {(role === 'admin' || role === 'super_admin') && (<button onClick={handleBulkDeleteClick} disabled={isDeletingSelected} className="px-3 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-700 rounded-md shadow-sm disabled:opacity-50 flex items-center"><Trash2 size={14} className="mr-1.5"/>Delete</button>)}
-            {isAuthenticated && (<button onClick={handleBulkDownload} disabled={isDownloadingSelected} className="px-3 py-1.5 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md shadow-sm disabled:opacity-50 flex items-center"><Download size={14} className="mr-1.5"/>Download</button>)}
-            {(role === 'admin' || role === 'super_admin') && (<button onClick={handleOpenBulkMoveModal} disabled={isMovingSelected} className="px-3 py-1.5 text-xs font-medium text-black bg-yellow-400 hover:bg-yellow-500 rounded-md shadow-sm disabled:opacity-50 flex items-center"><Move size={14} className="mr-1.5"/>Move</button>)}
+            {/* Standardized Bulk Action Buttons */}
+            {(role === 'admin' || role === 'super_admin') && (
+              <button 
+                onClick={handleBulkDeleteClick} 
+                disabled={isDeletingSelected} 
+                className="px-3 py-1.5 text-xs font-medium rounded-md shadow-sm flex items-center focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 text-white bg-red-600 hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-800 focus:ring-red-500 disabled:opacity-50">
+                <Trash2 size={14} className="mr-1.5"/>Delete
+              </button>
+            )}
+            {isAuthenticated && (
+              <button 
+                onClick={handleBulkDownload} 
+                disabled={isDownloadingSelected} 
+                className="px-3 py-1.5 text-xs font-medium rounded-md shadow-sm flex items-center focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 text-white bg-green-500 hover:bg-green-600 dark:bg-green-600 dark:hover:bg-green-700 focus:ring-green-500 disabled:opacity-50">
+                <Download size={14} className="mr-1.5"/>Download
+              </button>
+            )}
+            {(role === 'admin' || role === 'super_admin') && (
+              <button 
+                onClick={handleOpenBulkMoveModal} 
+                disabled={isMovingSelected} 
+                className="px-3 py-1.5 text-xs font-medium rounded-md shadow-sm flex items-center focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 text-white bg-blue-500 hover:bg-blue-600 dark:bg-blue-600 dark:hover:bg-blue-700 focus:ring-blue-500 disabled:opacity-50">
+                <Move size={14} className="mr-1.5"/>Move
+              </button>
+            )}
           </div>
         </div>
       )}

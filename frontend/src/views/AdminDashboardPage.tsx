@@ -413,7 +413,60 @@ const AdminDashboardPage: React.FC = () => {
         config.id === widgetId ? { ...config, visible: isVisible } : config
       )
     );
-    if (isEditMode) { // Or always, if visibility change is an unsaved change
+
+    if (isVisible) {
+      setCurrentLayouts(prevLayouts => {
+        const newLayoutsForAllBreakpoints = JSON.parse(JSON.stringify(prevLayouts || {})); // Deep copy
+        const widgetDefinition = WIDGET_DEFINITIONS_ARRAY.find(def => def.id === widgetId);
+
+        if (widgetDefinition) {
+          // Iterate over all defined breakpoints in currentLayouts (or just 'lg' if simplifying)
+          // For this fix, we'll primarily ensure 'lg' is handled, RGL might derive others.
+          const breakpointsToUpdate = Object.keys(newLayoutsForAllBreakpoints).length > 0 
+                                      ? Object.keys(newLayoutsForAllBreakpoints) 
+                                      : ['lg']; // Default to 'lg' if layouts is empty
+
+          for (const bp of breakpointsToUpdate) {
+            if (!newLayoutsForAllBreakpoints[bp]) {
+              newLayoutsForAllBreakpoints[bp] = [];
+            }
+            let itemLayout = newLayoutsForAllBreakpoints[bp].find((l: RglLayout) => l.i === widgetId);
+            const defaultWidgetItemLayout = widgetDefinition.defaultLayout;
+
+            if (itemLayout) {
+              // Widget layout exists, force it to a new row by setting y to a large number (Infinity)
+              // Keep its original width and height from default, or its last known w/h if preferred.
+              // Forcing to default w/h might be safer if its previous size contributed to issues.
+              itemLayout.y = Infinity;
+              itemLayout.x = defaultWidgetItemLayout.x; // Reset x to its default column
+              itemLayout.w = defaultWidgetItemLayout.w;
+              itemLayout.h = defaultWidgetItemLayout.h;
+              itemLayout.isDraggable = defaultWidgetItemLayout.static ? false : true;
+              itemLayout.isResizable = defaultWidgetItemLayout.static ? false : true;
+            } else {
+              // Widget layout doesn't exist for this breakpoint, add it using its default layout
+              // but with y = Infinity to push it to the bottom.
+              newLayoutsForAllBreakpoints[bp].push({
+                ...defaultWidgetItemLayout,
+                i: widgetId,
+                x: defaultWidgetItemLayout.x, // Default x position
+                y: Infinity,                 // Force to bottom
+                w: defaultWidgetItemLayout.w,
+                h: defaultWidgetItemLayout.h,
+                isDraggable: defaultWidgetItemLayout.static ? false : true,
+                isResizable: defaultWidgetItemLayout.static ? false : true,
+              });
+            }
+          }
+        }
+        return newLayoutsForAllBreakpoints;
+      });
+    }
+    // When hiding, we don't need to remove it from currentLayouts.
+    // RGL will not render it if it's not in the children.
+    // This preserves its position if the user toggles visibility quickly.
+
+    if (isEditMode) {
         setHasUnsavedChanges(true);
     }
   };

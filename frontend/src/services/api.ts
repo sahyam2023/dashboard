@@ -1914,6 +1914,36 @@ export async function updateEmail(payload: UpdateEmailPayload): Promise<{ msg: s
   }
 }
 
+// --- Username Update Function ---
+export interface UpdateUsernamePayload {
+  new_username: string;
+  current_password: string;
+}
+
+export interface UpdateUsernameResponse {
+  msg: string;
+  new_username: string; // Backend confirms the new username
+}
+
+export async function updateUsername(payload: UpdateUsernamePayload): Promise<UpdateUsernameResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/user/profile/update-username`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify(payload),
+    });
+    return handleApiError(response, 'Failed to update username');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error updating username:', error);
+    throw error;
+  }
+}
+// --- End Username Update Function ---
+
 // --- User Profile Picture Upload ---
 export interface UploadProfilePictureResponse {
   msg: string; // Success message from backend

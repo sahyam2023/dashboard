@@ -82,16 +82,16 @@ const DataTable = <T extends { id: number }>({
   // Add this check for undefined data
   if (!data && !isLoading) {
     return (
-      <div className="bg-white rounded-lg shadow-sm p-6 text-center">
-        <p className="text-gray-500">No data available (data is undefined)</p> 
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6 text-center">
+        <p className="text-gray-500 dark:text-gray-400">No data available (data is undefined)</p> 
       </div>
     );
   }
 
   if (data.length === 0 && !isLoading) {
     return (
-      <div className="bg-white rounded-lg shadow-sm p-6 text-center">
-        <p className="text-gray-500">No data available</p>
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6 text-center">
+        <p className="text-gray-500 dark:text-gray-400">No data available</p>
       </div>
     );
   }

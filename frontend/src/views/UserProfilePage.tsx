@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { changePassword, updateEmail, uploadUserProfilePicture} from '../services/api'; // Added uploadUserProfilePicture and API_BASE_URL
+import { changePassword, updateEmail, uploadUserProfilePicture, updateUsername } from '../services/api'; // Added updateUsername
 import { useAuth } from '../context/AuthContext';
 import { Navigate } from 'react-router-dom';
 import { Camera } from 'lucide-react'; // For icon
-import { showSuccessToast } from '../utils/toastUtils';
+import { showSuccessToast, showErrorToast } from '../utils/toastUtils'; // showErrorToast was missing from imports
 
 
 const UserProfilePage: React.FC = () => {
@@ -14,8 +14,8 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7000
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
+  // const [uploadError, setUploadError] = useState<string | null>(null); // Replaced by toast
+  // const [uploadSuccess, setUploadSuccess] = useState<string | null>(null); // Replaced by toast
 
 
   // State for Change Password form
@@ -31,6 +31,49 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7000
   const [confirmPasswordForEmail, setConfirmPasswordForEmail] = useState('');
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailSuccess, setEmailSuccess] = useState<string | null>(null);
+
+  // State for Update Username form
+  const [newUsername, setNewUsername] = useState('');
+  const [currentPasswordForUsername, setCurrentPasswordForUsername] = useState('');
+  const [usernameError, setUsernameError] = useState<string | null>(null);
+  const [usernameSuccess, setUsernameSuccess] = useState<string | null>(null);
+  const [isUpdatingUsername, setIsUpdatingUsername] = useState(false);
+
+
+  const handleUsernameChangeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setUsernameError(null);
+    setUsernameSuccess(null);
+
+    if (!newUsername || !currentPasswordForUsername) {
+      setUsernameError('New username and current password are required.');
+      return;
+    }
+    if (newUsername.length < 3) { 
+      setUsernameError('New username must be at least 3 characters long.');
+      return;
+    }
+
+    setIsUpdatingUsername(true);
+    try {
+      const response = await updateUsername({ new_username: newUsername, current_password: currentPasswordForUsername });
+      showSuccessToast(response.msg || 'Username updated successfully!');
+      setUsernameSuccess(response.msg || 'Username updated successfully!');
+      
+      if (auth && auth.updateAuthUsername) { 
+        auth.updateAuthUsername(response.new_username);
+      } else {
+        console.warn("AuthContext does not have updateAuthUsername method. UI might not reflect new username immediately.");
+      }
+      setNewUsername(''); 
+    } catch (error: any) {
+      showErrorToast(error.message || 'Failed to update username.');
+      setUsernameError(error.message || 'Failed to update username.');
+    } finally {
+      setCurrentPasswordForUsername(''); 
+      setIsUpdatingUsername(false);
+    }
+  };
 
   if (!auth.isAuthenticated) {
     return <Navigate to="/login" replace />;
@@ -64,13 +107,12 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7000
     setPasswordError(null); // Clear general errors
     setPasswordSuccess(null);
     
-    // Validate new password strength first
     const currentNewPasswordError = validatePassword(newPassword);
     if (currentNewPasswordError) {
       setNewPasswordError(currentNewPasswordError);
-      return; // Prevent submission
+      return; 
     } else {
-      setNewPasswordError(''); // Clear specific new password error if valid
+      setNewPasswordError(''); 
     }
 
     if (!currentPassword || !newPassword || !confirmNewPassword) {
@@ -84,19 +126,20 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7000
 
     try {
       const response = await changePassword({ current_password: currentPassword, new_password: newPassword });
+      showSuccessToast(response.msg || 'Password changed successfully!'); // Use toast
       setPasswordSuccess(response.msg || 'Password changed successfully!');
       setCurrentPassword('');
       setNewPassword('');
       setConfirmNewPassword('');
-      setNewPasswordError(''); // Clear strength error on success
+      setNewPasswordError(''); 
     } catch (error: any) {
-      // Check if the backend error is about password strength
       const backendMsg = error.message?.toLowerCase() || '';
       if (backendMsg.includes("password must") || backendMsg.includes("password should")) {
-        setNewPasswordError(error.message); // Show backend strength error for new password
+        setNewPasswordError(error.message); 
       } else {
         setPasswordError(error.message || 'Failed to change password.');
       }
+      showErrorToast(error.message || 'Failed to change password.'); // Use toast
     }
   };
 
@@ -116,10 +159,12 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7000
 
     try {
       const response = await updateEmail({ new_email: newEmail, password: confirmPasswordForEmail });
+      showSuccessToast(response.msg || 'Email updated successfully!'); // Use toast
       setEmailSuccess(response.msg || 'Email updated successfully!');
       setNewEmail('');
       setConfirmPasswordForEmail('');
     } catch (error: any) {
+      showErrorToast(error.message || 'Failed to update email.'); // Use toast
       setEmailError(error.message || 'Failed to update email.');
     }
   };
@@ -129,8 +174,8 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7000
     if (file) {
       setSelectedFile(file);
       setPreviewUrl(URL.createObjectURL(file));
-      setUploadError(null); // Clear previous errors
-      setUploadSuccess(null);
+      // setUploadError(null); // Clear previous errors - handled by toast
+      // setUploadSuccess(null); // - handled by toast
     } else {
       setSelectedFile(null);
       setPreviewUrl(null);
@@ -139,36 +184,34 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7000
 
   const handlePictureUpload = async () => {
     if (!selectedFile) {
-      showErrorToast("Please select a file first."); // Use toast
+      showErrorToast("Please select a file first."); 
       return;
     }
     setIsUploading(true);
-    setUploadError(null); // Clear local error state if any
-    // setUploadSuccess(null); // Success is handled by toast
 
     const formData = new FormData();
     formData.append('profile_picture', selectedFile);
 
     try {
       const response = await uploadUserProfilePicture(formData);
-      showSuccessToast(response.msg || "Profile picture updated successfully!"); // Use toast
+      showSuccessToast(response.msg || "Profile picture updated successfully!"); 
       if (auth.user && response.profile_picture_url) {
         auth.updateUserProfilePictureUrl(response.profile_picture_url);
       }
       setSelectedFile(null);
       setPreviewUrl(null); 
     } catch (error: any) {
-      showErrorToast(error.message || "Failed to upload profile picture."); // Use toast
+      showErrorToast(error.message || "Failed to upload profile picture."); 
       console.error("Profile picture upload error:", error);
     } finally {
       setIsUploading(false);
     }
   };
   
-  // Effect to update preview if auth user's profile picture changes (e.g., after upload)
   useEffect(() => {
     if (auth.user?.profile_picture_url && !previewUrl && !selectedFile) {
-      // No local preview active, so show the one from context
+      // This effect could potentially set previewUrl if needed,
+      // but current logic displays auth.user.profile_picture_url directly in img src.
     }
   }, [auth.user?.profile_picture_url, previewUrl, selectedFile]);
 
@@ -222,8 +265,6 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7000
             </button>
           </div>
         )}
-        {/* {uploadError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{uploadError}</p>} */}{/* Replaced by toast */}
-        {/* {uploadSuccess && <p className="mt-2 text-sm text-green-600 dark:text-green-400">{uploadSuccess}</p>} */}{/* Replaced by toast */}
       </div>
 
 
@@ -254,7 +295,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7000
                 type="password"
                 id="newPassword"
                 value={newPassword}
-                onChange={handleNewPasswordChange} // Use new handler
+                onChange={handleNewPasswordChange} 
                 className="shadow appearance-none border dark:border-gray-600 rounded w-full py-2 px-3 text-gray-700 dark:text-gray-200 leading-tight focus:outline-none focus:shadow-outline bg-white dark:bg-gray-700"
               />
               {newPasswordError && (
@@ -320,13 +361,53 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7000
             </button>
           </form>
         </div>
+
+        {/* Update Username Form */}
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+          <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-gray-100">Change Username</h2>
+          {usernameError && <p className="text-red-600 dark:text-red-300 bg-red-100 dark:bg-red-900 border border-red-300 dark:border-red-700 p-3 rounded mb-4">{usernameError}</p>}
+          {usernameSuccess && <p className="text-green-600 dark:text-green-300 bg-green-100 dark:bg-green-900 border border-green-300 dark:border-green-700 p-3 rounded mb-4">{usernameSuccess}</p>}
+          <form onSubmit={handleUsernameChangeSubmit}>
+            <div className="mb-4">
+              <label className="block text-gray-700 dark:text-gray-300 text-sm font-bold mb-2" htmlFor="newUsername">
+                New Username
+              </label>
+              <input
+                type="text"
+                id="newUsername"
+                value={newUsername}
+                onChange={(e) => setNewUsername(e.target.value)}
+                className="shadow appearance-none border dark:border-gray-600 rounded w-full py-2 px-3 text-gray-700 dark:text-gray-200 leading-tight focus:outline-none focus:shadow-outline bg-white dark:bg-gray-700"
+              />
+            </div>
+            <div className="mb-6">
+              <label className="block text-gray-700 dark:text-gray-300 text-sm font-bold mb-2" htmlFor="currentPasswordForUsername">
+                Current Password
+              </label>
+              <input
+                type="password"
+                id="currentPasswordForUsername"
+                value={currentPasswordForUsername}
+                onChange={(e) => setCurrentPasswordForUsername(e.target.value)}
+                className="shadow appearance-none border dark:border-gray-600 rounded w-full py-2 px-3 text-gray-700 dark:text-gray-200 mb-3 leading-tight focus:outline-none focus:shadow-outline bg-white dark:bg-gray-700"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={isUpdatingUsername}
+              className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline disabled:opacity-50"
+            >
+              {isUpdatingUsername ? 'Changing...' : 'Change Username'}
+            </button>
+          </form>
+        </div>
       </div>
     </div>
   );
 };
 
 export default UserProfilePage;
-function showErrorToast(arg0: any) {
-  throw new Error('Function not implemented.');
-}
-
+// Removed the mistakenly placed showErrorToast function from here
+// function showErrorToast(arg0: any) {
+//   throw new Error('Function not implemented.');
+// }

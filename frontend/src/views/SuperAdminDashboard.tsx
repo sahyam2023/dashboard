@@ -1081,12 +1081,12 @@ const SuperAdminDashboard: React.FC = () => {
                     if(resetError && e.target.value.trim() !== '') setResetError(null); 
                 }}
                 rows={4}
-                className={`block w-full px-3 py-2 border ${resetError && resetReason.trim() === '' ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'} rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500`}
+                className={`block w-full px-3 py-2 border ${resetError && resetReason.trim() === '' ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'} rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm bg-white dark:bg-gray-700 dark:text-gray-200 dark:border-gray-600 dark:placeholder-gray-500`}
                 required
                 disabled={isResettingDatabase}
                 aria-describedby={resetError && resetReason.trim() === '' ? "resetReason-error" : undefined}
               />
-               {resetError && resetReason.trim() === '' && <p id="resetReason-error" className="text-red-500 text-xs mt-1">{resetError}</p>}
+               {resetError && resetReason.trim() === '' && <p id="resetReason-error" className="text-red-500 dark:text-red-400 text-xs mt-1">{resetError}</p>}
             </div>
             <div className="flex flex-col sm:flex-row justify-end space-y-3 sm:space-y-0 sm:space-x-3 pt-3 border-t border-gray-200 dark:border-gray-700 mt-5">
               <button
@@ -1147,7 +1147,7 @@ const SuperAdminDashboard: React.FC = () => {
                   setResetProcessPassword(e.target.value);
                   if (resetError) setResetError(null);
                 }}
-                className={`block w-full px-3 py-2 border ${!resetProcessPassword.trim() && resetError ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'} rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500`}
+                className={`block w-full px-3 py-2 border ${!resetProcessPassword.trim() && resetError ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'} rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm bg-white dark:bg-gray-700 dark:text-gray-200 dark:border-gray-600 dark:placeholder-gray-500`}
                 required
                 disabled={isResettingDatabase}
               />
@@ -1162,7 +1162,7 @@ const SuperAdminDashboard: React.FC = () => {
                 type="text"
                 value={resetProcessConfirmText}
                 onChange={handleResetConfirmTextChange}
-                className={`block w-full px-3 py-2 border ${!resetProcessConfirmText.trim() && resetError ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'} rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500`}
+                className={`block w-full px-3 py-2 border ${!resetProcessConfirmText.trim() && resetError ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'} rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm bg-white dark:bg-gray-700 dark:text-gray-200 dark:border-gray-600 dark:placeholder-gray-500`}
                 required
                 disabled={isResettingDatabase}
               />

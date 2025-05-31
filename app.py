@@ -102,10 +102,10 @@ import json # Added for audit logging
 from flask import send_file, after_this_request
 import re
 from database import init_db
-from datetime import datetime, timedelta, timezone # Added timedelta and timezone
+from datetime import datetime, timedelta, timezone
 import math # Added for math.ceil
 import secrets # Added for secure token generation
-import shutil # For file operations if needed, though .backup is preferred for DB
+import shutil
 import click # For CLI arguments
 from functools import wraps
 # import cProfile # Removed
@@ -124,6 +124,8 @@ from flask_jwt_extended import (
 from werkzeug.utils import secure_filename
 from tempfile import NamedTemporaryFile
 import database # Your database.py helper
+from apscheduler.schedulers.background import BackgroundScheduler
+import atexit
 
 # --- Configuration ---
 # Best practice: Use app.instance_path for user-generated content if possible
@@ -131,6 +133,9 @@ import database # Your database.py helper
 INSTANCE_FOLDER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance')
 if not os.path.exists(INSTANCE_FOLDER_PATH):
     os.makedirs(INSTANCE_FOLDER_PATH, exist_ok=True)
+
+BACKUP_DIR = os.path.join(INSTANCE_FOLDER_PATH, 'backups')
+MAX_BACKUP_AGE_DAYS = 30
 
 # Define separate upload folders for clarity and potential different serving rules
 DOC_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'official_uploads', 'documents')
@@ -232,6 +237,115 @@ app.config['TMP_LARGE_UPLOADS_FOLDER'] = TMP_LARGE_UPLOADS_FOLDER # For large fi
 
 bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
+
+def delete_old_backups():
+    """Deletes backups older than MAX_BACKUP_AGE_DAYS."""
+    if not os.path.exists(BACKUP_DIR):
+        app.logger.info("Backup directory does not exist. No old backups to delete.")
+        return
+
+    app.logger.info(f"Checking for old backups in {BACKUP_DIR} older than {MAX_BACKUP_AGE_DAYS} days.")
+    now = datetime.now(timezone.utc)
+    deleted_count = 0
+    retained_count = 0
+
+    for filename in os.listdir(BACKUP_DIR):
+        if filename.startswith("software_dashboard_") and filename.endswith(".db"):
+            try:
+                # Extract timestamp string: software_dashboard_YYYYMMDD_HHMMSS.db
+                timestamp_str = filename.replace("software_dashboard_", "").replace(".db", "")
+                backup_datetime = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
+                backup_datetime = backup_datetime.replace(tzinfo=timezone.utc) # Make it timezone-aware (UTC)
+
+                if now - backup_datetime > timedelta(days=MAX_BACKUP_AGE_DAYS):
+                    file_path = os.path.join(BACKUP_DIR, filename)
+                    os.remove(file_path)
+                    app.logger.info(f"Deleted old backup: {filename}")
+                    deleted_count += 1
+                else:
+                    retained_count += 1
+            except ValueError:
+                app.logger.warning(f"Could not parse timestamp from backup filename: {filename}. Skipping.")
+            except Exception as e:
+                app.logger.error(f"Error processing backup file {filename}: {e}")
+    
+    app.logger.info(f"Old backup cleanup complete. Deleted: {deleted_count}, Retained: {retained_count}.")
+
+def perform_daily_backup_job():
+    """Job function for the scheduler to perform daily backups."""
+    app.logger.info("Starting daily backup job...")
+    try:
+        success, path_or_error = _perform_database_backup() # Assumes _perform_database_backup is defined
+        if success:
+            app.logger.info(f"Daily backup successful. Backup saved to: {path_or_error}")
+            log_audit_action(action_type='AUTO_BACKUP_SUCCESS', details={'backup_path': path_or_error})
+            delete_old_backups() # Delete old backups after a successful new backup
+        else:
+            app.logger.error(f"Daily backup failed: {path_or_error}")
+            log_audit_action(action_type='AUTO_BACKUP_FAILED', details={'error': path_or_error})
+    except Exception as e:
+        app.logger.error(f"Exception during daily backup job: {e}", exc_info=True)
+        log_audit_action(action_type='AUTO_BACKUP_EXCEPTION', details={'error': str(e)})
+    app.logger.info("Daily backup job finished.")
+
+def get_latest_backup_time():
+    """Gets the datetime of the latest backup file."""
+    if not os.path.exists(BACKUP_DIR):
+        return None
+    
+    latest_backup_dt = None
+    for filename in os.listdir(BACKUP_DIR):
+        if filename.startswith("software_dashboard_") and filename.endswith(".db"):
+            try:
+                timestamp_str = filename.replace("software_dashboard_", "").replace(".db", "")
+                backup_datetime = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
+                backup_datetime = backup_datetime.replace(tzinfo=timezone.utc) # UTC
+                if latest_backup_dt is None or backup_datetime > latest_backup_dt:
+                    latest_backup_dt = backup_datetime
+            except ValueError:
+                continue # Skip files with invalid timestamp format
+    return latest_backup_dt
+
+def check_and_perform_missed_backup():
+    """Checks if a backup was missed and performs one if necessary."""
+    app.logger.info("Checking for missed backups...")
+    latest_backup_time = get_latest_backup_time()
+
+    if latest_backup_time is None:
+        app.logger.info("No previous backups found. Performing initial backup.")
+        perform_daily_backup_job()
+    else:
+        # Check if the latest backup is older than 23 hours (to be safe for a 12 PM schedule)
+        if datetime.now(timezone.utc) - latest_backup_time > timedelta(hours=23):
+            app.logger.info(f"Latest backup was at {latest_backup_time}. Performing missed backup.")
+            perform_daily_backup_job()
+        else:
+            app.logger.info(f"Latest backup at {latest_backup_time} is recent enough. No missed backup to perform.")
+
+# --- Initialize Scheduler and Backups ---
+def initialize_scheduler_and_backups(current_app):
+    current_app.logger.info("Initializing scheduler and performing startup backup checks...")
+    # Ensure BACKUP_DIR exists (it should be defined globally or passed)
+    # BACKUP_DIR is already defined globally using INSTANCE_FOLDER_PATH
+    if not os.path.exists(BACKUP_DIR):
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        current_app.logger.info(f"Created backup directory at {BACKUP_DIR}")
+
+    check_and_perform_missed_backup() # This function uses app.logger internally
+
+    scheduler = BackgroundScheduler(timezone='UTC')
+    scheduler.add_job(perform_daily_backup_job, 'cron', hour=12, minute=0)
+    try:
+        scheduler.start()
+        current_app.logger.info("Background scheduler started. Daily backup job scheduled for 12:00 PM UTC.")
+        # Register scheduler shutdown
+        atexit.register(lambda: scheduler.shutdown())
+        current_app.logger.info("Scheduler shutdown registered with atexit.")
+    except Exception as e:
+        current_app.logger.error(f"Error starting background scheduler: {e}", exc_info=True)
+
+# Initialize scheduler and perform startup backup checks
+initialize_scheduler_and_backups(app)
 
 # --- Configuration Notes for Large File Uploads ---
 # Flask's MAX_CONTENT_LENGTH:
@@ -5576,7 +5690,26 @@ def database_reset_start():
             f.write(f"Timestamp: {log_timestamp.isoformat()}\n")
             f.write(f"Username: {actual_username}\n")
             f.write(f"Email: {user_email}\n")
-            f.write(f"IP Address: {request.remote_addr}\n")
+            
+            # Determine client IP
+            x_forwarded_for = request.headers.get('X-Forwarded-For')
+            ip_source = ''
+            if x_forwarded_for:
+                client_ip = x_forwarded_for.split(',')[0].strip()
+                ip_source = 'X-Forwarded-For'
+            else:
+                client_ip = request.headers.get('X-Real-IP')
+                if client_ip:
+                    ip_source = 'X-Real-IP'
+                else:
+                    client_ip = request.remote_addr
+                    ip_source = 'remote_addr'
+            
+            if not client_ip: # Fallback if somehow all are None/empty
+                client_ip = "IPNotDetected"
+                ip_source = "Unavailable"
+            
+            f.write(f"IP Address: {client_ip} (Source: {ip_source})\n")
             f.write(f"Reason: {reason}\n")
     except IOError as e:
         app.logger.error(f"Failed to write to reset log file {log_file_path}: {e}")
@@ -6520,46 +6653,58 @@ def serve_spa_catch_all(path): # Renamed function to ensure no endpoint conflict
     # It needs to correctly find index.html within app.static_folder (frontend/dist/index.html)
     return send_from_directory(app.static_folder, 'index.html')
 
+# --- Backup and Scheduler Functions ---
+
+
+
+
 if __name__ == '__main__':
     db_path = app.config.get('DATABASE')
     if not db_path:
-        print("ERROR: DATABASE configuration not found in app.config. Cannot initialize DB.")
+        app.logger.error("ERROR: DATABASE configuration not found in app.config. Cannot initialize DB.")
     else:
         db_dir = os.path.dirname(db_path)
         if db_dir and not os.path.exists(db_dir):
             try:
                 os.makedirs(db_dir, exist_ok=True)
-                print(f"Created instance directory: {db_dir}")
+                app.logger.info(f"Created instance directory: {db_dir}")
             except OSError as e:
-                print(f"Error creating instance directory {db_dir}: {e}")
+                app.logger.error(f"Error creating instance directory {db_dir}: {e}")
         
         if not os.path.exists(db_path):
-            print(f"Database file not found at {db_path}. Initializing database schema...")
+            app.logger.info(f"Database file not found at {db_path}. Initializing database schema...")
             try:
                 database.init_db(db_path) 
-                print(f"Database schema initialized successfully at {db_path}.")
+                app.logger.info(f"Database schema initialized successfully at {db_path}.")
             except Exception as e:
-                print(f"An error occurred during database schema initialization: {e}")
+                app.logger.error(f"An error occurred during database schema initialization: {e}")
         else:
-            print(f"Database file already exists at {db_path}. Skipping schema initialization.")
+            app.logger.info(f"Database file already exists at {db_path}. Skipping schema initialization.")
 
         if os.path.exists(db_path):
-            temp_conn = None
-            try:
-                temp_conn = database.get_db_connection(db_path)
-                _initialize_global_password(temp_conn) 
-            except sqlite3.OperationalError as e_op:
-                 print(f"SQLite OperationalError during global password initialization in __main__: {e_op}")
-            except Exception as e_global_pw:
-                print(f"Error during global password initialization in __main__: {e_global_pw}")
-            finally:
-                if temp_conn:
-                    temp_conn.close()
+            with app.app_context(): # Create an app context for get_db()
+                 temp_conn_main = None
+                 try:
+                    # Use get_db() within context to ensure proper handling if it uses 'g'
+                    temp_conn_main = get_db() 
+                    _initialize_global_password(temp_conn_main)
+                 except sqlite3.OperationalError as e_op:
+                     app.logger.error(f"SQLite OperationalError during global password initialization in __main__: {e_op}")
+                 except Exception as e_global_pw:
+                     app.logger.error(f"Error during global password initialization in __main__: {e_global_pw}")
+                 # No explicit close needed for g.db here, teardown_appcontext handles it.
         else: 
-            print(f"Skipping global password initialization as database file {db_path} was not successfully created/initialized.")
+            app.logger.warning(f"Skipping global password initialization as database file {db_path} was not successfully created/initialized.")
 
-    flask_port = int(os.environ.get('FLASK_RUN_PORT', 7000))
-    app.run(host='0.0.0.0', port=flask_port, debug=True)
+    # Note: Scheduler and backup checks are now initialized by initialize_scheduler_and_backups(app)
+    # called after app creation and configuration.
+
+    try:
+        flask_port = int(os.environ.get('FLASK_RUN_PORT', 7000))
+        app.run(host='0.0.0.0', port=flask_port, debug=True)
+    except (KeyboardInterrupt, SystemExit):
+        app.logger.info("Flask application shutting down...")
+    # Removed explicit scheduler shutdown from here as it's handled by atexit
 
 # --- Maintenance Mode Endpoints (Super Admin) ---
 @app.route('/api/admin/maintenance-mode', methods=['GET'])

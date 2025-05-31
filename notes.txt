@@ -1,0 +1,94 @@
+# --- Comprehensive Configuration Notes for Deployment ---
+# This application, especially with the large file upload functionality,
+# requires careful configuration at multiple levels: Flask app, WSGI server (e.g., Gunicorn),
+# and any reverse proxy (e.g., Nginx).
+#
+# 1. Flask Application Configuration (`app.config`):
+#    - `MAX_CONTENT_LENGTH`:
+#      - For standard Flask routes that might receive file uploads directly (not chunked),
+#        this setting limits the total request size. Example: `app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024` (16MB).
+#      - For the chunked upload endpoint (`/api/admin/upload_large_file`), the overall file size
+#        can be much larger than `MAX_CONTENT_LENGTH` because the file is processed in smaller pieces.
+#      - However, each individual chunk POST request (containing the chunk data + metadata)
+#        must still have a body size that the Flask app (and any preceding servers) can handle.
+#        Therefore, `MAX_CONTENT_LENGTH` should be set to a value sufficient for the
+#        largest expected *chunk* size plus any associated metadata in the multipart form.
+#        For example, if chunks are 5MB and metadata is small, a limit of 10MB might be reasonable.
+#        `app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024`
+#
+# 2. Web Server / WSGI Server Configuration:
+#    - These settings are crucial as they often impose their own limits before a request
+#      even reaches the Flask application.
+#
+#    - Gunicorn (Common WSGI Server for Flask):
+#      - `--timeout <seconds>`: Worker timeout. Default is 30 seconds. This might be too short
+#        for operations like processing a large file chunk or the finalization step of a large upload
+#        (moving file, DB insert). Increase as needed, e.g., `--timeout 120` (2 minutes) or higher.
+#      - `--limit-request-line <bytes>`: Max size of HTTP request line. Default 4094. Usually not an issue.
+#      - `--limit-request-field-size <bytes>`: Max size of an HTTP request header field. Default 8190.
+#        Usually not an issue unless sending extremely large headers/metadata.
+#      - `--limit-request-fields <integer>`: Max number of request header fields. Default 100.
+#
+#    - Nginx (Common Reverse Proxy):
+#      - `client_max_body_size <size>`: This is a very important directive. It defines the maximum
+#        allowed size of the client request body.
+#        - For the chunked upload endpoint, this should be set to accommodate the largest
+#          *chunk* size plus metadata overhead (e.g., `10M` if chunks are 5MB).
+#        - If you have other non-chunked routes that accept large files, this would need to be
+#          set to the absolute largest file size you want to support for those routes.
+#        - Example: `client_max_body_size 10M;`
+#      - `proxy_request_buffering off;`:
+#        - When set to `off`, Nginx starts sending the request body to the backend server (Gunicorn)
+#          immediately as it arrives, rather than buffering the entire request first.
+#        - This can be beneficial for large uploads to reduce disk I/O on the Nginx server and
+#          improve perceived performance, especially if Gunicorn/Flask can stream the request.
+#        - For the chunked approach, where chunks are relatively small, its impact might be less
+#          critical than for non-chunked monolithic uploads, but can still be good practice.
+#      - `proxy_buffering off;`: Similar to `proxy_request_buffering`, but for responses from
+#        the backend. Generally useful for streaming responses.
+#      - `proxy_read_timeout <seconds>`: Timeout for reading a response from the proxied server (Gunicorn).
+#        Increase if Gunicorn might take a long time to process a chunk or finalize a file.
+#        Example: `proxy_read_timeout 120s;`
+#      - `proxy_send_timeout <seconds>`: Timeout for sending a request to the proxied server.
+#        Example: `proxy_send_timeout 120s;`
+#      - `proxy_connect_timeout <seconds>`: Timeout for establishing a connection with the proxied server.
+#        Example: `proxy_connect_timeout 75s;`
+#
+#    - General Notes:
+#      - The specific directives and optimal values depend heavily on your deployment stack
+#        (Nginx, Apache, Caddy, etc.) and server resources.
+#      - Always consult the documentation for your specific web server and WSGI server.
+#
+# 3. Filesystem and Server Resources:
+#    - Disk Space:
+#      - `app.config['TMP_LARGE_UPLOADS_FOLDER']` (e.g., `instance/tmp_large_uploads`):
+#        Must have sufficient disk space to hold multiple concurrent large file uploads
+#        as they are being assembled. Consider the maximum number of concurrent uploads
+#        and the maximum size of files.
+#      - Final storage locations (e.g., `DOC_UPLOAD_FOLDER`, `PATCH_UPLOAD_FOLDER`):
+#        Must have adequate space for all permanently stored files.
+#    - Permissions:
+#      - The user account under which the Flask application (and WSGI server) runs needs
+#        read, write, and execute (for directories) permissions for all upload-related
+#        directories: `TMP_LARGE_UPLOADS_FOLDER`, `DOC_UPLOAD_FOLDER`, etc.
+#    - Memory:
+#      - While chunking significantly reduces the memory footprint compared to loading entire
+#        files into memory, each chunk is still processed. Monitor server memory usage,
+#        especially during peak upload times or if many small chunks are processed rapidly.
+#
+# 4. Chunking Implementation Notes (Current Application):
+#    - The current implementation appends chunks sequentially to a temporary file
+#      (e.g., `{upload_id}-{original_filename}.part`).
+#    - It relies on the client to send chunks in the correct order.
+#    - Error handling for individual chunk failures is present, but the overall upload
+#      process might leave partial files in `TMP_LARGE_UPLOADS_FOLDER` if an error occurs
+#      mid-upload or if the client abandons the upload. A cleanup mechanism (e.g., a periodic script)
+#      for stale `.part` files might be necessary for long-term maintenance.
+#    - For more advanced scenarios (e.g., very unreliable networks), consider:
+#      - Resumable uploads: Protocols like TUS (tus.io) provide robust resumable upload capabilities.
+#        This would require significant changes on both client and server.
+#      - Storing individual chunks and reassembling: Instead of appending, save each chunk
+#        as a separate file (e.g., `{upload_id}.{chunk_number}.chunk`) and then combine them
+#        once all are received. This can offer better error recovery for specific chunks.
+#
+# --- End Comprehensive Configuration Notes ---

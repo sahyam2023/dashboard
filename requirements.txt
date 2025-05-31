@@ -1,4 +1,4 @@
-flask
+Flask
 flask-cors
 flask-bcrypt
 flask-jwt-extended
@@ -7,4 +7,5 @@ requests
 SQLAlchemy
 Flask-SQLAlchemy
 Werkzeug
-flask_bcrypt
+APScheduler
+click

@@ -22,6 +22,7 @@ import { FilePermission, FilePermissionUpdatePayload, UpdateUserFilePermissionsR
 
 import DataTable, { ColumnDef } from '../components/DataTable';
 import Modal from '../components/shared/Modal';
+import SuperAdminCreateUserForm from '../components/admin/SuperAdminCreateUserForm'; // Import the new form
 
 // Define a type for the files we'll list for permission editing
 interface PermissibleFile {
@@ -43,6 +44,18 @@ const SuperAdminDashboard: React.FC = () => {
   const [itemsPerPage, setItemsPerPage] = useState<number>(10); // Default items per page
   const [totalPages, setTotalPages] = useState<number>(0);
   const [totalUsers, setTotalUsers] = useState<number>(0);
+
+  // State for Create User Form
+  const [showCreateUserForm, setShowCreateUserForm] = useState<boolean>(false);
+
+
+  // Callback for when a user is created by the form
+  const handleUserCreated = () => {
+    setShowCreateUserForm(false);
+    fetchUsers(); // Refresh the user list
+    // Optionally, set a success message on the main dashboard
+    setFeedback({ type: 'success', message: 'New user created successfully!' });
+  };
 
   // Sorting state
   const [sortBy, setSortBy] = useState<string>('username'); // Default sort column
@@ -641,7 +654,15 @@ const SuperAdminDashboard: React.FC = () => {
     <div className="container mx-auto p-4 md:p-6 lg:p-8 space-y-10 md:space-y-12">
       {/* User Management Section */}
       <section className="bg-white dark:bg-gray-800 shadow-xl rounded-xl p-6 md:p-8">
-        <h1 className="text-2xl md:text-3xl font-bold mb-6 text-gray-900 dark:text-gray-100">User Management</h1>
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100">User Management</h1>
+          <button
+            onClick={() => setShowCreateUserForm(true)}
+            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 transition ease-in-out duration-150"
+          >
+            Create User
+          </button>
+        </div>
         
         {feedback && (
           <div className={`p-4 mb-6 rounded-lg text-sm ${feedback.type === 'success' ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200 border border-green-200 dark:border-green-700' : 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200 border border-red-200 dark:border-red-700'}`}>
@@ -875,6 +896,18 @@ const SuperAdminDashboard: React.FC = () => {
              <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">No documents found to set permissions for. Ensure documents are uploaded.</p>
            )}
         </div>
+      </Modal>
+
+      {/* Modal for Creating New User */}
+      <Modal
+        isOpen={showCreateUserForm}
+        onClose={() => setShowCreateUserForm(false)}
+        title="Create New User"
+      >
+        <SuperAdminCreateUserForm
+          onUserCreated={handleUserCreated}
+          onCancel={() => setShowCreateUserForm(false)}
+        />
       </Modal>
     </div>
   );

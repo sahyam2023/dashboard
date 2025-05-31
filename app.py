@@ -895,6 +895,194 @@ def force_password_reset(user_id):
         app.logger.error(f"Error forcing password reset for user {user_id}: {e}")
         return jsonify(msg="Failed to force password reset due to a server error."), 500
 
+
+@app.route('/api/superadmin/users/create', methods=['POST'])
+@jwt_required()
+@super_admin_required
+def superadmin_create_user():
+    db = get_db()
+    data = request.get_json()
+
+    if not data:
+        return jsonify(msg="Missing JSON data"), 400
+
+    username = data.get('username')
+    password = data.get('password')
+    email = data.get('email')  # Optional
+    role = data.get('role')
+    security_answers = data.get('security_answers')
+
+    # --- Initial Presence Validation ---
+    if not username or not isinstance(username, str) or not username.strip():
+        return jsonify(msg="Username (string) is required."), 400
+    if not password or not isinstance(password, str): # Further strength validation later
+        return jsonify(msg="Password (string) is required."), 400
+    if not role or not isinstance(role, str):
+        return jsonify(msg="Role (string) is required."), 400
+    if not security_answers or not isinstance(security_answers, list):
+        return jsonify(msg="Security answers (array of objects) are required."), 400
+
+    username = username.strip()
+    if email and isinstance(email, str):
+        email = email.strip()
+    else:
+        email = None # Ensure email is None if not provided or not a string
+
+    # --- Password Strength Validation ---
+    is_strong, strength_msg = is_password_strong(password)
+    if not is_strong:
+        return jsonify(msg=strength_msg), 400
+
+    # --- Username and Email Uniqueness Validation ---
+    if find_user_by_username(username):
+        return jsonify(msg="Username already exists."), 409
+    if email and find_user_by_email(email):
+        return jsonify(msg="Email address already registered."), 409
+
+    # --- Role Validation ---
+    valid_roles = ['user', 'admin', 'super_admin']
+    if role not in valid_roles:
+        return jsonify(msg=f"Invalid role. Must be one of: {', '.join(valid_roles)}."), 400
+
+    # --- Security Answers Validation ---
+    if len(security_answers) != 3:
+        return jsonify(msg="Exactly three security answers are required."), 400
+
+    question_ids = []
+    for ans_obj in security_answers:
+        if not isinstance(ans_obj, dict) or 'question_id' not in ans_obj or 'answer' not in ans_obj:
+            return jsonify(msg="Each security answer must be an object with 'question_id' and 'answer'."), 400
+        if not isinstance(ans_obj['question_id'], int):
+            return jsonify(msg="Each 'question_id' must be an integer."), 400
+        if not isinstance(ans_obj['answer'], str) or not ans_obj['answer'].strip():
+            return jsonify(msg="Each security 'answer' must be a non-empty string."), 400
+        question_ids.append(ans_obj['question_id'])
+
+    if len(set(question_ids)) != 3:
+        return jsonify(msg="All three 'question_id's must be unique."), 400
+
+    # Check if question_ids are valid by querying the database
+    placeholders = ','.join(['?'] * len(question_ids))
+    query = f"SELECT COUNT(id) FROM security_questions WHERE id IN ({placeholders})"
+    cursor = db.execute(query, question_ids)
+    count_row = cursor.fetchone()
+    if count_row is None or count_row[0] != 3:
+        return jsonify(msg="One or more provided security question IDs are invalid."), 400
+
+    # --- User Creation Logic ---
+    try:
+        # Random profile picture assignment (similar to /api/auth/register)
+        profile_picture_filename_to_assign = None
+        default_pics_dir = app.config['DEFAULT_PROFILE_PICTURES_FOLDER']
+        user_pics_dir = app.config['PROFILE_PICTURES_UPLOAD_FOLDER']
+        available_default_pics = []
+        try:
+            available_default_pics = [f for f in os.listdir(default_pics_dir) if os.path.isfile(os.path.join(default_pics_dir, f)) and f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif'))]
+        except FileNotFoundError:
+            app.logger.warning(f"Default profile pictures directory not found: {default_pics_dir}. Cannot assign random picture.")
+
+        if available_default_pics:
+            chosen_default_pic_name = random.choice(available_default_pics)
+            original_default_pic_path = os.path.join(default_pics_dir, chosen_default_pic_name)
+            ext = chosen_default_pic_name.rsplit('.', 1)[1].lower() if '.' in chosen_default_pic_name else 'jpg'
+            new_user_specific_filename = f"{uuid.uuid4().hex}.{ext}"
+            new_user_specific_path = os.path.join(user_pics_dir, new_user_specific_filename)
+            try:
+                shutil.copy2(original_default_pic_path, new_user_specific_path)
+                profile_picture_filename_to_assign = new_user_specific_filename
+            except Exception as e_copy:
+                app.logger.error(f"Error copying default profile picture for superadmin user creation: {e_copy}")
+                # User will have no profile picture in this error case, which is acceptable.
+        else:
+            app.logger.warning(f"No suitable default profile pictures found in {default_pics_dir} for superadmin user creation. User will have no profile picture.")
+
+        # Create user in DB
+        # create_user_in_db hashes the password internally
+        user_id, assigned_role = create_user_in_db(
+            username,
+            password,
+            email,
+            role, # Use the role specified by the superadmin
+            profile_picture_filename_to_assign
+        )
+
+        if not user_id:
+            # Attempt to clean up copied profile picture if user creation failed
+            if profile_picture_filename_to_assign and os.path.exists(os.path.join(user_pics_dir, profile_picture_filename_to_assign)):
+                try:
+                    os.remove(os.path.join(user_pics_dir, profile_picture_filename_to_assign))
+                except Exception as e_clean:
+                    app.logger.error(f"Error cleaning up profile picture after failed user creation by superadmin: {e_clean}")
+            return jsonify(msg="Failed to create user due to a database issue."), 500
+
+        # Store hashed security answers
+        for ans in security_answers:
+            hashed_answer = bcrypt.generate_password_hash(ans['answer']).decode('utf-8')
+            db.execute(
+                "INSERT INTO user_security_answers (user_id, question_id, answer_hash) VALUES (?, ?, ?)",
+                (user_id, ans['question_id'], hashed_answer)
+            )
+
+        db.commit()
+
+        # Log audit action
+        log_audit_action(
+            action_type='SUPERADMIN_CREATE_USER',
+            target_table='users',
+            target_id=user_id,
+            details={
+                'created_username': username,
+                'created_email': email,
+                'assigned_role': assigned_role,
+                'profile_picture_assigned': profile_picture_filename_to_assign or 'None',
+                'security_questions_set': True
+            }
+            # The acting superadmin's ID/username will be logged automatically by log_audit_action
+        )
+
+        # Fetch the created user's details to return (excluding password)
+        new_user_details = find_user_by_id(user_id)
+        if not new_user_details: # Should not happen
+             app.logger.error(f"Superadmin_create_user: Could not fetch newly created user ID {user_id}")
+             return jsonify(msg="User created, but failed to retrieve details."), 500
+
+
+        return jsonify({
+            "id": new_user_details['id'],
+            "username": new_user_details['username'],
+            "email": new_user_details['email'],
+            "role": new_user_details['role'],
+            "is_active": new_user_details['is_active'],
+            "created_at": new_user_details['created_at'].isoformat() if new_user_details['created_at'] else None,
+            "profile_picture_filename": new_user_details['profile_picture_filename'],
+            "profile_picture_url": f"/profile_pictures/{new_user_details['profile_picture_filename']}" if new_user_details['profile_picture_filename'] else None,
+            "password_reset_required": new_user_details['password_reset_required']
+
+        }), 201
+
+    except sqlite3.IntegrityError as e:
+        db.rollback()
+        app.logger.error(f"Superadmin_create_user DB IntegrityError: {e}")
+        # Attempt to clean up copied profile picture on integrity error (e.g., security answers)
+        if profile_picture_filename_to_assign and os.path.exists(os.path.join(user_pics_dir, profile_picture_filename_to_assign)):
+            # This cleanup might be redundant if user creation failed and cleaned up already,
+            # but good for robustness if create_user_in_db succeeded but security answers failed.
+            try:
+                os.remove(os.path.join(user_pics_dir, profile_picture_filename_to_assign))
+            except Exception as e_clean_integrity:
+                app.logger.error(f"Error cleaning profile picture on integrity error for superadmin user creation: {e_clean_integrity}")
+        return jsonify(msg=f"Database integrity error during user creation: {e}"), 409
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"Superadmin_create_user General Exception: {e}", exc_info=True)
+        # Attempt to clean up copied profile picture on general error
+        if profile_picture_filename_to_assign and os.path.exists(os.path.join(user_pics_dir, profile_picture_filename_to_assign)):
+            try:
+                os.remove(os.path.join(user_pics_dir, profile_picture_filename_to_assign))
+            except Exception as e_clean_general:
+                app.logger.error(f"Error cleaning profile picture on general error for superadmin user creation: {e_clean_general}")
+        return jsonify(msg=f"An unexpected server error occurred: {e}"), 500
+
 # --- Super Admin File Permission Management Endpoints ---
 @app.route('/api/superadmin/users/<int:user_id>/permissions', methods=['GET'])
 @jwt_required()

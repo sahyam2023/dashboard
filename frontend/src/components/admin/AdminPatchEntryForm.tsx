@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useForm, Controller, SubmitHandler, FieldErrors } from 'react-hook-form';
 import * as yup from 'yup';
 import { yupResolver } from '@hookform/resolvers/yup';
-import { toast } from 'react-toastify';
+import { showSuccessToast, showErrorToast } from '../../utils/toastUtils'; // Standardized toast
 import {
   Software,
   Patch as PatchType,
@@ -14,8 +14,11 @@ import {
 import {
   fetchSoftware,
   fetchVersionsForSoftware,
-  addAdminPatchWithUrl, uploadAdminPatchFile,
-  editAdminPatchWithUrl, editAdminPatchFile
+  addAdminPatchWithUrl,
+  // uploadAdminPatchFile, // To be replaced
+  editAdminPatchWithUrl,
+  // editAdminPatchFile, // To be replaced
+  uploadFileInChunks // New chunked upload service
 } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { UploadCloud, Link as LinkIconLucide, FileText as FileIconLucide, X } from 'lucide-react';
@@ -119,7 +122,8 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
 
   const [isLoading, setIsLoading] = useState(false);
   const [isFetchingSoftwareOrVersions, setIsFetchingSoftwareOrVersions] = useState(false);
-  // error and successMessage states will be removed, replaced by toast
+  const [uploadProgress, setUploadProgress] = useState<number>(0); // For chunked upload progress
+  // error and successMessage states will be removed, replaced by toast (already done for some)
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { isAuthenticated, user } = useAuth();
@@ -136,7 +140,7 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
       setIsFetchingSoftwareOrVersions(true);
       fetchSoftware()
         .then(setSoftwareList)
-        .catch(() => toast.error('Failed to load software list.'))
+        .catch(() => showErrorToast('Failed to load software list.')) // Standardized
         .finally(() => setIsFetchingSoftwareOrVersions(false));
     }
   }, [isAuthenticated, role]);
@@ -150,7 +154,7 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
       setValue('typedVersionString', '');
       fetchVersionsForSoftware(parseInt(watchedSoftwareId))
         .then(setVersionsList)
-        .catch(() => toast.error('Failed to load versions.'))
+        .catch(() => showErrorToast('Failed to load versions.')) // Standardized
         .finally(() => setIsFetchingSoftwareOrVersions(false));
     } else {
       setVersionsList([]);
@@ -242,6 +246,7 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
 
   const onSubmit: SubmitHandler<PatchFormData> = async (data) => {
     setIsLoading(true);
+    setUploadProgress(0); // Reset progress
 
     let finalVersionId: number | undefined = undefined;
     let finalTypedVersionString: string | undefined = undefined;
@@ -265,61 +270,84 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
     try {
       let resultPatch: PatchType;
       if (data.inputMode === 'url') {
-        const payloadForUrl = { 
-            ...basePayload, 
-            download_link: data.externalUrl!.trim(), 
-            is_external_link: true 
-        } as AddPatchPayloadFlexible | EditPatchPayloadFlexible;
+        const payloadForUrl = {
+          ...basePayload,
+          download_link: data.externalUrl!.trim(),
+          is_external_link: true
+        } as AddPatchPayloadFlexible | EditPatchPayloadFlexible; // Ensure type assertion for clarity
 
         if (isEditMode && patchToEdit) {
           resultPatch = await editAdminPatchWithUrl(patchToEdit.id, payloadForUrl as EditPatchPayloadFlexible);
+          showSuccessToast(`Patch "${resultPatch.patch_name}" updated successfully!`);
+          if (onPatchUpdated) onPatchUpdated(resultPatch);
         } else {
           resultPatch = await addAdminPatchWithUrl(payloadForUrl as AddPatchPayloadFlexible);
+          showSuccessToast(`Patch "${resultPatch.patch_name}" added successfully!`);
+          if (onPatchAdded) onPatchAdded(resultPatch);
+          if (!isEditMode) {
+            resetFormDefaults(true);
+            setValue('selectedVersionId', ''); setValue('typedVersionString', '');
+          }
         }
       } else { // inputMode === 'upload'
-        const formData = new FormData();
-        formData.append('software_id', data.selectedSoftwareId);
-        if (finalVersionId) formData.append('version_id', finalVersionId.toString());
-        if (finalTypedVersionString) formData.append('typed_version_string', finalTypedVersionString);
-        
-        formData.append('patch_name', data.patchName.trim());
-        if (data.releaseDate) formData.append('release_date', data.releaseDate);
-        if (data.description?.trim()) formData.append('description', data.description.trim());
-        if (data.patch_by_developer?.trim()) formData.append('patch_by_developer', data.patch_by_developer.trim()); // Added
-        if (data.selectedFile) formData.append('file', data.selectedFile);
-
-        if (isEditMode && patchToEdit) {
-          resultPatch = await editAdminPatchFile(patchToEdit.id, formData);
-        } else {
-          // selectedFile is validated by yup to be present for new uploads
-          resultPatch = await uploadAdminPatchFile(formData);
+        if (!data.selectedFile) {
+          if (isEditMode && patchToEdit && !patchToEdit.is_external_link && !data.selectedFile) {
+            showErrorToast("To update metadata of an existing uploaded patch without re-uploading, use a different form/feature. To replace the file, select a new file.");
+            setIsLoading(false);
+            return;
+          }
+          if (!data.selectedFile && !isEditMode) { // Should be caught by yup
+             showErrorToast("No file selected for upload.");
+             setIsLoading(false);
+             return;
+          }
+          // Fallthrough: if selectedFile is null in edit mode for an existing uploaded file, and user didn't select a new one,
+          // this implies they might expect metadata-only update, which this path doesn't do.
+          // However, yup validation might require a file if inputMode is 'upload'.
+          // For now, if we reach here with data.selectedFile, we proceed to upload.
         }
-      }
-      toast.success(`Patch "${resultPatch.patch_name}" ${isEditMode ? 'updated' : 'added'} successfully!`);
-      if (!isEditMode) {
-          resetFormDefaults(true); // Keep software selected
-          setValue('selectedVersionId', ''); 
-          setValue('typedVersionString', '');
-      }
 
-      if (isEditMode && onPatchUpdated) onPatchUpdated(resultPatch);
-      if (!isEditMode && onPatchAdded) onPatchAdded(resultPatch);
+        // Metadata for chunked upload
+        const chunkMetadata = {
+            software_id: data.selectedSoftwareId,
+            ...(finalVersionId && { version_id: finalVersionId.toString() }),
+            ...(finalTypedVersionString && { typed_version_string: finalTypedVersionString }),
+            patch_name: data.patchName.trim(),
+            ...(data.releaseDate && { release_date: data.releaseDate }),
+            description: data.description?.trim() || '',
+            patch_by_developer: data.patch_by_developer?.trim() || '',
+        };
 
+        resultPatch = await uploadFileInChunks(
+            data.selectedFile!, // Assert not null, yup should ensure it's present
+            'patch',
+            chunkMetadata,
+            (progress) => setUploadProgress(progress)
+        );
+
+        // As uploadFileInChunks always creates a new patch entry with the current backend:
+        showSuccessToast(`Patch "${resultPatch.patch_name}" added successfully via chunked upload!`);
+        if (onPatchAdded) onPatchAdded(resultPatch); // Treat as new patch added
+        resetFormDefaults(true); // Reset form
+        setValue('selectedVersionId', '');
+        setValue('typedVersionString', '');
+      }
     } catch (err: any) {
-      const message = err.response?.data?.msg || err.message || `Failed to ${isEditMode ? 'update' : 'add'} patch.`;
-      toast.error(message);
+      const message = err.response?.data?.msg || err.message || `Failed to ${isEditMode && data.inputMode === 'url' ? 'update' : 'add'} patch.`;
+      showErrorToast(message); // Standardized
     } finally {
       setIsLoading(false);
+      // Consider resetting uploadProgress here or after a delay
     }
   };
   
   const onFormError = (formErrors: FieldErrors<PatchFormData>) => {
     console.error("Form validation errors:", formErrors);
-    toast.error("Please correct the errors highlighted in the form.");
+    showErrorToast("Please correct the errors highlighted in the form."); // Standardized
   };
 
   if (!isAuthenticated || !role || !['admin', 'super_admin'].includes(role)) return null;
-  // console.log("Current softwareList:", softwareList); // Removed console.log
+  // console.log("Current softwareList:", softwareList);
 
   return (
     <form onSubmit={handleSubmit(onSubmit, onFormError)} className="space-y-6 bg-white dark:bg-gray-800 dark:border-gray-700 p-6 rounded-lg shadow-md border border-gray-200">
@@ -525,6 +553,19 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
             </button>
         )}
       </div>
+
+      {/* Upload Progress Bar */}
+      {isLoading && watchedInputMode === 'upload' && uploadProgress > 0 && (
+        <div className="w-full bg-gray-200 rounded-full h-4 dark:bg-gray-700 my-3 relative">
+          <div
+            className="bg-blue-600 h-4 rounded-full transition-all duration-150 ease-out"
+            style={{ width: `${uploadProgress}%` }}
+          ></div>
+          <p className="absolute inset-0 text-center text-xs font-medium leading-4 text-white dark:text-gray-100">
+            {Math.round(uploadProgress)}%
+          </p>
+        </div>
+      )}
     </form>
   );
 };

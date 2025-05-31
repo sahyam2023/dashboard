@@ -8,8 +8,11 @@ import { showSuccessToast, showErrorToast } from '../../utils/toastUtils'; // Ad
 import { Software, Document as DocumentType, AddDocumentPayload, EditDocumentPayload } from '../../types'; // Added EditDocumentPayload
 import {
   fetchSoftware,
-  addAdminDocumentWithUrl, uploadAdminDocumentFile,
-  editAdminDocumentWithUrl, editAdminDocumentFile
+  addAdminDocumentWithUrl,
+  // uploadAdminDocumentFile, // To be replaced by chunked upload
+  editAdminDocumentWithUrl,
+  // editAdminDocumentFile, // To be replaced by chunked upload
+  uploadFileInChunks // New chunked upload service
 } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { UploadCloud, Link as LinkIconLucide, FileText as FileIconLucide, X } from 'lucide-react'; // File to FileText
@@ -90,6 +93,7 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
 
   const [isLoading, setIsLoading] = useState(false); // For API calls
   const [isFetchingSoftware, setIsFetchingSoftware] = useState(false); // For dropdown loading
+  const [uploadProgress, setUploadProgress] = useState<number>(0); // New state for upload progress
   // Error and success messages will be handled by toast
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -170,56 +174,81 @@ const role = user?.role; // Access role safely, as user can be null
 
   const onSubmit: SubmitHandler<DocumentFormData> = async (data) => {
     setIsLoading(true);
+    setUploadProgress(0); // Reset progress before new submission
 
     try {
       let resultDocument: DocumentType;
-      const commonPayload = {
-        software_id: parseInt(data.selectedSoftwareId),
+      const commonMetadata = {
+        software_id: data.selectedSoftwareId, // Will be parsed to int by backend or in uploadFileInChunks if needed
         doc_name: data.docName.trim(),
-        description: data.description?.trim() || undefined,
-        doc_type: data.docType?.trim() || undefined,
+        description: data.description?.trim() || '', // Ensure empty string if undefined
+        doc_type: data.docType?.trim() || '', // Ensure empty string if undefined
       };
 
       if (data.inputMode === 'url') {
         const payload = {
-          ...commonPayload,
+          software_id: parseInt(data.selectedSoftwareId), // Ensure software_id is number for URL mode
+          doc_name: commonMetadata.doc_name,
+          description: commonMetadata.description,
+          doc_type: commonMetadata.doc_type,
           download_link: data.externalUrl!.trim(), // Validated by yup
         };
         if (isEditMode && documentToEdit) {
+          // If editing and switching to/updating a URL, it's still an update to the existing document ID
           resultDocument = await editAdminDocumentWithUrl(documentToEdit.id, payload as EditDocumentPayload);
+          showSuccessToast(`Document "${resultDocument.doc_name}" updated successfully!`);
+          if (onDocumentUpdated) onDocumentUpdated(resultDocument);
         } else {
           resultDocument = await addAdminDocumentWithUrl(payload as AddDocumentPayload);
+          showSuccessToast(`Document "${resultDocument.doc_name}" added successfully!`);
+          if (onDocumentAdded) onDocumentAdded(resultDocument);
+          if (!isEditMode) resetFormDefaults(true); // Reset only if it was a new add, not edit->url
         }
       } else { // inputMode === 'upload'
-        const formData = new FormData();
-        formData.append('software_id', data.selectedSoftwareId);
-        formData.append('doc_name', data.docName.trim());
-        if (data.docType?.trim()) formData.append('doc_type', data.docType.trim());
-        if (data.description?.trim()) formData.append('description', data.description.trim());
-        
-        if (data.selectedFile) {
-          formData.append('file', data.selectedFile);
-        }
-
-        if (isEditMode && documentToEdit) {
-          resultDocument = await editAdminDocumentFile(documentToEdit.id, formData);
-        } else {
-          // selectedFile is validated by yup to be present for new uploads
-          resultDocument = await uploadAdminDocumentFile(formData);
+        if (!data.selectedFile) {
+          // This case should ideally be caught by Yup validation if a file is required.
+          // For edit mode, if no new file is selected, and it was previously an upload,
+          // it implies a metadata-only update, which needs a different endpoint or handling.
+          // For this subtask, if it's 'upload' mode, we expect a file.
+          // If in edit mode and user wants to only update metadata of an *existing uploaded file*,
+          // that's a scenario not directly covered by replacing with uploadFileInChunks without backend changes
+          // to support replacing file content for an existing ID via chunks.
+          // The current simplified plan: upload as new if file is present.
+          // If no file, and in edit mode for an existing uploaded file, this is an edge case.
+          // Let's assume for now yup ensures selectedFile is present if mode is 'upload' and it's a new item,
+          // or if user explicitly selects a file in edit mode.
+          if (isEditMode && documentToEdit && !documentToEdit.is_external_link && !data.selectedFile) {
+             showErrorToast("To update metadata of an existing uploaded file without re-uploading, please use a different form or feature (not implemented in this version of chunked upload). To replace the file, select a new file.");
+             setIsLoading(false);
+             return;
+          }
+          if (!data.selectedFile && !isEditMode) { // Should be caught by yup
+            showErrorToast("No file selected for upload.");
+            setIsLoading(false);
+            return;
+          }
+          // If data.selectedFile is present, proceed with chunked upload.
+          // This will always create a NEW document entry as per current backend capabilities.
+          resultDocument = await uploadFileInChunks(
+            data.selectedFile!, // Assert not null, yup should have caught if needed
+            'document',
+            commonMetadata,
+            (progress) => setUploadProgress(progress)
+          );
+          // Since uploadFileInChunks always creates a new document with current backend:
+          showSuccessToast(`Document "${resultDocument.doc_name}" added successfully via chunked upload!`);
+          if (onDocumentAdded) onDocumentAdded(resultDocument); // Treat as new document added
+          resetFormDefaults(true); // Reset form as it's a new entry
         }
       }
-
-      showSuccessToast(`Document "${resultDocument.doc_name}" ${isEditMode ? 'updated' : 'added'} successfully!`); // Changed to showSuccessToast
-      if (!isEditMode) resetFormDefaults(true);
-      
-      if (isEditMode && onDocumentUpdated) onDocumentUpdated(resultDocument);
-      if (!isEditMode && onDocumentAdded) onDocumentAdded(resultDocument);
-
     } catch (err: any) {
-      const message = err.response?.data?.msg || err.message || `Failed to ${isEditMode ? 'update' : 'add'} document.`;
-      showErrorToast(message); // Changed to showErrorToast
+      const message = err.response?.data?.msg || err.message || `Failed to ${isEditMode && data.inputMode === 'url' ? 'update' : 'add'} document.`;
+      showErrorToast(message);
     } finally {
       setIsLoading(false);
+      // Optionally reset progress after a short delay or based on success/failure
+      // For now, keep progress visible until next action.
+      // setTimeout(() => setUploadProgress(0), 2000);
     }
   };
   
@@ -397,6 +426,19 @@ const role = user?.role; // Access role safely, as user can be null
             </button>
         )}
       </div>
+
+      {/* Upload Progress Bar */}
+      {isLoading && watchedInputMode === 'upload' && uploadProgress > 0 && (
+        <div className="w-full bg-gray-200 rounded-full h-4 dark:bg-gray-700 my-3 relative">
+          <div
+            className="bg-blue-600 h-4 rounded-full transition-all duration-150 ease-out"
+            style={{ width: `${uploadProgress}%` }}
+          ></div>
+          <p className="absolute inset-0 text-center text-xs font-medium leading-4 text-white dark:text-gray-100">
+            {Math.round(uploadProgress)}%
+          </p>
+        </div>
+      )}
     </form>
   );
 };

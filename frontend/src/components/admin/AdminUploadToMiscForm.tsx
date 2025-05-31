@@ -3,12 +3,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useForm, Controller, SubmitHandler, FieldErrors } from 'react-hook-form';
 import * as yup from 'yup';
 import { yupResolver } from '@hookform/resolvers/yup';
-import { toast } from 'react-toastify';
+import { showSuccessToast, showErrorToast } from '../../utils/toastUtils'; // Standardized toast
 import { useAuth } from '../../context/AuthContext';
 import {
-  uploadAdminMiscFile,
+  // uploadAdminMiscFile, // To be replaced by chunked upload
   editAdminMiscFile,
-  fetchMiscCategories
+  fetchMiscCategories,
+  uploadFileInChunks // New chunked upload service
 } from '../../services/api';
 import { MiscCategory, MiscFile } from '../../types';
 import { UploadCloud, FileText as FileIconLucide, X } from 'lucide-react';
@@ -70,6 +71,7 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
 
   const [isLoading, setIsLoading] = useState(false);
   const [isFetchingCategories, setIsFetchingCategories] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number>(0); // For chunked upload progress
   // error and successMessage states removed
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -83,7 +85,7 @@ const role = user?.role; // Access role safely, as user can be null
       setIsFetchingCategories(true);
       fetchMiscCategories()
         .then(setMiscCategories)
-        .catch(() => toast.error('Failed to load misc categories.'))
+        .catch(() => showErrorToast('Failed to load misc categories.')) // Standardized
         .finally(() => setIsFetchingCategories(false));
     }
   }, [isAuthenticated, role]);
@@ -130,51 +132,68 @@ const role = user?.role; // Access role safely, as user can be null
   };
 
   const onSubmit: SubmitHandler<MiscUploadFormData> = async (data) => {
-    if (!isAuthenticated || !role || !['admin', 'super_admin'].includes(role)) { 
-      toast.error('Not authorized.'); 
-      return; 
+    if (!isAuthenticated || !role || !['admin', 'super_admin'].includes(role)) {
+      showErrorToast('Not authorized.'); // Standardized
+      return;
     }
     setIsLoading(true);
-
-    const formDataPayload = new FormData();
-    formDataPayload.append('misc_category_id', data.selectedCategoryId);
-    formDataPayload.append('user_provided_title', data.title?.trim() || ''); 
-    formDataPayload.append('user_provided_description', data.description?.trim() || '');
-
-    if (data.selectedFile) { 
-      formDataPayload.append('file', data.selectedFile);
-    }
+    setUploadProgress(0); // Reset progress
 
     try {
       let resultFile: MiscFile;
-      if (isEditMode && fileToEdit) {
-        resultFile = await editAdminMiscFile(fileToEdit.id, formDataPayload);
-        toast.success(`File "${resultFile.user_provided_title || resultFile.original_filename}" updated successfully!`);
-        if (onFileUpdated) onFileUpdated(resultFile);
-      } else { 
-        // selectedFile is validated by yup to be present for new uploads
-        resultFile = await uploadAdminMiscFile(formDataPayload);
-        toast.success(`File "${resultFile.original_filename}" uploaded successfully!`);
-        reset({ // Reset form fields for add mode
-            selectedCategoryId: preselectedCategoryId?.toString() || data.selectedCategoryId, // Keep category or use preselected
+
+      if (data.selectedFile) { // New file upload or replacing an existing file
+        const metadata = {
+          misc_category_id: data.selectedCategoryId,
+          user_provided_title: data.title?.trim() || '', // Backend handles default to filename
+          user_provided_description: data.description?.trim() || '',
+        };
+
+        resultFile = await uploadFileInChunks(
+          data.selectedFile,
+          'misc_file',
+          metadata,
+          (progress) => setUploadProgress(progress)
+        );
+        showSuccessToast(`File "${resultFile.original_filename}" uploaded successfully!`);
+        if (onUploadSuccess) onUploadSuccess(resultFile); // Use onUploadSuccess for new/replaced file
+         reset({
+            selectedCategoryId: preselectedCategoryId?.toString() || data.selectedCategoryId,
             title: '',
             description: '',
             selectedFile: null,
         });
         if (fileInputRef.current) fileInputRef.current.value = "";
-        if (onUploadSuccess) onUploadSuccess(resultFile);
+
+      } else if (isEditMode && fileToEdit) { // Metadata-only update for an existing file
+        const formDataPayload = new FormData();
+        formDataPayload.append('misc_category_id', data.selectedCategoryId);
+        formDataPayload.append('user_provided_title', data.title?.trim() || '');
+        formDataPayload.append('user_provided_description', data.description?.trim() || '');
+        // No file is appended here for metadata-only update
+
+        resultFile = await editAdminMiscFile(fileToEdit.id, formDataPayload);
+        showSuccessToast(`File "${resultFile.user_provided_title || resultFile.original_filename}" metadata updated successfully!`);
+        if (onFileUpdated) onFileUpdated(resultFile); // Use onFileUpdated for metadata changes
+
+      } else {
+        // Should not happen if validation is correct (e.g., new file requires selectedFile)
+        showErrorToast("No file selected for new upload.");
+        setIsLoading(false);
+        return;
       }
     } catch (err: any) {
       const message = err.response?.data?.msg || err.message || `File operation failed.`;
-      toast.error(message);
+      showErrorToast(message); // Standardized
     } finally {
       setIsLoading(false);
+      // Consider resetting uploadProgress after a delay or based on success/failure
     }
   };
   
   const onFormError = (formErrors: FieldErrors<MiscUploadFormData>) => {
     console.error("Form validation errors:", formErrors);
-    toast.error("Please correct the errors highlighted in the form.");
+    showErrorToast("Please correct the errors highlighted in the form."); // Standardized
   };
   
   if (!isAuthenticated || !role || !['admin', 'super_admin'].includes(role)) {
@@ -295,6 +314,19 @@ const role = user?.role; // Access role safely, as user can be null
             </button>
         )}
       </div>
+
+      {/* Upload Progress Bar */}
+      {isLoading && watchedSelectedFile && uploadProgress > 0 && (
+        <div className="w-full bg-gray-200 rounded-full h-4 dark:bg-gray-700 my-3 relative">
+          <div
+            className="bg-blue-600 h-4 rounded-full transition-all duration-150 ease-out"
+            style={{ width: `${uploadProgress}%` }}
+          ></div>
+          <p className="absolute inset-0 text-center text-xs font-medium leading-4 text-white dark:text-gray-100">
+            {Math.round(uploadProgress)}%
+          </p>
+        </div>
+      )}
     </form>
   );
 };

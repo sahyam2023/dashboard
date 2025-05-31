@@ -239,6 +239,8 @@ app.config['TMP_LARGE_UPLOADS_FOLDER'] = TMP_LARGE_UPLOADS_FOLDER # For large fi
 
 bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
+IST = pytz.timezone('Asia/Kolkata') # Added IST timezone
+UTC = pytz.utc # Added UTC for clarity in conversion if needed
 
 def delete_old_backups():
     """Deletes backups older than MAX_BACKUP_AGE_DAYS."""
@@ -351,8 +353,7 @@ def initialize_scheduler_and_backups(current_app):
 # Initialize scheduler and perform startup backup checks
 initialize_scheduler_and_backups(app)
 
-IST = pytz.timezone('Asia/Kolkata') # Added IST timezone
-UTC = pytz.utc # Added UTC for clarity in conversion if needed
+
 
 # Helper function to convert specific timestamp fields in a dictionary to IST ISO format
 def convert_timestamps_to_ist_iso(row_dict, timestamp_keys):

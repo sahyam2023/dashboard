@@ -36,13 +36,16 @@ const OFFLINE_MESSAGE = "Backend is unavailable. Please check your connection.";
 // For brevity, I'm showing User, DocumentType, Patch, Link, MiscFile as they are directly used in paginated responses.
 // Ensure Software, SoftwareVersion, AuthRequest, AuthResponse, etc., are also properly defined/imported.
 
-export interface User { // Already defined, ensure it's comprehensive
+export interface User {
   id: number;
   username: string;
   email: string | null;
   role: 'user' | 'admin' | 'super_admin';
   is_active: boolean;
-  created_at?: string; // Optional, if needed by UI from paginated response
+  created_at?: string;
+  profile_picture_filename?: string | null; // Added
+  profile_picture_url?: string | null;    // Added
+  password_reset_required?: boolean;      // Added
 }
 
 export interface ChangePasswordPayload {
@@ -2362,3 +2365,34 @@ export async function clearAllNotifications(): Promise<{ msg: string, count_dele
   }
 }
 // --- End Notification API Functions ---
+
+// --- Super Admin Create User ---
+export interface SuperAdminCreateUserPayload {
+  username: string;
+  password: string;
+  email?: string;
+  role: 'user' | 'admin' | 'super_admin';
+  security_answers: Array<{ question_id: number; answer: string }>;
+}
+
+export async function superAdminCreateUser(userData: SuperAdminCreateUserPayload): Promise<User> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/superadmin/users/create`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeader(),
+      },
+      body: JSON.stringify(userData),
+    });
+    return handleApiError(response, 'Failed to create user via super admin');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error creating user via super admin:', error);
+    throw error;
+  }
+}
+// --- End Super Admin Create User ---

@@ -5529,44 +5529,122 @@ def change_global_password():
         # or if it's part of a larger transaction (not the case here).
         return jsonify(msg="Failed to update global password due to a server error."), 500
 
+# --- Database Reset Start Endpoint (Super Admin) ---
+@app.route('/api/superadmin/database/reset/start', methods=['POST'])
+@jwt_required()
+@super_admin_required
+def database_reset_start():
+    current_user_username = get_jwt_identity() # This is actually the user ID string from JWT
+    db = get_db()
+
+    # Fetch user details using the ID from JWT
+    # Assuming get_jwt_identity() returns user ID as string, convert to int
+    try:
+        user_id_int = int(current_user_username)
+    except ValueError:
+        app.logger.error(f"Invalid user ID format from JWT: {current_user_username}")
+        return jsonify(msg="Invalid user identity in token."), 401 # Or 400
+
+    user = find_user_by_id(user_id_int)
+    if not user:
+        app.logger.error(f"User not found for ID: {user_id_int} from JWT.")
+        return jsonify(msg="User not found or invalid token."), 401
+
+    actual_username = user['username'] # Correct username for logging
+    user_email = user['email']
+
+    data = request.get_json()
+    if not data or not data.get('reason'):
+        return jsonify(msg="Reason for reset is required."), 400
+    reason = data['reason']
+
+    # 1. Create reset_logs directory
+    reset_logs_dir = os.path.join(app.config['INSTANCE_FOLDER_PATH'], 'reset_logs')
+    try:
+        os.makedirs(reset_logs_dir, exist_ok=True)
+    except OSError as e:
+        app.logger.error(f"Failed to create reset_logs directory: {e}")
+        return jsonify(msg="Server error: Could not create log directory."), 500
+
+    # 2. Log information to a timestamped text file
+    log_timestamp = datetime.now(timezone.utc)
+    log_filename = f"reset_{log_timestamp.strftime('%Y%m%d_%H%M%S')}_{actual_username}.txt"
+    log_file_path = os.path.join(reset_logs_dir, log_filename)
+
+    try:
+        with open(log_file_path, 'w') as f:
+            f.write(f"Timestamp: {log_timestamp.isoformat()}\n")
+            f.write(f"Username: {actual_username}\n")
+            f.write(f"Email: {user_email}\n")
+            f.write(f"IP Address: {request.remote_addr}\n")
+            f.write(f"Reason: {reason}\n")
+    except IOError as e:
+        app.logger.error(f"Failed to write to reset log file {log_file_path}: {e}")
+        # Continue with the process even if logging to file fails, but log this error.
+        # Alternatively, could return an error here if file logging is critical.
+
+    # 3. Call database backup logic
+    backup_success, backup_path_or_error = _perform_database_backup()
+    if not backup_success:
+        log_audit_action(
+            action_type='DATABASE_RESET_START_FAILED_BACKUP',
+            target_table='database', # General target
+            details={'reason': reason, 'backup_error': backup_path_or_error, 'log_file': log_file_path},
+            user_id=user_id_int, # Pass the fetched user_id
+            username=actual_username
+        )
+        return jsonify(msg="Database backup failed during reset process.", error=backup_path_or_error), 500
+
+    # 4. Log audit action for successful initiation
+    log_audit_action(
+        action_type='DATABASE_RESET_START_INITIATED',
+        target_table='database', # General target
+        details={'reason': reason, 'backup_path': backup_path_or_error, 'log_file': log_file_path},
+        user_id=user_id_int, # Pass the fetched user_id
+        username=actual_username
+    )
+
+    # 5. Return success response
+    return jsonify(
+        message="Reason logged and database backup successful. Proceed to final confirmation.",
+        backup_path=backup_path_or_error,
+        log_file=log_file_path
+    ), 200
+
+# --- Helper for Database Backup ---
+def _perform_database_backup():
+    """
+    Performs a database backup.
+    Returns: (bool: success, str: backup_path or error_message)
+    """
+    try:
+        backup_dir = os.path.join(app.config['INSTANCE_FOLDER_PATH'], 'backups')
+        os.makedirs(backup_dir, exist_ok=True)
+        source_db_path = app.config['DATABASE']
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        backup_filename = f"software_dashboard_{timestamp}.db"
+        backup_file_path = os.path.join(backup_dir, backup_filename)
+        shutil.copy2(source_db_path, backup_file_path)
+        return True, backup_file_path
+    except Exception as e:
+        app.logger.error(f"Database backup helper failed: {e}", exc_info=True)
+        return False, str(e)
+
 # --- Database Backup Endpoint (Super Admin) ---
 @app.route('/api/superadmin/database/backup', methods=['GET'])
 @jwt_required()
 @super_admin_required
-def backup_database():
-    try:
-        # Ensure shutil and os are imported (should be at the top of the file)
-        # Ensure datetime from datetime is imported (should be at the top of the file)
-
-        # Define backup directory path
-        backup_dir = os.path.join(app.config['INSTANCE_FOLDER_PATH'], 'backups')
-
-        # Create backup directory if it doesn't exist
-        os.makedirs(backup_dir, exist_ok=True)
-
-        # Database file path
-        source_db_path = app.config['DATABASE']
-
-        # Create timestamped backup filename
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        backup_filename = f"software_dashboard_{timestamp}.db"
-        backup_file_path = os.path.join(backup_dir, backup_filename)
-
-        # Copy the database file
-        shutil.copy2(source_db_path, backup_file_path)
-
-        # Log audit action
+def backup_database_route(): # Renamed to avoid conflict with the old name if it was a module-level function
+    success, path_or_error = _perform_database_backup()
+    if success:
         log_audit_action(
-            action_type='DATABASE_BACKUP_SUCCESS',
-            details={'backup_path': backup_file_path}
-            # User performing action is automatically logged by log_audit_action
+            action_type='DATABASE_BACKUP_SUCCESS', # Keep this specific for direct backup route
+            details={'backup_path': path_or_error}
         )
-
-        return jsonify(message="Database backup successful.", backup_path=backup_file_path), 200
-
-    except Exception as e:
-        app.logger.error(f"Database backup failed: {e}", exc_info=True) # Log with traceback
-        return jsonify(msg="Database backup failed.", error=str(e)), 500
+        return jsonify(message="Database backup successful.", backup_path=path_or_error), 200
+    else:
+        # log_audit_action for failure could be added here if desired
+        return jsonify(msg="Database backup failed.", error=path_or_error), 500
 
 # --- Database Restore Endpoint (Super Admin) ---
 @app.route('/api/superadmin/database/restore', methods=['POST'])
@@ -5671,6 +5749,107 @@ def restore_database():
 
         return jsonify(msg="Database restore failed.", error=str(e)), 500
 
+# --- Database Reset Confirm Endpoint (Super Admin) ---
+@app.route('/api/superadmin/database/reset/confirm', methods=['POST'])
+@jwt_required()
+@super_admin_required
+def database_reset_confirm():
+    current_user_id_str = get_jwt_identity()
+    try:
+        user_id_int = int(current_user_id_str)
+    except ValueError:
+        app.logger.error(f"Invalid user ID format from JWT: {current_user_id_str}")
+        return jsonify(msg="Invalid user identity in token."), 400 # Or 401
+
+    user = find_user_by_id(user_id_int) # Fetch user for logging username
+    if not user: # Should not happen if JWT is valid
+        app.logger.error(f"User not found for ID: {user_id_int} from JWT during DB reset confirm.")
+        return jsonify(msg="User not found or invalid token."), 401
+
+    actual_username = user['username']
+
+    data = request.get_json()
+    if not data:
+        return jsonify(msg="Missing JSON payload."), 400
+
+    reset_password = data.get('reset_password')
+    confirmation_text = data.get('confirmation_text')
+
+    # Validation
+    if reset_password != "I2vdatabase@123#@123":
+        log_audit_action(
+            action_type='DATABASE_RESET_CONFIRM_FAILED_VALIDATION',
+            user_id=user_id_int, username=actual_username,
+            details={'reason': 'Invalid reset password provided', 'ip_address': request.remote_addr}
+        )
+        return jsonify(msg="Invalid reset password."), 400
+
+    if confirmation_text != "CONFIRM DELETE":
+        log_audit_action(
+            action_type='DATABASE_RESET_CONFIRM_FAILED_VALIDATION',
+            user_id=user_id_int, username=actual_username,
+            details={'reason': 'Invalid confirmation text provided', 'ip_address': request.remote_addr}
+        )
+        return jsonify(msg="Invalid confirmation text."), 400
+
+    db_path = app.config['DATABASE']
+
+    # Close existing g.db connection if it exists
+    db_conn_to_close = g.pop('db', None)
+    if db_conn_to_close is not None:
+        try:
+            db_conn_to_close.close()
+            app.logger.info("Successfully closed g.db connection before database reset.")
+        except Exception as e_close:
+            app.logger.error(f"Error closing g.db connection before reset: {e_close}")
+            # Potentially proceed, but this is risky. For now, we will proceed.
+
+    # Delete the database file
+    try:
+        if os.path.exists(db_path):
+            os.remove(db_path)
+            app.logger.info(f"Database file {db_path} deleted successfully.")
+        else:
+            app.logger.warning(f"Database file {db_path} not found for deletion during reset. Proceeding to re-initialize.")
+    except OSError as e:
+        app.logger.error(f"Error deleting database file {db_path}: {e}")
+        log_audit_action(
+            action_type='DATABASE_RESET_FAILED_DELETE',
+            user_id=user_id_int, username=actual_username,
+            details={'error': str(e), 'db_path': db_path, 'ip_address': request.remote_addr}
+        )
+        return jsonify(msg="Failed to delete database file.", error=str(e)), 500
+
+    # Re-initialize the database
+    try:
+        database.init_db(db_path) # This function now handles db_path correctly
+        app.logger.info(f"Database {db_path} re-initialized successfully.")
+
+        # After init_db, it's good practice to re-establish g.db for any subsequent operations in this request (if any)
+        # or for other teardown logic that might expect g.db.
+        # However, since we're returning immediately, it might not be strictly necessary here.
+        # For robustness:
+        g.db = database.get_db_connection(db_path)
+        g.db.row_factory = sqlite3.Row
+
+
+        log_audit_action(
+            action_type='DATABASE_RESET_COMPLETED',
+            user_id=user_id_int, username=actual_username,
+            details={'db_path': db_path, 'ip_address': request.remote_addr}
+        )
+        return jsonify(message="Database has been successfully reset."), 200
+    except Exception as e:
+        app.logger.error(f"Error re-initializing database {db_path}: {e}")
+        log_audit_action(
+            action_type='DATABASE_RESET_FAILED_INIT',
+            user_id=user_id_int, username=actual_username,
+            details={'error': str(e), 'db_path': db_path, 'ip_address': request.remote_addr}
+        )
+        # Attempt to restore failsafe backup if db re-initialization fails?
+        # This is complex and depends on how init_db might fail.
+        # For now, just report the error.
+        return jsonify(msg="Failed to re-initialize database.", error=str(e)), 500
 
 
 @app.route('/api/favorites', methods=['POST'])

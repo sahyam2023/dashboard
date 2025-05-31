@@ -9,6 +9,7 @@ import {
 import { Link as LinkType, Software, SoftwareVersion } from '../types'; // LinkType is already here
 import CommentSection from '../components/comments/CommentSection'; // Added CommentSection
 import DataTable, { ColumnDef } from '../components/DataTable';
+import { formatISTWithOffset } from '../utils'; // Added import
 import FilterTabs from '../components/FilterTabs';
 import LoadingState from '../components/LoadingState';
 import ErrorState from '../components/ErrorState';
@@ -343,8 +344,8 @@ const LinksView: React.FC = () => {
     },
     { key: 'uploaded_by_username', header: 'Added By', sortable: true, render: l => l.uploaded_by_username || 'N/A' },
     { key: 'updated_by_username', header: 'Updated By', sortable: false, render: l => l.updated_by_username || 'N/A' },
-    { key: 'created_at', header: 'Created', sortable: true, render: l => l.created_at ? new Date(l.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : '-' },
-    { key: 'updated_at', header: 'Updated', sortable: true, render: l => l.updated_at ? new Date(l.updated_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : '-' },
+    { key: 'created_at', header: 'Created', sortable: true, Cell: ({ value }) => formatISTWithOffset(value) },
+    { key: 'updated_at', header: 'Updated', sortable: true, Cell: ({ value }) => formatISTWithOffset(value) },
     {
       key: 'actions' as any,
       header: 'Actions',

@@ -10,6 +10,7 @@ import {
 import { MiscCategory, MiscFile } from '../types'; // MiscFile is already here
 import CommentSection from '../components/comments/CommentSection'; // Added CommentSection
 import DataTable, { ColumnDef } from '../components/DataTable';
+import { formatISTWithOffset } from '../utils'; // Added import
 import ErrorState from '../components/ErrorState';
 import LoadingState from '../components/LoadingState';
 import AdminUploadToMiscForm from '../components/admin/AdminUploadToMiscForm'; // Using the correct form name
@@ -260,7 +261,13 @@ const role = user?.role; // Access role safely, as user can be null
     finally { setIsMovingSelected(false); setModalSelectedCategoryId(null); }
   };
 
-  const formatDate = (dateStr: string | null | undefined) => dateStr ? new Date(dateStr).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : '-';
+  // formatDate helper is no longer needed as we use the utility function directly in columns.
+  // However, if it were used for both created_at and updated_at which are not present in this file's column defs,
+  // it would be modified. Let's assume created_at and updated_at are handled directly or this helper is for specific date-only fields if any.
+  // For this task, the relevant column is 'created_at' which is 'Uploaded At'.
+  // If other timestamp columns like 'updated_at' were present, they'd also use formatISTWithOffset.
+
+  // const formatDate = (dateStr: string | null | undefined) => dateStr ? new Date(dateStr).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : '-';
   const formatFileSize = (bytes: number|null|undefined) => {
     if (bytes == null) return 'N/A';
     if (bytes === 0) return '0 B';
@@ -275,7 +282,9 @@ const role = user?.role; // Access role safely, as user can be null
     { key: 'category_name', header: 'Category', sortable: true },
     { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: f => f.uploaded_by_username||'N/A' },
     { key: 'file_size', header: 'Size', sortable: true, render: f => formatFileSize(f.file_size) },
-    { key: 'created_at', header: 'Uploaded At', sortable: true, render: f => formatDate(f.created_at) },
+    { key: 'created_at', header: 'Uploaded At', sortable: true, Cell: ({ value }) => formatISTWithOffset(value) },
+    // Assuming there's an updated_at field that might be added later or is implicitly handled by a similar pattern.
+    // For now, only created_at is explicitly in the provided column defs.
     { 
       key: 'file_path', 
       header: 'Link', 

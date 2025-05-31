@@ -3,6 +3,7 @@ import { FiChevronDown, FiChevronUp, FiFilter, FiLoader, FiAlertTriangle } from 
 import { ListChecks as ListChecksIcon } from 'lucide-react'; // Added
 import { Box, Typography } from '@mui/material'; // Added
 import { fetchAuditLogEntries, AuditLogResponse, AuditLogEntry } from '../../services/api';
+import { formatISTWithOffset } from '../../utils'; // Updated import
 import { showErrorToast } from '../../utils/toastUtils'; // Import toast utility
 import LoadingState from '../LoadingState'; // For initial load
 import ErrorState from '../ErrorState'; // For initial load error
@@ -171,7 +172,7 @@ const AuditLogViewer: React.FC = () => {
                 ) : logs.length > 0 ? logs.map((log) => (
                   <tr key={log.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{log.id}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{log.timestamp ? new Date(log.timestamp).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }) : 'N/A'}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{formatISTWithOffset(log.timestamp)}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{log.user_id ?? 'N/A'}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{log.username ?? 'N/A'}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{log.action_type}</td>

@@ -14,6 +14,7 @@ import { useAuth } from '../context/AuthContext';
 import LoadingState from '../components/LoadingState';
 import ErrorState from '../components/ErrorState';
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils'; // Import toast utilities
+import { formatISTWithOffset } from '../utils'; // Added import
 
 const FavoritesView: React.FC = () => {
   const { isAuthenticated, isLoading: isAuthLoading } = useAuth(); // Renamed to avoid conflict
@@ -224,7 +225,7 @@ const FavoritesView: React.FC = () => {
                     {item.version_number && ` • Version: ${item.version_number}`}
                   </p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Favorited on: {new Date(item.favorited_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}
+                    Favorited on: {formatISTWithOffset(item.favorited_at)}
                   </p>
                 </div>
               </div>

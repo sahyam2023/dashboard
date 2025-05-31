@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useForm, Controller, SubmitHandler, FieldErrors } from 'react-hook-form';
 import * as yup from 'yup';
 import { yupResolver } from '@hookform/resolvers/yup';
-import { toast } from 'react-toastify';
+import { showSuccessToast, showErrorToast } from '../../utils/toastUtils'; // Standardized toast
 import {
   Software,
   Link as LinkType,
@@ -13,8 +13,11 @@ import {
 import {
   fetchSoftware,
   fetchVersionsForSoftware,
-  addAdminLinkWithUrl, uploadAdminLinkFile,
-  editAdminLinkWithUrl, editAdminLinkFile
+  addAdminLinkWithUrl,
+  // uploadAdminLinkFile, // To be replaced
+  editAdminLinkWithUrl,
+  // editAdminLinkFile, // To be replaced
+  uploadFileInChunks // New chunked upload service
 } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { UploadCloud, Link as LinkIconLucide, FileText as FileIconLucide, X } from 'lucide-react';
@@ -102,7 +105,8 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
 
   const [isLoading, setIsLoading] = useState(false); // For API calls
   const [isFetchingSoftwareOrVersions, setIsFetchingSoftwareOrVersions] = useState(false); // For dropdown loading
-  // Error and success messages will be handled by toast
+  const [uploadProgress, setUploadProgress] = useState<number>(0); // For chunked upload progress
+  // Error and success messages will be handled by toast (already done for some)
 
   const { isAuthenticated, user } = useAuth();
   const role = user?.role; // Access role safely, as user can be null
@@ -123,7 +127,7 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
       setIsFetchingSoftwareOrVersions(true);
       fetchSoftware()
         .then(setSoftwareList)
-        .catch(() => toast.error('Failed to load software list.')) // Use toast
+        .catch(() => showErrorToast('Failed to load software list.')) // Standardized
         .finally(() => setIsFetchingSoftwareOrVersions(false));
     }
   }, [isAuthenticated, role]);
@@ -138,7 +142,7 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
       // setShowTypeVersionInput(false); // Derived state
       fetchVersionsForSoftware(parseInt(watchedSoftwareId))
         .then(setVersionsList)
-        .catch(() => toast.error('Failed to load versions for selected software.')) // Use toast
+        .catch(() => showErrorToast('Failed to load versions for selected software.')) // Standardized
         .finally(() => setIsFetchingSoftwareOrVersions(false));
     } else {
       setVersionsList([]);
@@ -230,10 +234,12 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
   // handleVersionSelectionChange is no longer needed, RHF handles select changes via register or Controller
 
   // RHF Submit Handler
+  // RHF Submit Handler
   const onSubmit: SubmitHandler<LinkFormData> = async (data) => {
     // Old e.preventDefault() is not needed
     // Old manual validation checks are removed
     setIsLoading(true);
+    setUploadProgress(0); // Reset progress
     // Old setError(null); setSuccessMessage(null) removed
 
     let finalVersionId: number | undefined = undefined;
@@ -257,67 +263,71 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
 
     try {
       let resultLink: LinkType;
-      if (data.inputMode === 'url') { // From RHF data
-        const payloadForUrl = { 
-            ...basePayload, 
-            url: data.externalUrl!.trim(), // From RHF data, ! asserts it's present due to yup validation
-            is_external_link: true 
+      if (data.inputMode === 'url') {
+        const payloadForUrl = {
+          ...basePayload,
+          url: data.externalUrl!.trim(),
+          is_external_link: true
         } as AddLinkPayloadFlexible | EditLinkPayloadFlexible;
 
         if (isEditMode && linkToEdit) {
           resultLink = await editAdminLinkWithUrl(linkToEdit.id, payloadForUrl as EditLinkPayloadFlexible);
+          showSuccessToast(`Link "${resultLink.title}" updated successfully!`); // Standardized
+          if (onLinkUpdated) onLinkUpdated(resultLink);
         } else {
           resultLink = await addAdminLinkWithUrl(payloadForUrl as AddLinkPayloadFlexible);
+          showSuccessToast(`Link "${resultLink.title}" added successfully!`); // Standardized
+          if (onLinkAdded) onLinkAdded(resultLink);
+          if (!isEditMode) {
+            resetFormDefaults(true);
+            setValue('selectedVersionId', ''); setValue('typedVersionString', '');
+          }
         }
       } else { // data.inputMode === 'upload'
-        const formDataPayload = new FormData(); // Renamed from 'formData' to avoid conflict
-        formDataPayload.append('software_id', data.selectedSoftwareId); // From RHF data
-        if (finalVersionId) formDataPayload.append('version_id', finalVersionId.toString());
-        if (finalTypedVersionString) formDataPayload.append('typed_version_string', finalTypedVersionString);
-        
-        formDataPayload.append('title', data.title.trim()); // From RHF data
-        if (data.description?.trim()) formDataPayload.append('description', data.description.trim()); // From RHF data
-        
-        // data.selectedFile comes from RHF, yup ensures it's present if required
-        if (data.selectedFile) {
-             formDataPayload.append('file', data.selectedFile);
+        if (!data.selectedFile) {
+          if (isEditMode && linkToEdit && !linkToEdit.is_external_link && !data.selectedFile) {
+            showErrorToast("To update metadata of an existing uploaded file link without re-uploading, use a different form/feature. To replace the file, select a new file.");
+            setIsLoading(false);
+            return;
+          }
+           if (!data.selectedFile && !isEditMode) { // Should be caught by yup
+             showErrorToast("No file selected for upload.");
+             setIsLoading(false);
+             return;
+          }
         }
-        // No need to check !selectedFile for new uploads, yup handles it.
+        
+        const chunkMetadata = {
+            software_id: data.selectedSoftwareId,
+            ...(finalVersionId && { version_id: finalVersionId.toString() }),
+            ...(finalTypedVersionString && { typed_version_string: finalTypedVersionString }),
+            link_title: data.title.trim(), // Backend expects 'link_title' for this item_type
+            description: data.description?.trim() || '',
+        };
 
-        if (isEditMode && linkToEdit) {
-          resultLink = await editAdminLinkFile(linkToEdit.id, formDataPayload);
-        } else {
-          // No !selectedFile check needed here, yup ensures it for new uploads
-          resultLink = await uploadAdminLinkFile(formDataPayload);
-        }
+        resultLink = await uploadFileInChunks(
+            data.selectedFile!,
+            'link_file', // Use 'link_file' as itemType for backend differentiation if necessary
+            chunkMetadata,
+            (progress) => setUploadProgress(progress)
+        );
+        
+        showSuccessToast(`Link file "${resultLink.title}" added successfully via chunked upload!`);
+        if (onLinkAdded) onLinkAdded(resultLink);
+        resetFormDefaults(true);
+        setValue('selectedVersionId', '');
+        setValue('typedVersionString', '');
       }
-      toast.success(`Link "${resultLink.title}" ${isEditMode ? 'updated' : 'added'} successfully!`); // Use toast
-      
-      if (!isEditMode) {
-          resetFormDefaults(true); // Keep software selected
-          // Explicitly reset version fields because they might not be covered by default reset if software is kept
-          setValue('selectedVersionId', '');
-          setValue('typedVersionString', '');
-      }
-      // Old setSelectedVersionId, setShowTypeVersionInput, setTypedVersionString removed
-
-      if (isEditMode && onLinkUpdated) onLinkUpdated(resultLink);
-      if (!isEditMode && onLinkAdded) onLinkAdded(resultLink);
-
-    } catch (err: any) { 
-      const message = err.response?.data?.msg || err.message || `Failed to ${isEditMode ? 'update' : 'add'} link.`;
-      toast.error(message); // Use toast
+    } catch (err: any) {
+      const message = err.response?.data?.msg || err.message || `Failed to ${isEditMode && data.inputMode === 'url' ? 'update' : 'add'} link.`;
+      showErrorToast(message); // Standardized
     }
     finally { setIsLoading(false); }
   };
   
-  // Optional error handler for handleSubmit, useful for global form error toasts if needed
   const onFormError = (formErrors: FieldErrors<LinkFormData>) => {
     console.error("Form validation errors:", formErrors);
-    // Example: Find the first error message and toast it, or a generic message
-    // const firstErrorMessage = Object.values(formErrors).map(e => e?.message).find(m => !!m);
-    // if (firstErrorMessage) toast.error(firstErrorMessage); else 
-    toast.error("Please correct the errors highlighted in the form.");
+    showErrorToast("Please correct the errors highlighted in the form."); // Standardized
   };
 
 
@@ -520,6 +530,19 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
             </button>
         )}
       </div>
+
+      {/* Upload Progress Bar */}
+      {isLoading && watchedInputMode === 'upload' && uploadProgress > 0 && (
+        <div className="w-full bg-gray-200 rounded-full h-4 dark:bg-gray-700 my-3 relative">
+          <div
+            className="bg-blue-600 h-4 rounded-full transition-all duration-150 ease-out"
+            style={{ width: `${uploadProgress}%` }}
+          ></div>
+          <p className="absolute inset-0 text-center text-xs font-medium leading-4 text-white dark:text-gray-100">
+            {Math.round(uploadProgress)}%
+          </p>
+        </div>
+      )}
     </form>
   );
 };

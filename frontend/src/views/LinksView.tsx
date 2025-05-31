@@ -144,7 +144,7 @@ const LinksView: React.FC = () => {
     if (activeSoftwareId) fetchVersionsForSoftware(activeSoftwareId).then(setVersionList).catch(() => { showErrorToast("Failed to load versions for filter."); setVersionList([]); });
     else setVersionList([]);
   }, [activeSoftwareId]);
-  
+
   // Effect to handle focusing on a comment if item_id and comment_id are in URL
   useEffect(() => {
     const queryParams = new URLSearchParams(location.search);
@@ -185,8 +185,8 @@ const LinksView: React.FC = () => {
   const handleApplyAdvancedFilters = () => { setCurrentPage(1); fetchAndSetLinks(1, true); };
 
   const handleOperationSuccess = async (message: string) => { // Made async
-    setShowAddOrEditForm(false); 
-    setEditingLink(null); 
+    setShowAddOrEditForm(false);
+    setEditingLink(null);
     /* showSuccessToast(message); */
     await fetchAndSetLinks(1, true); // Await this
 
@@ -299,22 +299,20 @@ const LinksView: React.FC = () => {
 
   const columns: ColumnDef<LinkType>[] = [
     { key: 'title', header: 'Title', sortable: true }, { key: 'software_name', header: 'Software', sortable: true },
-    { key: 'version_name', header: 'Version', sortable: true, render: l => l.version_name  || 'N/A' },
+    { key: 'version_name', header: 'Version', sortable: true, render: l => l.version_name || 'N/A' },
     { key: 'description', header: 'Description', render: l => <span className="text-sm text-gray-600 block max-w-xs truncate" title={l.description || ''}>{l.description || '-'}</span> },
-        {
+    {
+      // THIS IS THE PART TO CHANGE
       key: 'url',
-      header: 'URL/FILE',
+      header: 'Link', // Changed from 'URL/FILE' to 'Link' for consistency with PatchesView
       render: (l: LinkType) => {
         const isEffectivelyDownloadable = l.is_external_link || l.is_downloadable !== false;
-        // The original linkText calculation is no longer needed for the visible text
-        // const linkText = l.is_external_link
-        //   ? (l.url.length > 40 ? `${l.url.substring(0, 37)}...` : l.url)
-        //   : (l.original_filename_ref || l.url.split('/').pop() || 'Uploaded File');
 
-        // Determine the display text based on link type
-        const displayText = l.is_external_link ? 'Open Link' : 'Download';
-        // Determine the icon based on link type (ExternalLink for URLs, Download for files)
-        const IconComponent = l.is_external_link ? ExternalLink : Download;
+        // The text will now always be "Link"
+        const displayText = 'Link';
+
+        // The icon will now always be Download, just like in PatchesView
+        const IconComponent = Download;
 
         if (!isEffectivelyDownloadable && !l.is_external_link) { // Uploaded file, not downloadable
           return (
@@ -334,6 +332,7 @@ const LinksView: React.FC = () => {
               if (!isEffectivelyDownloadable) e.preventDefault();
               e.stopPropagation();
             }}
+            // Update the title attribute to be more specific to links context, matching PatchesView's logic
             title={isEffectivelyDownloadable ? (l.is_external_link ? "Open external link" : "Download file") : "Download not permitted"}
           >
             <IconComponent size={14} className="mr-1 flex-shrink-0" />
@@ -455,7 +454,7 @@ const LinksView: React.FC = () => {
         </div>
       )}
 
-            {/* REVISED STRUCTURE FOR FILTERS START */}
+      {/* REVISED STRUCTURE FOR FILTERS START */}
       {/* This div contains the FilterTabs AND the Version dropdown side-by-side (on md screens) */}
       <div className="flex flex-col md:flex-row md:items-center md:gap-4 -mt-20">
         {softwareList.length > 0 && (
@@ -520,8 +519,8 @@ const LinksView: React.FC = () => {
             {filtersAreActive ? "No Links Found Matching Criteria" : "No Links Available"}
           </p>
           <p className="text-sm text-gray-500 dark:text-gray-400 px-4">
-            {filtersAreActive ? "Try adjusting or clearing your search/filter settings." : 
-             (role==='admin'||role==='super_admin') ? "Add new links to get started." : "Please check back later."}
+            {filtersAreActive ? "Try adjusting or clearing your search/filter settings." :
+              (role === 'admin' || role === 'super_admin') ? "Add new links to get started." : "Please check back later."}
           </p>
           {filtersAreActive && (<button onClick={handleClearAllFiltersAndSearch} className="mt-6 btn-primary text-sm">Clear All Filters & Search</button>)}
         </div>
@@ -529,34 +528,34 @@ const LinksView: React.FC = () => {
         <DataTable columns={columns} data={filteredLinksBySearch} rowClassName="group" isLoading={isLoadingInitial || isProcessingSingleItem} currentPage={currentPage} totalPages={totalPages} onPageChange={handlePageChange} itemsPerPage={itemsPerPage} totalItems={totalLinks} sortColumn={sortBy} sortOrder={sortOrder} onSort={handleSort} isSelectionEnabled={true} selectedItemIds={selectedLinkIds} onSelectItem={handleSelectItem} onSelectAllItems={handleSelectAllItems} />
       )}
 
-      {showDeleteConfirm && linkToDelete && (<ConfirmationModal isOpen={showDeleteConfirm} title="Delete Link" message={`Delete "${linkToDelete.title}"?`} onConfirm={handleDeleteLinkConfirm} onCancel={closeDeleteConfirm} isConfirming={isProcessingSingleItem} confirmButtonText="Delete" confirmButtonVariant="danger"/>)}
-      {showBulkDeleteConfirmModal && (<ConfirmationModal isOpen={showBulkDeleteConfirmModal} title={`Delete ${selectedLinkIds.size} Link(s)`} message={`Delete ${selectedLinkIds.size} selected items?`} onConfirm={confirmBulkDeleteLinks} onCancel={()=>setShowBulkDeleteConfirmModal(false)} isConfirming={isDeletingSelected} confirmButtonText="Delete Selected" confirmButtonVariant="danger"/>)}
-      
+      {showDeleteConfirm && linkToDelete && (<ConfirmationModal isOpen={showDeleteConfirm} title="Delete Link" message={`Delete "${linkToDelete.title}"?`} onConfirm={handleDeleteLinkConfirm} onCancel={closeDeleteConfirm} isConfirming={isProcessingSingleItem} confirmButtonText="Delete" confirmButtonVariant="danger" />)}
+      {showBulkDeleteConfirmModal && (<ConfirmationModal isOpen={showBulkDeleteConfirmModal} title={`Delete ${selectedLinkIds.size} Link(s)`} message={`Delete ${selectedLinkIds.size} selected items?`} onConfirm={confirmBulkDeleteLinks} onCancel={() => setShowBulkDeleteConfirmModal(false)} isConfirming={isDeletingSelected} confirmButtonText="Delete Selected" confirmButtonVariant="danger" />)}
+
       {showBulkMoveModal && (
-        <Modal isOpen={showBulkMoveModal} onClose={()=>setShowBulkMoveModal(false)} title={`Move ${selectedLinkIds.size} Link(s)`}>
+        <Modal isOpen={showBulkMoveModal} onClose={() => setShowBulkMoveModal(false)} title={`Move ${selectedLinkIds.size} Link(s)`}>
           <div className="p-4">
             <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">Select target Software and optionally a Version:</p>
             <div className="mb-4">
               <label htmlFor="modalSoftwareMoveLinks" className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Target Software*</label>
-              <select id="modalSoftwareMoveLinks" value={modalSelectedSoftwareId??''} onChange={e=>{setModalSelectedSoftwareId(e.target.value?parseInt(e.target.value):null); setModalSelectedVersionId(undefined);}} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white" disabled={isMovingSelected||softwareList.length===0}>
+              <select id="modalSoftwareMoveLinks" value={modalSelectedSoftwareId ?? ''} onChange={e => { setModalSelectedSoftwareId(e.target.value ? parseInt(e.target.value) : null); setModalSelectedVersionId(undefined); }} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white" disabled={isMovingSelected || softwareList.length === 0}>
                 <option value="">Select Software...</option>
-                {softwareList.map(sw=>(<option key={sw.id} value={sw.id}>{sw.name}</option>))}
+                {softwareList.map(sw => (<option key={sw.id} value={sw.id}>{sw.name}</option>))}
               </select>
             </div>
             {modalSelectedSoftwareId && (
               <div className="mb-4">
                 <label htmlFor="modalVersionMoveLinks" className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Target Version (Optional)</label>
-                <select id="modalVersionMoveLinks" value={modalSelectedVersionId===null ? 'NULL_VERSION' : modalSelectedVersionId??''} onChange={e=>setModalSelectedVersionId(e.target.value === 'NULL_VERSION' ? null : (e.target.value ? parseInt(e.target.value) : undefined))} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white" disabled={isMovingSelected||isLoadingModalVersions}>
-                  <option value="">{isLoadingModalVersions?'Loading...':'Select Version (Optional)...'}</option>
+                <select id="modalVersionMoveLinks" value={modalSelectedVersionId === null ? 'NULL_VERSION' : modalSelectedVersionId ?? ''} onChange={e => setModalSelectedVersionId(e.target.value === 'NULL_VERSION' ? null : (e.target.value ? parseInt(e.target.value) : undefined))} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white" disabled={isMovingSelected || isLoadingModalVersions}>
+                  <option value="">{isLoadingModalVersions ? 'Loading...' : 'Select Version (Optional)...'}</option>
                   <option value="NULL_VERSION">No Specific Version (Clear Association)</option>
-                  {modalVersionsList.map(v=>(<option key={v.id} value={v.id}>{v.version_number}</option>))}
+                  {modalVersionsList.map(v => (<option key={v.id} value={v.id}>{v.version_number}</option>))}
                 </select>
-                {modalVersionsList.length===0&&!isLoadingModalVersions&&modalSelectedSoftwareId&&<p className="text-xs text-yellow-600 mt-1">No versions for selected software. You can still move to the software without a specific version.</p>}
+                {modalVersionsList.length === 0 && !isLoadingModalVersions && modalSelectedSoftwareId && <p className="text-xs text-yellow-600 mt-1">No versions for selected software. You can still move to the software without a specific version.</p>}
               </div>
             )}
             <div className="flex justify-end space-x-3 mt-6">
-              <button type="button" onClick={()=>setShowBulkMoveModal(false)} className="px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500" disabled={isMovingSelected}>Cancel</button>
-              <button type="button" onClick={handleConfirmBulkMoveLinks} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500" disabled={isMovingSelected||!modalSelectedSoftwareId}>{isMovingSelected?'Moving...':'Confirm Move'}</button>
+              <button type="button" onClick={() => setShowBulkMoveModal(false)} className="px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500" disabled={isMovingSelected}>Cancel</button>
+              <button type="button" onClick={handleConfirmBulkMoveLinks} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500" disabled={isMovingSelected || !modalSelectedSoftwareId}>{isMovingSelected ? 'Moving...' : 'Confirm Move'}</button>
             </div>
           </div>
         </Modal>

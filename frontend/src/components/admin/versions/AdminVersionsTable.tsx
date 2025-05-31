@@ -70,7 +70,7 @@ const AdminVersionsTable: React.FC<AdminVersionsTableProps> = ({ onEdit, onDelet
     if (!dateStr) return 'N/A';
     // Check if dateStr is a valid date string before creating a Date object
     const date = new Date(dateStr);
-    return !isNaN(date.getTime()) ? date.toLocaleString() : 'Invalid Date';
+    return !isNaN(date.getTime()) ? date.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : 'Invalid Date';
   };
 
   const truncateText = (text: string | null | undefined, maxLength: number = 50) => {

@@ -25,8 +25,8 @@ CREATE TABLE IF NOT EXISTS comments (
     item_id INTEGER NOT NULL,
     item_type TEXT NOT NULL,
     parent_comment_id INTEGER,
-    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
+    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
     FOREIGN KEY (user_id) REFERENCES users (id),
     FOREIGN KEY (parent_comment_id) REFERENCES comments (id) ON DELETE CASCADE
 );
@@ -35,7 +35,7 @@ CREATE INDEX IF NOT EXISTS idx_comments_item_id_item_type ON comments (item_id, 
 CREATE INDEX IF NOT EXISTS idx_comments_parent_comment_id ON comments (parent_comment_id);
 CREATE TRIGGER IF NOT EXISTS update_comments_updated_at
 AFTER UPDATE ON comments FOR EACH ROW BEGIN
-    UPDATE comments SET updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE id = OLD.id;
+    UPDATE comments SET updated_at = (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')) WHERE id = OLD.id;
 END;
 
 CREATE TABLE IF NOT EXISTS users (
@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS users (
     password_reset_required BOOLEAN DEFAULT FALSE NOT NULL,
     dashboard_layout_prefs TEXT DEFAULT NULL,
     profile_picture_filename TEXT, 
-    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30'))
 );
 CREATE INDEX IF NOT EXISTS idx_users_username ON users (username);
 CREATE INDEX IF NOT EXISTS idx_users_role ON users (role);
@@ -69,9 +69,9 @@ CREATE TABLE IF NOT EXISTS versions (
     changelog TEXT,
     known_bugs TEXT,
     created_by_user_id INTEGER,
-    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
     updated_by_user_id INTEGER,
-    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
     FOREIGN KEY (software_id) REFERENCES software (id),
     FOREIGN KEY (created_by_user_id) REFERENCES users (id),
     FOREIGN KEY (updated_by_user_id) REFERENCES users (id)
@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS versions (
 CREATE INDEX IF NOT EXISTS idx_versions_software_id ON versions (software_id);
 CREATE TRIGGER IF NOT EXISTS update_versions_updated_at
 AFTER UPDATE ON versions FOR EACH ROW BEGIN
-    UPDATE versions SET updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE id = OLD.id;
+    UPDATE versions SET updated_at = (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')) WHERE id = OLD.id;
 END;
 
 CREATE TABLE IF NOT EXISTS documents (
@@ -95,9 +95,9 @@ CREATE TABLE IF NOT EXISTS documents (
     file_size INTEGER,
     file_type TEXT,
     created_by_user_id INTEGER NOT NULL,
-    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
     updated_by_user_id INTEGER,
-    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
     FOREIGN KEY (software_id) REFERENCES software (id),
     FOREIGN KEY (created_by_user_id) REFERENCES users (id),
     FOREIGN KEY (updated_by_user_id) REFERENCES users (id),
@@ -107,7 +107,7 @@ CREATE INDEX IF NOT EXISTS idx_documents_software_id ON documents (software_id);
 CREATE INDEX IF NOT EXISTS idx_documents_stored_filename ON documents (stored_filename);
 CREATE TRIGGER IF NOT EXISTS update_documents_updated_at
 AFTER UPDATE ON documents FOR EACH ROW BEGIN
-    UPDATE documents SET updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE id = OLD.id;
+    UPDATE documents SET updated_at = (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')) WHERE id = OLD.id;
 END;
 
 CREATE TABLE IF NOT EXISTS patches (
@@ -124,9 +124,9 @@ CREATE TABLE IF NOT EXISTS patches (
     file_type TEXT,
     patch_by_developer TEXT,
     created_by_user_id INTEGER NOT NULL,
-    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
     updated_by_user_id INTEGER,
-    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
     FOREIGN KEY (version_id) REFERENCES versions (id),
     FOREIGN KEY (created_by_user_id) REFERENCES users (id),
     FOREIGN KEY (updated_by_user_id) REFERENCES users (id),
@@ -136,7 +136,7 @@ CREATE INDEX IF NOT EXISTS idx_patches_version_id ON patches (version_id);
 CREATE INDEX IF NOT EXISTS idx_patches_stored_filename ON patches (stored_filename);
 CREATE TRIGGER IF NOT EXISTS update_patches_updated_at
 AFTER UPDATE ON patches FOR EACH ROW BEGIN
-    UPDATE patches SET updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE id = OLD.id;
+    UPDATE patches SET updated_at = (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')) WHERE id = OLD.id;
 END;
 
 CREATE TABLE IF NOT EXISTS links (
@@ -152,9 +152,9 @@ CREATE TABLE IF NOT EXISTS links (
     file_size INTEGER,
     file_type TEXT,
     created_by_user_id INTEGER NOT NULL,
-    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
     updated_by_user_id INTEGER,
-    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
     FOREIGN KEY (software_id) REFERENCES software (id),
     FOREIGN KEY (version_id) REFERENCES versions (id),
     FOREIGN KEY (created_by_user_id) REFERENCES users (id),
@@ -165,7 +165,7 @@ CREATE INDEX IF NOT EXISTS idx_links_version_id ON links (version_id);
 CREATE INDEX IF NOT EXISTS idx_links_stored_filename ON links (stored_filename);
 CREATE TRIGGER IF NOT EXISTS update_links_updated_at
 AFTER UPDATE ON links FOR EACH ROW BEGIN
-    UPDATE links SET updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE id = OLD.id;
+    UPDATE links SET updated_at = (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')) WHERE id = OLD.id;
 END;
 
 CREATE TABLE IF NOT EXISTS misc_categories (
@@ -173,15 +173,15 @@ CREATE TABLE IF NOT EXISTS misc_categories (
     name TEXT NOT NULL UNIQUE,
     description TEXT,
     created_by_user_id INTEGER NOT NULL,
-    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
     updated_by_user_id INTEGER,
-    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
     FOREIGN KEY (created_by_user_id) REFERENCES users (id),
     FOREIGN KEY (updated_by_user_id) REFERENCES users (id)
 );
 CREATE TRIGGER IF NOT EXISTS update_misc_categories_updated_at
 AFTER UPDATE ON misc_categories FOR EACH ROW BEGIN
-    UPDATE misc_categories SET updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE id = OLD.id;
+    UPDATE misc_categories SET updated_at = (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')) WHERE id = OLD.id;
 END;
 
 CREATE TABLE IF NOT EXISTS misc_files (
@@ -196,9 +196,9 @@ CREATE TABLE IF NOT EXISTS misc_files (
     file_type TEXT,
     file_size INTEGER,
     created_by_user_id INTEGER NOT NULL,
-    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
     updated_by_user_id INTEGER,
-    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
     FOREIGN KEY (misc_category_id) REFERENCES misc_categories (id),
     FOREIGN KEY (user_id) REFERENCES users (id),
     FOREIGN KEY (created_by_user_id) REFERENCES users (id),
@@ -210,7 +210,7 @@ CREATE INDEX IF NOT EXISTS idx_misc_files_category_id ON misc_files (misc_catego
 CREATE INDEX IF NOT EXISTS idx_misc_files_user_id ON misc_files (user_id);
 CREATE TRIGGER IF NOT EXISTS update_misc_files_updated_at
 AFTER UPDATE ON misc_files FOR EACH ROW BEGIN
-    UPDATE misc_files SET updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE id = OLD.id;
+    UPDATE misc_files SET updated_at = (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')) WHERE id = OLD.id;
 END;
 
 CREATE TABLE IF NOT EXISTS user_favorites (
@@ -218,7 +218,7 @@ CREATE TABLE IF NOT EXISTS user_favorites (
     user_id INTEGER NOT NULL,
     item_id INTEGER NOT NULL,
     item_type TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
     FOREIGN KEY (user_id) REFERENCES users (id),
     UNIQUE (user_id, item_id, item_type)
 );
@@ -230,7 +230,7 @@ CREATE TABLE IF NOT EXISTS download_log (
     user_id INTEGER,
     file_id INTEGER NOT NULL,
     file_type TEXT NOT NULL,
-    download_timestamp TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    download_timestamp TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
     ip_address TEXT,
     user_agent TEXT,
     FOREIGN KEY (user_id) REFERENCES users (id)
@@ -246,7 +246,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     action_type TEXT NOT NULL,
     target_table TEXT,
     target_id INTEGER,
-    timestamp TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    timestamp TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
     details TEXT,
     FOREIGN KEY (user_id) REFERENCES users (id)
 );
@@ -291,8 +291,8 @@ CREATE TABLE IF NOT EXISTS file_permissions (
     file_type TEXT NOT NULL, -- (e.g., 'document', 'patch', 'link', 'misc_file')
     can_view BOOLEAN NOT NULL DEFAULT TRUE,
     can_download BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
+    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
     FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
     UNIQUE (user_id, file_id, file_type)
 );
@@ -300,7 +300,7 @@ CREATE INDEX IF NOT EXISTS idx_file_permissions_user_id ON file_permissions (use
 CREATE INDEX IF NOT EXISTS idx_file_permissions_file_id_file_type ON file_permissions (file_id, file_type);
 CREATE TRIGGER IF NOT EXISTS update_file_permissions_updated_at
 AFTER UPDATE ON file_permissions FOR EACH ROW BEGIN
-    UPDATE file_permissions SET updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE id = OLD.id;
+    UPDATE file_permissions SET updated_at = (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')) WHERE id = OLD.id;
 END;
 
 -- System Settings Table
@@ -309,7 +309,7 @@ CREATE TABLE IF NOT EXISTS system_settings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     setting_name TEXT UNIQUE NOT NULL,
     is_enabled BOOLEAN NOT NULL DEFAULT FALSE,
-    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30'))
 );
 
 -- Trigger to update 'updated_at' timestamp on row update.
@@ -317,7 +317,7 @@ CREATE TRIGGER IF NOT EXISTS trigger_system_settings_updated_at
 AFTER UPDATE ON system_settings
 FOR EACH ROW
 BEGIN
-    UPDATE system_settings SET updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE id = OLD.id;
+    UPDATE system_settings SET updated_at = (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')) WHERE id = OLD.id;
 END;
 
 -- Initialize the maintenance_mode setting.
@@ -334,13 +334,13 @@ CREATE TABLE IF NOT EXISTS notifications (
     item_id INTEGER,
     item_type TEXT,
     is_read BOOLEAN DEFAULT FALSE NOT NULL,
-    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
+    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
     FOREIGN KEY (user_id) REFERENCES users (id)
 );
 CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications (user_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_item_id_item_type ON notifications (item_id, item_type);
 CREATE TRIGGER IF NOT EXISTS update_notifications_updated_at
 AFTER UPDATE ON notifications FOR EACH ROW BEGIN
-    UPDATE notifications SET updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE id = OLD.id;
+    UPDATE notifications SET updated_at = (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')) WHERE id = OLD.id;
 END;

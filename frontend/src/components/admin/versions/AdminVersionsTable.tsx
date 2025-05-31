@@ -3,6 +3,7 @@ import { AdminSoftwareVersion, PaginationParams } from '../../../services/api'; 
 import { fetchAdminVersions } from '../../../services/api';
 import DataTable from '../../DataTable'; // Adjust path as needed
 import { FaEdit, FaTrash } from 'react-icons/fa';
+import { formatISTWithOffset, formatDateDisplay } from '../../../utils'; // Added imports
 
 interface AdminVersionsTableProps {
   onEdit: (version: AdminSoftwareVersion) => void;
@@ -66,12 +67,13 @@ const AdminVersionsTable: React.FC<AdminVersionsTableProps> = ({ onEdit, onDelet
     setCurrentPage(1); // Reset to first page on sort change
   };
 
-  const formatNullableDate = (dateStr: string | null | undefined) => {
-    if (!dateStr) return 'N/A';
-    // Check if dateStr is a valid date string before creating a Date object
-    const date = new Date(dateStr);
-    return !isNaN(date.getTime()) ? date.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : 'Invalid Date';
-  };
+  // formatNullableDate helper is no longer needed as we use specific utility functions now.
+  // const formatNullableDate = (dateStr: string | null | undefined) => {
+  //   if (!dateStr) return 'N/A';
+  //   // Check if dateStr is a valid date string before creating a Date object
+  //   const date = new Date(dateStr);
+  //   return !isNaN(date.getTime()) ? date.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : 'Invalid Date';
+  // };
 
   const truncateText = (text: string | null | undefined, maxLength: number = 50) => {
     if (!text) return 'N/A';
@@ -83,7 +85,7 @@ const AdminVersionsTable: React.FC<AdminVersionsTableProps> = ({ onEdit, onDelet
   const columns = [
     { key: 'software_name', header: 'Software', accessor: 'software_name', sortable: true },
     { key: 'version_number', header: 'Version', accessor: 'version_number', sortable: true },
-    { key: 'release_date', header: 'Release Date', accessor: 'release_date', sortable: true, render: (item: AdminSoftwareVersion) => formatNullableDate(item.release_date) },
+    { key: 'release_date', header: 'Release Date', accessor: 'release_date', sortable: true, Cell: ({ value }) => formatDateDisplay(value) },
     {
       key: 'main_download_link',
       header: 'Download Link',
@@ -98,8 +100,8 @@ const AdminVersionsTable: React.FC<AdminVersionsTableProps> = ({ onEdit, onDelet
     },
     { key: 'changelog', header: 'Changelog', accessor: 'changelog', sortable: false, render: (item: AdminSoftwareVersion) => truncateText(item.changelog) },
     { key: 'known_bugs', header: 'Known Bugs', accessor: 'known_bugs', sortable: false, render: (item: AdminSoftwareVersion) => truncateText(item.known_bugs) },
-    { key: 'created_at', header: 'Created At', accessor: 'created_at', sortable: true, render: (item: AdminSoftwareVersion) => formatNullableDate(item.created_at) },
-    { key: 'updated_at', header: 'Updated At', accessor: 'updated_at', sortable: true, render: (item: AdminSoftwareVersion) => formatNullableDate(item.updated_at) },
+    { key: 'created_at', header: 'Created At', accessor: 'created_at', sortable: true, Cell: ({ value }) => formatISTWithOffset(value) },
+    { key: 'updated_at', header: 'Updated At', accessor: 'updated_at', sortable: true, Cell: ({ value }) => formatISTWithOffset(value) },
     {
       key: 'actions', // Unique key for the actions column
       header: 'Actions',

@@ -19,6 +19,7 @@ import {
 import { Patch as PatchType, Software, SoftwareVersion } from '../types';
 import CommentSection from '../components/comments/CommentSection'; // Added CommentSection
 import DataTable, { ColumnDef } from '../components/DataTable';
+import { formatISTWithOffset, formatDateDisplay } from '../utils'; // Added imports
 import FilterTabs from '../components/FilterTabs';
 import LoadingState from '../components/LoadingState';
 import ErrorState from '../components/ErrorState';
@@ -362,13 +363,13 @@ useEffect(() => {
     finally { setIsMovingSelected(false); setModalSelectedSoftwareId(null); setModalSelectedVersionId(null); }
   };
 
-  const formatDate = (dateStr: string | null | undefined) => dateStr ? new Date(dateStr).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : '-';
+  // const formatDate helper is no longer needed as we use specific utility functions now.
   const columns: ColumnDef<PatchType>[] = [
     { key: 'patch_name', header: 'Patch Name', sortable: true }, { key: 'software_name', header: 'Software', sortable: true },
     { key: 'version_number', header: 'Version', sortable: true },
     { key: 'patch_by_developer', header: 'Developer', sortable: true, render: p => p.patch_by_developer || '-' },
     { key: 'description', header: 'Description', render: p => <span className="text-sm text-gray-600 block max-w-xs truncate" title={p.description||''}>{p.description||'-'}</span> },
-    { key: 'release_date', header: 'Release Date', sortable: true, render: p => formatDate(p.release_date) },
+    { key: 'release_date', header: 'Release Date', sortable: true, Cell: ({ value }) => formatDateDisplay(value) },
     { 
       key: 'download_link', 
       header: 'Link', 
@@ -400,8 +401,8 @@ useEffect(() => {
     },
     { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: p => p.uploaded_by_username||'N/A' },
     { key: 'updated_by_username', header: 'Updated By', sortable: false, render: p => p.updated_by_username||'N/A' },
-    { key: 'created_at', header: 'Created At', sortable: true, render: p => formatDate(p.created_at) },
-    { key: 'updated_at', header: 'Updated At', sortable: true, render: p => formatDate(p.updated_at) },
+    { key: 'created_at', header: 'Created At', sortable: true, Cell: ({ value }) => formatISTWithOffset(value) },
+    { key: 'updated_at', header: 'Updated At', sortable: true, Cell: ({ value }) => formatISTWithOffset(value) },
     { 
       key: 'actions' as any, 
       header: 'Actions', 

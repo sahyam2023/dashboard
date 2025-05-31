@@ -301,20 +301,26 @@ const LinksView: React.FC = () => {
     { key: 'title', header: 'Title', sortable: true }, { key: 'software_name', header: 'Software', sortable: true },
     { key: 'version_name', header: 'Version', sortable: true, render: l => l.version_name  || 'N/A' },
     { key: 'description', header: 'Description', render: l => <span className="text-sm text-gray-600 block max-w-xs truncate" title={l.description || ''}>{l.description || '-'}</span> },
-    {
+        {
       key: 'url',
-      header: 'URL/File',
+      header: 'URL/FILE',
       render: (l: LinkType) => {
         const isEffectivelyDownloadable = l.is_external_link || l.is_downloadable !== false;
-        const linkText = l.is_external_link
-          ? (l.url.length > 40 ? `${l.url.substring(0, 37)}...` : l.url)
-          : (l.original_filename_ref || l.url.split('/').pop() || 'Uploaded File');
+        // The original linkText calculation is no longer needed for the visible text
+        // const linkText = l.is_external_link
+        //   ? (l.url.length > 40 ? `${l.url.substring(0, 37)}...` : l.url)
+        //   : (l.original_filename_ref || l.url.split('/').pop() || 'Uploaded File');
+
+        // Determine the display text based on link type
+        const displayText = l.is_external_link ? 'Open Link' : 'Download';
+        // Determine the icon based on link type (ExternalLink for URLs, Download for files)
+        const IconComponent = l.is_external_link ? ExternalLink : Download;
 
         if (!isEffectivelyDownloadable && !l.is_external_link) { // Uploaded file, not downloadable
           return (
             <span className="flex items-center text-gray-400 cursor-not-allowed" title="Download not permitted">
-              {l.is_external_link ? <ExternalLink size={14} className="mr-1 flex-shrink-0" /> : <Download size={14} className="mr-1 flex-shrink-0" />}
-              {linkText}
+              <IconComponent size={14} className="mr-1 flex-shrink-0" />
+              {displayText}
             </span>
           );
         }
@@ -330,8 +336,8 @@ const LinksView: React.FC = () => {
             }}
             title={isEffectivelyDownloadable ? (l.is_external_link ? "Open external link" : "Download file") : "Download not permitted"}
           >
-            {l.is_external_link || !l.url?.startsWith('/') ? <ExternalLink size={14} className="mr-1 flex-shrink-0" /> : <Download size={14} className="mr-1 flex-shrink-0" />}
-            {linkText}
+            <IconComponent size={14} className="mr-1 flex-shrink-0" />
+            {displayText}
           </a>
         );
       }

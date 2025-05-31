@@ -22,6 +22,7 @@ import { FilePermission, FilePermissionUpdatePayload, UpdateUserFilePermissionsR
 
 import DataTable, { ColumnDef } from '../components/DataTable';
 import Modal from '../components/shared/Modal';
+import ConfirmationModal from '../components/shared/ConfirmationModal'; // Added this import
 import SuperAdminCreateUserForm from '../components/admin/SuperAdminCreateUserForm'; // Import the new form
 
 // Define a type for the files we'll list for permission editing
@@ -89,6 +90,15 @@ const SuperAdminDashboard: React.FC = () => {
   const [isMaintenanceModeActive, setIsMaintenanceModeActive] = useState<boolean>(false);
   const [isMaintenanceLoading, setIsMaintenanceLoading] = useState<boolean>(true); // Start true for initial fetch
   const [maintenanceError, setMaintenanceError] = useState<string | null>(null); // Specific for maintenance section
+
+  // State for Database Reset
+  const [resetStep, setResetStep] = useState<number>(0); // 0: idle, 1: warning1, 2: warning2, 3: warning3, 4: reason form, 5: awaitingPassword confirmation
+  const [resetReason, setResetReason] = useState<string>('');
+  const [resetProcessPassword, setResetProcessPassword] = useState<string>('');
+  const [resetProcessConfirmText, setResetProcessConfirmText] = useState<string>('');
+  const [isResettingDatabase, setIsResettingDatabase] = useState<boolean>(false);
+  const [resetError, setResetError] = useState<string | null>(null); // For errors displayed within modals
+  const [resetFeedback, setResetFeedback] = useState<{type: 'success' | 'error', message: string} | null>(null); // For feedback on main page
 
 
   // --- State for File Permissions Management ---
@@ -535,6 +545,60 @@ const SuperAdminDashboard: React.FC = () => {
     }
   };
 
+  // --- Database Reset Handlers ---
+  const handleResetSubmitReason = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (resetReason.trim() === '') {
+      setResetError("Reason cannot be empty."); // Show error in modal
+      return;
+    }
+    setIsResettingDatabase(true);
+    setResetError(null); // Clear error in modal
+    setResetFeedback(null); // Clear main page feedback
+
+    try {
+      const response = await startDatabaseReset(resetReason);
+      setResetFeedback({ type: 'success', message: response.message || "Database reset process initiated. Backup created." });
+      setResetStep(5); // Advance to awaitingPassword confirmation step
+      setResetReason(''); // Clear reason after successful submission
+      setResetError(null); // Clear any modal errors
+    } catch (err: any) {
+      const errorMessage = err.response?.data?.msg || err.message || "Failed to start database reset process.";
+      setResetError(errorMessage); // Show error in the reason modal
+      setResetFeedback({ type: 'error', message: errorMessage }); // Also show on main page if preferred
+    } finally {
+      setIsResettingDatabase(false);
+    }
+  };
+
+  const handleFinalResetConfirm = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (resetProcessPassword.trim() === '' || resetProcessConfirmText.trim() === '') {
+      setResetError("Password and confirmation text are required."); // Show error in final confirm modal
+      return;
+    }
+    setIsResettingDatabase(true);
+    setResetError(null); // Clear modal error
+    setResetFeedback(null); // Clear main page feedback
+
+    try {
+      const response = await confirmDatabaseReset(resetProcessPassword, resetProcessConfirmText);
+      setResetFeedback({ type: 'success', message: response.message || "Database has been successfully reset." });
+      setResetStep(0); // Reset to idle/initial state
+      setResetReason('');
+      setResetProcessPassword('');
+      setResetProcessConfirmText('');
+      setResetError(null);
+    } catch (err: any) {
+      const errorMessage = err.response?.data?.msg || err.message || "Failed to confirm database reset.";
+      setResetError(errorMessage); // Show error in final confirm modal
+      setResetFeedback({ type: 'error', message: errorMessage}); // Also show on main page
+    } finally {
+      setIsResettingDatabase(false);
+    }
+  };
+  // --- End Database Reset Handlers ---
+
   const columns: ColumnDef<User>[] = [
     { key: 'username', header: 'Username', sortable: true },
     { key: 'email', header: 'Email', sortable: true, render: (user) => user.email || 'N/A' },
@@ -789,6 +853,30 @@ const SuperAdminDashboard: React.FC = () => {
         </div>
       </section>
 
+      {/* Database Reset Section */}
+      <section className="bg-white dark:bg-gray-800 shadow-xl rounded-xl p-6 md:p-8">
+        <h2 className="text-xl font-semibold mb-6 text-gray-800 dark:text-gray-100">Reset Database</h2>
+        {resetFeedback && (
+          <div className={`p-3 mb-4 rounded-md text-sm ${resetFeedback.type === 'success' ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 border border-green-200 dark:border-green-700' : 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 border border-red-200 dark:border-red-700'}`}>
+            {resetFeedback.message}
+          </div>
+        )}
+        <button
+          onClick={() => {
+            setResetFeedback(null); // Clear previous feedback
+            setResetError(null); // Clear previous modal error
+            setResetStep(1);
+          }}
+          className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-60 transition-colors"
+          disabled={isResettingDatabase || resetStep !== 0} // Disable if already in a reset step
+        >
+          {isResettingDatabase ? <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white"></div> : 'Reset Database'}
+        </button>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-3">
+          This action will permanently delete all data in the database. This process involves multiple confirmation steps.
+        </p>
+      </section>
+
       {/* System Maintenance Mode Section */}
       <section className="bg-white dark:bg-gray-800 shadow-xl rounded-xl p-6 md:p-8">
         <h2 className="text-xl font-semibold mb-6 text-gray-800 dark:text-gray-100">System Maintenance Mode</h2>
@@ -909,6 +997,199 @@ const SuperAdminDashboard: React.FC = () => {
           onCancel={() => setShowCreateUserForm(false)}
         />
       </Modal>
+
+      {/* Database Reset Modals */}
+      {resetStep === 1 && (
+        <ConfirmationModal
+          isOpen={resetStep === 1}
+          title="Confirm Database Reset - Step 1/3"
+          message={<span className="text-red-700 dark:text-red-300 font-semibold">This will delete EVERYTHING in the database. Are you sure you want to proceed?</span>}
+          onConfirm={() => setResetStep(2)}
+          onCancel={() => { setResetStep(0); setResetFeedback(null); }}
+          confirmButtonText="Yes, I'm sure"
+          cancelButtonText="No, cancel"
+          confirmButtonVariant="danger"
+        />
+      )}
+      {resetStep === 2 && (
+        <ConfirmationModal
+          isOpen={resetStep === 2}
+          title="Confirm Database Reset - Step 2/3"
+          message={<span className="text-red-700 dark:text-red-300 font-semibold">This action is IRREVERSIBLE. Once the database is reset, the data cannot be recovered. Are you absolutely sure?</span>}
+          onConfirm={() => setResetStep(3)}
+          onCancel={() => { setResetStep(0); setResetFeedback(null); }}
+          confirmButtonText="Yes, I understand the risk"
+          cancelButtonText="No, cancel"
+          confirmButtonVariant="danger"
+        />
+      )}
+      {resetStep === 3 && (
+        <ConfirmationModal
+          isOpen={resetStep === 3}
+          title="Confirm Database Reset - Step 3/3"
+          message={<span className="text-yellow-600 dark:text-yellow-400 font-semibold">FINAL WARNING: Proceeding will open a form for you to state your reason before the reset. This is your last chance to cancel.</span>}
+          onConfirm={() => { setResetStep(4); setResetError(null); }} // Proceed to reason form & clear previous errors
+          onCancel={() => { setResetStep(0); setResetFeedback(null); }}
+          confirmButtonText="Yes, proceed to reason form"
+          cancelButtonText="No, cancel"
+          confirmButtonVariant="warning" // Changed to warning for the last confirmation
+        />
+      )}
+
+      {resetStep === 4 && (
+        <Modal
+          isOpen={resetStep === 4}
+          onClose={() => { // This will be triggered by the Modal's default close if showCloseButton were true
+            setResetStep(0);
+            setResetReason('');
+            setResetError(null);
+            setResetFeedback(null);
+          }}
+          title="Reason for Database Reset"
+          showCloseButton={false} // Using custom buttons in the form
+        >
+          <form
+            onSubmit={handleResetSubmitReason} // Updated to call the new handler
+            className="space-y-4"
+          >
+            <p className="text-sm text-gray-700 dark:text-gray-300">
+              For security and auditing purposes, please provide a reason for resetting the database. This reason will be logged.
+              Your action will be recorded along with this reason. This is a critical operation.
+            </p>
+            <div>
+              <label htmlFor="resetReason" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Reason for Reset <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                id="resetReason"
+                value={resetReason}
+                onChange={(e) => {
+                    setResetReason(e.target.value);
+                    if(resetError && e.target.value.trim() !== '') setResetError(null);
+                }}
+                rows={4}
+                className={`block w-full px-3 py-2 border ${resetError && resetReason.trim() === '' ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'} rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500`}
+                required
+                disabled={isResettingDatabase}
+                aria-describedby={resetError && resetReason.trim() === '' ? "resetReason-error" : undefined}
+              />
+               {resetError && resetReason.trim() === '' && <p id="resetReason-error" className="text-red-500 text-xs mt-1">{resetError}</p>}
+            </div>
+            <div className="flex flex-col sm:flex-row justify-end space-y-3 sm:space-y-0 sm:space-x-3 pt-3 border-t border-gray-200 dark:border-gray-700 mt-5">
+              <button
+                type="button"
+                onClick={() => {
+                  setResetStep(0);
+                  setResetReason('');
+                  setResetError(null);
+                  setResetFeedback({type: 'error', message: 'Database reset cancelled.'});
+                }}
+                disabled={isResettingDatabase}
+                className="w-full sm:w-auto px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 dark:bg-gray-600 dark:text-gray-200 dark:hover:bg-gray-500 dark:border-gray-500"
+              >
+                Cancel Reset Process
+              </button>
+              <button
+                type="submit"
+                disabled={isResettingDatabase || !resetReason.trim()}
+                className="w-full sm:w-auto px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:bg-red-300 dark:disabled:bg-red-400 transition-opacity"
+              >
+                {isResettingDatabase ? (
+                  <span className="flex items-center justify-center">
+                    <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white mr-2"></div>
+                    Processing...
+                  </span>
+                ) : 'Submit and Reset Database'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* Step 5: Final Confirmation with Password */}
+      {resetStep === 5 && (
+        <Modal
+          isOpen={resetStep === 5}
+          onClose={() => { /* No direct close, only via buttons */ }}
+          title="Final Database Reset Confirmation"
+          showCloseButton={false}
+        >
+          <form onSubmit={handleFinalResetConfirm} className="space-y-4">
+            <p className="text-sm text-yellow-600 dark:text-yellow-400">
+              This is the final step. The database backup has been created.
+              To proceed with the reset, please enter the confirmation password and text.
+            </p>
+
+            {resetError && <div className="p-3 rounded-md bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 border border-red-200 dark:border-red-700 text-sm">{resetError}</div>}
+
+            <div>
+              <label htmlFor="resetProcessPassword" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Confirmation Password
+              </label>
+              <input
+                id="resetProcessPassword"
+                type="password"
+                value={resetProcessPassword}
+                onChange={(e) => {
+                  setResetProcessPassword(e.target.value);
+                  if (resetError) setResetError(null);
+                }}
+                className={`block w-full px-3 py-2 border ${!resetProcessPassword.trim() && resetError ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'} rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500`}
+                required
+                disabled={isResettingDatabase}
+              />
+            </div>
+
+            <div>
+              <label htmlFor="resetProcessConfirmText" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Type "CONFIRM DELETE"
+              </label>
+              <input
+                id="resetProcessConfirmText"
+                type="text"
+                value={resetProcessConfirmText}
+                onChange={(e) => {
+                  setResetProcessConfirmText(e.target.value);
+                   if (resetError) setResetError(null);
+                }}
+                className={`block w-full px-3 py-2 border ${!resetProcessConfirmText.trim() && resetError ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'} rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500`}
+                required
+                disabled={isResettingDatabase}
+              />
+            </div>
+
+            <div className="flex flex-col sm:flex-row justify-end space-y-3 sm:space-y-0 sm:space-x-3 pt-3 border-t border-gray-200 dark:border-gray-700 mt-5">
+              <button
+                type="button"
+                onClick={() => {
+                  setResetStep(0); // Go back to idle
+                  setResetReason('');
+                  setResetProcessPassword('');
+                  setResetProcessConfirmText('');
+                  setResetError(null);
+                  setResetFeedback({ type: 'error', message: 'Database reset process cancelled by user at final confirmation.' });
+                }}
+                disabled={isResettingDatabase}
+                className="w-full sm:w-auto px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 dark:bg-gray-600 dark:text-gray-200 dark:hover:bg-gray-500 dark:border-gray-500"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isResettingDatabase || !resetProcessPassword.trim() || !resetProcessConfirmText.trim()}
+                className="w-full sm:w-auto px-4 py-2 text-sm font-medium text-white bg-red-700 hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:bg-red-400 dark:disabled:bg-red-500 transition-opacity"
+              >
+                {isResettingDatabase ? (
+                  <span className="flex items-center justify-center">
+                    <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white mr-2"></div>
+                    Resetting...
+                  </span>
+                ) : 'Confirm and Reset Database Now'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </div>
   );
 };

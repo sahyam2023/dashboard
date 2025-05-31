@@ -2397,6 +2397,59 @@ export async function superAdminCreateUser(userData: SuperAdminCreateUserPayload
 }
 // --- End Super Admin Create User ---
 
+// --- Super Admin Database Reset Functions ---
+export interface DatabaseResetStartResponse {
+  message: string;
+  backup_path: string;
+  log_file: string;
+}
+
+export async function startDatabaseReset(reason: string): Promise<DatabaseResetStartResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/superadmin/database/reset/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ reason }),
+    });
+    return handleApiError(response, 'Failed to start database reset process');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error starting database reset:', error);
+    throw error;
+  }
+}
+
+export interface DatabaseResetConfirmPayload {
+  reset_password: string;
+  confirmation_text: string;
+}
+
+export interface DatabaseResetConfirmResponse {
+  message: string;
+}
+
+export async function confirmDatabaseReset(payload: DatabaseResetConfirmPayload): Promise<DatabaseResetConfirmResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/superadmin/database/reset/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify(payload),
+    });
+    return handleApiError(response, 'Failed to confirm database reset');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error confirming database reset:', error);
+    throw error;
+  }
+}
+// --- End Super Admin Database Reset Functions ---
+
 // --- Large File Upload (Chunked) ---
 
 /**

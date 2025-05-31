@@ -344,8 +344,8 @@ const LinksView: React.FC = () => {
     },
     { key: 'uploaded_by_username', header: 'Added By', sortable: true, render: l => l.uploaded_by_username || 'N/A' },
     { key: 'updated_by_username', header: 'Updated By', sortable: false, render: l => l.updated_by_username || 'N/A' },
-    { key: 'created_at', header: 'Created', sortable: true, Cell: ({ value }) => formatISTWithOffset(value) },
-    { key: 'updated_at', header: 'Updated', sortable: true, Cell: ({ value }) => formatISTWithOffset(value) },
+    { key: 'created_at', header: 'Created', sortable: true, cell: (info) => formatISTWithOffset(info.getValue() as string) },
+    { key: 'updated_at', header: 'Updated', sortable: true, cell: (info) => formatISTWithOffset(info.getValue() as string) },
     {
       key: 'actions' as any,
       header: 'Actions',

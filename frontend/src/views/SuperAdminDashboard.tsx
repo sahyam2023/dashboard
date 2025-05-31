@@ -15,7 +15,9 @@ import {
   getUserFilePermissions,
   updateUserFilePermissions,
   fetchDocuments, // To get list of documents
-  PaginatedDocumentsResponse
+  PaginatedDocumentsResponse,
+  startDatabaseReset,
+  confirmDatabaseReset
 } from '../services/api';
 import { FilePermission, FilePermissionUpdatePayload, UpdateUserFilePermissionsResponse, Document as DocumentType } from '../types';
 
@@ -96,7 +98,7 @@ const SuperAdminDashboard: React.FC = () => {
   const [resetReason, setResetReason] = useState<string>('');
   const [resetProcessPassword, setResetProcessPassword] = useState<string>('');
   const [resetProcessConfirmText, setResetProcessConfirmText] = useState<string>('');
-  const [isResettingDatabase, setIsResettingDatabase] = useState<boolean>(false);
+  const [isResettingDatabase, setIsResettingDatabase] = useState<boolean>(false); 
   const [resetError, setResetError] = useState<string | null>(null); // For errors displayed within modals
   const [resetFeedback, setResetFeedback] = useState<{type: 'success' | 'error', message: string} | null>(null); // For feedback on main page
 
@@ -597,6 +599,13 @@ const SuperAdminDashboard: React.FC = () => {
       setIsResettingDatabase(false);
     }
   };
+
+  const handleResetConfirmTextChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setResetProcessConfirmText(event.target.value);
+    if (resetError) {
+      setResetError(null);
+    }
+  };
   // --- End Database Reset Handlers ---
 
   const columns: ColumnDef<User>[] = [
@@ -1041,14 +1050,14 @@ const SuperAdminDashboard: React.FC = () => {
           isOpen={resetStep === 4}
           onClose={() => { // This will be triggered by the Modal's default close if showCloseButton were true
             setResetStep(0);
-            setResetReason('');
+            setResetReason(''); 
             setResetError(null);
             setResetFeedback(null);
           }}
           title="Reason for Database Reset"
           showCloseButton={false} // Using custom buttons in the form
         >
-          <form
+          <form 
             onSubmit={handleResetSubmitReason} // Updated to call the new handler
             className="space-y-4"
           >
@@ -1065,7 +1074,7 @@ const SuperAdminDashboard: React.FC = () => {
                 value={resetReason}
                 onChange={(e) => {
                     setResetReason(e.target.value);
-                    if(resetError && e.target.value.trim() !== '') setResetError(null);
+                    if(resetError && e.target.value.trim() !== '') setResetError(null); 
                 }}
                 rows={4}
                 className={`block w-full px-3 py-2 border ${resetError && resetReason.trim() === '' ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'} rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500`}
@@ -1119,7 +1128,7 @@ const SuperAdminDashboard: React.FC = () => {
               This is the final step. The database backup has been created.
               To proceed with the reset, please enter the confirmation password and text.
             </p>
-
+            
             {resetError && <div className="p-3 rounded-md bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 border border-red-200 dark:border-red-700 text-sm">{resetError}</div>}
 
             <div>
@@ -1148,10 +1157,7 @@ const SuperAdminDashboard: React.FC = () => {
                 id="resetProcessConfirmText"
                 type="text"
                 value={resetProcessConfirmText}
-                onChange={(e) => {
-                  setResetProcessConfirmText(e.target.value);
-                   if (resetError) setResetError(null);
-                }}
+                onChange={handleResetConfirmTextChange}
                 className={`block w-full px-3 py-2 border ${!resetProcessConfirmText.trim() && resetError ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'} rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500`}
                 required
                 disabled={isResettingDatabase}

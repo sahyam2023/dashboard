@@ -46,7 +46,7 @@ const CommentSection: React.FC<CommentSectionProps> = ({ itemId, itemType }) => 
       showErrorToast(err.message || 'Failed to fetch comments.');
     } finally {
       setIsLoading(false);
-      if (isInitialLoading) setIsInitialLoading(false);
+      setIsInitialLoading(false);
     }
   }, [itemId, itemType]);
 

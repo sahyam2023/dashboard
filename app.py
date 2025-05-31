@@ -114,6 +114,8 @@ from functools import wraps
 import random
 import zipfile
 import tempfile
+import pytz # Added for IST
+from datetime import datetime, timedelta, timezone # Ensured all are here
 from flask import Flask, request, g, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
@@ -245,7 +247,7 @@ def delete_old_backups():
         return
 
     app.logger.info(f"Checking for old backups in {BACKUP_DIR} older than {MAX_BACKUP_AGE_DAYS} days.")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(IST) # Changed to IST
     deleted_count = 0
     retained_count = 0
 
@@ -255,7 +257,8 @@ def delete_old_backups():
                 # Extract timestamp string: software_dashboard_YYYYMMDD_HHMMSS.db
                 timestamp_str = filename.replace("software_dashboard_", "").replace(".db", "")
                 backup_datetime = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
-                backup_datetime = backup_datetime.replace(tzinfo=timezone.utc) # Make it timezone-aware (UTC)
+                # backup_datetime is naive, localize to IST
+                backup_datetime = IST.localize(backup_datetime)
 
                 if now - backup_datetime > timedelta(days=MAX_BACKUP_AGE_DAYS):
                     file_path = os.path.join(BACKUP_DIR, filename)
@@ -299,7 +302,8 @@ def get_latest_backup_time():
             try:
                 timestamp_str = filename.replace("software_dashboard_", "").replace(".db", "")
                 backup_datetime = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
-                backup_datetime = backup_datetime.replace(tzinfo=timezone.utc) # UTC
+                # backup_datetime is naive, localize to IST
+                backup_datetime = IST.localize(backup_datetime)
                 if latest_backup_dt is None or backup_datetime > latest_backup_dt:
                     latest_backup_dt = backup_datetime
             except ValueError:
@@ -316,7 +320,7 @@ def check_and_perform_missed_backup():
         perform_daily_backup_job()
     else:
         # Check if the latest backup is older than 23 hours (to be safe for a 12 PM schedule)
-        if datetime.now(timezone.utc) - latest_backup_time > timedelta(hours=23):
+        if datetime.now(IST) - latest_backup_time > timedelta(hours=23): # Changed to IST
             app.logger.info(f"Latest backup was at {latest_backup_time}. Performing missed backup.")
             perform_daily_backup_job()
         else:
@@ -333,7 +337,7 @@ def initialize_scheduler_and_backups(current_app):
 
     check_and_perform_missed_backup() # This function uses app.logger internally
 
-    scheduler = BackgroundScheduler(timezone='UTC')
+    scheduler = BackgroundScheduler(timezone='Asia/Kolkata') # Changed to Asia/Kolkata
     scheduler.add_job(perform_daily_backup_job, 'cron', hour=12, minute=0)
     try:
         scheduler.start()
@@ -346,6 +350,44 @@ def initialize_scheduler_and_backups(current_app):
 
 # Initialize scheduler and perform startup backup checks
 initialize_scheduler_and_backups(app)
+
+IST = pytz.timezone('Asia/Kolkata') # Added IST timezone
+UTC = pytz.utc # Added UTC for clarity in conversion if needed
+
+# Helper function to convert specific timestamp fields in a dictionary to IST ISO format
+def convert_timestamps_to_ist_iso(row_dict, timestamp_keys):
+    if not row_dict:
+        return row_dict
+    for key in timestamp_keys:
+        original_value_str = row_dict.get(key)
+        if isinstance(original_value_str, str) and original_value_str:
+            try:
+                # Try parsing with microseconds first, then without
+                try:
+                    naive_dt = datetime.strptime(original_value_str, '%Y-%m-%d %H:%M:%S.%f')
+                except ValueError:
+                    naive_dt = datetime.strptime(original_value_str, '%Y-%m-%d %H:%M:%S')
+
+                # Localize the naive datetime (assumed to be stored as IST representation) to IST
+                ist_aware_dt = IST.localize(naive_dt)
+                row_dict[key] = ist_aware_dt.isoformat()
+            except ValueError as e:
+                app.logger.warning(f"Timestamp conversion: Could not parse timestamp string '{original_value_str}' for key '{key}'. Error: {e}. Leaving original.")
+            except Exception as e_global: # Catch any other unexpected error during conversion
+                app.logger.error(f"Timestamp conversion: Unexpected error for key '{key}', value '{original_value_str}': {e_global}")
+        # If it's already a datetime object (e.g. from datetime.now(IST) directly)
+        elif isinstance(original_value_str, datetime):
+            if original_value_str.tzinfo is None: # If it's a naive datetime object
+                # Assume it's intended to be IST, localize it
+                try:
+                    ist_aware_dt = IST.localize(original_value_str)
+                    row_dict[key] = ist_aware_dt.isoformat()
+                except Exception as e_localize:
+                    app.logger.error(f"Timestamp conversion: Error localizing naive datetime for key '{key}': {e_localize}")
+            else: # It's already timezone-aware, just ensure it's in ISO format
+                row_dict[key] = original_value_str.isoformat()
+
+    return row_dict
 
 # --- Configuration Notes for Large File Uploads ---
 # Flask's MAX_CONTENT_LENGTH:
@@ -783,12 +825,11 @@ def verify_security_answers():
             # All answers are correct, generate and store token
             token = secrets.token_urlsafe(32)
             # Ensure datetime objects are timezone-aware if comparing with timezone-aware datetimes
-            # For UTC, datetime.now(timezone.utc) is preferred over datetime.utcnow() in new code.
-            expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+            expires_at = datetime.now(IST) + timedelta(hours=1) # Changed to IST
             
             db.execute(
                 "INSERT INTO password_reset_requests (token, user_id, expires_at) VALUES (?, ?, ?)",
-                (token, user_id, expires_at)
+                (token, user_id, expires_at.strftime('%Y-%m-%d %H:%M:%S')) # Format to string for DB
             )
             db.commit()
 
@@ -838,10 +879,11 @@ def reset_password_with_token():
             return jsonify(msg="Invalid or expired reset token."), 400 # Or 404
 
         # Check expiry - ensure comparison is between timezone-aware datetimes if stored as such
-        # If expires_at is stored as UTC string, parse it and compare with current UTC time.
-        # Assuming expires_at was stored using datetime.now(timezone.utc).isoformat() or similar
-        expires_at_dt = datetime.fromisoformat(token_data['expires_at'])
-        if expires_at_dt < datetime.now(timezone.utc):
+        # expires_at from DB is 'YYYY-MM-DD HH:MM:SS' string representing IST (naive)
+        expires_at_naive = datetime.fromisoformat(token_data['expires_at'])
+        expires_at_dt = IST.localize(expires_at_naive) # Make it IST aware
+
+        if expires_at_dt < datetime.now(IST): # Compare with current IST time
             # Clean up expired token
             db.execute("DELETE FROM password_reset_requests WHERE token = ?", (token,))
             db.commit()
@@ -934,7 +976,9 @@ def list_users():
     
     try:
         users_cursor = db.execute(query_string, (per_page, offset))
-        users_list = [dict(row) for row in users_cursor.fetchall()]
+        users_list_raw = [dict(row) for row in users_cursor.fetchall()]
+        timestamp_keys = ['created_at']
+        users_list = [convert_timestamps_to_ist_iso(user, timestamp_keys) for user in users_list_raw]
     except Exception as e:
         app.logger.error(f"Error fetching paginated users: {e}")
         return jsonify(msg="Error fetching users."), 500
@@ -1291,11 +1335,12 @@ def superadmin_create_user():
         )
 
         # Fetch the created user's details to return (excluding password)
-        new_user_details = find_user_by_id(user_id)
-        if not new_user_details: # Should not happen
+        new_user_details_raw = find_user_by_id(user_id)
+        if not new_user_details_raw: # Should not happen
              app.logger.error(f"Superadmin_create_user: Could not fetch newly created user ID {user_id}")
              return jsonify(msg="User created, but failed to retrieve details."), 500
 
+        new_user_details = convert_timestamps_to_ist_iso(dict(new_user_details_raw), ['created_at'])
 
         return jsonify({
             "id": new_user_details['id'],
@@ -1303,7 +1348,7 @@ def superadmin_create_user():
             "email": new_user_details['email'],
             "role": new_user_details['role'],
             "is_active": new_user_details['is_active'],
-            "created_at": new_user_details['created_at'].isoformat() if new_user_details['created_at'] else None,
+            "created_at": new_user_details['created_at'], # Already ISO formatted by helper
             "profile_picture_filename": new_user_details['profile_picture_filename'],
             "profile_picture_url": f"/profile_pictures/{new_user_details['profile_picture_filename']}" if new_user_details['profile_picture_filename'] else None,
             "password_reset_required": new_user_details['password_reset_required']
@@ -1356,7 +1401,9 @@ def get_user_file_permissions(user_id):
             target_id=user_id,
             details={'retrieved_for_user_id': user_id, 'permission_count': len(permissions)}
         )
-        return jsonify(permissions), 200
+        timestamp_keys_perms = ['created_at', 'updated_at']
+        processed_permissions = [convert_timestamps_to_ist_iso(dict(perm), timestamp_keys_perms) for perm in permissions]
+        return jsonify(processed_permissions), 200
     except Exception as e:
         app.logger.error(f"Error fetching file permissions for user {user_id}: {e}")
         return jsonify(msg="Failed to retrieve file permissions due to a server error."), 500
@@ -1484,7 +1531,9 @@ def update_user_file_permissions(user_id):
             "SELECT id, file_id, file_type, can_view, can_download, created_at, updated_at FROM file_permissions WHERE user_id = ?",
             (user_id,)
         )
-        updated_permissions = [dict(row) for row in updated_permissions_cursor.fetchall()]
+        updated_permissions_raw = [dict(row) for row in updated_permissions_cursor.fetchall()]
+        timestamp_keys_perms_upd = ['created_at', 'updated_at']
+        updated_permissions = [convert_timestamps_to_ist_iso(perm, timestamp_keys_perms_upd) for perm in updated_permissions_raw]
         return jsonify(msg=f"Successfully processed {processed_count} permission(s) for user {user_id}.", permissions=updated_permissions), 200
     except Exception as e_commit:
         db.rollback() # Rollback on commit error
@@ -2276,7 +2325,9 @@ def get_all_documents_api():
         # app.logger.info(f"Documents Data Query for user {logged_in_user_id}: {final_query}") # Removed
         # app.logger.info(f"Documents Data Params: {tuple(final_params_for_data)}") # Removed
         documents_cursor = db.execute(final_query, tuple(final_params_for_data))
-        documents_list = [dict(row) for row in documents_cursor.fetchall()]
+        documents_list_raw = [dict(row) for row in documents_cursor.fetchall()]
+        ts_keys = ['created_at', 'updated_at']
+        documents_list = [convert_timestamps_to_ist_iso(doc, ts_keys) for doc in documents_list_raw]
     except Exception as e:
         app.logger.error(f"Error fetching paginated documents with permissions: {e} with query {final_query} and params {final_params_for_data}")
         return jsonify(msg="Error fetching documents."), 500
@@ -2436,7 +2487,10 @@ def get_all_patches_api():
         # app.logger.info(f"Patches Data Query for user {logged_in_user_id}: {final_query}") # Removed
         # app.logger.info(f"Patches Data Params: {tuple(final_params_for_data)}") # Removed
         patches_cursor = db.execute(final_query, tuple(final_params_for_data))
-        patches_list = [dict(row) for row in patches_cursor.fetchall()]
+        patches_list_raw = [dict(row) for row in patches_cursor.fetchall()]
+        # Note: 'release_date' in patches is a DATE, not TIMESTAMP, so not included here.
+        ts_keys = ['created_at', 'updated_at']
+        patches_list = [convert_timestamps_to_ist_iso(patch, ts_keys) for patch in patches_list_raw]
     except Exception as e:
         app.logger.error(f"Error fetching paginated patches with permissions: {e} with query {final_query} and params {final_params_for_data}")
         return jsonify(msg="Error fetching patches."), 500
@@ -2599,7 +2653,9 @@ def get_all_links_api():
         # app.logger.info(f"Links Data Query for user {logged_in_user_id}: {final_query}") # Removed
         # app.logger.info(f"Links Data Params: {tuple(final_params_for_data)}") # Removed
         links_cursor = db.execute(final_query, tuple(final_params_for_data))
-        links_list = [dict(row) for row in links_cursor.fetchall()]
+        links_list_raw = [dict(row) for row in links_cursor.fetchall()]
+        ts_keys = ['created_at', 'updated_at']
+        links_list = [convert_timestamps_to_ist_iso(link, ts_keys) for link in links_list_raw]
     except Exception as e:
         app.logger.error(f"Error fetching paginated links with permissions: {e} with query {final_query} and params {final_params_for_data}")
         return jsonify(msg="Error fetching links."), 500
@@ -2748,7 +2804,9 @@ def get_all_misc_files_api():
         # app.logger.info(f"Misc Files Data Query for user {logged_in_user_id}: {final_query}") # Removed
         # app.logger.info(f"Misc Files Data Params: {tuple(final_params_for_data)}") # Removed
         misc_files_cursor = db.execute(final_query, tuple(final_params_for_data))
-        misc_files_list = [dict(row) for row in misc_files_cursor.fetchall()]
+        misc_files_list_raw = [dict(row) for row in misc_files_cursor.fetchall()]
+        ts_keys = ['created_at', 'updated_at']
+        misc_files_list = [convert_timestamps_to_ist_iso(mf, ts_keys) for mf in misc_files_list_raw]
     except Exception as e:
         app.logger.error(f"Error fetching paginated misc_files with permissions: {e} with query {final_query} and params {final_params_for_data}")
         return jsonify(msg="Error fetching misc_files."), 500
@@ -2923,11 +2981,14 @@ def _admin_handle_file_upload_and_db_insert(
             if new_item_row:
                 app.logger.info(f"_admin_helper: Successfully fetched back item from {table_name} ID {new_id}.")
                 try:
-                    new_item = dict(new_item_row)
-                    app.logger.debug(f"_admin_helper: Converted fetched row to dict: {new_item}")
-                    return jsonify(new_item), 201
+                    new_item_dict = dict(new_item_row)
+                    # Common timestamp keys for most items created/updated this way
+                    timestamp_keys_to_convert = ['created_at', 'updated_at', 'release_date'] # release_date might be None or not applicable
+                    processed_item = convert_timestamps_to_ist_iso(new_item_dict, timestamp_keys_to_convert)
+                    app.logger.debug(f"_admin_helper: Converted fetched row to dict and processed timestamps: {processed_item}")
+                    return jsonify(processed_item), 201
                 except Exception as e_dict:
-                    app.logger.error(f"_admin_helper: EXCEPTION converting sqlite3.Row to dict for {table_name} ID {new_id}: {e_dict}. Row data: {new_item_row}")
+                    app.logger.error(f"_admin_helper: EXCEPTION converting sqlite3.Row to dict or processing timestamps for {table_name} ID {new_id}: {e_dict}. Row data: {new_item_row}")
                     return jsonify(msg=f"Item uploaded, metadata fetched but failed to process for {table_name}."), 500
             else:
                 app.logger.error(f"_admin_helper: Failed to retrieve (fetchone() was None) newly uploaded item from {table_name}, ID: {new_id} after using specific query.")
@@ -3104,11 +3165,11 @@ def _admin_add_item_with_external_link(
         new_item_row = db.execute(fetch_back_query, (new_id,)).fetchone()
         
         if new_item_row:
-            new_item = dict(new_item_row)
-            # If the table is 'patches', ensure 'patch_by_developer' is in the response if it was selected.
-            # The fetch_back_query for 'patches' now includes it.
-            app.logger.info(f"ADMIN_HELPER_LINK: Successfully fetched back new item from {table_name}: {new_item}")
-            return jsonify(new_item), 201
+            new_item_dict = dict(new_item_row)
+            timestamp_keys_to_convert = ['created_at', 'updated_at', 'release_date'] # release_date might be None or not applicable
+            processed_item = convert_timestamps_to_ist_iso(new_item_dict, timestamp_keys_to_convert)
+            app.logger.info(f"ADMIN_HELPER_LINK: Successfully fetched back and processed new item from {table_name}: {processed_item}")
+            return jsonify(processed_item), 201
         else:
             app.logger.error(f"ADMIN_HELPER_LINK: CRITICAL - Failed to fetch newly added item from {table_name} with ID: {new_id} immediately after commit using query: {fetch_back_query}")
             return jsonify(msg=f"Item added to {table_name} (ID: {new_id}) but could not be immediately retrieved with full details. Please refresh the list."), 207
@@ -3436,7 +3497,8 @@ def admin_edit_document_url(document_id):
             WHERE d.id = ?
         """, (document_id,)).fetchone()
         if updated_doc_row:
-            return jsonify(dict(updated_doc_row)), 200
+            processed_doc = convert_timestamps_to_ist_iso(dict(updated_doc_row), ['created_at', 'updated_at'])
+            return jsonify(processed_doc), 200
         else:
             app.logger.error(f"Failed to fetch document with ID {document_id} after edit_url.")
             return jsonify(msg="Document updated but failed to retrieve full details."), 500
@@ -3561,7 +3623,8 @@ def admin_edit_document_file(document_id):
             WHERE d.id = ?
         """, (document_id,)).fetchone()
         if updated_doc_row:
-            return jsonify(dict(updated_doc_row)), 200
+            processed_doc = convert_timestamps_to_ist_iso(dict(updated_doc_row), ['created_at', 'updated_at'])
+            return jsonify(processed_doc), 200
         else:
             app.logger.error(f"Failed to fetch document with ID {document_id} after edit_file.")
             return jsonify(msg="Document updated but failed to retrieve full details."), 500
@@ -3803,7 +3866,9 @@ def admin_edit_patch_url(patch_id):
             WHERE p.id = ?""", (patch_id,)).fetchone()
         
         if updated_item_row:
-            return jsonify(dict(updated_item_row)), 200
+            # Note: 'release_date' in patches is DATE, not TIMESTAMP.
+            processed_item = convert_timestamps_to_ist_iso(dict(updated_item_row), ['created_at', 'updated_at'])
+            return jsonify(processed_item), 200
         else:
             # This case should ideally not be reached if the update was successful.
             app.logger.error(f"Failed to fetch patch with ID {patch_id} after edit_url.")
@@ -3940,7 +4005,9 @@ def admin_edit_patch_file(patch_id):
         ).fetchone()
 
         if updated_item_row:
-            return jsonify(dict(updated_item_row)), 200
+            # Note: 'release_date' in patches is DATE, not TIMESTAMP.
+            processed_item = convert_timestamps_to_ist_iso(dict(updated_item_row), ['created_at', 'updated_at'])
+            return jsonify(processed_item), 200
         else:
             # This case should ideally not be reached if the update was successful.
             app.logger.error(f"Failed to fetch patch with ID {patch_id} after edit_file.")
@@ -4013,7 +4080,12 @@ def admin_add_misc_category():
         )
         db.commit()
         new_cat_cursor = db.execute("SELECT * FROM misc_categories WHERE id = ?", (new_category_id,))
-        return jsonify(dict(new_cat_cursor.fetchone())), 201
+        new_cat_row = new_cat_cursor.fetchone()
+        if new_cat_row:
+            processed_cat = convert_timestamps_to_ist_iso(dict(new_cat_row), ['created_at', 'updated_at'])
+            return jsonify(processed_cat), 201
+        else: # Should not happen
+            return jsonify(msg="Category created but failed to retrieve details."), 500
     except sqlite3.IntegrityError: 
         db.rollback() 
         return jsonify(msg=f"Misc category '{name}' likely already exists."), 409
@@ -4145,7 +4217,7 @@ def admin_edit_link_url(link_id_from_url):
             WHERE l.id = ?""", (link_id_from_url,)).fetchone()
         
         if updated_item_dict:
-            response_data = dict(updated_item_dict)
+            response_data = convert_timestamps_to_ist_iso(dict(updated_item_dict), ['created_at', 'updated_at'])
             # Ensure uploaded_by_username (creator) and updated_by_username (editor) are distinct if needed
             # The query aliases cr_u.username to uploaded_by_username and upd_u.username to updated_by_username
             return jsonify(response_data), 200
@@ -4301,7 +4373,8 @@ def admin_edit_link_file(link_id_from_url):
             WHERE l.id = ?""", (link_id_from_url,)).fetchone()
 
         if updated_item_dict:
-            return jsonify(dict(updated_item_dict)), 200
+            processed_item = convert_timestamps_to_ist_iso(dict(updated_item_dict), ['created_at', 'updated_at'])
+            return jsonify(processed_item), 200
         else:
             app.logger.error(f"Failed to fetch link with ID {link_id_from_url} after edit_file.")
             return jsonify(msg="Link updated but failed to retrieve full details."), 500
@@ -4395,7 +4468,8 @@ def admin_edit_misc_category(category_id):
             WHERE mc.id = ?
         """, (category_id,)).fetchone()
         if updated_category_row:
-            return jsonify(dict(updated_category_row)), 200
+            processed_cat = convert_timestamps_to_ist_iso(dict(updated_category_row), ['created_at', 'updated_at'])
+            return jsonify(processed_cat), 200
         else:
             app.logger.error(f"Failed to fetch misc_category with ID {category_id} after edit.")
             return jsonify(msg="Misc category updated but failed to retrieve full details."), 500
@@ -4568,7 +4642,8 @@ def admin_edit_misc_file(file_id):
         """, (file_id,)).fetchone()
         
         if updated_file_row:
-            return jsonify(dict(updated_file_row)), 200
+            processed_file = convert_timestamps_to_ist_iso(dict(updated_file_row), ['created_at', 'updated_at'])
+            return jsonify(processed_file), 200
         else:
             app.logger.error(f"Failed to fetch misc_file with ID {file_id} after edit.")
             return jsonify(msg="Misc file updated but failed to retrieve full details."),500
@@ -4926,7 +5001,9 @@ def admin_create_version():
             app.logger.error(f"Failed to fetch newly created version ID {new_version_id}")
             return jsonify(msg="Version created but failed to retrieve."), 500
 
-        return jsonify(dict(new_version_row)), 201
+        # Note: 'release_date' is DATE, not TIMESTAMP. Timestamps are 'created_at', 'updated_at'.
+        processed_version = convert_timestamps_to_ist_iso(dict(new_version_row), ['created_at', 'updated_at'])
+        return jsonify(processed_version), 201
 
     except sqlite3.IntegrityError as e:
         db.rollback()
@@ -5024,7 +5101,10 @@ def admin_list_versions():
 
         try:
             versions_cursor = db.execute(final_query, tuple(paginated_params))
-            versions_list = [dict(row) for row in versions_cursor.fetchall()]
+            versions_list_raw = [dict(row) for row in versions_cursor.fetchall()]
+            # Note: 'release_date' is DATE, not TIMESTAMP.
+            ts_keys = ['created_at', 'updated_at']
+            versions_list = [convert_timestamps_to_ist_iso(ver, ts_keys) for ver in versions_list_raw]
         except sqlite3.Error as e: # Be specific with database errors if possible
             app.logger.error(f"Database error fetching paginated versions: {e}")
             return jsonify(msg=f"Database error fetching versions: {e}"), 500
@@ -5057,7 +5137,9 @@ def admin_get_version_by_id(version_id):
     if not version_row:
         return jsonify(msg=f"Version with ID {version_id} not found."), 404
     
-    return jsonify(dict(version_row)), 200
+    # Note: 'release_date' is DATE, not TIMESTAMP.
+    processed_version = convert_timestamps_to_ist_iso(dict(version_row), ['created_at', 'updated_at'])
+    return jsonify(processed_version), 200
 
 @app.route('/api/admin/versions/<int:version_id>', methods=['PUT'])
 @jwt_required()
@@ -5143,8 +5225,10 @@ def admin_update_version(version_id):
         if not updated_version_row: # Should not happen if update was successful on existing ID
             app.logger.error(f"Failed to fetch updated version ID {version_id} after PUT.")
             return jsonify(msg="Version updated but failed to retrieve."), 500
-            
-        return jsonify(dict(updated_version_row)), 200
+
+        # Note: 'release_date' is DATE, not TIMESTAMP.
+        processed_version = convert_timestamps_to_ist_iso(dict(updated_version_row), ['created_at', 'updated_at'])
+        return jsonify(processed_version), 200
 
     except sqlite3.IntegrityError as e:
         db.rollback()
@@ -5681,7 +5765,7 @@ def database_reset_start():
         return jsonify(msg="Server error: Could not create log directory."), 500
 
     # 2. Log information to a timestamped text file
-    log_timestamp = datetime.now(timezone.utc)
+    log_timestamp = datetime.now(IST) # Changed to IST
     log_filename = f"reset_{log_timestamp.strftime('%Y%m%d_%H%M%S')}_{actual_username}.txt"
     log_file_path = os.path.join(reset_logs_dir, log_filename)
 
@@ -5754,7 +5838,7 @@ def _perform_database_backup():
         backup_dir = os.path.join(app.config['INSTANCE_FOLDER_PATH'], 'backups')
         os.makedirs(backup_dir, exist_ok=True)
         source_db_path = app.config['DATABASE']
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        timestamp = datetime.now(IST).strftime('%Y%m%d_%H%M%S') # Changed to IST
         backup_filename = f"software_dashboard_{timestamp}.db"
         backup_file_path = os.path.join(backup_dir, backup_filename)
         shutil.copy2(source_db_path, backup_file_path)
@@ -6096,7 +6180,7 @@ def get_user_favorites_api():
         total_pages = math.ceil(total_count / per_page) if total_count > 0 else 1
         
         # Convert Row objects to dicts for JSON serialization
-        items_as_dicts = [dict(item) for item in items]
+        items_as_dicts = [convert_timestamps_to_ist_iso(dict(item), ['favorited_at']) for item in items]
 
         return jsonify({
             "favorites": items_as_dicts,
@@ -6128,13 +6212,14 @@ def get_user_favorite_status_api(item_type, item_id):
     favorite_record = database.get_favorite_status(db, user_id, item_id, item_type)
 
     if favorite_record:
+        processed_fav_record = convert_timestamps_to_ist_iso(dict(favorite_record), ['created_at'])
         return jsonify({
             "is_favorite": True,
-            "favorite_id": favorite_record['id'], # ID of the user_favorites record
-            "favorited_at": favorite_record['created_at']
+            "favorite_id": processed_fav_record['id'], # ID of the user_favorites record
+            "favorited_at": processed_fav_record['created_at'] # Key is 'created_at' in DB, exposed as 'favorited_at'
         }), 200
     else:
-        return jsonify({"is_favorite": False, "favorite_id": None}), 200
+        return jsonify({"is_favorite": False, "favorite_id": None, "favorited_at": None}), 200
 
 # --- Audit Log Viewer Endpoint (Admin) ---
 @app.route('/api/admin/audit-logs', methods=['GET'])
@@ -6238,7 +6323,9 @@ def get_audit_logs():
 
         try:
             logs_cursor = db.execute(base_query, tuple(query_params))
-            logs_list = [dict(row) for row in logs_cursor.fetchall()]
+            logs_list_raw = [dict(row) for row in logs_cursor.fetchall()]
+            ts_keys = ['timestamp']
+            logs_list = [convert_timestamps_to_ist_iso(log, ts_keys) for log in logs_list_raw]
         except sqlite3.Error as e:
             app.logger.error(f"Database error fetching audit logs: {e}")
             return jsonify(msg=f"Database error fetching audit logs: {e}"), 500
@@ -6433,36 +6520,40 @@ def get_dashboard_stats():
         total_software_titles = db.execute("SELECT COUNT(*) as count FROM software").fetchone()['count']
 
         # --- Recent Activities (Audit Logs) ---
-        recent_activities = [
+        recent_activities_raw = [
             dict(row) for row in db.execute(
                 "SELECT action_type, username, timestamp, details FROM audit_logs ORDER BY timestamp DESC LIMIT 5"
             ).fetchall()
         ]
+        recent_activities = [convert_timestamps_to_ist_iso(act, ['timestamp']) for act in recent_activities_raw]
 
         # --- Recent Additions (last 5 across all types) ---
-        recent_additions = []
-        recent_additions += [
+        recent_additions_raw = []
+        recent_additions_raw += [
             dict(row) for row in db.execute(
                 "SELECT id, doc_name as name, created_at, 'Document' as type FROM documents ORDER BY created_at DESC LIMIT 5"
             ).fetchall()
         ]
-        recent_additions += [
+        recent_additions_raw += [
             dict(row) for row in db.execute(
                 "SELECT id, patch_name as name, created_at, 'Patch' as type FROM patches ORDER BY created_at DESC LIMIT 5"
             ).fetchall()
         ]
-        recent_additions += [
+        recent_additions_raw += [
             dict(row) for row in db.execute(
                 "SELECT id, title as name, created_at, 'Link File' as type FROM links WHERE is_external_link = FALSE ORDER BY created_at DESC LIMIT 5"
             ).fetchall()
         ]
-        recent_additions += [
+        recent_additions_raw += [
             dict(row) for row in db.execute(
                 "SELECT id, COALESCE(user_provided_title, original_filename) as name, created_at, 'Misc File' as type FROM misc_files ORDER BY created_at DESC LIMIT 5"
             ).fetchall()
         ]
-        recent_additions.sort(key=lambda x: x['created_at'], reverse=True)
-        top_recent_additions = recent_additions[:5]
+        # Sort before converting, as conversion might make direct string sort tricky if not all are proper ISO strings yet
+        recent_additions_raw.sort(key=lambda x: x['created_at'], reverse=True)
+
+        processed_recent_additions = [convert_timestamps_to_ist_iso(add, ['created_at']) for add in recent_additions_raw]
+        top_recent_additions = processed_recent_additions[:5]
 
         # --- Popular Downloads ---
         popular_downloads = []
@@ -7837,9 +7928,10 @@ def add_comment_to_item(item_type, item_id):
 
             # --- End Notification Logic ---
 
-            new_comment = database.get_comment_by_id(db, comment_id)
-            if new_comment:
-                return jsonify(dict(new_comment)), 201
+            new_comment_raw = database.get_comment_by_id(db, comment_id)
+            if new_comment_raw:
+                processed_comment = convert_timestamps_to_ist_iso(dict(new_comment_raw), ['created_at', 'updated_at'])
+                return jsonify(processed_comment), 201
             else:
                 app.logger.error(f"Failed to retrieve comment {comment_id} after creation.")
                 return jsonify(msg="Comment created but failed to retrieve details."), 500
@@ -7893,10 +7985,21 @@ def get_comments_for_item_api(item_type, item_id):
 
     try:
         # database.get_comments_for_item should return a dict with 'comments' list and pagination fields
-        comments_data = database.get_comments_for_item(db, item_id, item_type, page, per_page)
+        comments_data_raw = database.get_comments_for_item(db, item_id, item_type, page, per_page)
+
+        # Process timestamps within the 'comments' list of the returned dict
+        if 'comments' in comments_data_raw:
+            ts_keys_comments = ['created_at', 'updated_at']
+            processed_comments_list = []
+            for comment_dict in comments_data_raw['comments']: # comment_dict is already a dict
+                # Recursively process replies if they exist
+                if 'replies' in comment_dict and isinstance(comment_dict['replies'], list):
+                    processed_replies = [convert_timestamps_to_ist_iso(reply, ts_keys_comments) for reply in comment_dict['replies']]
+                    comment_dict['replies'] = processed_replies
+                processed_comments_list.append(convert_timestamps_to_ist_iso(comment_dict, ts_keys_comments))
+            comments_data_raw['comments'] = processed_comments_list
         
-        # The database function already converts rows to dicts and handles structure.
-        return jsonify(comments_data), 200
+        return jsonify(comments_data_raw), 200
         
     except Exception as e:
         app.logger.error(f"Error fetching comments for {item_type} ID {item_id}: {e}", exc_info=True)
@@ -7933,9 +8036,10 @@ def update_comment_api(comment_id):
             target_id=comment_id,
             details={'item_type': existing_comment['item_type'], 'item_id': existing_comment['item_id'], 'old_content_snippet': existing_comment['content'][:50], 'new_content_length': len(new_content)}
         )
-        updated_comment = database.get_comment_by_id(db, comment_id)
-        if updated_comment:
-            return jsonify(dict(updated_comment)), 200
+        updated_comment_raw = database.get_comment_by_id(db, comment_id)
+        if updated_comment_raw:
+            processed_comment = convert_timestamps_to_ist_iso(dict(updated_comment_raw), ['created_at', 'updated_at'])
+            return jsonify(processed_comment), 200
         else:
             app.logger.error(f"Failed to retrieve comment {comment_id} after update.")
             return jsonify(msg="Comment updated but failed to retrieve details."), 500
@@ -8064,10 +8168,12 @@ def get_notifications_api():
             total_notifications = len(unread_notifications_all)
             start_index = (page - 1) * per_page
             end_index = start_index + per_page
-            notifications_list = [dict(n) for n in unread_notifications_all[start_index:end_index]]
+            notifications_list_raw = [dict(n) for n in unread_notifications_all[start_index:end_index]]
+            notifications_list = [convert_timestamps_to_ist_iso(n, ['created_at', 'updated_at']) for n in notifications_list_raw]
         elif status_filter == 'all': # Explicitly check for 'all'
-            notifications_rows, total_notifications_count = database.get_all_notifications(db, user_id, page, per_page)
-            notifications_list = [dict(n) for n in notifications_rows]
+            notifications_rows_raw, total_notifications_count = database.get_all_notifications(db, user_id, page, per_page)
+            notifications_list_raw = [dict(n) for n in notifications_rows_raw]
+            notifications_list = [convert_timestamps_to_ist_iso(n, ['created_at', 'updated_at']) for n in notifications_list_raw]
             total_notifications = total_notifications_count
         else: # Handle invalid status filters
              app.logger.info(f"Notification API: Received invalid status_filter '{status_filter}', returning empty list.")
@@ -8128,9 +8234,10 @@ def mark_notification_as_read_api(notification_id):
             target_id=notification_id,
             details={'notification_id': notification_id}
         )
-        updated_notification = database.get_notification_by_id(db, notification_id)
-        if updated_notification:
-            return jsonify(dict(updated_notification)), 200
+        updated_notification_raw = database.get_notification_by_id(db, notification_id)
+        if updated_notification_raw:
+            processed_notification = convert_timestamps_to_ist_iso(dict(updated_notification_raw), ['created_at', 'updated_at'])
+            return jsonify(processed_notification), 200
         else:
             app.logger.error(f"Failed to retrieve notification {notification_id} after marking as read.")
             return jsonify(msg="Notification marked as read, but failed to retrieve updated details."), 500

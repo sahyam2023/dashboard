@@ -260,7 +260,7 @@ const role = user?.role; // Access role safely, as user can be null
     finally { setIsMovingSelected(false); setModalSelectedCategoryId(null); }
   };
 
-  const formatDate = (dateStr: string | null | undefined) => dateStr ? new Date(dateStr).toLocaleString() : '-';
+  const formatDate = (dateStr: string | null | undefined) => dateStr ? new Date(dateStr).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : '-';
   const formatFileSize = (bytes: number|null|undefined) => {
     if (bytes == null) return 'N/A';
     if (bytes === 0) return '0 B';

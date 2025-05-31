@@ -1,6 +1,10 @@
 # database.py
 import sqlite3
 import os
+import pytz
+from datetime import datetime, timezone # ensure timezone is imported if needed
+
+IST = pytz.timezone('Asia/Kolkata')
 
 # No global DATABASE constant needed here anymore, as path will be passed in.
 # BASE_DIR might still be needed for locating schema.sql relative to this file.
@@ -434,7 +438,7 @@ def update_comment_content(db, comment_id, user_id, new_content):
         cursor = db.execute(
             """
             UPDATE comments
-            SET content = ?, updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+            SET content = ?, updated_at = (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30'))
             WHERE id = ? AND user_id = ?
             """,
             (new_content, comment_id, user_id)
@@ -631,7 +635,7 @@ def mark_notification_as_read(db, notification_id, user_id):
             return False
 
         cursor = db.execute(
-            "UPDATE notifications SET is_read = TRUE, updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE id = ? AND user_id = ?",
+            "UPDATE notifications SET is_read = TRUE, updated_at = (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')) WHERE id = ? AND user_id = ?",
             (notification_id, user_id)
         )
         db.commit()
@@ -644,7 +648,7 @@ def mark_all_notifications_as_read(db, user_id):
     """Marks all unread notifications for a user as read."""
     try:
         cursor = db.execute(
-            "UPDATE notifications SET is_read = TRUE, updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE user_id = ? AND is_read = FALSE",
+            "UPDATE notifications SET is_read = TRUE, updated_at = (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')) WHERE user_id = ? AND is_read = FALSE",
             (user_id,)
         )
         db.commit()

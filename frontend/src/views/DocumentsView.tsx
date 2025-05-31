@@ -465,8 +465,8 @@ useEffect(() => {
     },
     { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: (d: DocumentType) => d.uploaded_by_username||'N/A' },
     { key: 'updated_by_username', header: 'Updated By', sortable: false, render: (d: DocumentType) => d.updated_by_username||'N/A' },
-    { key: 'created_at', header: 'Created At', sortable: true, render: (d: DocumentType) => d.created_at?new Date(d.created_at).toLocaleString():'-' },
-    { key: 'updated_at', header: 'Updated At', sortable: true, render: (d: DocumentType) => d.updated_at?new Date(d.updated_at).toLocaleString():'-' },
+    { key: 'created_at', header: 'Created At', sortable: true, render: (d: DocumentType) => d.created_at ? new Date(d.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : '-' },
+    { key: 'updated_at', header: 'Updated At', sortable: true, render: (d: DocumentType) => d.updated_at ? new Date(d.updated_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : '-' },
     { key: 'actions' as any, header: 'Actions', render: (d: DocumentType) => (
       <div className="flex space-x-1 items-center">
         {isAuthenticated && (

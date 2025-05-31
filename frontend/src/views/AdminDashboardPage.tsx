@@ -156,13 +156,17 @@ const AdminDashboardPage: React.FC = () => {
   
 
   const formatDate = (dateString: string) => {
-    // dateString is now expected to be in ISO 8601 UTC format (e.g., "YYYY-MM-DDTHH:MM:SSZ")
-    
+    // dateString is now expected to be in ISO 8601 format with offset (e.g., "YYYY-MM-DDTHH:MM:SS+05:30")
+    if (!dateString) return 'N/A';
     const dateObj = new Date(dateString);
-    return dateObj.toLocaleDateString('en-US', {
-      year: 'numeric', month: 'short', day: 'numeric',
-      hour: '2-digit', minute: '2-digit',
-      hour12: true 
+    return dateObj.toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata', // Ensure display is in IST
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
     });
   };
 

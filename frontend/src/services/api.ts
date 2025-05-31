@@ -2396,3 +2396,172 @@ export async function superAdminCreateUser(userData: SuperAdminCreateUserPayload
   }
 }
 // --- End Super Admin Create User ---
+
+// --- Large File Upload (Chunked) ---
+
+/**
+ * Uploads a file in chunks to the backend.
+ * @param file The file to upload.
+ * @param itemType The type of item being uploaded (e.g., 'document', 'patch').
+ * @param metadata An object containing all other necessary form data.
+ * @param onProgress A callback function to report upload progress (percentage 0-100).
+ * @returns A promise that resolves to the server's response for the last chunk (finalized file details).
+ */
+export async function uploadFileInChunks(
+  file: File,
+  itemType: string,
+  metadata: Record<string, any>,
+  onProgress: (progress: number) => void
+): Promise<any> { // The return type 'any' should ideally be the specific type of the uploaded item (DocumentType, Patch, etc.)
+  const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB per chunk
+  const total_chunks = Math.ceil(file.size / CHUNK_SIZE);
+  const upload_id = crypto.randomUUID(); // Generate a unique ID for this upload session
+
+  let finalResponse: any = null;
+
+  try {
+    for (let chunk_number = 0; chunk_number < total_chunks; chunk_number++) {
+      const start_byte = chunk_number * CHUNK_SIZE;
+      const end_byte = Math.min(file.size, start_byte + CHUNK_SIZE);
+      const file_chunk = file.slice(start_byte, end_byte);
+
+      const formData = new FormData();
+      formData.append('file_chunk', file_chunk, file.name); // Add filename for the blob
+      formData.append('chunk_number', chunk_number.toString());
+      formData.append('total_chunks', total_chunks.toString());
+      formData.append('upload_id', upload_id);
+      formData.append('original_filename', file.name);
+      formData.append('item_type', itemType);
+
+      // Append all metadata fields to FormData
+      for (const key in metadata) {
+        if (Object.prototype.hasOwnProperty.call(metadata, key) && metadata[key] !== undefined && metadata[key] !== null) {
+          formData.append(key, metadata[key]);
+        }
+      }
+
+      // Log FormData content for debugging the first chunk
+      // if (chunk_number === 0 || chunk_number === total_chunks -1) {
+      //   console.log(`FormData for chunk ${chunk_number} (upload_id: ${upload_id}):`);
+      //   formData.forEach((value, key) => {
+      //     if (value instanceof File) {
+      //       console.log(`${key}: File { name: "${value.name}", size: ${value.size}, type: "${value.type}" }`);
+      //     } else {
+      //       console.log(`${key}: ${value}`);
+      //     }
+      //   });
+      // }
+
+
+      const response = await fetch(`${API_BASE_URL}/api/admin/upload_large_file`, {
+        method: 'POST',
+        headers: {
+          ...getAuthHeader(),
+          // Content-Type is automatically set by the browser for FormData
+        },
+        body: formData,
+      });
+
+      // Use handleApiError for response checking. It will throw on non-OK responses.
+      // The response from handleApiError is the parsed JSON body.
+      const chunkResponse = await handleApiError(response, `Failed to upload chunk ${chunk_number + 1}/${total_chunks}`);
+
+      if (chunk_number === total_chunks - 1) {
+        finalResponse = chunkResponse; // Store the response from the last chunk
+      }
+
+      // Report progress
+      const progress = ((chunk_number + 1) / total_chunks) * 100;
+      onProgress(progress);
+
+      // Optional: Small delay between chunks if needed, though typically not necessary
+      // await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    if (!finalResponse) {
+      // This case should ideally not be reached if total_chunks > 0 and loop completes
+      throw new Error("Upload completed but no final response was received.");
+    }
+    return finalResponse;
+
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    // Re-throw the error so the calling component can handle it (e.g., display error message)
+    console.error('Error during chunked file upload:', error);
+    // The error object might already be structured by handleApiError.
+    // If not, or if it's a different type of error, ensure it's useful.
+    throw error;
+  }
+}
+
+// --- How to use uploadFileInChunks in a UI component ---
+//
+// import React, { useState } from 'react';
+// import { uploadFileInChunks } from './services/api'; // Adjust path as needed
+//
+// const FileUploaderComponent: React.FC = () => {
+//   const [uploadProgress, setUploadProgress] = useState(0);
+//   const [isUploading, setIsUploading] = useState(false);
+//   const [error, setError] = useState<string | null>(null);
+//   const [uploadResult, setUploadResult] = useState<any | null>(null);
+//
+//   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+//     const file = event.target.files?.[0];
+//     if (!file) return;
+//
+//     setIsUploading(true);
+//     setUploadProgress(0);
+//     setError(null);
+//     setUploadResult(null);
+//
+//     // Example metadata - this would come from your form state
+//     const itemType = 'document'; // Or 'patch', 'misc_file'
+//     const metadata = {
+//       software_id: '1', // Example: replace with actual ID
+//       doc_name: 'My Large Document via Chunks', // Example
+//       description: 'This is a description for the large file.',
+//       // Add other relevant metadata based on itemType:
+//       // For 'document': doc_type
+//       // For 'patch': version_id, patch_name, release_date, patch_by_developer
+//       // For 'misc_file': misc_category_id, user_provided_title (optional)
+//       // For 'link_file': software_id, version_id (optional), title
+//     };
+//
+//     try {
+//       const result = await uploadFileInChunks(file, itemType, metadata, (progress) => {
+//         setUploadProgress(progress);
+//         console.log(`Upload Progress: ${progress.toFixed(2)}%`);
+//       });
+//       setUploadResult(result);
+//       console.log('Upload successful:', result);
+//       // Handle successful upload (e.g., show success message, update UI state, clear file input)
+//     } catch (err: any) {
+//       console.error('Upload failed:', err);
+//       setError(err.message || 'An unknown error occurred during upload.');
+//       // Handle upload error (e.g., show error message to user)
+//     } finally {
+//       setIsUploading(false);
+//     }
+//   };
+//
+//   return (
+//     <div>
+//       <input type="file" onChange={handleFileChange} disabled={isUploading} />
+//       {isUploading && (
+//         <div>
+//           <p>Uploading: {uploadProgress.toFixed(2)}%</p>
+//           {/* You can use a proper progress bar component here */}
+//           <progress value={uploadProgress} max="100" style={{ width: '100%' }} />
+//         </div>
+//       )}
+//       {error && <p style={{ color: 'red' }}>Error: {error}</p>}
+//       {uploadResult && <p style={{ color: 'green' }}>Success! Server response: {JSON.stringify(uploadResult)}</p>}
+//     </div>
+//   );
+// };
+//
+// export default FileUploaderComponent;
+// --- End Large File Upload (Chunked) ---

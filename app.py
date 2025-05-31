@@ -1,4 +1,100 @@
 # app.py
+
+# --- Comprehensive Configuration Notes for Deployment ---
+# This application, especially with the large file upload functionality,
+# requires careful configuration at multiple levels: Flask app, WSGI server (e.g., Gunicorn),
+# and any reverse proxy (e.g., Nginx).
+#
+# 1. Flask Application Configuration (`app.config`):
+#    - `MAX_CONTENT_LENGTH`:
+#      - For standard Flask routes that might receive file uploads directly (not chunked),
+#        this setting limits the total request size. Example: `app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024` (16MB).
+#      - For the chunked upload endpoint (`/api/admin/upload_large_file`), the overall file size
+#        can be much larger than `MAX_CONTENT_LENGTH` because the file is processed in smaller pieces.
+#      - However, each individual chunk POST request (containing the chunk data + metadata)
+#        must still have a body size that the Flask app (and any preceding servers) can handle.
+#        Therefore, `MAX_CONTENT_LENGTH` should be set to a value sufficient for the
+#        largest expected *chunk* size plus any associated metadata in the multipart form.
+#        For example, if chunks are 5MB and metadata is small, a limit of 10MB might be reasonable.
+#        `app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024`
+#
+# 2. Web Server / WSGI Server Configuration:
+#    - These settings are crucial as they often impose their own limits before a request
+#      even reaches the Flask application.
+#
+#    - Gunicorn (Common WSGI Server for Flask):
+#      - `--timeout <seconds>`: Worker timeout. Default is 30 seconds. This might be too short
+#        for operations like processing a large file chunk or the finalization step of a large upload
+#        (moving file, DB insert). Increase as needed, e.g., `--timeout 120` (2 minutes) or higher.
+#      - `--limit-request-line <bytes>`: Max size of HTTP request line. Default 4094. Usually not an issue.
+#      - `--limit-request-field-size <bytes>`: Max size of an HTTP request header field. Default 8190.
+#        Usually not an issue unless sending extremely large headers/metadata.
+#      - `--limit-request-fields <integer>`: Max number of request header fields. Default 100.
+#
+#    - Nginx (Common Reverse Proxy):
+#      - `client_max_body_size <size>`: This is a very important directive. It defines the maximum
+#        allowed size of the client request body.
+#        - For the chunked upload endpoint, this should be set to accommodate the largest
+#          *chunk* size plus metadata overhead (e.g., `10M` if chunks are 5MB).
+#        - If you have other non-chunked routes that accept large files, this would need to be
+#          set to the absolute largest file size you want to support for those routes.
+#        - Example: `client_max_body_size 10M;`
+#      - `proxy_request_buffering off;`:
+#        - When set to `off`, Nginx starts sending the request body to the backend server (Gunicorn)
+#          immediately as it arrives, rather than buffering the entire request first.
+#        - This can be beneficial for large uploads to reduce disk I/O on the Nginx server and
+#          improve perceived performance, especially if Gunicorn/Flask can stream the request.
+#        - For the chunked approach, where chunks are relatively small, its impact might be less
+#          critical than for non-chunked monolithic uploads, but can still be good practice.
+#      - `proxy_buffering off;`: Similar to `proxy_request_buffering`, but for responses from
+#        the backend. Generally useful for streaming responses.
+#      - `proxy_read_timeout <seconds>`: Timeout for reading a response from the proxied server (Gunicorn).
+#        Increase if Gunicorn might take a long time to process a chunk or finalize a file.
+#        Example: `proxy_read_timeout 120s;`
+#      - `proxy_send_timeout <seconds>`: Timeout for sending a request to the proxied server.
+#        Example: `proxy_send_timeout 120s;`
+#      - `proxy_connect_timeout <seconds>`: Timeout for establishing a connection with the proxied server.
+#        Example: `proxy_connect_timeout 75s;`
+#
+#    - General Notes:
+#      - The specific directives and optimal values depend heavily on your deployment stack
+#        (Nginx, Apache, Caddy, etc.) and server resources.
+#      - Always consult the documentation for your specific web server and WSGI server.
+#
+# 3. Filesystem and Server Resources:
+#    - Disk Space:
+#      - `app.config['TMP_LARGE_UPLOADS_FOLDER']` (e.g., `instance/tmp_large_uploads`):
+#        Must have sufficient disk space to hold multiple concurrent large file uploads
+#        as they are being assembled. Consider the maximum number of concurrent uploads
+#        and the maximum size of files.
+#      - Final storage locations (e.g., `DOC_UPLOAD_FOLDER`, `PATCH_UPLOAD_FOLDER`):
+#        Must have adequate space for all permanently stored files.
+#    - Permissions:
+#      - The user account under which the Flask application (and WSGI server) runs needs
+#        read, write, and execute (for directories) permissions for all upload-related
+#        directories: `TMP_LARGE_UPLOADS_FOLDER`, `DOC_UPLOAD_FOLDER`, etc.
+#    - Memory:
+#      - While chunking significantly reduces the memory footprint compared to loading entire
+#        files into memory, each chunk is still processed. Monitor server memory usage,
+#        especially during peak upload times or if many small chunks are processed rapidly.
+#
+# 4. Chunking Implementation Notes (Current Application):
+#    - The current implementation appends chunks sequentially to a temporary file
+#      (e.g., `{upload_id}-{original_filename}.part`).
+#    - It relies on the client to send chunks in the correct order.
+#    - Error handling for individual chunk failures is present, but the overall upload
+#      process might leave partial files in `TMP_LARGE_UPLOADS_FOLDER` if an error occurs
+#      mid-upload or if the client abandons the upload. A cleanup mechanism (e.g., a periodic script)
+#      for stale `.part` files might be necessary for long-term maintenance.
+#    - For more advanced scenarios (e.g., very unreliable networks), consider:
+#      - Resumable uploads: Protocols like TUS (tus.io) provide robust resumable upload capabilities.
+#        This would require significant changes on both client and server.
+#      - Storing individual chunks and reassembling: Instead of appending, save each chunk
+#        as a separate file (e.g., `{upload_id}.{chunk_number}.chunk`) and then combine them
+#        once all are received. This can offer better error recovery for specific chunks.
+#
+# --- End Comprehensive Configuration Notes ---
+
 import os
 import uuid
 import sqlite3
@@ -47,13 +143,14 @@ STATIC_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fronte
 
 
 # Ensure all upload folders exist
-for folder in [DOC_UPLOAD_FOLDER, PATCH_UPLOAD_FOLDER, LINK_UPLOAD_FOLDER, MISC_UPLOAD_FOLDER, PROFILE_PICTURES_UPLOAD_FOLDER, DEFAULT_PROFILE_PICTURES_FOLDER]: # Added PROFILE_PICTURES_UPLOAD_FOLDER and DEFAULT_PROFILE_PICTURES_FOLDER
+TMP_LARGE_UPLOADS_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'tmp_large_uploads') # For large file chunks
+for folder in [DOC_UPLOAD_FOLDER, PATCH_UPLOAD_FOLDER, LINK_UPLOAD_FOLDER, MISC_UPLOAD_FOLDER, PROFILE_PICTURES_UPLOAD_FOLDER, DEFAULT_PROFILE_PICTURES_FOLDER, TMP_LARGE_UPLOADS_FOLDER]: # Added PROFILE_PICTURES_UPLOAD_FOLDER and DEFAULT_PROFILE_PICTURES_FOLDER
     if not os.path.exists(folder):
         os.makedirs(folder, exist_ok=True) # exist_ok=True is helpful
 
 ALLOWED_EXTENSIONS = {
-    'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 
-    'mp4', 'mov', 'avi', 'wmv', # Video
+    'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif',
+    'mp4', 'mov', 'avi', 'wmv', 'mkv', 'ts', # Video
     'mp3', 'wav', # Audio
     'zip', 'rar', '7z', 'tar', 'gz', # Archives
     'exe', 'msi', 'dmg', # Installers/Executables
@@ -104,14 +201,53 @@ app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=4)
 # Store upload folder paths in app config for easy access in routes
 app.config['DOC_UPLOAD_FOLDER'] = DOC_UPLOAD_FOLDER
 app.config['PATCH_UPLOAD_FOLDER'] = PATCH_UPLOAD_FOLDER
+
+# --- MIME Type to Extension Mapping ---
+COMMON_MIME_TO_EXT = {
+    'video/mp4': 'mp4',
+    'application/pdf': 'pdf',
+    'application/zip': 'zip',
+    'application/x-zip-compressed': 'zip',
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'text/plain': 'txt',
+    'application/msword': 'doc',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+    'application/vnd.ms-excel': 'xls',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+    'application/vnd.ms-powerpoint': 'ppt',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+    'video/x-matroska': 'mkv',
+    'video/mp2t': 'ts',
+    'application/x-iso9660-image': 'iso',
+    'application/octet-stream': 'bin', # Generic fallback for unknown binary data
+}
+# --- End MIME Type to Extension Mapping ---
 app.config['LINK_UPLOAD_FOLDER'] = LINK_UPLOAD_FOLDER
 app.config['MISC_UPLOAD_FOLDER'] = MISC_UPLOAD_FOLDER
 app.config['PROFILE_PICTURES_UPLOAD_FOLDER'] = PROFILE_PICTURES_UPLOAD_FOLDER # Added
 app.config['DEFAULT_PROFILE_PICTURES_FOLDER'] = DEFAULT_PROFILE_PICTURES_FOLDER # New
 app.config['INSTANCE_FOLDER_PATH'] = INSTANCE_FOLDER_PATH # Added for DB backup
+app.config['TMP_LARGE_UPLOADS_FOLDER'] = TMP_LARGE_UPLOADS_FOLDER # For large file chunks
 
 bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
+
+# --- Configuration Notes for Large File Uploads ---
+# Flask's MAX_CONTENT_LENGTH:
+# Set in Flask app config, e.g., app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024 * 1024 # 1 GB
+# This affects the maximum size of the entire request, including all parts of multipart/form-data.
+# For chunked uploads, individual chunks must be smaller than this limit.
+
+# Web Server (Gunicorn/Nginx) Timeouts and Body Size Limits:
+# Gunicorn: --timeout <seconds> (e.g., 300 for 5 minutes)
+# Nginx: client_max_body_size <size>; (e.g., 1G)
+#        proxy_read_timeout <seconds>;
+#        proxy_send_timeout <seconds>;
+# These need to be configured to allow large requests and sufficient time for uploads.
+# For chunked uploads, the timeout applies to each chunk's request.
+# The client_max_body_size should be larger than the MAX_CONTENT_LENGTH in Flask for individual chunks.
+# If not using chunking and sending whole large files, these limits must accommodate the entire file size.
 
 # --- Database Connection & Helpers ---
 def get_site_setting(key: str) -> str | None:
@@ -4369,6 +4505,144 @@ def admin_delete_misc_file(file_id):
         app.logger.error(f"Error deleting misc file ID {file_id}: {e}")
         return jsonify(msg=f"Database error while deleting misc file: {e}"), 500
 
+# Helper function for handling DB insertion for large file uploads
+def _admin_handle_large_file_db_insert(
+    item_type, stored_filename, original_filename, file_size, mime_type,
+    current_user_id, metadata: dict
+):
+    db = get_db()
+    table_name = ""
+    sql_insert_query = ""
+    sql_params_list = [] # List of actual values for the query
+
+    # Common fields for logging/response
+    item_name_for_log = metadata.get('doc_name') or metadata.get('patch_name') or metadata.get('link_title') or metadata.get('user_provided_title_misc') or original_filename
+
+    server_path_prefix = ""
+    # The 'mime_type' parameter received by this function is the client-provided/detected MIME type for the chunk.
+    # We'll use this for the database 'file_type' column.
+    db_file_type_to_store = mime_type
+    app.logger.info(f"Large file DB insert: Storing file_type='{db_file_type_to_store}' for {original_filename}.")
+
+    if item_type == 'document':
+        table_name = 'documents'
+        server_path_prefix = '/official_uploads/docs'
+        required_meta = ['software_id', 'doc_name']
+        missing_meta = [field for field in required_meta if not metadata.get(field)]
+        if missing_meta:
+            return None, jsonify(msg=f"Missing metadata for document: {', '.join(missing_meta)}"), 400
+
+        sql_insert_query = """INSERT INTO documents (software_id, doc_name, download_link, description, doc_type,
+                                               is_external_link, stored_filename, original_filename_ref, file_size, file_type,
+                                               created_by_user_id, updated_by_user_id)
+                              VALUES (?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)"""
+        sql_params_list = [
+            int(metadata['software_id']), metadata['doc_name'], f"{server_path_prefix}/{stored_filename}",
+            metadata.get('description', ''), metadata.get('doc_type', ''), stored_filename, original_filename, # original_filename here is original_filename_ref
+            file_size, db_file_type_to_store, current_user_id, current_user_id
+        ]
+    elif item_type == 'patch':
+        table_name = 'patches'
+        server_path_prefix = '/official_uploads/patches'
+        required_meta = ['version_id', 'patch_name']
+        missing_meta = [field for field in required_meta if not metadata.get(field)]
+        if missing_meta:
+            return None, jsonify(msg=f"Missing metadata for patch: {', '.join(missing_meta)}"), 400
+
+        sql_insert_query = """INSERT INTO patches (version_id, patch_name, download_link, description, release_date, patch_by_developer,
+                                             is_external_link, stored_filename, original_filename_ref, file_size, file_type,
+                                             created_by_user_id, updated_by_user_id)
+                              VALUES (?, ?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)"""
+        sql_params_list = [
+            int(metadata['version_id']), metadata['patch_name'], f"{server_path_prefix}/{stored_filename}",
+            metadata.get('description', ''), metadata.get('release_date'), metadata.get('patch_by_developer', ''),
+            stored_filename, original_filename, # original_filename here is original_filename_ref
+            file_size, db_file_type_to_store, current_user_id, current_user_id
+        ]
+    elif item_type == 'misc_file':
+        table_name = 'misc_files'
+        server_path_prefix = '/misc_uploads'
+        required_meta = ['misc_category_id']
+        missing_meta = [field for field in required_meta if not metadata.get(field)]
+        if missing_meta:
+            return None, jsonify(msg=f"Missing metadata for misc_file: {', '.join(missing_meta)}"), 400
+
+        user_provided_title = metadata.get('user_provided_title_misc') or original_filename
+
+        sql_insert_query = """INSERT INTO misc_files (misc_category_id, user_id, user_provided_title, user_provided_description,
+                                        original_filename, stored_filename, file_path, file_type, file_size,
+                                        created_by_user_id, updated_by_user_id)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+        sql_params_list = [
+            int(metadata['misc_category_id']), current_user_id, user_provided_title, metadata.get('description', ''),
+            original_filename, stored_filename, f"{server_path_prefix}/{stored_filename}", db_file_type_to_store, file_size, # original_filename here is correct for misc_files.original_filename
+            current_user_id, current_user_id
+        ]
+    elif item_type == 'link_file': # Using 'link_file' to differentiate from external links added via URL
+        table_name = 'links'
+        server_path_prefix = '/official_uploads/links'
+        required_meta = ['software_id', 'link_title'] # version_id for links can be optional
+        missing_meta = [field for field in required_meta if not metadata.get(field)]
+        if missing_meta:
+            return None, jsonify(msg=f"Missing metadata for link_file: {', '.join(missing_meta)}"), 400
+
+        version_id_for_link = metadata.get('version_id')
+        if version_id_for_link:
+            try:
+                version_id_for_link = int(version_id_for_link)
+            except ValueError:
+                 return None, jsonify(msg="Invalid version_id format for link_file."), 400
+
+        sql_insert_query = """INSERT INTO links (software_id, version_id, title, url, description,
+                                           is_external_link, stored_filename, original_filename_ref, file_size, file_type,
+                                           created_by_user_id, updated_by_user_id)
+                              VALUES (?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)"""
+        sql_params_list = [
+            int(metadata['software_id']), version_id_for_link, metadata['link_title'], f"{server_path_prefix}/{stored_filename}",
+            metadata.get('description', ''), stored_filename, original_filename, # original_filename here is original_filename_ref
+            file_size, db_file_type_to_store,
+            current_user_id, current_user_id
+        ]
+    else:
+        return None, jsonify(msg=f"Unsupported item_type for large file DB insert: {item_type}"), 400
+
+    try:
+        cursor = db.execute(sql_insert_query, tuple(sql_params_list))
+        new_id = cursor.lastrowid
+        db.commit()
+        app.logger.info(f"Large file DB insert: Successfully inserted {item_type} '{item_name_for_log}', new ID: {new_id}")
+
+        # Fetch back the newly created item with joined data for response
+        fetch_back_query = ""
+        if table_name == 'documents':
+            fetch_back_query = "SELECT d.*, s.name as software_name, u.username as uploaded_by_username FROM documents d JOIN software s ON d.software_id = s.id LEFT JOIN users u ON d.created_by_user_id = u.id WHERE d.id = ?"
+        elif table_name == 'patches':
+            fetch_back_query = "SELECT p.*, s.name as software_name, v.version_number, u.username as uploaded_by_username FROM patches p JOIN versions v ON p.version_id = v.id JOIN software s ON v.software_id = s.id LEFT JOIN users u ON p.created_by_user_id = u.id WHERE p.id = ?"
+        elif table_name == 'misc_files':
+            fetch_back_query = "SELECT mf.*, mc.name as category_name, u.username as uploaded_by_username FROM misc_files mf JOIN misc_categories mc ON mf.misc_category_id = mc.id LEFT JOIN users u ON mf.created_by_user_id = u.id WHERE mf.id = ?"
+        elif table_name == 'links': # for 'link_file'
+            fetch_back_query = "SELECT l.*, s.name as software_name, v.version_number as version_name, u.username as uploaded_by_username FROM links l JOIN software s ON l.software_id = s.id LEFT JOIN versions v ON l.version_id = v.id LEFT JOIN users u ON l.created_by_user_id = u.id WHERE l.id = ?"
+
+        if fetch_back_query:
+            new_item_row = db.execute(fetch_back_query, (new_id,)).fetchone()
+            if new_item_row:
+                return dict(new_item_row), None, 201 # item, error_response, status_code
+            else:
+                app.logger.error(f"Large file DB insert: Failed to fetch back {item_type} ID {new_id}")
+                return None, jsonify(msg=f"{item_type.capitalize()} created (ID: {new_id}) but failed to retrieve details."), 207 # Partial success
+        else: # Should not happen if table_name is set
+            return None, jsonify(msg="Internal error: Fetch back query not defined."), 500
+
+    except sqlite3.IntegrityError as e:
+        db.rollback()
+        app.logger.error(f"Large file DB insert: IntegrityError for {item_type} '{item_name_for_log}': {e}")
+        return None, jsonify(msg=f"Database integrity error for {item_type}: {str(e)}"), 409
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"Large file DB insert: General Exception for {item_type} '{item_name_for_log}': {e}", exc_info=True)
+        return None, jsonify(msg=f"Server error during database insertion for {item_type}: {str(e)}"), 500
+
+
 # --- Misc File Upload ---
 @app.route('/api/admin/misc_files/upload', methods=['POST'])
 @jwt_required() 
@@ -6176,6 +6450,244 @@ def disable_maintenance_mode():
         db.rollback()
         app.logger.error(f"Unexpected error disabling maintenance mode: {e}", exc_info=True)
         return jsonify({"msg": "An unexpected server error occurred", "error": str(e)}), 500
+
+# --- Large File Upload Endpoint ---
+@app.route('/api/admin/upload_large_file', methods=['POST'])
+@jwt_required()
+@admin_required
+def admin_upload_large_file():
+    current_user_id = int(get_jwt_identity())
+    db = get_db() # For potential future use (e.g., storing metadata early)
+
+    try:
+        # --- Form Data ---
+        file_chunk = request.files.get('file_chunk')
+        chunk_number_str = request.form.get('chunk_number')
+        total_chunks_str = request.form.get('total_chunks')
+        upload_id = request.form.get('upload_id')
+        original_filename = request.form.get('original_filename')
+        item_type = request.form.get('item_type')
+
+        # --- Metadata (expected with every chunk, but primarily used by the last) ---
+        # Common metadata
+        description = request.form.get('description', '') # Optional
+
+        # Item-type specific metadata
+        software_id_str = request.form.get('software_id') # For docs, patches, links
+        version_id_str = request.form.get('version_id') # For patches, links
+        doc_name = request.form.get('doc_name') # For documents
+        doc_type = request.form.get('doc_type') # For documents
+        patch_name = request.form.get('patch_name') # For patches
+        release_date = request.form.get('release_date') # For patches
+        patch_by_developer = request.form.get('patch_by_developer') # For patches
+        link_title = request.form.get('title') # For links (used as 'title')
+        # For misc_files
+        misc_category_id_str = request.form.get('misc_category_id')
+        user_provided_title_misc = request.form.get('user_provided_title') # For misc_files (can also be 'title')
+
+        # --- Basic Validation for core chunking fields ---
+        required_chunk_fields = {
+            'file_chunk': file_chunk, 'chunk_number': chunk_number_str, 'total_chunks': total_chunks_str,
+            'upload_id': upload_id, 'original_filename': original_filename, 'item_type': item_type
+        }
+        missing_chunk_fields = [name for name, val in required_chunk_fields.items() if val is None or (isinstance(val, str) and not val.strip())]
+        if file_chunk and file_chunk.filename == '':
+            missing_chunk_fields.append('file_chunk (empty filename)')
+
+        if missing_chunk_fields:
+            return jsonify(msg=f"Missing required chunking form fields: {', '.join(missing_chunk_fields)}"), 400
+
+        try:
+            chunk_number = int(chunk_number_str)
+            total_chunks = int(total_chunks_str)
+        except ValueError:
+            return jsonify(msg="chunk_number and total_chunks must be integers."), 400
+
+        valid_item_types = ['document', 'patch', 'misc_file', 'link_file']
+        if item_type not in valid_item_types:
+            return jsonify(msg=f"Invalid item_type. Must be one of: {', '.join(valid_item_types)}"), 400
+
+        # Log a warning if original_filename fails allowed_file check but proceed
+        if not allowed_file(original_filename):
+            app.logger.warning(f"Large file upload: original_filename '{original_filename}' failed allowed_file check (e.g. missing extension or disallowed). Proceeding with upload based on item_type '{item_type}'.")
+            # The upload proceeds; actual storage and DB record will use derived/default types if needed.
+
+        # --- Chunk Handling ---
+        tmp_dir = app.config['TMP_LARGE_UPLOADS_FOLDER']
+        if not os.path.exists(tmp_dir): # Should have been created at startup, but check again
+            os.makedirs(tmp_dir, exist_ok=True)
+
+        # Secure original_filename before using it in path (though upload_id provides uniqueness)
+        secured_original_filename = secure_filename(original_filename)
+        temp_part_filename = f"{upload_id}-{secured_original_filename}.part"
+        temp_part_filepath = os.path.join(tmp_dir, temp_part_filename)
+
+        # For simplicity, append chunks. Client must send them in order.
+        # More robust solution would use chunk_number to write to specific offsets,
+        # or store chunks separately and reassemble, but that's more complex.
+        try:
+            with open(temp_part_filepath, 'ab') as f: # Append binary
+                f.write(file_chunk.read())
+        except IOError as e:
+            app.logger.error(f"IOError appending to chunk file {temp_part_filepath}: {e}")
+            # Consider cleaning up temp_part_filepath if error occurs
+            return jsonify(msg="Error saving file chunk."), 500
+
+        app.logger.info(f"User {current_user_id} uploaded chunk {chunk_number}/{total_chunks-1} for upload_id {upload_id}, file {original_filename} to {temp_part_filepath}")
+
+        # --- Check if this is the last chunk ---
+        if chunk_number == total_chunks - 1:
+            # File assembly is complete (or all chunks received if appending serially)
+            app.logger.info(f"Last chunk received for {upload_id}-{original_filename}. File assembly complete at {temp_part_filepath}.")
+
+            # TODO:
+            # 1. Determine final upload folder based on item_type.
+            # 2. Generate new unique stored_filename.
+            # 3. Move temp_part_filepath to final_folder/stored_filename.
+            # 4. Calculate file_size (os.path.getsize).
+            # 5. Get file_type (MIME from original or infer).
+            # 6. Insert metadata into appropriate DB table.
+            #    - This requires all other metadata fields (software_id, title, description etc.)
+            #    - Consider requiring all metadata with the LAST chunk, or storing metadata from first chunk.
+            #    - For now, assume metadata will be passed with the last chunk for processing.
+            # File assembly is complete (or all chunks received if appending serially)
+            app.logger.info(f"Last chunk received for {upload_id}-{original_filename}. File assembly complete at {temp_part_filepath}.")
+
+            # --- Metadata Validation for Last Chunk ---
+            # (This assumes metadata is sent with the last chunk, or every chunk)
+            final_metadata_errors = []
+            metadata_payload = {'description': description} # Common field
+
+            if item_type == 'document':
+                if not software_id_str: final_metadata_errors.append("software_id")
+                else: metadata_payload['software_id'] = software_id_str
+                if not doc_name: final_metadata_errors.append("doc_name")
+                else: metadata_payload['doc_name'] = doc_name
+                metadata_payload['doc_type'] = doc_type if doc_type else ''
+            elif item_type == 'patch':
+                if not version_id_str: final_metadata_errors.append("version_id")
+                else: metadata_payload['version_id'] = version_id_str
+                if not patch_name: final_metadata_errors.append("patch_name")
+                else: metadata_payload['patch_name'] = patch_name
+                metadata_payload['release_date'] = release_date
+                metadata_payload['patch_by_developer'] = patch_by_developer if patch_by_developer else ''
+            elif item_type == 'misc_file':
+                if not misc_category_id_str: final_metadata_errors.append("misc_category_id")
+                else: metadata_payload['misc_category_id'] = misc_category_id_str
+                metadata_payload['user_provided_title_misc'] = user_provided_title_misc # Optional
+            elif item_type == 'link_file':
+                if not software_id_str: final_metadata_errors.append("software_id")
+                else: metadata_payload['software_id'] = software_id_str
+                if not link_title: final_metadata_errors.append("title (for link_file)")
+                else: metadata_payload['link_title'] = link_title
+                if version_id_str: metadata_payload['version_id'] = version_id_str # Optional for links
+
+            if final_metadata_errors:
+                _delete_file_if_exists(temp_part_filepath) # Cleanup partial file on error
+                return jsonify(msg=f"Missing required metadata for item_type '{item_type}' on final chunk: {', '.join(final_metadata_errors)}"), 400
+
+            # --- Final File Processing ---
+            final_upload_folder = None
+            if item_type == 'document': final_upload_folder = app.config['DOC_UPLOAD_FOLDER']
+            elif item_type == 'patch': final_upload_folder = app.config['PATCH_UPLOAD_FOLDER']
+            elif item_type == 'misc_file': final_upload_folder = app.config['MISC_UPLOAD_FOLDER']
+            elif item_type == 'link_file': final_upload_folder = app.config['LINK_UPLOAD_FOLDER']
+
+            if not final_upload_folder:
+                 _delete_file_if_exists(temp_part_filepath)
+                 return jsonify(msg="Internal error: Could not determine final upload folder."), 500
+
+            # Determine extension for stored_filename
+            original_ext = secured_original_filename.rsplit('.', 1)[-1].lower() if '.' in secured_original_filename else ''
+
+            # Capture mime type from the current file_chunk (representing the last chunk)
+            chunk_mime_type = file_chunk.mimetype if file_chunk else 'application/octet-stream'
+            app.logger.info(f"Large file upload: Last chunk MIME type detected as '{chunk_mime_type}' for {original_filename}")
+
+            final_ext = original_ext
+            if not final_ext: # If original filename had no extension
+                final_ext = COMMON_MIME_TO_EXT.get(chunk_mime_type)
+                if final_ext:
+                    app.logger.info(f"Large file upload: Original filename '{original_filename}' had no extension. Derived '{final_ext}' from MIME type '{chunk_mime_type}'.")
+                else:
+                    app.logger.warning(f"Large file upload: Could not derive extension for '{original_filename}' from MIME type '{chunk_mime_type}'. Stored file may lack an extension.")
+                    final_ext = '' # Ensure it's an empty string if no extension found
+
+            new_stored_filename_base = uuid.uuid4().hex
+            # Ensure final_ext is not None before concatenation if COMMON_MIME_TO_EXT.get could return None and final_ext wasn't re-assigned to ''
+            final_stored_filename = f"{new_stored_filename_base}{'.' + final_ext if final_ext else ''}"
+            final_filepath = os.path.join(final_upload_folder, final_stored_filename)
+            app.logger.info(f"Large file upload: Determined final stored_filename as '{final_stored_filename}' (original_ext: '{original_ext}', mime_type: '{chunk_mime_type}', derived_ext: '{final_ext}')")
+
+            try:
+                shutil.move(temp_part_filepath, final_filepath)
+                app.logger.info(f"Moved completed file from {temp_part_filepath} to {final_filepath}")
+            except Exception as e_move:
+                app.logger.error(f"Error moving completed file {temp_part_filepath} to {final_filepath}: {e_move}")
+                _delete_file_if_exists(temp_part_filepath) # Attempt cleanup
+                _delete_file_if_exists(final_filepath) # Attempt cleanup if move partially failed
+                return jsonify(msg=f"Error finalizing file movement: {str(e_move)}"), 500
+
+            file_size = os.path.getsize(final_filepath)
+
+            # Infer MIME type (basic) - can be enhanced
+            mime_type = file_chunk.mimetype if file_chunk.mimetype and file_chunk.mimetype != 'application/octet-stream' else None
+            if not mime_type:
+                # Basic inference from extension
+                if ext == 'pdf': mime_type = 'application/pdf'
+                elif ext in ['png', 'jpg', 'jpeg', 'gif']: mime_type = f'image/{ext}'
+                else: mime_type = 'application/octet-stream' # Default
+
+            # TODO: Database insertion logic will go here.
+            # This will involve a new helper function `_admin_handle_large_file_db_insert`
+            # or adapting the existing one. It will use all the collected metadata
+            # (software_id, version_id, doc_name, description, etc.) and file properties
+            # --- Database Insertion ---
+            new_item, error_response, status_code = _admin_handle_large_file_db_insert(
+                item_type=item_type,
+                stored_filename=final_stored_filename,
+                original_filename=original_filename, # secured_original_filename is not the true original
+                file_size=file_size,
+                mime_type=mime_type,
+                current_user_id=current_user_id,
+                metadata=metadata_payload
+            )
+
+            if error_response: # DB insertion failed
+                _delete_file_if_exists(final_filepath) # Cleanup successfully moved file
+                app.logger.error(f"DB insertion failed for large file {original_filename} (upload_id: {upload_id}). Cleaned up final file: {final_filepath}")
+                return error_response, status_code # error_response is already a jsonify object
+
+            # Log audit action for successful large file upload and DB insert
+            audit_action_type = f'CREATE_{item_type.upper()}_LARGE_FILE'
+            log_audit_action(
+                action_type=audit_action_type,
+                target_table=item_type + "s",
+                target_id=new_item.get('id') if new_item else None,
+                details={
+                    'original_filename': original_filename,
+                    'stored_filename': final_stored_filename,
+                    'file_size': file_size,
+                    'item_type': item_type,
+                    'upload_id': upload_id,
+                    # Add other relevant metadata from metadata_payload if needed for audit
+                    'doc_name': metadata_payload.get('doc_name'), # Example
+                    'patch_name': metadata_payload.get('patch_name') # Example
+                },
+                user_id=current_user_id
+            )
+
+            return jsonify(new_item), 201 # Return the newly created item from DB
+
+        else:
+            # Not the last chunk, acknowledge receipt
+            return jsonify(msg=f"Chunk {chunk_number}/{total_chunks-1} for {original_filename} received successfully."), 200
+
+    except Exception as e:
+        app.logger.error(f"Error in /api/admin/upload_large_file: {e}", exc_info=True)
+        # Consider cleaning up temp_part_filepath if an error occurs at a higher level
+        return jsonify(msg=f"An unexpected server error occurred: {str(e)}"), 500
+
 
 # --- Profile Picture Serving Endpoint ---
 @app.route('/profile_pictures/<path:filename>')

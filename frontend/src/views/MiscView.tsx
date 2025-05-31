@@ -260,7 +260,7 @@ const role = user?.role; // Access role safely, as user can be null
     finally { setIsMovingSelected(false); setModalSelectedCategoryId(null); }
   };
 
-  const formatDate = (dateStr: string | null | undefined) => dateStr ? new Date(dateStr).toLocaleDateString('en-CA') : '-';
+  const formatDate = (dateStr: string | null | undefined) => dateStr ? new Date(dateStr).toLocaleString() : '-';
   const formatFileSize = (bytes: number|null|undefined) => {
     if (bytes == null) return 'N/A';
     if (bytes === 0) return '0 B';

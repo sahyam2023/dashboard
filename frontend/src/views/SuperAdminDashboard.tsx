@@ -584,7 +584,11 @@ const SuperAdminDashboard: React.FC = () => {
     setResetFeedback(null); // Clear main page feedback
 
     try {
-      const response = await confirmDatabaseReset(resetProcessPassword, resetProcessConfirmText);
+      const payload = {
+        reset_password: resetProcessPassword,
+        confirmation_text: resetProcessConfirmText
+      };
+      const response = await confirmDatabaseReset(payload);
       setResetFeedback({ type: 'success', message: response.message || "Database has been successfully reset." });
       setResetStep(0); // Reset to idle/initial state
       setResetReason('');

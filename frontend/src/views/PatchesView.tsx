@@ -362,7 +362,7 @@ useEffect(() => {
     finally { setIsMovingSelected(false); setModalSelectedSoftwareId(null); setModalSelectedVersionId(null); }
   };
 
-  const formatDate = (dateStr: string | null | undefined) => dateStr ? new Date(dateStr).toLocaleDateString('en-CA') : '-';
+  const formatDate = (dateStr: string | null | undefined) => dateStr ? new Date(dateStr).toLocaleString() : '-';
   const columns: ColumnDef<PatchType>[] = [
     { key: 'patch_name', header: 'Patch Name', sortable: true }, { key: 'software_name', header: 'Software', sortable: true },
     { key: 'version_number', header: 'Version', sortable: true },

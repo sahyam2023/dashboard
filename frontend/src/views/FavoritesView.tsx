@@ -224,7 +224,7 @@ const FavoritesView: React.FC = () => {
                     {item.version_number && ` • Version: ${item.version_number}`}
                   </p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Favorited on: {new Date(item.favorited_at).toLocaleDateString()}
+                    Favorited on: {new Date(item.favorited_at).toLocaleString()}
                   </p>
                 </div>
               </div>

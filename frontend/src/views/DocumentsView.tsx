@@ -465,8 +465,8 @@ useEffect(() => {
     },
     { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: (d: DocumentType) => d.uploaded_by_username||'N/A' },
     { key: 'updated_by_username', header: 'Updated By', sortable: false, render: (d: DocumentType) => d.updated_by_username||'N/A' },
-    { key: 'created_at', header: 'Created At', sortable: true, render: (d: DocumentType) => d.created_at?new Date(d.created_at).toLocaleDateString('en-CA'):'-' },
-    { key: 'updated_at', header: 'Updated At', sortable: true, render: (d: DocumentType) => d.updated_at?new Date(d.updated_at).toLocaleDateString('en-CA'):'-' },
+    { key: 'created_at', header: 'Created At', sortable: true, render: (d: DocumentType) => d.created_at?new Date(d.created_at).toLocaleString():'-' },
+    { key: 'updated_at', header: 'Updated At', sortable: true, render: (d: DocumentType) => d.updated_at?new Date(d.updated_at).toLocaleString():'-' },
     { key: 'actions' as any, header: 'Actions', render: (d: DocumentType) => (
       <div className="flex space-x-1 items-center">
         {isAuthenticated && (

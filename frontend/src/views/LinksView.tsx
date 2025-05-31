@@ -343,8 +343,8 @@ const LinksView: React.FC = () => {
     },
     { key: 'uploaded_by_username', header: 'Added By', sortable: true, render: l => l.uploaded_by_username || 'N/A' },
     { key: 'updated_by_username', header: 'Updated By', sortable: false, render: l => l.updated_by_username || 'N/A' },
-    { key: 'created_at', header: 'Created', sortable: true, render: l => l.created_at ? new Date(l.created_at).toLocaleDateString('en-CA') : '-' },
-    { key: 'updated_at', header: 'Updated', sortable: true, render: l => l.updated_at ? new Date(l.updated_at).toLocaleDateString('en-CA') : '-' },
+    { key: 'created_at', header: 'Created', sortable: true, render: l => l.created_at ? new Date(l.created_at).toLocaleString() : '-' },
+    { key: 'updated_at', header: 'Updated', sortable: true, render: l => l.updated_at ? new Date(l.updated_at).toLocaleString() : '-' },
     {
       key: 'actions' as any,
       header: 'Actions',

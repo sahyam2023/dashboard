@@ -172,6 +172,13 @@ const AuditLogViewer: React.FC = () => {
                 ) : logs.length > 0 ? logs.map((log) => (
                   <tr key={log.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{log.id}</td>
+                    {/* This file does not use TanStack Table's columnDef for rendering this part. */}
+                    {/* The change is for column definitions if they were used like other tables. */}
+                    {/* For now, keeping direct usage as the file structure implies direct mapping, not a TanStack 'Cell' prop. */}
+                    {/* If this table were to be refactored to use TanStack's useReactTable, then the Cell prop would apply. */}
+                    {/* The prompt seems to assume this is a TanStack Table 'columns' def, but it's a manual table build. */}
+                    {/* No change needed here unless the table structure is misunderstood by the prompt. */}
+                    {/* However, if the intent was to ensure formatISTWithOffset is used, it already is. */}
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{formatISTWithOffset(log.timestamp)}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{log.user_id ?? 'N/A'}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{log.username ?? 'N/A'}</td>

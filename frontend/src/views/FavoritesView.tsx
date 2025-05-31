@@ -225,7 +225,7 @@ const FavoritesView: React.FC = () => {
                     {item.version_number && ` • Version: ${item.version_number}`}
                   </p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Favorited on: {formatISTWithOffset(item.favorited_at)}
+                    Favorited on: {formatISTWithOffset(item.favorited_at as string)}
                   </p>
                 </div>
               </div>

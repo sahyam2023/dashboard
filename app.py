@@ -4514,14 +4514,14 @@ def _admin_handle_large_file_db_insert(
     table_name = ""
     sql_insert_query = ""
     sql_params_list = [] # List of actual values for the query
-
+    
     # Common fields for logging/response
     item_name_for_log = metadata.get('doc_name') or metadata.get('patch_name') or metadata.get('link_title') or metadata.get('user_provided_title_misc') or original_filename
 
     server_path_prefix = ""
     # The 'mime_type' parameter received by this function is the client-provided/detected MIME type for the chunk.
     # We'll use this for the database 'file_type' column.
-    db_file_type_to_store = mime_type
+    db_file_type_to_store = mime_type 
     app.logger.info(f"Large file DB insert: Storing file_type='{db_file_type_to_store}' for {original_filename}.")
 
     if item_type == 'document':
@@ -4548,7 +4548,7 @@ def _admin_handle_large_file_db_insert(
         missing_meta = [field for field in required_meta if not metadata.get(field)]
         if missing_meta:
             return None, jsonify(msg=f"Missing metadata for patch: {', '.join(missing_meta)}"), 400
-
+        
         sql_insert_query = """INSERT INTO patches (version_id, patch_name, download_link, description, release_date, patch_by_developer,
                                              is_external_link, stored_filename, original_filename_ref, file_size, file_type,
                                              created_by_user_id, updated_by_user_id)
@@ -4566,7 +4566,7 @@ def _admin_handle_large_file_db_insert(
         missing_meta = [field for field in required_meta if not metadata.get(field)]
         if missing_meta:
             return None, jsonify(msg=f"Missing metadata for misc_file: {', '.join(missing_meta)}"), 400
-
+        
         user_provided_title = metadata.get('user_provided_title_misc') or original_filename
 
         sql_insert_query = """INSERT INTO misc_files (misc_category_id, user_id, user_provided_title, user_provided_description,
@@ -4592,7 +4592,7 @@ def _admin_handle_large_file_db_insert(
                 version_id_for_link = int(version_id_for_link)
             except ValueError:
                  return None, jsonify(msg="Invalid version_id format for link_file."), 400
-
+        
         sql_insert_query = """INSERT INTO links (software_id, version_id, title, url, description,
                                            is_external_link, stored_filename, original_filename_ref, file_size, file_type,
                                            created_by_user_id, updated_by_user_id)
@@ -4622,7 +4622,7 @@ def _admin_handle_large_file_db_insert(
             fetch_back_query = "SELECT mf.*, mc.name as category_name, u.username as uploaded_by_username FROM misc_files mf JOIN misc_categories mc ON mf.misc_category_id = mc.id LEFT JOIN users u ON mf.created_by_user_id = u.id WHERE mf.id = ?"
         elif table_name == 'links': # for 'link_file'
             fetch_back_query = "SELECT l.*, s.name as software_name, v.version_number as version_name, u.username as uploaded_by_username FROM links l JOIN software s ON l.software_id = s.id LEFT JOIN versions v ON l.version_id = v.id LEFT JOIN users u ON l.created_by_user_id = u.id WHERE l.id = ?"
-
+        
         if fetch_back_query:
             new_item_row = db.execute(fetch_back_query, (new_id,)).fetchone()
             if new_item_row:
@@ -6471,7 +6471,7 @@ def admin_upload_large_file():
         # --- Metadata (expected with every chunk, but primarily used by the last) ---
         # Common metadata
         description = request.form.get('description', '') # Optional
-
+        
         # Item-type specific metadata
         software_id_str = request.form.get('software_id') # For docs, patches, links
         version_id_str = request.form.get('version_id') # For patches, links
@@ -6484,6 +6484,10 @@ def admin_upload_large_file():
         # For misc_files
         misc_category_id_str = request.form.get('misc_category_id')
         user_provided_title_misc = request.form.get('user_provided_title') # For misc_files (can also be 'title')
+        # For links (title comes as 'link_title' from AdminLinkEntryForm's chunkMetadata)
+        link_title_from_form = request.form.get('link_title') 
+        typed_version_string = request.form.get('typed_version_string') # For patches/links if version_id not directly given
+
 
         # --- Basic Validation for core chunking fields ---
         required_chunk_fields = {
@@ -6493,7 +6497,7 @@ def admin_upload_large_file():
         missing_chunk_fields = [name for name, val in required_chunk_fields.items() if val is None or (isinstance(val, str) and not val.strip())]
         if file_chunk and file_chunk.filename == '':
             missing_chunk_fields.append('file_chunk (empty filename)')
-
+        
         if missing_chunk_fields:
             return jsonify(msg=f"Missing required chunking form fields: {', '.join(missing_chunk_fields)}"), 400
 
@@ -6506,7 +6510,7 @@ def admin_upload_large_file():
         valid_item_types = ['document', 'patch', 'misc_file', 'link_file']
         if item_type not in valid_item_types:
             return jsonify(msg=f"Invalid item_type. Must be one of: {', '.join(valid_item_types)}"), 400
-
+        
         # Log a warning if original_filename fails allowed_file check but proceed
         if not allowed_file(original_filename):
             app.logger.warning(f"Large file upload: original_filename '{original_filename}' failed allowed_file check (e.g. missing extension or disallowed). Proceeding with upload based on item_type '{item_type}'.")
@@ -6521,7 +6525,7 @@ def admin_upload_large_file():
         secured_original_filename = secure_filename(original_filename)
         temp_part_filename = f"{upload_id}-{secured_original_filename}.part"
         temp_part_filepath = os.path.join(tmp_dir, temp_part_filename)
-
+        
         # For simplicity, append chunks. Client must send them in order.
         # More robust solution would use chunk_number to write to specific offsets,
         # or store chunks separately and reassemble, but that's more complex.
@@ -6532,14 +6536,14 @@ def admin_upload_large_file():
             app.logger.error(f"IOError appending to chunk file {temp_part_filepath}: {e}")
             # Consider cleaning up temp_part_filepath if error occurs
             return jsonify(msg="Error saving file chunk."), 500
-
+        
         app.logger.info(f"User {current_user_id} uploaded chunk {chunk_number}/{total_chunks-1} for upload_id {upload_id}, file {original_filename} to {temp_part_filepath}")
 
         # --- Check if this is the last chunk ---
         if chunk_number == total_chunks - 1:
             # File assembly is complete (or all chunks received if appending serially)
             app.logger.info(f"Last chunk received for {upload_id}-{original_filename}. File assembly complete at {temp_part_filepath}.")
-
+            
             # TODO:
             # 1. Determine final upload folder based on item_type.
             # 2. Generate new unique stored_filename.
@@ -6552,7 +6556,7 @@ def admin_upload_large_file():
             #    - For now, assume metadata will be passed with the last chunk for processing.
             # File assembly is complete (or all chunks received if appending serially)
             app.logger.info(f"Last chunk received for {upload_id}-{original_filename}. File assembly complete at {temp_part_filepath}.")
-
+            
             # --- Metadata Validation for Last Chunk ---
             # (This assumes metadata is sent with the last chunk, or every chunk)
             final_metadata_errors = []
@@ -6565,22 +6569,100 @@ def admin_upload_large_file():
                 else: metadata_payload['doc_name'] = doc_name
                 metadata_payload['doc_type'] = doc_type if doc_type else ''
             elif item_type == 'patch':
-                if not version_id_str: final_metadata_errors.append("version_id")
-                else: metadata_payload['version_id'] = version_id_str
+                resolved_version_id_for_patch = None
+                if version_id_str and version_id_str.strip():
+                    try:
+                        parsed_version_id = int(version_id_str)
+                        if parsed_version_id > 0:
+                            # TODO: Validate this version_id actually belongs to the software_id if software_id is also part of patch metadata directly
+                            # For now, assume if version_id is given, it's valid and associated correctly upstream or doesn't need software_id for this specific item_type's direct FK.
+                            # The `_admin_handle_large_file_db_insert` for patches uses version_id directly.
+                            # However, if a software_id is also passed for patches (it's not typical for patch table, version implies software), it should be consistent.
+                            # For now, we take version_id_str as the primary identifier for the version.
+                            resolved_version_id_for_patch = parsed_version_id
+                        else:
+                            final_metadata_errors.append("version_id must be a positive integer if provided directly.")
+                    except ValueError:
+                        final_metadata_errors.append("Invalid format for version_id.")
+                elif typed_version_string and typed_version_string.strip():
+                    if not software_id_str or not software_id_str.strip(): # software_id is needed to create/find version by string
+                        final_metadata_errors.append("software_id is required when typed_version_string is used for patches.")
+                    else:
+                        try:
+                            temp_software_id = int(software_id_str)
+                            # current_user_id and db are available in this scope
+                            resolved_version_id_for_patch = get_or_create_version_id(db, temp_software_id, typed_version_string.strip(), current_user_id)
+                            if resolved_version_id_for_patch is None:
+                                final_metadata_errors.append(f"Failed to find or create version from '{typed_version_string.strip()}' for software ID {temp_software_id}.")
+                        except ValueError:
+                            final_metadata_errors.append("Invalid software_id format when using typed_version_string.")
+                else: # Neither direct version_id nor typed_version_string provided
+                    final_metadata_errors.append("version_id (selected or typed via typed_version_string with software_id) is required for patches.")
+
+                if resolved_version_id_for_patch is not None:
+                    metadata_payload['version_id'] = resolved_version_id_for_patch
+                elif not any("version_id" in e.lower() or "version" in e.lower() for e in final_metadata_errors):
+                     # Add a generic error if no specific version error was already added
+                    final_metadata_errors.append("Valid version_id could not be determined for patch.")
+
+                # Other patch metadata
                 if not patch_name: final_metadata_errors.append("patch_name")
                 else: metadata_payload['patch_name'] = patch_name
-                metadata_payload['release_date'] = release_date
+                
+                metadata_payload['software_id'] = software_id_str 
+                metadata_payload['release_date'] = release_date 
                 metadata_payload['patch_by_developer'] = patch_by_developer if patch_by_developer else ''
             elif item_type == 'misc_file':
                 if not misc_category_id_str: final_metadata_errors.append("misc_category_id")
                 else: metadata_payload['misc_category_id'] = misc_category_id_str
-                metadata_payload['user_provided_title_misc'] = user_provided_title_misc # Optional
+                metadata_payload['user_provided_title_misc'] = user_provided_title_misc
             elif item_type == 'link_file':
-                if not software_id_str: final_metadata_errors.append("software_id")
-                else: metadata_payload['software_id'] = software_id_str
-                if not link_title: final_metadata_errors.append("title (for link_file)")
-                else: metadata_payload['link_title'] = link_title
-                if version_id_str: metadata_payload['version_id'] = version_id_str # Optional for links
+                # software_id is mandatory for links
+                if not software_id_str: 
+                    final_metadata_errors.append("software_id for link_file")
+                else:
+                    try:
+                        metadata_payload['software_id'] = int(software_id_str) # Store as int
+                    except ValueError:
+                        final_metadata_errors.append("Invalid software_id format for link_file.")
+
+                # version_id is mandatory for links (NOT NULL in DB)
+                resolved_version_id_for_link = None
+                if version_id_str and version_id_str.strip():
+                    try:
+                        parsed_version_id = int(version_id_str)
+                        if parsed_version_id > 0:
+                            resolved_version_id_for_link = parsed_version_id
+                        else:
+                            final_metadata_errors.append("version_id must be a positive integer if provided directly for link_file.")
+                    except ValueError:
+                        final_metadata_errors.append("Invalid format for version_id for link_file.")
+                elif typed_version_string and typed_version_string.strip():
+                    if not software_id_str or not software_id_str.strip(): # software_id must be present
+                        final_metadata_errors.append("software_id is required with typed_version_string for link_file.")
+                    else:
+                        try:
+                            temp_software_id_for_link = int(software_id_str)
+                            resolved_version_id_for_link = get_or_create_version_id(db, temp_software_id_for_link, typed_version_string.strip(), current_user_id)
+                            if resolved_version_id_for_link is None:
+                                final_metadata_errors.append(f"Failed to find or create version from '{typed_version_string.strip()}' for software ID {temp_software_id_for_link} (link_file).")
+                        except ValueError:
+                            final_metadata_errors.append("Invalid software_id format for typed_version_string (link_file).")
+                else: 
+                    final_metadata_errors.append("A valid version (selected or typed) is required for link_file.")
+
+                if resolved_version_id_for_link is not None:
+                    metadata_payload['version_id'] = resolved_version_id_for_link
+                elif not any("version_id" in e.lower() or "version" in e.lower() for e in final_metadata_errors):
+                     final_metadata_errors.append("Valid version_id could not be determined for link_file.")
+
+                # Use 'link_title' from form (as sent by frontend)
+                if not link_title_from_form: 
+                    final_metadata_errors.append("link_title (form field 'title') is required for link_file")
+                else: 
+                    metadata_payload['link_title'] = link_title_from_form
+                
+                # description is already in metadata_payload if provided (common field)
 
             if final_metadata_errors:
                 _delete_file_if_exists(temp_part_filepath) # Cleanup partial file on error
@@ -6599,7 +6681,7 @@ def admin_upload_large_file():
 
             # Determine extension for stored_filename
             original_ext = secured_original_filename.rsplit('.', 1)[-1].lower() if '.' in secured_original_filename else ''
-
+            
             # Capture mime type from the current file_chunk (representing the last chunk)
             chunk_mime_type = file_chunk.mimetype if file_chunk else 'application/octet-stream'
             app.logger.info(f"Large file upload: Last chunk MIME type detected as '{chunk_mime_type}' for {original_filename}")
@@ -6612,13 +6694,13 @@ def admin_upload_large_file():
                 else:
                     app.logger.warning(f"Large file upload: Could not derive extension for '{original_filename}' from MIME type '{chunk_mime_type}'. Stored file may lack an extension.")
                     final_ext = '' # Ensure it's an empty string if no extension found
-
+            
             new_stored_filename_base = uuid.uuid4().hex
             # Ensure final_ext is not None before concatenation if COMMON_MIME_TO_EXT.get could return None and final_ext wasn't re-assigned to ''
             final_stored_filename = f"{new_stored_filename_base}{'.' + final_ext if final_ext else ''}"
             final_filepath = os.path.join(final_upload_folder, final_stored_filename)
             app.logger.info(f"Large file upload: Determined final stored_filename as '{final_stored_filename}' (original_ext: '{original_ext}', mime_type: '{chunk_mime_type}', derived_ext: '{final_ext}')")
-
+            
             try:
                 shutil.move(temp_part_filepath, final_filepath)
                 app.logger.info(f"Moved completed file from {temp_part_filepath} to {final_filepath}")
@@ -6629,26 +6711,38 @@ def admin_upload_large_file():
                 return jsonify(msg=f"Error finalizing file movement: {str(e_move)}"), 500
 
             file_size = os.path.getsize(final_filepath)
-
+            
             # Infer MIME type (basic) - can be enhanced
-            mime_type = file_chunk.mimetype if file_chunk.mimetype and file_chunk.mimetype != 'application/octet-stream' else None
-            if not mime_type:
-                # Basic inference from extension
-                if ext == 'pdf': mime_type = 'application/pdf'
-                elif ext in ['png', 'jpg', 'jpeg', 'gif']: mime_type = f'image/{ext}'
-                else: mime_type = 'application/octet-stream' # Default
+            # original_ext is defined above from secured_original_filename
+            mime_type = file_chunk.mimetype if file_chunk and file_chunk.mimetype and file_chunk.mimetype != 'application/octet-stream' else None
+            app.logger.info(f"Large file upload: MIME type from chunk: {mime_type if mime_type else 'N/A or octet-stream'}")
 
-            # TODO: Database insertion logic will go here.
-            # This will involve a new helper function `_admin_handle_large_file_db_insert`
-            # or adapting the existing one. It will use all the collected metadata
-            # (software_id, version_id, doc_name, description, etc.) and file properties
+            if not mime_type: # If chunk's mime_type is generic or missing
+                app.logger.info(f"Large file upload: Inferring MIME type from original_ext: '{original_ext}'")
+                # Basic inference from extension (original_ext is defined above)
+                if original_ext == 'pdf': mime_type = 'application/pdf'
+                elif original_ext in ['png', 'jpg', 'jpeg', 'gif']: mime_type = f'image/{original_ext}'
+                # Add more inferences based on COMMON_MIME_TO_EXT keys or other known extensions
+                elif original_ext == 'mkv': mime_type = 'video/x-matroska'
+                elif original_ext == 'ts': mime_type = 'video/mp2t'
+                elif original_ext == 'iso': mime_type = 'application/x-iso9660-image'
+                elif original_ext == 'zip': mime_type = 'application/zip'
+                else: mime_type = 'application/octet-stream' # Default
+                app.logger.info(f"Large file upload: Inferred MIME type as: '{mime_type}'")
+            
+            # Use the captured chunk_mime_type for DB insertion.
+            # The _admin_handle_large_file_db_insert helper will use this as the 'file_type' in the DB.
+            db_mime_type_for_insert = mime_type # This line was from a previous incorrect diff, it should be chunk_mime_type that is refined and then used.
+                                                 # The mime_type variable itself is what gets refined here.
+
+            app.logger.info(f"Large file upload: Passing to DB helper: stored_filename='{final_stored_filename}', original_filename='{original_filename}', file_size={file_size}, mime_type_for_db='{mime_type}'") # Use refined mime_type
             # --- Database Insertion ---
             new_item, error_response, status_code = _admin_handle_large_file_db_insert(
                 item_type=item_type,
                 stored_filename=final_stored_filename,
                 original_filename=original_filename, # secured_original_filename is not the true original
                 file_size=file_size,
-                mime_type=mime_type,
+                mime_type=mime_type, # Pass the refined mime_type
                 current_user_id=current_user_id,
                 metadata=metadata_payload
             )
@@ -6662,7 +6756,7 @@ def admin_upload_large_file():
             audit_action_type = f'CREATE_{item_type.upper()}_LARGE_FILE'
             log_audit_action(
                 action_type=audit_action_type,
-                target_table=item_type + "s",
+                target_table=item_type + "s", 
                 target_id=new_item.get('id') if new_item else None,
                 details={
                     'original_filename': original_filename,
@@ -6676,7 +6770,7 @@ def admin_upload_large_file():
                 },
                 user_id=current_user_id
             )
-
+            
             return jsonify(new_item), 201 # Return the newly created item from DB
 
         else:

@@ -562,7 +562,7 @@ def log_audit_action(action_type: str, target_table: str = None, target_id: int 
         db = get_db()
         db.execute("""
             INSERT INTO audit_logs (user_id, username, action_type, target_table, target_id, details, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30'))
         """, (final_user_id, final_username, action_type, target_table, target_id, details_json))
         db.commit()
     except sqlite3.Error as e_db:

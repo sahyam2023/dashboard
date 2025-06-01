@@ -85,7 +85,7 @@ const AdminVersionsTable: React.FC<AdminVersionsTableProps> = ({ onEdit, onDelet
   const columns = [
     { key: 'software_name', header: 'Software', accessor: 'software_name', sortable: true },
     { key: 'version_number', header: 'Version', accessor: 'version_number', sortable: true },
-    { key: 'release_date', header: 'Release Date', accessor: 'release_date', sortable: true, cell: (info) => formatDateDisplay(info.getValue() as string) },
+    { key: 'release_date', header: 'Release Date', accessor: 'release_date', sortable: true, render: (item: AdminSoftwareVersion) => formatDateDisplay(item.release_date) },
     {
       key: 'main_download_link',
       header: 'Download Link',
@@ -100,8 +100,8 @@ const AdminVersionsTable: React.FC<AdminVersionsTableProps> = ({ onEdit, onDelet
     },
     { key: 'changelog', header: 'Changelog', accessor: 'changelog', sortable: false, render: (item: AdminSoftwareVersion) => truncateText(item.changelog) },
     { key: 'known_bugs', header: 'Known Bugs', accessor: 'known_bugs', sortable: false, render: (item: AdminSoftwareVersion) => truncateText(item.known_bugs) },
-    { key: 'created_at', header: 'Created At', accessor: 'created_at', sortable: true, cell: (info) => formatISTWithOffset(info.getValue() as string) },
-    { key: 'updated_at', header: 'Updated At', accessor: 'updated_at', sortable: true, cell: (info) => formatISTWithOffset(info.getValue() as string) },
+    { key: 'created_at', header: 'Created At', accessor: 'created_at', sortable: true, render: (item: AdminSoftwareVersion) => formatISTWithOffset(item.created_at) },
+    { key: 'updated_at', header: 'Updated At', accessor: 'updated_at', sortable: true, render: (item: AdminSoftwareVersion) => formatISTWithOffset(item.updated_at) },
     {
       key: 'actions', // Unique key for the actions column
       header: 'Actions',

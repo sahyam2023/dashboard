@@ -369,7 +369,7 @@ useEffect(() => {
     { key: 'version_number', header: 'Version', sortable: true },
     { key: 'patch_by_developer', header: 'Developer', sortable: true, render: p => p.patch_by_developer || '-' },
     { key: 'description', header: 'Description', render: p => <span className="text-sm text-gray-600 block max-w-xs truncate" title={p.description||''}>{p.description||'-'}</span> },
-    { key: 'release_date', header: 'Release Date', sortable: true, cell: (info) => formatDateDisplay(info.getValue() as string) },
+    { key: 'release_date', header: 'Release Date', sortable: true, render: (item: PatchType) => formatDateDisplay(item.release_date) },
     { 
       key: 'download_link', 
       header: 'Link', 
@@ -401,8 +401,8 @@ useEffect(() => {
     },
     { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: p => p.uploaded_by_username||'N/A' },
     { key: 'updated_by_username', header: 'Updated By', sortable: false, render: p => p.updated_by_username||'N/A' },
-    { key: 'created_at', header: 'Created At', sortable: true, cell: (info) => formatISTWithOffset(info.getValue() as string) },
-    { key: 'updated_at', header: 'Updated At', sortable: true, cell: (info) => formatISTWithOffset(info.getValue() as string) },
+    { key: 'created_at', header: 'Created At', sortable: true, render: (item: PatchType) => formatISTWithOffset(item.created_at) },
+    { key: 'updated_at', header: 'Updated At', sortable: true, render: (item: PatchType) => formatISTWithOffset(item.updated_at) },
     { 
       key: 'actions' as any, 
       header: 'Actions', 

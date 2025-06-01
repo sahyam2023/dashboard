@@ -282,7 +282,7 @@ const role = user?.role; // Access role safely, as user can be null
     { key: 'category_name', header: 'Category', sortable: true },
     { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: f => f.uploaded_by_username||'N/A' },
     { key: 'file_size', header: 'Size', sortable: true, render: f => formatFileSize(f.file_size) },
-    { key: 'created_at', header: 'Uploaded At', sortable: true, render: (item: MiscFile) => formatToISTLocaleString(item.created_at) },
+    { key: 'created_at', header: 'Uploaded At', sortable: true, render: (item: MiscFile) => formatToISTLocaleString(item.created_at ?? '') },
     // Assuming there's an updated_at field that might be added later or is implicitly handled by a similar pattern.
     // For now, only created_at is explicitly in the provided column defs.
     { 

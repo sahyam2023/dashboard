@@ -401,8 +401,8 @@ useEffect(() => {
     },
     { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: p => p.uploaded_by_username||'N/A' },
     { key: 'updated_by_username', header: 'Updated By', sortable: false, render: p => p.updated_by_username||'N/A' },
-    { key: 'created_at', header: 'Created At', sortable: true, render: (item: PatchType) => formatToISTLocaleString(item.created_at) },
-    { key: 'updated_at', header: 'Updated At', sortable: true, render: (item: PatchType) => formatToISTLocaleString(item.updated_at) },
+    { key: 'created_at', header: 'Created At', sortable: true, render: (item: PatchType) => formatToISTLocaleString(item.created_at ?? '') },
+    { key: 'updated_at', header: 'Updated At', sortable: true, render: (item: PatchType) => formatToISTLocaleString(item.updated_at ?? '') },
     { 
       key: 'actions' as any, 
       header: 'Actions', 

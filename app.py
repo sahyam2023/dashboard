@@ -1,99 +1,4 @@
-# app.py
-
-# --- Comprehensive Configuration Notes for Deployment ---
-# This application, especially with the large file upload functionality,
-# requires careful configuration at multiple levels: Flask app, WSGI server (e.g., Gunicorn),
-# and any reverse proxy (e.g., Nginx).
-#
-# 1. Flask Application Configuration (`app.config`):
-#    - `MAX_CONTENT_LENGTH`:
-#      - For standard Flask routes that might receive file uploads directly (not chunked),
-#        this setting limits the total request size. Example: `app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024` (16MB).
-#      - For the chunked upload endpoint (`/api/admin/upload_large_file`), the overall file size
-#        can be much larger than `MAX_CONTENT_LENGTH` because the file is processed in smaller pieces.
-#      - However, each individual chunk POST request (containing the chunk data + metadata)
-#        must still have a body size that the Flask app (and any preceding servers) can handle.
-#        Therefore, `MAX_CONTENT_LENGTH` should be set to a value sufficient for the
-#        largest expected *chunk* size plus any associated metadata in the multipart form.
-#        For example, if chunks are 5MB and metadata is small, a limit of 10MB might be reasonable.
-#        `app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024`
-#
-# 2. Web Server / WSGI Server Configuration:
-#    - These settings are crucial as they often impose their own limits before a request
-#      even reaches the Flask application.
-#
-#    - Gunicorn (Common WSGI Server for Flask):
-#      - `--timeout <seconds>`: Worker timeout. Default is 30 seconds. This might be too short
-#        for operations like processing a large file chunk or the finalization step of a large upload
-#        (moving file, DB insert). Increase as needed, e.g., `--timeout 120` (2 minutes) or higher.
-#      - `--limit-request-line <bytes>`: Max size of HTTP request line. Default 4094. Usually not an issue.
-#      - `--limit-request-field-size <bytes>`: Max size of an HTTP request header field. Default 8190.
-#        Usually not an issue unless sending extremely large headers/metadata.
-#      - `--limit-request-fields <integer>`: Max number of request header fields. Default 100.
-#
-#    - Nginx (Common Reverse Proxy):
-#      - `client_max_body_size <size>`: This is a very important directive. It defines the maximum
-#        allowed size of the client request body.
-#        - For the chunked upload endpoint, this should be set to accommodate the largest
-#          *chunk* size plus metadata overhead (e.g., `10M` if chunks are 5MB).
-#        - If you have other non-chunked routes that accept large files, this would need to be
-#          set to the absolute largest file size you want to support for those routes.
-#        - Example: `client_max_body_size 10M;`
-#      - `proxy_request_buffering off;`:
-#        - When set to `off`, Nginx starts sending the request body to the backend server (Gunicorn)
-#          immediately as it arrives, rather than buffering the entire request first.
-#        - This can be beneficial for large uploads to reduce disk I/O on the Nginx server and
-#          improve perceived performance, especially if Gunicorn/Flask can stream the request.
-#        - For the chunked approach, where chunks are relatively small, its impact might be less
-#          critical than for non-chunked monolithic uploads, but can still be good practice.
-#      - `proxy_buffering off;`: Similar to `proxy_request_buffering`, but for responses from
-#        the backend. Generally useful for streaming responses.
-#      - `proxy_read_timeout <seconds>`: Timeout for reading a response from the proxied server (Gunicorn).
-#        Increase if Gunicorn might take a long time to process a chunk or finalize a file.
-#        Example: `proxy_read_timeout 120s;`
-#      - `proxy_send_timeout <seconds>`: Timeout for sending a request to the proxied server.
-#        Example: `proxy_send_timeout 120s;`
-#      - `proxy_connect_timeout <seconds>`: Timeout for establishing a connection with the proxied server.
-#        Example: `proxy_connect_timeout 75s;`
-#
-#    - General Notes:
-#      - The specific directives and optimal values depend heavily on your deployment stack
-#        (Nginx, Apache, Caddy, etc.) and server resources.
-#      - Always consult the documentation for your specific web server and WSGI server.
-#
-# 3. Filesystem and Server Resources:
-#    - Disk Space:
-#      - `app.config['TMP_LARGE_UPLOADS_FOLDER']` (e.g., `instance/tmp_large_uploads`):
-#        Must have sufficient disk space to hold multiple concurrent large file uploads
-#        as they are being assembled. Consider the maximum number of concurrent uploads
-#        and the maximum size of files.
-#      - Final storage locations (e.g., `DOC_UPLOAD_FOLDER`, `PATCH_UPLOAD_FOLDER`):
-#        Must have adequate space for all permanently stored files.
-#    - Permissions:
-#      - The user account under which the Flask application (and WSGI server) runs needs
-#        read, write, and execute (for directories) permissions for all upload-related
-#        directories: `TMP_LARGE_UPLOADS_FOLDER`, `DOC_UPLOAD_FOLDER`, etc.
-#    - Memory:
-#      - While chunking significantly reduces the memory footprint compared to loading entire
-#        files into memory, each chunk is still processed. Monitor server memory usage,
-#        especially during peak upload times or if many small chunks are processed rapidly.
-#
-# 4. Chunking Implementation Notes (Current Application):
-#    - The current implementation appends chunks sequentially to a temporary file
-#      (e.g., `{upload_id}-{original_filename}.part`).
-#    - It relies on the client to send chunks in the correct order.
-#    - Error handling for individual chunk failures is present, but the overall upload
-#      process might leave partial files in `TMP_LARGE_UPLOADS_FOLDER` if an error occurs
-#      mid-upload or if the client abandons the upload. A cleanup mechanism (e.g., a periodic script)
-#      for stale `.part` files might be necessary for long-term maintenance.
-#    - For more advanced scenarios (e.g., very unreliable networks), consider:
-#      - Resumable uploads: Protocols like TUS (tus.io) provide robust resumable upload capabilities.
-#        This would require significant changes on both client and server.
-#      - Storing individual chunks and reassembling: Instead of appending, save each chunk
-#        as a separate file (e.g., `{upload_id}.{chunk_number}.chunk`) and then combine them
-#        once all are received. This can offer better error recovery for specific chunks.
-#
-# --- End Comprehensive Configuration Notes ---
+#app.py
 
 import os
 import uuid
@@ -241,6 +146,178 @@ bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
 IST = pytz.timezone('Asia/Kolkata') # Added IST timezone
 UTC = pytz.utc # Added UTC for clarity in conversion if needed
+
+
+# --- Helper for Database Backup ---
+def _perform_database_backup():
+    """
+    Performs a database backup.
+    Returns: (bool: success, str: backup_path or error_message)
+    """
+    try:
+        backup_dir = os.path.join(app.config['INSTANCE_FOLDER_PATH'], 'backups')
+        os.makedirs(backup_dir, exist_ok=True)
+        source_db_path = app.config['DATABASE']
+        timestamp = datetime.now(IST).strftime('%Y%m%d_%H%M%S') # Changed to IST
+        backup_filename = f"software_dashboard_{timestamp}.db"
+        backup_file_path = os.path.join(backup_dir, backup_filename)
+        shutil.copy2(source_db_path, backup_file_path)
+        return True, backup_file_path
+    except Exception as e:
+        app.logger.error(f"Database backup helper failed: {e}", exc_info=True)
+        return False, str(e)
+    
+# --- Database Connection & Helpers ---
+def get_site_setting(key: str) -> str | None:
+    """Fetches a setting value from the site_settings table."""
+    db = get_db()
+    cursor = db.execute("SELECT setting_value FROM site_settings WHERE setting_key = ?", (key,))
+    row = cursor.fetchone()
+    return row['setting_value'] if row else None
+
+def update_site_setting(key: str, value: str) -> None:
+    """Updates or inserts a setting in the site_settings table."""
+    db = get_db()
+    db.execute(
+        "INSERT OR REPLACE INTO site_settings (setting_key, setting_value) VALUES (?, ?)",
+        (key, value)
+    )
+    db.commit()
+
+def get_db():
+    if 'db' not in g:
+        g.db = database.get_db_connection(app.config['DATABASE']) # Pass DB path
+        g.db.row_factory = sqlite3.Row
+    return g.db
+
+# --- Audit Log Helper ---
+def log_audit_action(action_type: str, target_table: str = None, target_id: int = None, details: dict = None, user_id: int = None, username: str = None):
+    """
+    Logs an action to the audit_logs table.
+    Automatically tries to derive user_id and username from JWT if not provided.
+    """
+    final_user_id = user_id
+    final_username = username
+
+    # Try to get user details from JWT if not explicitly provided
+    if final_user_id is None: # Only attempt JWT if user_id isn't already specified
+        try:
+            # verify_jwt_in_request checks if a JWT is present and valid.
+            # optional=True means it won't raise an error if JWT is missing.
+            verify_jwt_in_request(optional=True) 
+            current_user_id_str = get_jwt_identity() # Returns None if no identity in JWT
+
+            if current_user_id_str:
+                try:
+                    jwt_user_id = int(current_user_id_str)
+                    final_user_id = jwt_user_id # Set final_user_id from JWT
+                    
+                    # Fetch username if not provided and we have a user_id from JWT
+                    if final_username is None:
+                        user_details = find_user_by_id(jwt_user_id)
+                        if user_details:
+                            final_username = user_details['username']
+                        else:
+                            # This case means JWT has an ID for a user that doesn't exist.
+                            # Log with the ID, but username will remain None or what was passed.
+                            app.logger.warning(f"Audit log: User ID {jwt_user_id} from JWT not found in database.")
+                except ValueError:
+                    app.logger.error(f"Audit log: Invalid user ID format in JWT: {current_user_id_str}")
+                except Exception as e_jwt_user_fetch:
+                    # Catch errors during find_user_by_id or int conversion if any other
+                    app.logger.error(f"Audit log: Error processing JWT user identity: {e_jwt_user_fetch}")
+            # If no JWT or no identity in JWT, final_user_id and final_username remain as initially passed (or None)
+        except Exception as e_jwt_verify:
+            # This might catch errors from verify_jwt_in_request itself, though less common with optional=True
+            app.logger.error(f"Audit log: Error during JWT verification (optional): {e_jwt_verify}")
+
+    details_json = None
+    if details is not None:
+        try:
+            details_json = json.dumps(details)
+        except TypeError as e_json:
+            app.logger.error(f"Audit log: Could not serialize details to JSON for action '{action_type}': {e_json}. Details: {details}")
+            details_json = json.dumps({"error": "Could not serialize details", "original_details_type": str(type(details))})
+
+    try:
+        db = get_db()
+        db.execute("""
+            INSERT INTO audit_logs (user_id, username, action_type, target_table, target_id, details, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30'))
+        """, (final_user_id, final_username, action_type, target_table, target_id, details_json))
+        db.commit()
+    except sqlite3.Error as e_db:
+        app.logger.error(f"Audit log: Database error logging action '{action_type}': {e_db}")
+        # Depending on policy, you might want to rollback if part of a larger transaction elsewhere,
+        # but this function is self-contained for audit logging.
+        # db.rollback() # Not strictly necessary here as it's a single insert attempt.
+    except Exception as e_general:
+        # Catch any other unexpected errors
+        app.logger.error(f"Audit log: General error logging action '{action_type}': {e_general}")
+
+# --- Download Log Helper ---
+def _log_download_activity(filename_to_serve: str, item_type: str, current_db: sqlite3.Connection):
+    """Logs download activity to the download_log table."""
+    try:
+        table_map = {
+            'document': {'table_name': 'documents', 'id_column': 'id'},
+            'patch': {'table_name': 'patches', 'id_column': 'id'},
+            'link_file': {'table_name': 'links', 'id_column': 'id'}, # Assuming 'links' table for files uploaded via "Links"
+            'misc_file': {'table_name': 'misc_files', 'id_column': 'id'}
+        }
+
+        if item_type not in table_map:
+            app.logger.error(f"Download log: Invalid item_type '{item_type}' for filename '{filename_to_serve}'.")
+            return
+
+        table_info = table_map[item_type]
+        table_name = table_info['table_name']
+        # id_column = table_info['id_column'] # Currently always 'id'
+
+        item_id = None
+        # Query to find the item_id based on stored_filename
+        # Note: For 'misc_files', the column is 'stored_filename'.
+        # For 'documents', 'patches', 'links', it's also 'stored_filename'.
+        query = f"SELECT id FROM {table_name} WHERE stored_filename = ?"
+        item_cursor = current_db.execute(query, (filename_to_serve,))
+        item_row = item_cursor.fetchone()
+
+        if item_row:
+            item_id = item_row['id']
+        else:
+            app.logger.error(f"Download log: Could not find item_id for filename '{filename_to_serve}' in table '{table_name}'.")
+            return # Cannot log if item not found
+
+        user_id_for_log = None
+        try:
+            # Try to get user_id from JWT. Optional=True means it won't raise error if JWT is missing/invalid.
+            verify_jwt_in_request(optional=True)
+            current_user_jwt_identity = get_jwt_identity()
+            if current_user_jwt_identity:
+                user_id_for_log = int(current_user_jwt_identity)
+        except ValueError:
+            app.logger.warning(f"Download log: Invalid user ID format in JWT for download of '{filename_to_serve}'.")
+        except Exception as e_jwt:
+            # Log other JWT related errors but don't fail download logging
+            app.logger.warning(f"Download log: Error processing JWT for download of '{filename_to_serve}': {e_jwt}")
+
+        ip_address = request.remote_addr
+
+        # Insert into download_log
+        current_db.execute("""
+            INSERT INTO download_log (file_id, file_type, user_id, ip_address, download_timestamp)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """, (item_id, item_type, user_id_for_log, ip_address))
+        current_db.commit()
+        app.logger.info(f"Download logged: File '{filename_to_serve}', Type '{item_type}', UserID '{user_id_for_log}', IP '{ip_address}'")
+
+    except sqlite3.Error as e_db:
+        app.logger.error(f"Download log: Database error for '{filename_to_serve}': {e_db}")
+        # Potentially rollback if the commit failed, though commit is for this specific transaction.
+        # current_db.rollback() # Only if part of a larger transaction that needs to be rolled back.
+    except Exception as e_general:
+        app.logger.error(f"Download log: General error for '{filename_to_serve}': {e_general}")
+
 
 def delete_old_backups():
     """Deletes backups older than MAX_BACKUP_AGE_DAYS."""
@@ -406,28 +483,7 @@ def convert_timestamps_to_ist_iso(row_dict, timestamp_keys):
 # The client_max_body_size should be larger than the MAX_CONTENT_LENGTH in Flask for individual chunks.
 # If not using chunking and sending whole large files, these limits must accommodate the entire file size.
 
-# --- Database Connection & Helpers ---
-def get_site_setting(key: str) -> str | None:
-    """Fetches a setting value from the site_settings table."""
-    db = get_db()
-    cursor = db.execute("SELECT setting_value FROM site_settings WHERE setting_key = ?", (key,))
-    row = cursor.fetchone()
-    return row['setting_value'] if row else None
 
-def update_site_setting(key: str, value: str) -> None:
-    """Updates or inserts a setting in the site_settings table."""
-    db = get_db()
-    db.execute(
-        "INSERT OR REPLACE INTO site_settings (setting_key, setting_value) VALUES (?, ?)",
-        (key, value)
-    )
-    db.commit()
-
-def get_db():
-    if 'db' not in g:
-        g.db = database.get_db_connection(app.config['DATABASE']) # Pass DB path
-        g.db.row_factory = sqlite3.Row
-    return g.db
 
 # --- Maintenance Mode Helper ---
 def is_maintenance_mode_active():
@@ -509,133 +565,6 @@ def is_password_strong(password: str) -> tuple[bool, str]:
     
     return True, "Password is strong"
 
-# --- Audit Log Helper ---
-def log_audit_action(action_type: str, target_table: str = None, target_id: int = None, details: dict = None, user_id: int = None, username: str = None):
-    """
-    Logs an action to the audit_logs table.
-    Automatically tries to derive user_id and username from JWT if not provided.
-    """
-    final_user_id = user_id
-    final_username = username
-
-    # Try to get user details from JWT if not explicitly provided
-    if final_user_id is None: # Only attempt JWT if user_id isn't already specified
-        try:
-            # verify_jwt_in_request checks if a JWT is present and valid.
-            # optional=True means it won't raise an error if JWT is missing.
-            verify_jwt_in_request(optional=True) 
-            current_user_id_str = get_jwt_identity() # Returns None if no identity in JWT
-
-            if current_user_id_str:
-                try:
-                    jwt_user_id = int(current_user_id_str)
-                    final_user_id = jwt_user_id # Set final_user_id from JWT
-                    
-                    # Fetch username if not provided and we have a user_id from JWT
-                    if final_username is None:
-                        user_details = find_user_by_id(jwt_user_id)
-                        if user_details:
-                            final_username = user_details['username']
-                        else:
-                            # This case means JWT has an ID for a user that doesn't exist.
-                            # Log with the ID, but username will remain None or what was passed.
-                            app.logger.warning(f"Audit log: User ID {jwt_user_id} from JWT not found in database.")
-                except ValueError:
-                    app.logger.error(f"Audit log: Invalid user ID format in JWT: {current_user_id_str}")
-                except Exception as e_jwt_user_fetch:
-                    # Catch errors during find_user_by_id or int conversion if any other
-                    app.logger.error(f"Audit log: Error processing JWT user identity: {e_jwt_user_fetch}")
-            # If no JWT or no identity in JWT, final_user_id and final_username remain as initially passed (or None)
-        except Exception as e_jwt_verify:
-            # This might catch errors from verify_jwt_in_request itself, though less common with optional=True
-            app.logger.error(f"Audit log: Error during JWT verification (optional): {e_jwt_verify}")
-
-    details_json = None
-    if details is not None:
-        try:
-            details_json = json.dumps(details)
-        except TypeError as e_json:
-            app.logger.error(f"Audit log: Could not serialize details to JSON for action '{action_type}': {e_json}. Details: {details}")
-            details_json = json.dumps({"error": "Could not serialize details", "original_details_type": str(type(details))})
-
-    try:
-        db = get_db()
-        db.execute("""
-            INSERT INTO audit_logs (user_id, username, action_type, target_table, target_id, details, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30'))
-        """, (final_user_id, final_username, action_type, target_table, target_id, details_json))
-        db.commit()
-    except sqlite3.Error as e_db:
-        app.logger.error(f"Audit log: Database error logging action '{action_type}': {e_db}")
-        # Depending on policy, you might want to rollback if part of a larger transaction elsewhere,
-        # but this function is self-contained for audit logging.
-        # db.rollback() # Not strictly necessary here as it's a single insert attempt.
-    except Exception as e_general:
-        # Catch any other unexpected errors
-        app.logger.error(f"Audit log: General error logging action '{action_type}': {e_general}")
-
-# --- Download Log Helper ---
-def _log_download_activity(filename_to_serve: str, item_type: str, current_db: sqlite3.Connection):
-    """Logs download activity to the download_log table."""
-    try:
-        table_map = {
-            'document': {'table_name': 'documents', 'id_column': 'id'},
-            'patch': {'table_name': 'patches', 'id_column': 'id'},
-            'link_file': {'table_name': 'links', 'id_column': 'id'}, # Assuming 'links' table for files uploaded via "Links"
-            'misc_file': {'table_name': 'misc_files', 'id_column': 'id'}
-        }
-
-        if item_type not in table_map:
-            app.logger.error(f"Download log: Invalid item_type '{item_type}' for filename '{filename_to_serve}'.")
-            return
-
-        table_info = table_map[item_type]
-        table_name = table_info['table_name']
-        # id_column = table_info['id_column'] # Currently always 'id'
-
-        item_id = None
-        # Query to find the item_id based on stored_filename
-        # Note: For 'misc_files', the column is 'stored_filename'.
-        # For 'documents', 'patches', 'links', it's also 'stored_filename'.
-        query = f"SELECT id FROM {table_name} WHERE stored_filename = ?"
-        item_cursor = current_db.execute(query, (filename_to_serve,))
-        item_row = item_cursor.fetchone()
-
-        if item_row:
-            item_id = item_row['id']
-        else:
-            app.logger.error(f"Download log: Could not find item_id for filename '{filename_to_serve}' in table '{table_name}'.")
-            return # Cannot log if item not found
-
-        user_id_for_log = None
-        try:
-            # Try to get user_id from JWT. Optional=True means it won't raise error if JWT is missing/invalid.
-            verify_jwt_in_request(optional=True)
-            current_user_jwt_identity = get_jwt_identity()
-            if current_user_jwt_identity:
-                user_id_for_log = int(current_user_jwt_identity)
-        except ValueError:
-            app.logger.warning(f"Download log: Invalid user ID format in JWT for download of '{filename_to_serve}'.")
-        except Exception as e_jwt:
-            # Log other JWT related errors but don't fail download logging
-            app.logger.warning(f"Download log: Error processing JWT for download of '{filename_to_serve}': {e_jwt}")
-
-        ip_address = request.remote_addr
-
-        # Insert into download_log
-        current_db.execute("""
-            INSERT INTO download_log (file_id, file_type, user_id, ip_address, download_timestamp)
-            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-        """, (item_id, item_type, user_id_for_log, ip_address))
-        current_db.commit()
-        app.logger.info(f"Download logged: File '{filename_to_serve}', Type '{item_type}', UserID '{user_id_for_log}', IP '{ip_address}'")
-
-    except sqlite3.Error as e_db:
-        app.logger.error(f"Download log: Database error for '{filename_to_serve}': {e_db}")
-        # Potentially rollback if the commit failed, though commit is for this specific transaction.
-        # current_db.rollback() # Only if part of a larger transaction that needs to be rolled back.
-    except Exception as e_general:
-        app.logger.error(f"Download log: General error for '{filename_to_serve}': {e_general}")
 
 # --- Authorization Decorator ---
 def admin_required(fn):
@@ -5829,24 +5758,7 @@ def database_reset_start():
         log_file=log_file_path
     ), 200
 
-# --- Helper for Database Backup ---
-def _perform_database_backup():
-    """
-    Performs a database backup.
-    Returns: (bool: success, str: backup_path or error_message)
-    """
-    try:
-        backup_dir = os.path.join(app.config['INSTANCE_FOLDER_PATH'], 'backups')
-        os.makedirs(backup_dir, exist_ok=True)
-        source_db_path = app.config['DATABASE']
-        timestamp = datetime.now(IST).strftime('%Y%m%d_%H%M%S') # Changed to IST
-        backup_filename = f"software_dashboard_{timestamp}.db"
-        backup_file_path = os.path.join(backup_dir, backup_filename)
-        shutil.copy2(source_db_path, backup_file_path)
-        return True, backup_file_path
-    except Exception as e:
-        app.logger.error(f"Database backup helper failed: {e}", exc_info=True)
-        return False, str(e)
+
 
 # --- Database Backup Endpoint (Super Admin) ---
 @app.route('/api/superadmin/database/backup', methods=['GET'])

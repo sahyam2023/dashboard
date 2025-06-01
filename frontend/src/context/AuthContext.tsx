@@ -18,6 +18,7 @@ interface AuthContextType {
   login: (token: string, username: string, role: string, user_id: number, expiresInSeconds: number, password_reset_required?: boolean, profile_picture_url?: string | null) => boolean; // Added profile_picture_url
   logout: (showSessionExpiredToast?: boolean) => void;
   updateUserProfilePictureUrl: (newUrl: string | null) => void; // Added for updating profile picture
+  updateAuthUsername: (newUsername: string) => void; // Function to update username
   isLoading: boolean;
   isAuthModalOpen: boolean;
   authModalView: 'login' | 'register';
@@ -260,6 +261,26 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     });
   };
 
+  const updateAuthUsername = (newUsername: string) => {
+    setUser(prevUser => {
+      if (prevUser) {
+        const updatedUser = { ...prevUser, username: newUsername };
+        // console.log('[AuthContext] Updating user state with new username:', updatedUser); // Optional: for debugging
+        return updatedUser;
+      }
+      return null;
+    });
+    setTokenData(prevTokenData => {
+      if (prevTokenData) {
+        const updatedTokenData = { ...prevTokenData, username: newUsername };
+        localStorage.setItem('tokenData', JSON.stringify(updatedTokenData));
+        // console.log('[AuthContext] Updating tokenData in state and localStorage with new username:', updatedTokenData); // Optional: for debugging
+        return updatedTokenData;
+      }
+      return null;
+    });
+  };
+
   return (
     <AuthContext.Provider value={{ 
       tokenData,
@@ -268,6 +289,7 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
       login, 
       logout, 
       updateUserProfilePictureUrl, // Added function to context
+      updateAuthUsername, // Add new function here
       isLoading,
       isAuthModalOpen,
       authModalView,

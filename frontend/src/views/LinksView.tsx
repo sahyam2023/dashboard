@@ -9,7 +9,7 @@ import {
 import { Link as LinkType, Software, SoftwareVersion } from '../types'; // LinkType is already here
 import CommentSection from '../components/comments/CommentSection'; // Added CommentSection
 import DataTable, { ColumnDef } from '../components/DataTable';
-import { formatISTWithOffset } from '../utils'; // Added import
+import { formatToISTLocaleString } from '../utils'; // Updated import
 import FilterTabs from '../components/FilterTabs';
 import LoadingState from '../components/LoadingState';
 import ErrorState from '../components/ErrorState';
@@ -344,8 +344,8 @@ const LinksView: React.FC = () => {
     },
     { key: 'uploaded_by_username', header: 'Added By', sortable: true, render: l => l.uploaded_by_username || 'N/A' },
     { key: 'updated_by_username', header: 'Updated By', sortable: false, render: l => l.updated_by_username || 'N/A' },
-    { key: 'created_at', header: 'Created', sortable: true, render: (item: LinkType) => formatISTWithOffset(item.created_at) },
-    { key: 'updated_at', header: 'Updated', sortable: true, render: (item: LinkType) => formatISTWithOffset(item.updated_at) },
+    { key: 'created_at', header: 'Created', sortable: true, render: (item: LinkType) => formatToISTLocaleString(item.created_at) },
+    { key: 'updated_at', header: 'Updated', sortable: true, render: (item: LinkType) => formatToISTLocaleString(item.updated_at) },
     {
       key: 'actions' as any,
       header: 'Actions',

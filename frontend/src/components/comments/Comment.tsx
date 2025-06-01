@@ -2,7 +2,7 @@ import React from 'react';
 import { Comment as CommentType } from '../../services/api';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { MessageSquare, Edit3, Trash2, CornerDownRight } from 'lucide-react';
-import { formatISTWithOffset } from '../../utils'; // Added import
+import { formatToISTLocaleString } from '../../utils'; // Updated import
 
 interface CommentProps {
   comment: CommentType;
@@ -24,7 +24,7 @@ const Comment: React.FC<CommentProps> = ({ comment, onEdit, onDelete, onReply, c
       return formatDistanceToNow(parseISO(comment.created_at), { addSuffix: true });
     } catch (error) {
       console.error('Error formatting date:', error);
-      return formatISTWithOffset(comment.created_at); // Fallback to raw date, now formatted
+      return formatToISTLocaleString(comment.created_at); // Fallback to raw date, now formatted
     }
   };
 

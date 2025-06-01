@@ -3,7 +3,7 @@ import { AdminSoftwareVersion, PaginationParams } from '../../../services/api'; 
 import { fetchAdminVersions } from '../../../services/api';
 import DataTable from '../../DataTable'; // Adjust path as needed
 import { FaEdit, FaTrash } from 'react-icons/fa';
-import { formatISTWithOffset, formatDateDisplay } from '../../../utils'; // Added imports
+import { formatToISTLocaleString, formatDateDisplay } from '../../../utils'; // Updated import
 
 interface AdminVersionsTableProps {
   onEdit: (version: AdminSoftwareVersion) => void;
@@ -85,7 +85,7 @@ const AdminVersionsTable: React.FC<AdminVersionsTableProps> = ({ onEdit, onDelet
   const columns = [
     { key: 'software_name', header: 'Software', accessor: 'software_name', sortable: true },
     { key: 'version_number', header: 'Version', accessor: 'version_number', sortable: true },
-    { key: 'release_date', header: 'Release Date', accessor: 'release_date', sortable: true, render: (item: AdminSoftwareVersion) => formatDateDisplay(item.release_date) },
+    { key: 'release_date', header: 'Release Date', accessor: 'release_date', sortable: true, render: (item: AdminSoftwareVersion) => formatDateDisplay(item.release_date) }, // Stays the same
     {
       key: 'main_download_link',
       header: 'Download Link',
@@ -100,8 +100,8 @@ const AdminVersionsTable: React.FC<AdminVersionsTableProps> = ({ onEdit, onDelet
     },
     { key: 'changelog', header: 'Changelog', accessor: 'changelog', sortable: false, render: (item: AdminSoftwareVersion) => truncateText(item.changelog) },
     { key: 'known_bugs', header: 'Known Bugs', accessor: 'known_bugs', sortable: false, render: (item: AdminSoftwareVersion) => truncateText(item.known_bugs) },
-    { key: 'created_at', header: 'Created At', accessor: 'created_at', sortable: true, render: (item: AdminSoftwareVersion) => formatISTWithOffset(item.created_at) },
-    { key: 'updated_at', header: 'Updated At', accessor: 'updated_at', sortable: true, render: (item: AdminSoftwareVersion) => formatISTWithOffset(item.updated_at) },
+    { key: 'created_at', header: 'Created At', accessor: 'created_at', sortable: true, render: (item: AdminSoftwareVersion) => formatToISTLocaleString(item.created_at) },
+    { key: 'updated_at', header: 'Updated At', accessor: 'updated_at', sortable: true, render: (item: AdminSoftwareVersion) => formatToISTLocaleString(item.updated_at) },
     {
       key: 'actions', // Unique key for the actions column
       header: 'Actions',

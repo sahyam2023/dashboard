@@ -19,7 +19,7 @@ import {
 import { Patch as PatchType, Software, SoftwareVersion } from '../types';
 import CommentSection from '../components/comments/CommentSection'; // Added CommentSection
 import DataTable, { ColumnDef } from '../components/DataTable';
-import { formatISTWithOffset, formatDateDisplay } from '../utils'; // Added imports
+import { formatToISTLocaleString, formatDateDisplay } from '../utils'; // Updated import
 import FilterTabs from '../components/FilterTabs';
 import LoadingState from '../components/LoadingState';
 import ErrorState from '../components/ErrorState';
@@ -369,7 +369,7 @@ useEffect(() => {
     { key: 'version_number', header: 'Version', sortable: true },
     { key: 'patch_by_developer', header: 'Developer', sortable: true, render: p => p.patch_by_developer || '-' },
     { key: 'description', header: 'Description', render: p => <span className="text-sm text-gray-600 block max-w-xs truncate" title={p.description||''}>{p.description||'-'}</span> },
-    { key: 'release_date', header: 'Release Date', sortable: true, render: (item: PatchType) => formatDateDisplay(item.release_date) },
+    { key: 'release_date', header: 'Release Date', sortable: true, render: (item: PatchType) => formatDateDisplay(item.release_date) }, // Stays the same
     { 
       key: 'download_link', 
       header: 'Link', 
@@ -401,8 +401,8 @@ useEffect(() => {
     },
     { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: p => p.uploaded_by_username||'N/A' },
     { key: 'updated_by_username', header: 'Updated By', sortable: false, render: p => p.updated_by_username||'N/A' },
-    { key: 'created_at', header: 'Created At', sortable: true, render: (item: PatchType) => formatISTWithOffset(item.created_at) },
-    { key: 'updated_at', header: 'Updated At', sortable: true, render: (item: PatchType) => formatISTWithOffset(item.updated_at) },
+    { key: 'created_at', header: 'Created At', sortable: true, render: (item: PatchType) => formatToISTLocaleString(item.created_at) },
+    { key: 'updated_at', header: 'Updated At', sortable: true, render: (item: PatchType) => formatToISTLocaleString(item.updated_at) },
     { 
       key: 'actions' as any, 
       header: 'Actions', 

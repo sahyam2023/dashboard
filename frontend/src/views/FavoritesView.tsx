@@ -14,7 +14,7 @@ import { useAuth } from '../context/AuthContext';
 import LoadingState from '../components/LoadingState';
 import ErrorState from '../components/ErrorState';
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils'; // Import toast utilities
-import { formatISTWithOffset } from '../utils'; // Added import
+import { formatToISTLocaleString } from '../utils'; // Updated import
 
 const FavoritesView: React.FC = () => {
   const { isAuthenticated, isLoading: isAuthLoading } = useAuth(); // Renamed to avoid conflict
@@ -225,7 +225,7 @@ const FavoritesView: React.FC = () => {
                     {item.version_number && ` • Version: ${item.version_number}`}
                   </p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Favorited on: {formatISTWithOffset(item.favorited_at as string)}
+                    Favorited on: {formatToISTLocaleString(item.favorited_at as string)}
                   </p>
                 </div>
               </div>

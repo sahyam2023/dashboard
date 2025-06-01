@@ -3,7 +3,7 @@ import { FiChevronDown, FiChevronUp, FiFilter, FiLoader, FiAlertTriangle } from 
 import { ListChecks as ListChecksIcon } from 'lucide-react'; // Added
 import { Box, Typography } from '@mui/material'; // Added
 import { fetchAuditLogEntries, AuditLogResponse, AuditLogEntry } from '../../services/api';
-import { formatISTWithOffset } from '../../utils'; // Updated import
+import { formatToISTLocaleString } from '../../utils'; // Updated import
 import { showErrorToast } from '../../utils/toastUtils'; // Import toast utility
 import LoadingState from '../LoadingState'; // For initial load
 import ErrorState from '../ErrorState'; // For initial load error
@@ -178,8 +178,8 @@ const AuditLogViewer: React.FC = () => {
                     {/* If this table were to be refactored to use TanStack's useReactTable, then the Cell prop would apply. */}
                     {/* The prompt seems to assume this is a TanStack Table 'columns' def, but it's a manual table build. */}
                     {/* No change needed here unless the table structure is misunderstood by the prompt. */}
-                    {/* However, if the intent was to ensure formatISTWithOffset is used, it already is. */}
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{formatISTWithOffset(log.timestamp)}</td>
+                    {/* However, if the intent was to ensure formatToISTLocaleString is used, it already is. */}
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{formatToISTLocaleString(log.timestamp)}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{log.user_id ?? 'N/A'}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{log.username ?? 'N/A'}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{log.action_type}</td>

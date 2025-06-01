@@ -33,7 +33,7 @@ export function formatDateDisplay(dateString: string | null | undefined): string
   }
 }
 
-export function formatISTWithOffset(isoTimestamp: string): string {
+export function formatToISTLocaleString(isoTimestamp: string): string {
   if (!isoTimestamp) {
     return 'N/A';
   }
@@ -42,33 +42,20 @@ export function formatISTWithOffset(isoTimestamp: string): string {
     const date = new Date(isoTimestamp); // Correctly parses "YYYY-MM-DDTHH:MM:SS+05:30"
 
     // Format date and time parts using 'en-IN' locale and IST timezone.
-    // This ensures the date/time values are correct for IST.
-    const dateOptions: Intl.DateTimeFormatOptions = {
+    const options: Intl.DateTimeFormatOptions = {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
-      timeZone: 'Asia/Kolkata', // Ensure interpretation as IST
-    };
-    const timeOptions: Intl.DateTimeFormatOptions = {
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
-      hour12: true, // Or false for 24-hour format
-      timeZone: 'Asia/Kolkata', // Ensure interpretation as IST
+      hour12: true,
+      timeZone: 'Asia/Kolkata', // Ensures the output is IST
     };
 
-    const datePart = date.toLocaleDateString('en-IN', dateOptions); // e.g., "27/10/2023"
-    const timePart = date.toLocaleTimeString('en-IN', timeOptions); // e.g., "10:00:00 AM"
-
-    // The input isoTimestamp already contains the offset. We can extract it,
-    // or, since we are standardizing on IST, we can hardcode "+05:30".
-    // Extracting it to be robust, though for this project it will always be +05:30 from backend.
-    const offsetMatch = isoTimestamp.match(/[+-]\d{2}:\d{2}$/);
-    const offsetString = offsetMatch ? offsetMatch[0] : '+05:30'; // Default to +05:30
-
-    return `${datePart}, ${timePart} ${offsetString}`; // e.g., "27/10/2023, 10:00:00 AM +05:30"
+    return date.toLocaleString('en-IN', options); // e.g., "dd/mm/yyyy, h:mm:ss AM/PM"
   } catch (error) {
-    console.error('Error formatting timestamp:', isoTimestamp, error);
+    console.error('Error formatting timestamp to IST locale string:', isoTimestamp, error);
     // Check if the original string was "Invalid Date" or similar from backend already
     if (typeof isoTimestamp === 'string' && isoTimestamp.toLowerCase().includes('invalid date')) {
         return isoTimestamp;

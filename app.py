@@ -1044,6 +1044,23 @@ def delete_user(user_id):
     current_super_admin_id_str = get_jwt_identity()
     current_super_admin_id = int(current_super_admin_id_str)
 
+    # --- BEGIN NEW LOGIC ---
+    if target_user['role'] == 'super_admin':
+        # Query for the ID of the first super admin (lowest ID)
+        first_super_admin_cursor = db.execute("SELECT MIN(id) as first_sa_id FROM users WHERE role = 'super_admin'")
+        first_super_admin_result = first_super_admin_cursor.fetchone()
+
+        if first_super_admin_result and first_super_admin_result['first_sa_id'] == target_user['id']:
+            # Log this attempt
+            log_audit_action(
+                action_type='DELETE_PRIMARY_SUPERADMIN_ATTEMPT_DENIED',
+                target_table='users',
+                target_id=target_user['id'],
+                details={'attempting_superadmin_id': current_super_admin_id, 'message': 'Attempt to delete the primary super admin was blocked.'}
+            )
+            return jsonify(msg="The primary super admin account cannot be deleted."), 403
+    # --- END NEW LOGIC ---
+
     if user_id == current_super_admin_id:
         # Self-deletion check (ensure there's another active super admin)
         # This logic is similar to deactivation but ensures if this is the *only* super admin

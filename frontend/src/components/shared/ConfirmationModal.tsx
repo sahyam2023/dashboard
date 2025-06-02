@@ -38,8 +38,8 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
 
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 transition-opacity">
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md transform transition-all">
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black bg-opacity-50 transition-opacity pt-12"> {/* Changed items-center to items-start and added pt-12 to this wrapper */}
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md transform transition-all"> {/* No margin needed here as padding on parent pushes it down */}
         <h3 className="text-lg font-medium leading-6 text-gray-900 dark:text-gray-100">{title}</h3>
         <div className="mt-2">
           {typeof message === 'string' ? <p className="text-sm text-gray-500 dark:text-gray-300">{message}</p> : message}

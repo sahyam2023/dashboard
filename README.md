@@ -60,7 +60,7 @@ A comprehensive full-stack dashboard application for managing, visualizing, and 
 - **Backend:** Python 3.10+, Flask, Flask-JWT-Extended, Flask-CORS, Flask-Bcrypt, SQLAlchemy, APScheduler
 - **Frontend:** React (TypeScript), Vite, Tailwind CSS, React Grid Layout, Chart.js
 - **Database:** SQLite (with schema in `schema.sql`), migrations supported
-- **Testing:** Pytest (backend), MSW/Jest (frontend, if implemented)
+- **Testing:** Pytest (backend)
 
 ---
 

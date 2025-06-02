@@ -102,6 +102,8 @@ const SuperAdminDashboard: React.FC = () => {
   const [resetError, setResetError] = useState<string | null>(null); // For errors displayed within modals
   const [resetFeedback, setResetFeedback] = useState<{type: 'success' | 'error', message: string} | null>(null); // For feedback on main page
 
+  const [firstSuperAdminId, setFirstSuperAdminId] = useState<number | null>(null);
+
 
   // --- State for File Permissions Management ---
   const [selectedUserForPermissions, setSelectedUserForPermissions] = useState<User | null>(null);
@@ -233,6 +235,24 @@ const SuperAdminDashboard: React.FC = () => {
   useEffect(() => {
     fetchUsers();
   }, [fetchUsers]);
+
+  useEffect(() => {
+    if (users && users.length > 0) {
+      let minId = Infinity;
+      let firstSaId: number | null = null;
+      for (const user of users) {
+        if (user.role === 'super_admin') {
+          if (user.id < minId) {
+            minId = user.id;
+            firstSaId = user.id;
+          }
+        }
+      }
+      setFirstSuperAdminId(firstSaId);
+    } else {
+      setFirstSuperAdminId(null); // Reset if no users
+    }
+  }, [users]);
 
   useEffect(() => {
     const fetchMaintenanceStatus = async () => {
@@ -683,47 +703,58 @@ const SuperAdminDashboard: React.FC = () => {
     {
       key: 'actions',
       header: 'Actions',
-      render: (user) => (
-        <div className="flex items-center space-x-3 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-          {user.is_active ? (
+      render: (user) => {
+        const isCurrentUser = auth.user?.id === user.id;
+        const isFirstSA = user.id === firstSuperAdminId;
+        const isOnlyActiveSuperAdmin = auth.user?.username === user.username && users.filter(u => u.role === 'super_admin' && u.is_active).length <= 1;
+
+        return (
+          <div className="flex items-center space-x-3 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+            {user.is_active ? (
+              <button
+                onClick={(e) => { e.stopPropagation(); handleDeactivate(user.id, user.username);}}
+                className="text-yellow-600 hover:text-yellow-700 disabled:text-gray-400 dark:disabled:text-gray-500 text-xs font-medium"
+                disabled={isOnlyActiveSuperAdmin}
+                title={isOnlyActiveSuperAdmin ? "Cannot deactivate the only active super admin." : "Deactivate user"}
+              >
+                Deactivate
+              </button>
+            ) : (
+              <button
+                onClick={(e) => { e.stopPropagation(); handleActivate(user.id, user.username);}}
+                className="text-green-600 hover:text-green-700 text-xs font-medium"
+                title="Activate user"
+              >
+                Activate
+              </button>
+            )}
             <button
-              onClick={(e) => { e.stopPropagation(); handleDeactivate(user.id, user.username);}}
-              className="text-yellow-600 hover:text-yellow-700 disabled:text-gray-400 dark:disabled:text-gray-500 text-xs font-medium"
-              disabled={auth.user?.username === user.username && users.filter(u => u.role === 'super_admin' && u.is_active).length <= 1}
+              onClick={(e) => { e.stopPropagation(); handleDelete(user.id, user.username);}}
+              className="text-red-600 hover:text-red-700 disabled:text-gray-400 dark:disabled:text-gray-500 text-xs font-medium"
+              disabled={isCurrentUser || isFirstSA} // Updated condition
+              title={isFirstSA ? "The primary super admin account cannot be deleted." : (isCurrentUser ? "You cannot delete your own account." : "Delete user")}
             >
-              Deactivate
+              Delete
             </button>
-          ) : (
-            <button
-              onClick={(e) => { e.stopPropagation(); handleActivate(user.id, user.username);}}
-              className="text-green-600 hover:text-green-700 text-xs font-medium"
-            >
-              Activate
-            </button>
-          )}
-          <button
-            onClick={(e) => { e.stopPropagation(); handleDelete(user.id, user.username);}}
-            className="text-red-600 hover:text-red-700 disabled:text-gray-400 dark:disabled:text-gray-500 text-xs font-medium"
-            disabled={auth.user?.username === user.username}
-          >
-            Delete
-          </button>
-          {user.role !== 'super_admin' && auth.user?.username !== user.username && (
-            <button
-              onClick={(e) => { e.stopPropagation(); handleForceResetPassword(user.id, user.username);}}
-              className="text-purple-600 hover:text-purple-700 text-xs font-medium"
-            >
-              Force Reset
-            </button>
-          )}
-           <button
-              onClick={(e) => { e.stopPropagation(); setSelectedUserForPermissions(user); }}
-              className="text-teal-600 hover:text-teal-700 text-xs font-medium"
-            >
-              Permissions
-            </button>
-        </div>
-      )
+            {user.role !== 'super_admin' && !isCurrentUser && (
+              <button
+                onClick={(e) => { e.stopPropagation(); handleForceResetPassword(user.id, user.username);}}
+                className="text-purple-600 hover:text-purple-700 text-xs font-medium"
+                title="Force password reset for user"
+              >
+                Force Reset
+              </button>
+            )}
+             <button
+                onClick={(e) => { e.stopPropagation(); setSelectedUserForPermissions(user); }}
+                className="text-teal-600 hover:text-teal-700 text-xs font-medium"
+                title="Edit file permissions for user"
+              >
+                Permissions
+              </button>
+          </div>
+        );
+      }
     }
   ];
 

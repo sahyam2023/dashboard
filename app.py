@@ -613,6 +613,27 @@ def super_admin_required(fn):
         return fn(*args, **kwargs)
     return wrapper
 
+# --- Helper function to get the ID of the primary super admin ---
+def get_primary_super_admin_id():
+    """
+    Retrieves the ID of the super_admin with the minimum ID.
+    This user is considered the primary or first super_admin.
+    Returns: The ID (int) of the primary super_admin, or None if no super_admin is found.
+    """
+    db = get_db()
+    try:
+        cursor = db.execute("SELECT MIN(id) as first_sa_id FROM users WHERE role = 'super_admin'")
+        result = cursor.fetchone()
+        if result and result['first_sa_id'] is not None:
+            return int(result['first_sa_id'])
+        else:
+            # This case should ideally not happen in a system that requires at least one super_admin.
+            app.logger.warning("get_primary_super_admin_id: No super_admin found in the database.")
+            return None
+    except Exception as e:
+        app.logger.error(f"get_primary_super_admin_id: Error fetching primary super_admin ID: {e}")
+        return None
+
 # --- Authentication Endpoints ---
 @app.route('/api/auth/global-login', methods=['POST'])
 def global_login():
@@ -942,8 +963,21 @@ def change_user_role(user_id):
     current_super_admin_id_str = get_jwt_identity()
     current_super_admin_id = int(current_super_admin_id_str)
 
+    # --- Primary Super Admin Protection ---
+    primary_super_admin_id = get_primary_super_admin_id()
+    if primary_super_admin_id is not None and target_user['id'] == primary_super_admin_id:
+        if current_super_admin_id != primary_super_admin_id:
+            log_audit_action(
+                action_type='CHANGE_ROLE_PRIMARY_SUPERADMIN_ATTEMPT_DENIED',
+                target_table='users',
+                target_id=target_user['id'],
+                details={'attempting_admin_id': current_super_admin_id, 'new_role_attempted': new_role}
+            )
+            return jsonify(msg="The role of the primary super admin cannot be changed by other administrators."), 403
+        # If the primary super admin is changing their own role (self-demotion), the existing checks below will apply.
+
     if user_id == current_super_admin_id and new_role != 'super_admin':
-        # Self-demotion check
+        # Self-demotion check (also applies if primary super admin is demoting themselves)
         super_admin_count_cursor = db.execute("SELECT COUNT(*) as count FROM users WHERE role = 'super_admin'")
         super_admin_count = super_admin_count_cursor.fetchone()['count']
         if super_admin_count <= 1:
@@ -978,8 +1012,21 @@ def deactivate_user(user_id):
     current_super_admin_id_str = get_jwt_identity()
     current_super_admin_id = int(current_super_admin_id_str)
 
-    if user_id == current_super_admin_id:
-        # Self-deactivation check
+    # --- Primary Super Admin Protection ---
+    primary_super_admin_id = get_primary_super_admin_id()
+    if primary_super_admin_id is not None and target_user['id'] == primary_super_admin_id:
+        if current_super_admin_id != primary_super_admin_id:
+            log_audit_action(
+                action_type='DEACTIVATE_PRIMARY_SUPERADMIN_ATTEMPT_DENIED',
+                target_table='users',
+                target_id=target_user['id'],
+                details={'attempting_admin_id': current_super_admin_id}
+            )
+            return jsonify(msg="The primary super admin account cannot be deactivated by other administrators."), 403
+        # If the primary super admin is deactivating themselves, the existing self-deactivation check below applies.
+
+    if user_id == current_super_admin_id: # This is the self-deactivation check
+        # Self-deactivation check (also applies if primary super admin is deactivating themselves)
         active_super_admin_count_cursor = db.execute("SELECT COUNT(*) as count FROM users WHERE role = 'super_admin' AND is_active = TRUE")
         active_super_admin_count = active_super_admin_count_cursor.fetchone()['count']
         if active_super_admin_count <= 1:
@@ -1047,10 +1094,10 @@ def delete_user(user_id):
     # --- BEGIN NEW LOGIC ---
     if target_user['role'] == 'super_admin':
         # Query for the ID of the first super admin (lowest ID)
-        first_super_admin_cursor = db.execute("SELECT MIN(id) as first_sa_id FROM users WHERE role = 'super_admin'")
-        first_super_admin_result = first_super_admin_cursor.fetchone()
+        # Use the new helper function
+        primary_super_admin_id = get_primary_super_admin_id()
 
-        if first_super_admin_result and first_super_admin_result['first_sa_id'] == target_user['id']:
+        if primary_super_admin_id is not None and primary_super_admin_id == target_user['id']:
             # Log this attempt
             log_audit_action(
                 action_type='DELETE_PRIMARY_SUPERADMIN_ATTEMPT_DENIED',
@@ -1367,6 +1414,19 @@ def update_user_file_permissions(user_id):
     if not target_user:
         app.logger.warning(f"Target user {user_id} not found.")
         return jsonify(msg="Target user not found."), 404
+
+    # --- Primary Super Admin Protection ---
+    primary_super_admin_id = get_primary_super_admin_id()
+    if primary_super_admin_id is not None and target_user['id'] == primary_super_admin_id:
+        if acting_super_admin_id != primary_super_admin_id:
+            log_audit_action(
+                action_type='CHANGE_PERMISSIONS_PRIMARY_SUPERADMIN_ATTEMPT_DENIED',
+                target_table='users',
+                target_id=target_user['id'],
+                details={'attempting_admin_id': acting_super_admin_id}
+            )
+            return jsonify(msg="File permissions of the primary super admin cannot be changed by other administrators."), 403
+        # If the primary super admin is changing their own permissions, it's allowed.
 
     permissions_data = request.get_json()
     app.logger.info(f"Received permissions_data for user_id {user_id}: {json.dumps(permissions_data)}")

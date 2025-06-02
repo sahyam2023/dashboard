@@ -19,7 +19,7 @@ const Modal: React.FC<ModalProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 overflow-y-auto h-full w-full z-50 flex justify-center items-center px-4"> {/* Added px-4 for small screen padding */}
-      <div className="relative mx-auto p-5 sm:p-6 border w-full max-w-2xl shadow-lg rounded-md bg-white dark:bg-gray-800 overflow-y-auto max-h-[90vh]"> {/* Increased max-h, adjusted padding */}
+      <div className="relative mx-auto p-4 sm:p-5 border w-full max-w-2xl shadow-lg rounded-md bg-white dark:bg-gray-800 overflow-y-auto max-h-[90vh]"> {/* Increased max-h, adjusted padding */}
         <div className="text-center"> {/* Removed mt-3 */}
           {title && (
             <h3 className="text-lg leading-6 font-medium text-gray-900 dark:text-gray-100 mb-4">{title}</h3>

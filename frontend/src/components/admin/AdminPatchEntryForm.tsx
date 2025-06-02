@@ -123,6 +123,7 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [isFetchingSoftwareOrVersions, setIsFetchingSoftwareOrVersions] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number>(0); // For chunked upload progress
+  const [isUploading, setIsUploading] = useState<boolean>(false); // For beforeunload warning
   // error and successMessage states will be removed, replaced by toast (already done for some)
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -133,6 +134,21 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
   const watchedInputMode = watch('inputMode');
   const watchedSelectedFile = watch('selectedFile');
   const showTypeVersionInput = watchedSelectedVersionId === CREATE_NEW_VERSION_SENTINEL;
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (isUploading) {
+        event.preventDefault();
+        event.returnValue = '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isUploading]);
 
   // Fetch software list for the product dropdown
   useEffect(() => {
@@ -246,6 +262,9 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
 
   const onSubmit: SubmitHandler<PatchFormData> = async (data) => {
     setIsLoading(true);
+    if (data.inputMode === 'upload' && data.selectedFile) {
+      setIsUploading(true);
+    }
     setUploadProgress(0); // Reset progress
 
     let finalVersionId: number | undefined = undefined;
@@ -335,8 +354,10 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
     } catch (err: any) {
       const message = err.response?.data?.msg || err.message || `Failed to ${isEditMode && data.inputMode === 'url' ? 'update' : 'add'} patch.`;
       showErrorToast(message); // Standardized
+      if (data.inputMode === 'upload') setIsUploading(false); // Also set isUploading to false on error
     } finally {
       setIsLoading(false);
+      if (data.inputMode === 'upload') setIsUploading(false); // Ensure isUploading is reset
       // Consider resetting uploadProgress here or after a delay
     }
   };

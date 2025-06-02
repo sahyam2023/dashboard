@@ -2832,9 +2832,11 @@ def _admin_handle_file_upload_and_db_insert(
         stored_filename = f"{uuid.uuid4().hex}{'.' + ext if ext else ''}"
         file_save_path = os.path.join(app.config[upload_folder_config_key], stored_filename)
         download_link_or_path = f"{server_path_prefix}/{stored_filename}"
+        file_saved_for_cleanup = False # Flag to track if file was saved
 
         try:
             uploaded_file_obj.save(file_save_path)
+            file_saved_for_cleanup = True # Set flag after successful save
             file_size = os.path.getsize(file_save_path)
 
             final_sql_params = []
@@ -2876,6 +2878,7 @@ def _admin_handle_file_upload_and_db_insert(
                 )
             
             db.commit() # Commit after logging if it's specific to this helper's scope
+            file_saved_for_cleanup = False # Reset flag after successful commit, no cleanup needed
 
             # --- CORRECTED FETCH-BACK SECTION ---
             fetch_back_query = ""
@@ -2948,14 +2951,18 @@ def _admin_handle_file_upload_and_db_insert(
                     app.logger.error(f"_admin_helper: Simple fetch for {table_name} ID {new_id} also FAILED to find the row. This is very unexpected after successful insert.")
                 return jsonify(msg=f"Item uploaded but metadata retrieval failed for {table_name}"), 500
 
-        except sqlite3.IntegrityError as e:
-            if os.path.exists(file_save_path): os.remove(file_save_path)
-            app.logger.error(f"Admin upload for {table_name} DB IntegrityError: {e}")
-            return jsonify(msg=f"Database error: {e}"), 409
-        except Exception as e:
-            if os.path.exists(file_save_path): os.remove(file_save_path)
-            app.logger.error(f"Admin upload for {table_name} Exception: {e}")
-            return jsonify(msg=f"Server error during file upload: {e}"), 500
+        except Exception as e: # Catch any error during DB operations or fetch-back
+            db.rollback() # Ensure rollback on any error after starting DB operations
+            if file_saved_for_cleanup: # Check flag
+                _delete_file_if_exists(file_save_path)
+                app.logger.info(f"_admin_helper: Cleaned up file {file_save_path} for {table_name} due to DB/processing error: {e}")
+
+            if isinstance(e, sqlite3.IntegrityError):
+                app.logger.error(f"Admin upload for {table_name} DB IntegrityError: {e}")
+                return jsonify(msg=f"Database error: {e}"), 409
+            else:
+                app.logger.error(f"Admin upload for {table_name} Exception: {e}")
+                return jsonify(msg=f"Server error during file upload or DB processing: {e}"), 500
     else: # This else corresponds to "if uploaded_file_obj and allowed_file(...)"
         app.logger.warning(f"_admin_helper: File type not allowed or file object invalid for {uploaded_file_obj.filename if uploaded_file_obj else 'N/A'} for table {table_name}")
         return jsonify(msg="File type not allowed or invalid file object."), 400
@@ -4653,6 +4660,8 @@ def _admin_handle_large_file_db_insert(
     
     # Common fields for logging/response
     item_name_for_log = metadata.get('doc_name') or metadata.get('patch_name') or metadata.get('link_title') or metadata.get('user_provided_title_misc') or original_filename
+    final_filepath_for_cleanup = None # To store the path of the file after it's moved
+    temp_part_filepath_for_cleanup = metadata.get('temp_part_filepath') # Passed from the calling route
 
     server_path_prefix = ""
     # The 'mime_type' parameter received by this function is the client-provided/detected MIME type for the chunk.
@@ -4740,13 +4749,26 @@ def _admin_handle_large_file_db_insert(
             current_user_id, current_user_id
         ]
     else:
+        # If item_type is unsupported, temp_part_filepath might still exist if passed, so clean it up.
+        _delete_file_if_exists(temp_part_filepath_for_cleanup)
+        app.logger.warning(f"Large file DB insert: Unsupported item_type '{item_type}'. Cleaned up temp file: {temp_part_filepath_for_cleanup}")
         return None, jsonify(msg=f"Unsupported item_type for large file DB insert: {item_type}"), 400
 
     try:
+        # final_filepath_for_cleanup is set within the calling route before this helper is called,
+        # but this helper is responsible for what happens if DB insert fails *after* the move.
+        # The actual move operation (shutil.move) happens in the calling route (/api/admin/upload_large_file).
+        # This helper is now primarily for DB insertion and subsequent cleanup logic if DB fails.
+        # We will assume `final_filepath_for_cleanup` will be passed in `metadata` if the move has occurred.
+        final_filepath_for_cleanup = metadata.get('final_filepath_moved')
+
+
         cursor = db.execute(sql_insert_query, tuple(sql_params_list))
         new_id = cursor.lastrowid
         db.commit()
         app.logger.info(f"Large file DB insert: Successfully inserted {item_type} '{item_name_for_log}', new ID: {new_id}")
+        # If commit is successful, the temp file should have already been deleted by the caller after successful move.
+        # And the final file should remain. So, no cleanup needed here on success.
 
         # Fetch back the newly created item with joined data for response
         fetch_back_query = ""
@@ -4767,16 +4789,31 @@ def _admin_handle_large_file_db_insert(
                 app.logger.error(f"Large file DB insert: Failed to fetch back {item_type} ID {new_id}")
                 return None, jsonify(msg=f"{item_type.capitalize()} created (ID: {new_id}) but failed to retrieve details."), 207 # Partial success
         else: # Should not happen if table_name is set
+            # This is an internal logic error, but attempt cleanup of final_filepath if it exists.
+            _delete_file_if_exists(final_filepath_for_cleanup)
+            app.logger.error(f"Large file DB insert: Internal error - fetch_back_query not defined for {item_type}. Cleaned up final file: {final_filepath_for_cleanup}")
             return None, jsonify(msg="Internal error: Fetch back query not defined."), 500
 
-    except sqlite3.IntegrityError as e:
-        db.rollback()
-        app.logger.error(f"Large file DB insert: IntegrityError for {item_type} '{item_name_for_log}': {e}")
-        return None, jsonify(msg=f"Database integrity error for {item_type}: {str(e)}"), 409
     except Exception as e:
         db.rollback()
-        app.logger.error(f"Large file DB insert: General Exception for {item_type} '{item_name_for_log}': {e}", exc_info=True)
-        return None, jsonify(msg=f"Server error during database insertion for {item_type}: {str(e)}"), 500
+        app.logger.error(f"Large file DB insert: Exception for {item_type} '{item_name_for_log}': {e}", exc_info=True)
+        # If an error occurs during DB operations, the file might have already been moved to its final destination.
+        # So, we need to clean up the final_filepath.
+        # The temp_part_filepath should have been deleted by the caller if the move was successful.
+        # If the move itself failed, the caller should handle temp_part_filepath.
+        # This function's responsibility is to clean up final_filepath if DB fails *after* a successful move.
+        if final_filepath_for_cleanup: # This implies the move was done by the caller
+             _delete_file_if_exists(final_filepath_for_cleanup)
+             app.logger.info(f"Large file DB insert: Cleaned up final file {final_filepath_for_cleanup} for {item_type} due to DB error: {e}")
+        else: # This implies the move might not have happened or 'final_filepath_moved' wasn't passed
+            _delete_file_if_exists(temp_part_filepath_for_cleanup) # Fallback to cleaning temp if final path not available
+            app.logger.info(f"Large file DB insert: Cleaned up temp file {temp_part_filepath_for_cleanup} for {item_type} due to DB error (final_filepath not provided): {e}")
+
+
+        if isinstance(e, sqlite3.IntegrityError):
+            return None, jsonify(msg=f"Database integrity error for {item_type}: {str(e)}"), 409
+        else:
+            return None, jsonify(msg=f"Server error during database insertion for {item_type}: {str(e)}"), 500
 
 
 # --- Misc File Upload ---
@@ -6900,7 +6937,7 @@ def admin_upload_large_file():
             #    - Consider requiring all metadata with the LAST chunk, or storing metadata from first chunk.
             #    - For now, assume metadata will be passed with the last chunk for processing.
             # File assembly is complete (or all chunks received if appending serially)
-            app.logger.info(f"Last chunk received for {upload_id}-{original_filename}. File assembly complete at {temp_part_filepath}.")
+            app.logger.info(f"Last chunk received for {upload_id}-{original_filename}. File assembly complete at {temp_part_filepath}.") # temp_part_filepath is defined in this scope
             
             # --- Metadata Validation for Last Chunk ---
             # (This assumes metadata is sent with the last chunk, or every chunk)
@@ -7046,16 +7083,19 @@ def admin_upload_large_file():
             final_filepath = os.path.join(final_upload_folder, final_stored_filename)
             app.logger.info(f"Large file upload: Determined final stored_filename as '{final_stored_filename}' (original_ext: '{original_ext}', mime_type: '{chunk_mime_type}', derived_ext: '{final_ext}')")
             
+            final_filepath_for_db_helper = None # Path of the moved file for the DB helper
             try:
-                shutil.move(temp_part_filepath, final_filepath)
+                shutil.move(temp_part_filepath, final_filepath) # temp_part_filepath and final_filepath are defined in this scope
                 app.logger.info(f"Moved completed file from {temp_part_filepath} to {final_filepath}")
+                final_filepath_for_db_helper = final_filepath # Store for passing to DB helper
+                # After successful move, temp_part_filepath no longer exists.
             except Exception as e_move:
                 app.logger.error(f"Error moving completed file {temp_part_filepath} to {final_filepath}: {e_move}")
-                _delete_file_if_exists(temp_part_filepath) # Attempt cleanup
-                _delete_file_if_exists(final_filepath) # Attempt cleanup if move partially failed
+                _delete_file_if_exists(temp_part_filepath)
+                _delete_file_if_exists(final_filepath)
                 return jsonify(msg=f"Error finalizing file movement: {str(e_move)}"), 500
 
-            file_size = os.path.getsize(final_filepath)
+            file_size = os.path.getsize(final_filepath) # final_filepath is defined in this scope
             
             # Infer MIME type (basic) - can be enhanced
             # original_ext is defined above from secured_original_filename
@@ -7087,15 +7127,22 @@ def admin_upload_large_file():
                 stored_filename=final_stored_filename,
                 original_filename=original_filename, # secured_original_filename is not the true original
                 file_size=file_size,
-                mime_type=mime_type, # Pass the refined mime_type
+                mime_type=mime_type,
                 current_user_id=current_user_id,
-                metadata=metadata_payload
+                metadata={
+                    **metadata_payload,
+                    'temp_part_filepath': None, # temp_part_filepath is gone after move
+                    'final_filepath_moved': final_filepath_for_db_helper # Pass the path of the moved file
+                }
             )
 
             if error_response: # DB insertion failed
-                _delete_file_if_exists(final_filepath) # Cleanup successfully moved file
-                app.logger.error(f"DB insertion failed for large file {original_filename} (upload_id: {upload_id}). Cleaned up final file: {final_filepath}")
-                return error_response, status_code # error_response is already a jsonify object
+                # _delete_file_if_exists(final_filepath) is now handled inside _admin_handle_large_file_db_insert
+                # No, the helper expects final_filepath_moved to be passed, so it can clean it up.
+                # The original _delete_file_if_exists(final_filepath) here was correct if helper didn't handle it.
+                # With the change to pass final_filepath_moved, the helper *will* clean it.
+                app.logger.error(f"DB insertion failed for large file {original_filename} (upload_id: {upload_id}). Final file {final_filepath_for_db_helper} should have been cleaned by DB helper.")
+                return error_response, status_code
 
             # Log audit action for successful large file upload and DB insert
             audit_action_type = f'CREATE_{item_type.upper()}_LARGE_FILE'

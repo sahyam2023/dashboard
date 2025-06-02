@@ -94,6 +94,7 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
   const [isLoading, setIsLoading] = useState(false); // For API calls
   const [isFetchingSoftware, setIsFetchingSoftware] = useState(false); // For dropdown loading
   const [uploadProgress, setUploadProgress] = useState<number>(0); // New state for upload progress
+  const [isUploading, setIsUploading] = useState<boolean>(false); // For beforeunload warning
   // Error and success messages will be handled by toast
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -101,6 +102,21 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
 const role = user?.role; // Access role safely, as user can be null
   const watchedInputMode = watch('inputMode');
   const watchedSelectedFile = watch('selectedFile');
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (isUploading) {
+        event.preventDefault();
+        event.returnValue = '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isUploading]);
 
   useEffect(() => {
     if (isAuthenticated && (role === 'admin' || role === 'super_admin')) {
@@ -174,6 +190,9 @@ const role = user?.role; // Access role safely, as user can be null
 
   const onSubmit: SubmitHandler<DocumentFormData> = async (data) => {
     setIsLoading(true);
+    if (data.inputMode === 'upload' && data.selectedFile) {
+      setIsUploading(true);
+    }
     setUploadProgress(0); // Reset progress before new submission
 
     try {
@@ -244,8 +263,10 @@ const role = user?.role; // Access role safely, as user can be null
     } catch (err: any) {
       const message = err.response?.data?.msg || err.message || `Failed to ${isEditMode && data.inputMode === 'url' ? 'update' : 'add'} document.`;
       showErrorToast(message);
+      if (data.inputMode === 'upload') setIsUploading(false); // Also set isUploading to false on error
     } finally {
       setIsLoading(false);
+      if (data.inputMode === 'upload') setIsUploading(false); // Ensure isUploading is reset
       // Optionally reset progress after a short delay or based on success/failure
       // For now, keep progress visible until next action.
       // setTimeout(() => setUploadProgress(0), 2000);

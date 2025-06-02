@@ -106,6 +106,7 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
   const [isLoading, setIsLoading] = useState(false); // For API calls
   const [isFetchingSoftwareOrVersions, setIsFetchingSoftwareOrVersions] = useState(false); // For dropdown loading
   const [uploadProgress, setUploadProgress] = useState<number>(0); // For chunked upload progress
+  const [isUploading, setIsUploading] = useState<boolean>(false); // For beforeunload warning
   // Error and success messages will be handled by toast (already done for some)
 
   const { isAuthenticated, user } = useAuth();
@@ -121,6 +122,21 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
   // Old state variables for individual fields are removed (title, description, etc.)
   // Old error and successMessage states are removed
   // useState for selectedSoftwareId, selectedVersionId, typedVersionString, inputMode, externalUrl, selectedFile are removed.
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (isUploading) {
+        event.preventDefault();
+        event.returnValue = '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isUploading]);
 
   useEffect(() => {
     if (isAuthenticated && (role === 'admin' || role === 'super_admin')) {
@@ -239,6 +255,9 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
     // Old e.preventDefault() is not needed
     // Old manual validation checks are removed
     setIsLoading(true);
+    if (data.inputMode === 'upload' && data.selectedFile) {
+      setIsUploading(true);
+    }
     setUploadProgress(0); // Reset progress
     // Old setError(null); setSuccessMessage(null) removed
 
@@ -321,8 +340,12 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
     } catch (err: any) {
       const message = err.response?.data?.msg || err.message || `Failed to ${isEditMode && data.inputMode === 'url' ? 'update' : 'add'} link.`;
       showErrorToast(message); // Standardized
+      if (data.inputMode === 'upload') setIsUploading(false); // Also set isUploading to false on error
     }
-    finally { setIsLoading(false); }
+    finally {
+      setIsLoading(false);
+      if (data.inputMode === 'upload') setIsUploading(false); // Ensure isUploading is reset
+    }
   };
   
   const onFormError = (formErrors: FieldErrors<LinkFormData>) => {

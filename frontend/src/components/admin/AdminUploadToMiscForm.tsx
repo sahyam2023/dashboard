@@ -72,12 +72,28 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [isFetchingCategories, setIsFetchingCategories] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number>(0); // For chunked upload progress
+  const [isUploading, setIsUploading] = useState<boolean>(false); // For beforeunload warning
   // error and successMessage states removed
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { isAuthenticated, user } = useAuth();
 const role = user?.role; // Access role safely, as user can be null
   const watchedSelectedFile = watch('selectedFile');
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (isUploading) {
+        event.preventDefault();
+        event.returnValue = '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isUploading]);
 
   // Fetch categories for the dropdown
   useEffect(() => {
@@ -137,6 +153,9 @@ const role = user?.role; // Access role safely, as user can be null
       return;
     }
     setIsLoading(true);
+    if (data.selectedFile) {
+      setIsUploading(true);
+    }
     setUploadProgress(0); // Reset progress
 
     try {
@@ -185,8 +204,10 @@ const role = user?.role; // Access role safely, as user can be null
     } catch (err: any) {
       const message = err.response?.data?.msg || err.message || `File operation failed.`;
       showErrorToast(message); // Standardized
+      if (data.selectedFile) setIsUploading(false); // Also set isUploading to false on error
     } finally {
       setIsLoading(false);
+      if (data.selectedFile) setIsUploading(false); // Ensure isUploading is reset
       // Consider resetting uploadProgress after a delay or based on success/failure
     }
   };

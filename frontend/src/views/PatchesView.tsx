@@ -557,8 +557,8 @@ useEffect(() => {
               </div>
             )}
             <div className="flex justify-end space-x-3 mt-6">
-              <button type="button" onClick={()=>setShowBulkMoveModal(false)} className="btn-secondary" disabled={isMovingSelected}>Cancel</button>
-              <button type="button" onClick={handleConfirmBulkMovePatches} className="btn-primary" disabled={isMovingSelected||!modalSelectedSoftwareId||!modalSelectedVersionId}>{isMovingSelected?'Moving...':'Confirm Move'}</button>
+              <button type="button" onClick={()=>setShowBulkMoveModal(false)} className="px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500" disabled={isMovingSelected}>Cancel</button>
+              <button type="button" onClick={handleConfirmBulkMovePatches} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500" disabled={isMovingSelected||!modalSelectedSoftwareId||!modalSelectedVersionId}>{isMovingSelected?'Moving...':'Confirm Move'}</button>
             </div>
           </div>
         </Modal>
@@ -574,6 +574,7 @@ useEffect(() => {
           <CommentSection
             itemId={selectedPatchForComments.id}
             itemType="patch"
+            onCommentAction={loadPatchesCallback}
           />
         </div>
       )}

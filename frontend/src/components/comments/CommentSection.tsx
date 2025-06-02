@@ -14,9 +14,10 @@ import { Loader2, RefreshCw, MessageCircle } from 'lucide-react';
 interface CommentSectionProps {
   itemId: number;
   itemType: string;
+  onCommentAction?: () => void; // New optional callback
 }
 
-const CommentSection: React.FC<CommentSectionProps> = ({ itemId, itemType }) => {
+const CommentSection: React.FC<CommentSectionProps> = ({ itemId, itemType, onCommentAction }) => {
   const { user } = useAuth();
   const currentUserId = user?.id ?? null;
 
@@ -65,6 +66,9 @@ const CommentSection: React.FC<CommentSectionProps> = ({ itemId, itemType }) => 
     loadComments(currentPage); 
     setReplyingToComment(null); // Close reply form
     setEditingComment(null); // Close edit form
+    if (onCommentAction) { // Call the callback
+      onCommentAction();
+    }
   };
 
   const handleDeleteComment = async (commentId: number) => {
@@ -73,11 +77,17 @@ const CommentSection: React.FC<CommentSectionProps> = ({ itemId, itemType }) => 
         await deleteComment(commentId);
         showSuccessToast('Comment deleted successfully.');
         // Refresh comments: remove the deleted comment and its replies from state or re-fetch
+        // Simplified to just re-fetch or call parent to re-fetch all data which includes comments
+        // The local state update for comments might still be useful for immediate UI feedback
+        // but the parent re-fetch will ensure comment counts are accurate.
+        // Consider if loadComments(currentPage) is needed here if parent re-fetches everything.
+        // For now, we'll rely on onCommentAction for the parent to refresh.
+        // Local immediate update can still be:
         setComments(prevComments => 
           prevComments.reduce((acc, comment) => {
             if (comment.id === commentId) {
-              setTotalComments(prev => prev -1); // Decrement total if top-level
-              return acc; // Skip this comment
+              // Assuming totalComments state is managed correctly by loadComments after parent refresh
+              return acc;
             }
             if (comment.replies) {
               comment.replies = comment.replies.filter(reply => reply.id !== commentId);
@@ -86,8 +96,13 @@ const CommentSection: React.FC<CommentSectionProps> = ({ itemId, itemType }) => 
             return acc;
           }, [] as CommentType[])
         );
-        // If a full re-fetch is preferred:
-        // loadComments(currentPage);
+
+        if (onCommentAction) { // Call the callback
+          onCommentAction();
+        } else {
+          // Fallback to local reload if no callback provided, though the goal is parent refresh
+          loadComments(currentPage);
+        }
       } catch (err: any) {
         showErrorToast(err.message || 'Failed to delete comment.');
       }

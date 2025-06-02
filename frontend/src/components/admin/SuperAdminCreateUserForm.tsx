@@ -28,6 +28,21 @@ const isPasswordStrong = (password: string): { strong: boolean; message: string 
   return { strong: true, message: "Password is strong." };
 };
 
+const ChevronIcon = ({ expanded }: { expanded: boolean }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    className={`h-5 w-5 transform transition-transform duration-200 ${expanded ? 'rotate-180' : 'rotate-0'}`}
+    viewBox="0 0 20 20"
+    fill="currentColor"
+  >
+    <path
+      fillRule="evenodd"
+      d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+      clipRule="evenodd"
+    />
+  </svg>
+);
+
 
 const SuperAdminCreateUserForm: React.FC<SuperAdminCreateUserFormProps> = ({ onUserCreated, onCancel }) => {
   const [username, setUsername] = useState('');
@@ -50,6 +65,7 @@ const SuperAdminCreateUserForm: React.FC<SuperAdminCreateUserFormProps> = ({ onU
   const [error, setError] = useState<string | null>(null);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [passwordStrengthMessage, setPasswordStrengthMessage] = useState<string>('');
+  const [isSecurityQuestionsExpanded, setIsSecurityQuestionsExpanded] = useState<boolean>(true);
 
 
   useEffect(() => {
@@ -252,15 +268,30 @@ const SuperAdminCreateUserForm: React.FC<SuperAdminCreateUserFormProps> = ({ onU
         {formErrors.role && <p className="mt-1 text-xs text-red-500">{formErrors.role}</p>}
       </div>
 
-      <div className="space-y-4">
-        <h3 className="text-md font-medium text-gray-900 dark:text-white">Security Questions</h3>
-        {formErrors.securityQuestions && <p className="text-xs text-red-500">{formErrors.securityQuestions}</p>}
+      <div className="space-y-2">
+        <button // Changed the div to a button for better accessibility and larger click target
+          type="button"
+          onClick={() => setIsSecurityQuestionsExpanded(prev => !prev)}
+          className="flex justify-between items-center w-full py-2 text-left text-md font-medium text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded-md px-2 focus:outline-none focus-visible:ring focus-visible:ring-blue-500 focus-visible:ring-opacity-75"
+          aria-expanded={isSecurityQuestionsExpanded}
+          aria-controls="security-questions-content" // Added for accessibility
+        >
+          <span>Security Questions</span>
+          <ChevronIcon expanded={isSecurityQuestionsExpanded} />
+        </button>
+        {formErrors.securityQuestions && !isSecurityQuestionsExpanded && (
+          <p className="text-xs text-red-500 mt-1 px-2"> {/* Ensure error message is visible and spaced */}
+            {formErrors.securityQuestions}
+          </p>
+        )}
 
-        {/* Question 1 */}
-        <div className="space-y-1">
-          <label htmlFor="question1" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Question 1</label>
-          <select
-            id="question1"
+        {isSecurityQuestionsExpanded && (
+          <div id="security-questions-content" className="space-y-4 pt-2 pl-2 pr-2 pb-2 border-t border-gray-200 dark:border-gray-700 mt-2"> {/* Added pl-2, pr-2, pb-2 and border-t for visual separation */}
+            {/* Question 1 */}
+            <div className="space-y-1">
+              <label htmlFor="question1" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Question 1</label>
+              <select
+                id="question1"
             value={selectedQuestion1}
             onChange={(e) => setSelectedQuestion1(e.target.value)}
             className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md dark:bg-gray-700 dark:text-white"
@@ -331,6 +362,8 @@ const SuperAdminCreateUserForm: React.FC<SuperAdminCreateUserFormProps> = ({ onU
           {formErrors.answer3 && <p className="mt-1 text-xs text-red-500">{formErrors.answer3}</p>}
         </div>
       </div>
+      )}
+    </div>
 
       <div className="flex flex-col sm:flex-row sm:justify-end sm:space-x-3 pt-4 space-y-2 sm:space-y-0">
         <button

@@ -359,9 +359,9 @@ const handleApiError = async (response: Response, defaultMessage: string, isLogi
 
     // Check for 401 Unauthorized and if a token was likely used (i.e., not a login attempt itself)
     if (response.status === 401 && !isLoginAttempt && localStorage.getItem('tokenData')) {
-      // Dispatch a custom event for token expiration
+      // Dispatch a custom event for token invalidation (e.g. blacklisted or expired)
       // This event should be listened to by AuthContext to handle logout and redirect
-      document.dispatchEvent(new CustomEvent('tokenExpired'));
+      document.dispatchEvent(new CustomEvent('tokenInvalidated'));
       
       // We don't throw an error here because the event handler will navigate away.
       // Returning a promise that never resolves can prevent further processing in the calling function.

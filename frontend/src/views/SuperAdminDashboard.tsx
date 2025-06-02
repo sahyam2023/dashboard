@@ -706,7 +706,7 @@ const SuperAdminDashboard: React.FC = () => {
       render: (user) => {
         const isCurrentUser = auth.user?.id === user.id;
         const isFirstSA = user.id === firstSuperAdminId;
-        const isOnlyActiveSuperAdmin = auth.user?.username === user.username && users.filter(u => u.role === 'super_admin' && u.is_active).length <= 1;
+        const isTheOnlyActiveSuperAdmin = user.role === 'super_admin' && user.is_active && users.filter(u => u.role === 'super_admin' && u.is_active).length <= 1;
 
         return (
           <div className="flex items-center space-x-3 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
@@ -714,8 +714,13 @@ const SuperAdminDashboard: React.FC = () => {
               <button
                 onClick={(e) => { e.stopPropagation(); handleDeactivate(user.id, user.username);}}
                 className="text-yellow-600 hover:text-yellow-700 disabled:text-gray-400 dark:disabled:text-gray-500 text-xs font-medium"
-                disabled={isOnlyActiveSuperAdmin}
-                title={isOnlyActiveSuperAdmin ? "Cannot deactivate the only active super admin." : "Deactivate user"}
+                disabled={(isCurrentUser && isTheOnlyActiveSuperAdmin) || isFirstSA}
+                title={
+                  isFirstSA ? "The primary super admin account cannot be deactivated." :
+                  (isCurrentUser && isTheOnlyActiveSuperAdmin ? "Cannot deactivate your own account as the only active super admin." :
+                  (isTheOnlyActiveSuperAdmin ? "Cannot deactivate the only active super admin." : // This case might be redundant if isCurrentUser implies isTheOnlyActiveSuperAdmin for self
+                  "Deactivate user"))
+                }
               >
                 Deactivate
               </button>
@@ -747,8 +752,9 @@ const SuperAdminDashboard: React.FC = () => {
             )}
              <button
                 onClick={(e) => { e.stopPropagation(); setSelectedUserForPermissions(user); }}
-                className="text-teal-600 hover:text-teal-700 text-xs font-medium"
-                title="Edit file permissions for user"
+                className="text-teal-600 hover:text-teal-700 disabled:text-gray-400 dark:disabled:text-gray-500 disabled:cursor-not-allowed text-xs font-medium"
+                disabled={isFirstSA}
+                title={isFirstSA ? "Permissions for the primary super admin cannot be modified here." : "Manage file permissions"}
               >
                 Permissions
               </button>

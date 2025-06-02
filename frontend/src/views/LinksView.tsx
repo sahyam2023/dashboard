@@ -467,9 +467,8 @@ const LinksView: React.FC = () => {
         {activeSoftwareId && (
           // This div's classes are already correct from previous steps
           <div className="flex items-center gap-2 min-w-[200px] mt-4 md:mt-0 flex-shrink-0">
-            <label htmlFor="versionFilterLinks" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Version</label>
             <select id="versionFilterLinks" value={activeVersionId || ''} onChange={handleVersionFilterChange} className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-200" disabled={versionList.length === 0}>
-              <option value="">All Versions</option>
+              <option value="">Version</option>
               {versionList.map(v => (<option key={v.id} value={v.id}>{v.version_number}</option>))}
             </select>
           </div>

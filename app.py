@@ -26,7 +26,7 @@ from flask_cors import CORS
 from flask_bcrypt import Bcrypt
 from flask_jwt_extended import (
     create_access_token, jwt_required, JWTManager,
-    get_jwt_identity, verify_jwt_in_request, get_raw_jwt, get_jti
+    get_jwt_identity, verify_jwt_in_request, get_jwt, get_jti
 )
 from werkzeug.utils import secure_filename
 from tempfile import NamedTemporaryFile
@@ -109,8 +109,8 @@ app.config['SECRET_KEY'] = '161549f75b4148cd529620b59c4fd706b40ae5805912a513811e
 app.config['JWT_SECRET_KEY'] = '991ca90ca06a362033f84c9a295a7c0f880caac7a74aefcf23df09f3b783c8e5a9bb0d8c1fcacf614d78cc3b580540419f55e08a29802eb9ea5e83a16eac641c0c028c814267dc94b261aa6a209462ea052773739f1429b7333185bf2b8bf8ba7ac19bccf691f4eece8d47174b6b3e191766d6a1a5c9a3ad21fd672f864e8a357d3c4b3fb838312a047156965a5756d73504db10b3920a3e6bfba5288443be112953e6b46132f6022280b192087384d6f8e91094bb5bbf21deac4bff2aaeda3f607db786b4847096f6112bad168e5223638c47146c74a9da65a54a86060c5298238169e1f2646f670c5f8014fe4997f9a2d8964e52938b627e31f58a70ece4d7'
 app.config['BCRYPT_LOG_ROUNDS'] = 12
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=4)
-app.config['JWT_BLACKLIST_ENABLED'] = True
-app.config['JWT_BLACKLIST_TOKEN_CHECKS'] = ['access'] # Check only access tokens
+app.config['JWT_BLOCKLIST_ENABLED'] = True
+app.config['JWT_BLOCKLIST_TOKEN_CHECKS'] = ['access'] # Check only access tokens
 
 # Store upload folder paths in app config for easy access in routes
 app.config['DOC_UPLOAD_FOLDER'] = DOC_UPLOAD_FOLDER
@@ -149,13 +149,13 @@ jwt = JWTManager(app)
 IST = pytz.timezone('Asia/Kolkata') # Added IST timezone
 UTC = pytz.utc # Added UTC for clarity in conversion if needed
 
-# --- Token Blacklist ---
-blacklist = set()
+# --- Token Blocklist ---
+blocklist = set()
 
-@jwt.token_in_blacklist_loader
-def check_if_token_in_blacklist(decrypted_token):
-    jti = decrypted_token['jti']
-    return jti in blacklist
+@jwt.token_in_blocklist_loader
+def check_if_token_in_blocklist(jwt_header, jwt_payload):
+    jti = jwt_payload['jti']
+    return jti in blocklist
 
 
 # --- Helper for Database Backup ---
@@ -1046,20 +1046,15 @@ def deactivate_user(user_id):
         deactivated_username = target_user['username'] # Get username before deactivation
         db.execute("UPDATE users SET is_active = FALSE WHERE id = ?", (user_id,))
 
-        # Add current token's JTI to blacklist
-        try:
-            jti = get_raw_jwt()['jti']
-            blacklist.add(jti)
-            app.logger.info(f"Token JTI {jti} for user {user_id} added to blacklist upon deactivation.")
-        except Exception as e_jti:
-            app.logger.error(f"Error getting JTI or adding to blacklist for user {user_id} during deactivation: {e_jti}")
-            # Optionally, decide if this error should prevent deactivation. For now, it doesn't.
+        # The admin's token should not be blocklisted when deactivating another user.
+        # The blocklist mechanism is for specific tokens that need to be invalidated,
+        # not the token of the admin performing the action.
 
         log_audit_action(
             action_type='DEACTIVATE_USER',
             target_table='users',
             target_id=user_id,
-            details={'deactivated_username': deactivated_username, 'token_blacklisted': jti if 'jti' in locals() else 'Error getting JTI'}
+            details={'deactivated_username': deactivated_username} # Removed token_blocklisted detail
         )
         db.commit()
         updated_user = find_user_by_id(user_id)

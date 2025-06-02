@@ -575,35 +575,82 @@ def is_password_strong(password: str) -> tuple[bool, str]:
     
     return True, "Password is strong"
 
+# --- Authorization Decorators ---
 
-# --- Authorization Decorator ---
+def active_user_required(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        verify_jwt_in_request()
+        current_user_id_str = get_jwt_identity()
+        user_id = None # Initialize user_id to None
+        user = None # Initialize user to None
+        try:
+            if current_user_id_str:
+                 user_id = int(current_user_id_str)
+                 user = find_user_by_id(user_id)
+
+            if not user or not user['is_active']:
+                # Log attempt before returning error
+                log_audit_action(
+                    action_type='INACTIVE_USER_ACCESS_DENIED',
+                    user_id=user_id if user_id else None, # Log the ID if available
+                    username=user['username'] if user else "Unknown/Invalid", # Log username if user object exists
+                    details={'message': 'Attempt to access resource with inactive account or invalid token.'}
+                )
+                return jsonify(msg="User account is inactive or token is invalid."), 401
+        except ValueError:
+            # This handles cases where current_user_id_str is not a valid integer
+            log_audit_action(
+                action_type='INVALID_TOKEN_ACCESS_DENIED',
+                details={'message': 'Access attempt with invalid token format.'}
+            )
+            return jsonify(msg="Invalid user identity in token."), 400 # Or 401
+        except Exception as e: # Catch-all for other unexpected errors
+            app.logger.error(f"Error in active_user_required decorator: {e}")
+            log_audit_action(
+                action_type='ACTIVE_USER_CHECK_ERROR',
+                details={'error': str(e)}
+            )
+            return jsonify(msg="An internal error occurred during authorization."), 500
+        return fn(*args, **kwargs)
+    return wrapper
+
 def admin_required(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
         verify_jwt_in_request()
         current_user_id_str = get_jwt_identity()
         try:
-            user = find_user_by_id(int(current_user_id_str))
+            user_id_int = int(current_user_id_str) # Convert once
+            user = find_user_by_id(user_id_int)
             if not user:
-                return jsonify(msg="User not found or invalid token."), 401 # Or 403
+                log_audit_action(action_type='ADMIN_ACCESS_DENIED_USER_NOT_FOUND', user_id=user_id_int, details={'message': 'Admin user not found with token ID.'})
+                return jsonify(msg="User not found or invalid token."), 401
+
+            if not user['is_active']:
+                log_audit_action(action_type='INACTIVE_ADMIN_ACCESS_DENIED', user_id=user['id'], username=user['username'], details={'message': 'Admin account is inactive.'})
+                return jsonify(msg="Administrator account is inactive."), 401
 
             if is_maintenance_mode_active():
                 if user['role'] != 'super_admin':
-                    # During maintenance, only super_admins can access admin_required routes
                     log_audit_action(
                         action_type='ADMIN_ACCESS_DENIED_MAINTENANCE',
                         user_id=user['id'], username=user['username'],
                         details={'route_attempted': request.path}
                     )
                     return jsonify(msg="System is currently undergoing maintenance. Only super administrators have access.", maintenance_mode_active=True), 503
-            else: # Not in maintenance mode, original logic applies
-                if user['role'] not in ['admin', 'super_admin']:
-                    return jsonify(msg="Administration rights required."), 403
+
+            # Role check (only if not in maintenance mode or if user is super_admin)
+            if user['role'] not in ['admin', 'super_admin']:
+                log_audit_action(action_type='ADMIN_ACCESS_DENIED_ROLE', user_id=user['id'], username=user['username'], details={'current_role': user['role']})
+                return jsonify(msg="Administration rights required."), 403
             
         except ValueError:
+             log_audit_action(action_type='ADMIN_ACCESS_DENIED_INVALID_TOKEN_ID', details={'token_id_str': current_user_id_str})
              return jsonify(msg="Invalid user identity in token."), 400
         except Exception as e:
             app.logger.error(f"Error in admin_required decorator: {e}")
+            log_audit_action(action_type='ADMIN_AUTH_EXCEPTION', details={'error': str(e)})
             return jsonify(msg="An internal error occurred during authorization."), 500
         return fn(*args, **kwargs)
     return wrapper
@@ -615,11 +662,27 @@ def super_admin_required(fn):
         verify_jwt_in_request()
         current_user_id_str = get_jwt_identity()
         try:
-            user = find_user_by_id(int(current_user_id_str))
-            if not user or user['role'] != 'super_admin':
+            user_id_int = int(current_user_id_str) # Convert once
+            user = find_user_by_id(user_id_int)
+            if not user:
+                log_audit_action(action_type='SUPER_ADMIN_ACCESS_DENIED_USER_NOT_FOUND', user_id=user_id_int, details={'message': 'Super admin user not found with token ID.'})
+                return jsonify(msg="User not found or invalid token."), 401 # Or 403
+
+            if not user['is_active']:
+                log_audit_action(action_type='INACTIVE_SUPER_ADMIN_ACCESS_DENIED', user_id=user['id'], username=user['username'], details={'message': 'Super administrator account is inactive.'})
+                return jsonify(msg="Super administrator account is inactive."), 401
+
+            if user['role'] != 'super_admin':
+                log_audit_action(action_type='SUPER_ADMIN_ACCESS_DENIED_ROLE', user_id=user['id'], username=user['username'], details={'current_role': user['role']})
                 return jsonify(msg="Super administration rights required."), 403
+
         except ValueError:
+             log_audit_action(action_type='SUPER_ADMIN_ACCESS_DENIED_INVALID_TOKEN_ID', details={'token_id_str': current_user_id_str})
              return jsonify(msg="Invalid user identity in token."), 400
+        except Exception as e:
+            app.logger.error(f"Error in super_admin_required decorator: {e}")
+            log_audit_action(action_type='SUPER_ADMIN_AUTH_EXCEPTION', details={'error': str(e)})
+            return jsonify(msg="An internal error occurred during authorization."), 500
         return fn(*args, **kwargs)
     return wrapper
 
@@ -1845,10 +1908,10 @@ def login():
 # --- User Profile Management Endpoints ---
 
 @app.route('/api/user/profile/upload-picture', methods=['POST'])
-@jwt_required()
+@active_user_required
 def upload_profile_picture():
-    current_user_id = int(get_jwt_identity())
-    user = find_user_by_id(current_user_id)
+    current_user_id = int(get_jwt_identity()) # Already verified by active_user_required
+    user = find_user_by_id(current_user_id) # Already verified by active_user_required
     if not user:
         return jsonify(msg="User not found."), 404
 
@@ -1904,15 +1967,10 @@ def upload_profile_picture():
 
 
 @app.route('/api/user/profile/change-password', methods=['POST'])
-@jwt_required()
+@active_user_required
 def change_password():
-    current_user_id_str = get_jwt_identity()
-    try:
-        current_user_id = int(current_user_id_str)
-    except ValueError:
-        return jsonify(msg="Invalid user identity in token."), 400
-
-    user = find_user_by_id(current_user_id)
+    current_user_id = int(get_jwt_identity()) # Already verified
+    user = find_user_by_id(current_user_id) # Already verified
     if not user:
         return jsonify(msg="User not found."), 404
 
@@ -1961,15 +2019,10 @@ def change_password():
         return jsonify(msg="Failed to update password due to a server error."), 500
 
 @app.route('/api/user/profile/update-email', methods=['POST'])
-@jwt_required()
+@active_user_required
 def update_email():
-    current_user_id_str = get_jwt_identity()
-    try:
-        current_user_id = int(current_user_id_str)
-    except ValueError:
-        return jsonify(msg="Invalid user identity in token."), 400
-
-    user = find_user_by_id(current_user_id)
+    current_user_id = int(get_jwt_identity()) # Already verified
+    user = find_user_by_id(current_user_id) # Already verified
     if not user:
         return jsonify(msg="User not found."), 404
 
@@ -2011,15 +2064,10 @@ def update_email():
         return jsonify(msg="Failed to update email due to a server error."), 500
 
 @app.route('/api/user/profile/update-username', methods=['PUT'])
-@jwt_required()
+@active_user_required
 def update_username():
-    current_user_id_str = get_jwt_identity()
-    try:
-        current_user_id = int(current_user_id_str)
-    except ValueError:
-        return jsonify(msg="Invalid user identity in token."), 401
-
-    user = find_user_by_id(current_user_id)
+    current_user_id = int(get_jwt_identity()) # Already verified
+    user = find_user_by_id(current_user_id) # Already verified
     if not user:
         return jsonify(msg="User not found."), 404
 
@@ -2091,14 +2139,9 @@ def update_username():
 
 # --- User Dashboard Layout Preferences Endpoints ---
 @app.route('/api/user/dashboard-layout', methods=['GET'])
-@jwt_required()
+@active_user_required
 def get_dashboard_layout():
-    current_user_id_str = get_jwt_identity()
-    try:
-        user_id = int(current_user_id_str)
-    except ValueError:
-        return jsonify(msg="Invalid user identity in token."), 400
-
+    user_id = int(get_jwt_identity()) # Already verified
     db = get_db()
     user_prefs_row = db.execute("SELECT dashboard_layout_prefs FROM users WHERE id = ?", (user_id,)).fetchone()
 
@@ -2115,14 +2158,9 @@ def get_dashboard_layout():
         return jsonify({}), 200
 
 @app.route('/api/user/dashboard-layout', methods=['PUT'])
-@jwt_required()
+@active_user_required
 def update_dashboard_layout():
-    current_user_id_str = get_jwt_identity()
-    try:
-        user_id = int(current_user_id_str)
-    except ValueError:
-        return jsonify(msg="Invalid user identity in token."), 400
-
+    user_id = int(get_jwt_identity()) # Already verified
     new_layout_prefs = request.get_json()
     if new_layout_prefs is None: # Check if request body is valid JSON or empty
         return jsonify(msg="Invalid or missing JSON data in request body."), 400
@@ -6112,14 +6150,9 @@ def database_reset_confirm():
 
 
 @app.route('/api/favorites', methods=['POST'])
-@jwt_required()
+@active_user_required
 def add_user_favorite():
-    current_user_id_str = get_jwt_identity()
-    try:
-        user_id = int(current_user_id_str)
-    except ValueError:
-        return jsonify(msg="Invalid user identity in token."), 400
-
+    user_id = int(get_jwt_identity()) # Already verified
     data = request.get_json()
     if not data:
         return jsonify(msg="Missing JSON data"), 400
@@ -6164,14 +6197,9 @@ def add_user_favorite():
         return jsonify(msg="Failed to add favorite. It might already exist or a database error occurred."), 409 # 409 Conflict or 500
 
 @app.route('/api/favorites/<item_type>/<int:item_id>', methods=['DELETE'])
-@jwt_required()
+@active_user_required
 def remove_user_favorite(item_type, item_id):
-    current_user_id_str = get_jwt_identity()
-    try:
-        user_id = int(current_user_id_str)
-    except ValueError:
-        return jsonify(msg="Invalid user identity in token."), 400
-
+    user_id = int(get_jwt_identity()) # Already verified
     if item_type not in ALLOWED_FAVORITE_ITEM_TYPES:
         return jsonify(msg=f"Invalid item_type. Must be one of: {', '.join(ALLOWED_FAVORITE_ITEM_TYPES)}."), 400
     if item_id <= 0:
@@ -6196,14 +6224,9 @@ def remove_user_favorite(item_type, item_id):
         return jsonify(msg="Failed to remove favorite. It might not exist or a database error occurred."), 404 # Or 500
 
 @app.route('/api/favorites', methods=['GET'])
-@jwt_required()
+@active_user_required
 def get_user_favorites_api():
-    current_user_id_str = get_jwt_identity()
-    try:
-        user_id = int(current_user_id_str)
-    except ValueError:
-        return jsonify(msg="Invalid user identity in token."), 400
-
+    user_id = int(get_jwt_identity()) # Already verified
     page = request.args.get('page', default=1, type=int)
     per_page = request.args.get('per_page', default=10, type=int)
     item_type_filter = request.args.get('item_type', default=None, type=str)
@@ -6237,14 +6260,9 @@ def get_user_favorites_api():
 
 
 @app.route('/api/favorites/status/<item_type>/<int:item_id>', methods=['GET'])
-@jwt_required()
+@active_user_required
 def get_user_favorite_status_api(item_type, item_id):
-    current_user_id_str = get_jwt_identity()
-    try:
-        user_id = int(current_user_id_str)
-    except ValueError:
-        return jsonify(msg="Invalid user identity in token."), 400
-
+    user_id = int(get_jwt_identity()) # Already verified
     if item_type not in ALLOWED_FAVORITE_ITEM_TYPES:
         return jsonify(msg=f"Invalid item_type. Must be one of: {', '.join(ALLOWED_FAVORITE_ITEM_TYPES)}."), 400
     if item_id <= 0:
@@ -7879,20 +7897,11 @@ def bulk_move_items():
 
 # --- Comment Endpoints ---
 @app.route('/api/items/<item_type>/<int:item_id>/comments', methods=['POST'])
-@jwt_required()
+@active_user_required # Changed from @jwt_required()
 def add_comment_to_item(item_type, item_id):
-    current_user_id_str = get_jwt_identity()
-    comment_author_username = "Unknown" 
-    try:
-        user_id = int(current_user_id_str)
-        commenting_user = find_user_by_id(user_id)
-        if commenting_user:
-            comment_author_username = commenting_user['username']
-        else: # Should not happen if JWT is valid and user exists
-            app.logger.error(f"ADD_COMMENT: User ID {user_id} from JWT not found in DB.")
-            return jsonify(msg="Commenting user not found."), 404
-    except ValueError:
-        return jsonify(msg="Invalid user identity in token."), 401
+    user_id = int(get_jwt_identity()) # Already verified
+    commenting_user = find_user_by_id(user_id) # Already verified to be active
+    comment_author_username = commenting_user['username'] if commenting_user else "Unknown"
 
     if item_type not in ALLOWED_COMMENT_ITEM_TYPES:
         return jsonify(msg=f"Invalid item_type. Allowed types: {', '.join(ALLOWED_COMMENT_ITEM_TYPES)}."), 400
@@ -8058,14 +8067,9 @@ def get_comments_for_item_api(item_type, item_id):
         return jsonify(msg="An unexpected server error occurred while fetching comments."), 500
 
 @app.route('/api/comments/<int:comment_id>', methods=['PUT'])
-@jwt_required()
+@active_user_required # Changed from @jwt_required()
 def update_comment_api(comment_id):
-    current_user_id_str = get_jwt_identity()
-    try:
-        user_id = int(current_user_id_str)
-    except ValueError:
-        return jsonify(msg="Invalid user identity in token."), 401
-
+    user_id = int(get_jwt_identity()) # Already verified
     data = request.get_json()
     if not data or not data.get('content') or not data.get('content').strip():
         return jsonify(msg="Comment content is required and cannot be empty."), 400
@@ -8105,16 +8109,11 @@ def update_comment_api(comment_id):
 
 
 @app.route('/api/comments/<int:comment_id>', methods=['DELETE'])
-@jwt_required()
+@active_user_required # Changed from @jwt_required()
 def delete_comment_api(comment_id):
-    current_user_id_str = get_jwt_identity()
-    try:
-        user_id = int(current_user_id_str)
-    except ValueError:
-        return jsonify(msg="Invalid user identity in token."), 401
-
+    user_id = int(get_jwt_identity()) # Already verified
     db = get_db()
-    user = find_user_by_id(user_id) # Fetch user details for role
+    user = find_user_by_id(user_id) # Already verified to be active
     if not user:
         return jsonify(msg="User not found based on token."), 401 # Should not happen if JWT is valid
 
@@ -8144,8 +8143,9 @@ def delete_comment_api(comment_id):
         return jsonify(msg="Failed to delete comment. You may not be the owner or an administrator, or a database error occurred."), 403
 
 @app.route('/api/users/mention_suggestions', methods=['GET'])
-@jwt_required()
+@active_user_required # Changed from @jwt_required()
 def get_mention_suggestions():
+    # User performing the mention search must be active
     query_term = request.args.get('q', '').strip()
     if not query_term: # Or if len(query_term) < N, e.g., 2 or 3 characters
         return jsonify([]), 200 # Return empty list if query is too short or empty
@@ -8192,14 +8192,9 @@ def get_mention_suggestions():
 # --- Notification Endpoints ---
 
 @app.route('/api/notifications', methods=['GET'])
-@jwt_required()
+@active_user_required # Changed from @jwt_required()
 def get_notifications_api():
-    current_user_id_str = get_jwt_identity()
-    try:
-        user_id = int(current_user_id_str)
-    except ValueError:
-        return jsonify(msg="Invalid user identity in token."), 401
-
+    user_id = int(get_jwt_identity()) # Already verified
     page = request.args.get('page', default=1, type=int)
     per_page = request.args.get('per_page', default=10, type=int)
     status_filter = request.args.get('status', default='all', type=str).lower()
@@ -8250,14 +8245,9 @@ def get_notifications_api():
         return jsonify(msg="An error occurred while fetching notifications."), 500
 
 @app.route('/api/notifications/unread_count', methods=['GET'])
-@jwt_required()
+@active_user_required # Changed from @jwt_required()
 def get_unread_notification_count_api():
-    current_user_id_str = get_jwt_identity()
-    try:
-        user_id = int(current_user_id_str)
-    except ValueError:
-        return jsonify(msg="Invalid user identity in token."), 401
-    
+    user_id = int(get_jwt_identity()) # Already verified
     db = get_db()
     try:
         unread_notifications = database.get_unread_notifications(db, user_id)
@@ -8267,14 +8257,9 @@ def get_unread_notification_count_api():
         return jsonify(msg="An error occurred while fetching unread notification count."), 500
 
 @app.route('/api/notifications/<int:notification_id>/read', methods=['PUT'])
-@jwt_required()
+@active_user_required # Changed from @jwt_required()
 def mark_notification_as_read_api(notification_id):
-    current_user_id_str = get_jwt_identity()
-    try:
-        user_id = int(current_user_id_str)
-    except ValueError:
-        return jsonify(msg="Invalid user identity in token."), 401
-
+    user_id = int(get_jwt_identity()) # Already verified
     db = get_db()
     
     success = database.mark_notification_as_read(db, notification_id, user_id)
@@ -8303,14 +8288,9 @@ def mark_notification_as_read_api(notification_id):
 
 
 @app.route('/api/notifications/mark_all_read', methods=['PUT'])
-@jwt_required()
+@active_user_required # Changed from @jwt_required()
 def mark_all_user_notifications_as_read_api():
-    current_user_id_str = get_jwt_identity()
-    try:
-        user_id = int(current_user_id_str)
-    except ValueError:
-        return jsonify(msg="Invalid user identity in token."), 401
-
+    user_id = int(get_jwt_identity()) # Already verified
     db = get_db()
     try:
         count_marked_read = database.mark_all_notifications_as_read(db, user_id)
@@ -8324,14 +8304,9 @@ def mark_all_user_notifications_as_read_api():
         return jsonify(msg="An error occurred while marking all notifications as read."), 500
 
 @app.route('/api/notifications/clear_all', methods=['DELETE'])
-@jwt_required()
+@active_user_required # Changed from @jwt_required()
 def clear_all_user_notifications_api():
-    current_user_id_str = get_jwt_identity()
-    try:
-        user_id = int(current_user_id_str)
-    except ValueError:
-        return jsonify(msg="Invalid user identity in token."), 401
-
+    user_id = int(get_jwt_identity()) # Already verified
     db = get_db()
     try:
         count_deleted = database.clear_all_notifications(db, user_id)

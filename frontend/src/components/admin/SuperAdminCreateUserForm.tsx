@@ -180,7 +180,7 @@ const SuperAdminCreateUserForm: React.FC<SuperAdminCreateUserFormProps> = ({ onU
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 p-4 sm:p-6 bg-white dark:bg-gray-800 rounded-lg shadow-md">
+    <form onSubmit={handleSubmit} className="space-y-4 p-2 sm:p-4 bg-white dark:bg-gray-800 rounded-lg shadow-md">
       <h2 className="text-2xl font-semibold text-gray-900 dark:text-white">Create New User</h2>
 
       {error && <div className="p-3 mb-4 text-sm text-red-700 bg-red-100 rounded-lg dark:bg-red-200 dark:text-red-800" role="alert">{error}</div>}
@@ -332,7 +332,7 @@ const SuperAdminCreateUserForm: React.FC<SuperAdminCreateUserFormProps> = ({ onU
         </div>
       </div>
 
-      <div className="flex justify-end space-x-3 pt-4">
+      <div className="flex flex-col sm:flex-row sm:justify-end sm:space-x-3 pt-4 space-y-2 sm:space-y-0">
         <button
           type="button"
           onClick={onCancel}

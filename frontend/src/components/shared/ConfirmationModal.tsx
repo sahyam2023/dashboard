@@ -34,15 +34,15 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
   } else { // primary
     confirmButtonClasses += " text-white bg-blue-600 hover:bg-blue-700 focus:ring-blue-500 disabled:bg-blue-300";
   }
-  const cancelButtonClasses = "px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500";
+  const cancelButtonClasses = "px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-500 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 dark:focus:ring-offset-gray-800";
 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 transition-opacity">
-      <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md transform transition-all">
-        <h3 className="text-lg font-medium leading-6 text-gray-900">{title}</h3>
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md transform transition-all">
+        <h3 className="text-lg font-medium leading-6 text-gray-900 dark:text-gray-100">{title}</h3>
         <div className="mt-2">
-          {typeof message === 'string' ? <p className="text-sm text-gray-500">{message}</p> : message}
+          {typeof message === 'string' ? <p className="text-sm text-gray-500 dark:text-gray-300">{message}</p> : message}
         </div>
         <div className="mt-5 sm:mt-6 sm:flex sm:flex-row-reverse">
           <button

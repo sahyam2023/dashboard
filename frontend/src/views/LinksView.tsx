@@ -572,6 +572,7 @@ const LinksView: React.FC = () => {
           <CommentSection
             itemId={selectedLinkForComments.id}
             itemType="link"
+            onCommentAction={loadLinksCallback}
           />
         </div>
       )}

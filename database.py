@@ -7,7 +7,7 @@ from datetime import datetime, timezone # ensure timezone is imported if needed
 IST = pytz.timezone('Asia/Kolkata')
 
 # No global DATABASE constant needed here anymore, as path will be passed in.
-# BASE_DIR might still be needed for locating schema.sql relative to this file.
+# BASE_DIR might still be needed for locating schema.sql relative to this file if schema_file_path is None.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def get_db_connection(db_path: str):
@@ -19,56 +19,62 @@ def get_db_connection(db_path: str):
                                     # For simplicity, let app.py handle row_factory on g.db
     return conn
 
-def init_db(db_path: str):
-    """Initializes the database at the specified path using schema.sql."""
-    print(f"DB_HELPER: Attempting to initialize database at: {db_path}")
+# def init_db(db_path: str): # OLD signature
+def init_db(db_path: str, schema_file_path: str = None): # NEW signature
+    """Initializes the database at the specified path using the provided schema file."""
+    print(f"JULES_DEBUG_DB: Initializing DB at {db_path} with schema {schema_file_path}")
     
     # Ensure the directory for the database file exists
     db_dir = os.path.dirname(db_path)
-    if db_dir and not os.path.exists(db_dir): # Check if db_dir is not empty (e.g. just filename)
-        print(f"DB_HELPER: Creating directory for database: {db_dir}")
+    if db_dir and not os.path.exists(db_dir):
+        print(f"JULES_DEBUG_DB: Creating directory for database: {db_dir}")
         os.makedirs(db_dir, exist_ok=True)
 
     conn = None
     try:
-        conn = get_db_connection(db_path) # Use the modified function
-        # It's good practice to set row_factory on the connection used for initialization too
-        # if you rely on dict-like access in the software insertion part.
+        conn = get_db_connection(db_path)
         conn.row_factory = sqlite3.Row 
 
-        schema_path = os.path.join(BASE_DIR, 'schema.sql') # Assumes schema.sql is in the same dir as database.py
-        if not os.path.exists(schema_path):
-            print(f"DB_HELPER: ERROR - schema.sql not found at {schema_path}")
-            return
+        actual_schema_path = schema_file_path
+        if actual_schema_path is None:
+            print(f"JULES_WARNING_DB: schema_file_path not provided to init_db. Trying default relative 'schema.sql'.")
+            actual_schema_path = os.path.join(BASE_DIR, 'schema.sql') # Fallback
 
-        with open(schema_path, 'r') as f:
-            sql_script = f.read()
+        if not os.path.exists(actual_schema_path):
+            print(f"JULES_ERROR_DB: Schema file not found at {actual_schema_path}. Cannot initialize database.")
+            if conn: conn.close() # Close connection if opened
+            raise FileNotFoundError(f"Schema file not found: {actual_schema_path}")
+
+        try:
+            with open(actual_schema_path, 'r') as f:
+                sql_script = f.read()
             conn.executescript(sql_script)
-        conn.commit()
-        print("DB_HELPER: Database schema initialized successfully.")
+            conn.commit()
+            print(f"JULES_DEBUG_DB: Database schema executed from {actual_schema_path}")
+        except Exception as e_exec:
+            print(f"JULES_ERROR_DB: Error executing schema from {actual_schema_path}: {e_exec}")
+            if conn: conn.rollback() # Rollback on error during schema execution
+            raise # Re-raise the exception to indicate failure
 
         # Add initial software data (only if table is empty)
-        cursor = conn.cursor() # Standard cursor for this operation
+        cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM software")
-        # fetchone() returns a tuple, e.g., (0,). Access the first element.
         count_row = cursor.fetchone()
         if count_row is not None and count_row[0] == 0:
-            print("DB_HELPER: Adding initial software entries...")
+            print("JULES_DEBUG_DB: Adding initial software entries...")
             software_list = ['ITMS', 'VMS', 'Analytic Manager', 'ICCC']
-            # Use executemany with a list of tuples
             cursor.executemany("INSERT INTO software (name) VALUES (?)", [(s,) for s in software_list])
             conn.commit()
-            print("DB_HELPER: Initial software added.")
+            print("JULES_DEBUG_DB: Initial software added.")
         elif count_row is not None:
-            print("DB_HELPER: Software table already populated.")
+            print("JULES_DEBUG_DB: Software table already populated.")
         else:
-            print("DB_HELPER: Could not determine count from software table (table might not exist - check schema).")
+            print("JULES_ERROR_DB: Could not determine count from software table.")
 
-        # Add initial security questions (only if table is empty)
         cursor.execute("SELECT COUNT(*) FROM security_questions")
         count_row_questions = cursor.fetchone()
         if count_row_questions is not None and count_row_questions[0] == 0:
-            print("DB_HELPER: Adding initial security questions...")
+            print("JULES_DEBUG_DB: Adding initial security questions...")
             default_questions = [
                 ("What was your first pet's name?",),
                 ("What city were you born in?",),
@@ -79,19 +85,27 @@ def init_db(db_path: str):
             ]
             cursor.executemany("INSERT INTO security_questions (question_text) VALUES (?)", default_questions)
             conn.commit()
-            print(f"DB_HELPER: Added {len(default_questions)} initial security questions.")
+            print(f"JULES_DEBUG_DB: Added {len(default_questions)} initial security questions.")
         elif count_row_questions is not None:
-            print("DB_HELPER: Security questions table already populated.")
+            print("JULES_DEBUG_DB: Security questions table already populated.")
         else:
-            print("DB_HELPER: Could not determine count from security_questions table (table might not exist - check schema).")
+            print("JULES_ERROR_DB: Could not determine count from security_questions table.")
 
-    except sqlite3.Error as e:
-        print(f"DB_HELPER: An error occurred during DB initialization: {e}")
-    except Exception as e: # Catch any other potential errors
-        print(f"DB_HELPER: A general error occurred during DB initialization: {e}")
+    except sqlite3.Error as e_sqlite: # More specific catch
+        print(f"JULES_ERROR_DB: SQLite error during DB initialization: {e_sqlite}")
+        if conn: conn.rollback() # Rollback on SQLite error
+        raise # Re-raise to allow caller to handle
+    except FileNotFoundError: # Already handled, but good to be explicit if re-raised
+        # conn should be closed by the block that raises FileNotFoundError
+        raise
+    except Exception as e_general:
+        print(f"JULES_ERROR_DB: A general error occurred during DB initialization: {e_general}")
+        if conn: conn.rollback() # Rollback on general error
+        raise # Re-raise
     finally:
         if conn:
             conn.close()
+            print(f"JULES_DEBUG_DB: DB connection closed for {db_path}")
 
 # Note: No other functions needed in this file for basic connection and init.
 # Data fetching logic is now in app.py or will be called by app.py's route handlers.

@@ -1,5 +1,6 @@
 #app.py
 
+import sys
 import os
 import uuid
 import sqlite3
@@ -13,6 +14,7 @@ import secrets # Added for secure token generation
 import shutil
 import click # For CLI arguments
 from functools import wraps
+import database # Added
 # import cProfile # Removed
 # import pstats # Removed
 # import io # Removed
@@ -33,32 +35,139 @@ from tempfile import NamedTemporaryFile
 import database # Your database.py helper
 from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
+from waitress import serve
+
+# --- Path Helper Functions ---
+def determine_app_root():
+    """ Determine the application root directory. """
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        # Running in a PyInstaller bundle (onefile)
+        # sys.executable is the path to the .exe file
+        return os.path.dirname(sys.executable)
+    else:
+        # Running in a normal Python environment
+        return os.path.abspath(".")
+
+def meipass_resource_path(relative_path):
+    """ Get absolute path to a resource bundled by PyInstaller into _MEIPASS. """
+    if hasattr(sys, '_MEIPASS'):
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+        return os.path.join(base_path, relative_path)
+    else:
+        # Not running in a bundle, return path relative to script or CWD
+        # This fallback might need adjustment based on dev environment structure
+        return os.path.join(os.path.abspath("."), relative_path)
 
 # --- Configuration ---
-# Best practice: Use app.instance_path for user-generated content if possible
-# This ensures files are not in your main app directory.
-INSTANCE_FOLDER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance')
-if not os.path.exists(INSTANCE_FOLDER_PATH):
-    os.makedirs(INSTANCE_FOLDER_PATH, exist_ok=True)
+APP_ROOT = determine_app_root()
+
+# Paths for data stored relative to the executable's location (in 'instance' subfolder)
+INSTANCE_FOLDER_PATH = os.path.join(APP_ROOT, 'instance')
+DATABASE_PATH = os.path.join(INSTANCE_FOLDER_PATH, 'software_dashboard.db')
+MAX_BACKUP_AGE_DAYS=30
 
 BACKUP_DIR = os.path.join(INSTANCE_FOLDER_PATH, 'backups')
-MAX_BACKUP_AGE_DAYS = 30
-
-# Define separate upload folders for clarity and potential different serving rules
 DOC_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'official_uploads', 'documents')
 PATCH_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'official_uploads', 'patches')
 LINK_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'official_uploads', 'links')
 MISC_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'misc_uploads')
-PROFILE_PICTURES_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'profile_pictures') # Added
-DEFAULT_PROFILE_PICTURES_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'default_profile_pictures') # New
-STATIC_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'frontend', 'dist')
+PROFILE_PICTURES_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'profile_pictures') # For user-uploaded pictures
+RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'default_profile_pictures') # Location of defaults after NSIS install
+TMP_LARGE_UPLOADS_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'tmp_large_uploads')
+
+# Paths for assets bundled *into* the EXE by PyInstaller (accessed via _MEIPASS)
+# These use meipass_resource_path
+STATIC_FOLDER = meipass_resource_path(os.path.join('frontend', 'dist'))
+BUNDLED_SCHEMA_SQL_PATH = meipass_resource_path('schema.sql') # Assumes schema.sql is bundled at the root of _MEIPASS
+BUNDLED_MIGRATIONS_PATH = meipass_resource_path('migrations') # Assumes migrations folder is bundled at the root of _MEIPASS
+
+# BUNDLED_DEFAULT_PROFILE_PICTURES_SOURCE_PATH is no longer needed here if NSIS handles placement.
+# If app.py were to copy them from _MEIPASS on first run (alternative to NSIS placing them):
+# BUNDLED_DEFAULT_PROFILE_PICTURES_SOURCE_PATH_MEIPASS = meipass_resource_path(os.path.join('instance', 'default_profile_pictures'))
+# For the current plan, NSIS places them, so app.py only needs RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER.
+
+# The ensure_user_data_initialized function will handle creation of these directories
+# and initialization of the database using these new APP_ROOT relative paths.
+# The BUNDLED_SCHEMA_SQL_PATH will be used by ensure_user_data_initialized to init the DB.
+# The RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER is where app.py expects default avatars to be.
+# NSIS is responsible for placing the default avatars (copied from project's instance/default_profile_pictures)
+# into the $INSTDIR\instance\default_profile_pictures directory, which becomes RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER.
+
+# Ensure all upload folders exist (now using user-specific paths)
+# Note: DEFAULT_PROFILE_PICTURES_FOLDER is now RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER for user-specific copy
+# The directory creation logic is now moved into ensure_data_initialized_in_install_dir()
+
+def ensure_data_initialized_in_install_dir():
+    # This function uses globally defined paths like INSTANCE_FOLDER_PATH, DATABASE_PATH etc.
+    # which are now based on APP_ROOT (e.g., C:\Program Files\i2vdashboard\instance)
+    
+    print(f"JULES_DEBUG: ensure_data_initialized_in_install_dir: Base instance folder: {INSTANCE_FOLDER_PATH}")
+
+    # Create functional subdirectories within INSTANCE_FOLDER_PATH
+    # RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER is also an instance subfolder, but NSIS creates and populates it.
+    # App.py just needs to create the *other* ones needed for its operations.
+    functional_subdirs = [
+        BACKUP_DIR,
+        DOC_UPLOAD_FOLDER,
+        PATCH_UPLOAD_FOLDER,
+        LINK_UPLOAD_FOLDER,
+        MISC_UPLOAD_FOLDER,
+        PROFILE_PICTURES_UPLOAD_FOLDER, # For user-uploaded pictures
+        TMP_LARGE_UPLOADS_FOLDER,
+        os.path.join(INSTANCE_FOLDER_PATH, 'reset_logs')
+    ]
+    # Also ensure INSTANCE_FOLDER_PATH itself exists, as os.makedirs for subdirs might rely on it.
+    if not os.path.exists(INSTANCE_FOLDER_PATH):
+        try:
+            os.makedirs(INSTANCE_FOLDER_PATH, exist_ok=True)
+            print(f"JULES_DEBUG: Created main instance directory: {INSTANCE_FOLDER_PATH}")
+        except OSError as e:
+            print(f"JULES_CRITICAL_ERROR: Could not create main instance directory {INSTANCE_FOLDER_PATH}: {e}")
+            return # Stop if this fails
+
+    for dir_path in functional_subdirs:
+        if not os.path.exists(dir_path):
+            try:
+                os.makedirs(dir_path, exist_ok=True)
+                print(f"JULES_DEBUG: Created data subdirectory: {dir_path}")
+            except OSError as e:
+                print(f"JULES_ERROR: Could not create data subdirectory {dir_path}: {e}")
+                # Decide if this is critical enough to stop
+
+    # Check if the default profile pictures folder (expected to be created by NSIS) exists and has content
+    if os.path.exists(RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER):
+        if not os.listdir(RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER): # Check if directory is empty
+            print(f"JULES_WARNING: The runtime default profile pictures folder '{RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER}' was found but is empty. NSIS should have populated this.")
+    else:
+        print(f"JULES_WARNING: The runtime default profile pictures folder '{RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER}' was not found. NSIS should have created and populated this.")
+        # As a fallback, app.py could create this folder, but it cannot populate it if images are not bundled.
+        # For this plan, we rely on NSIS. If NSIS fails this, avatars might not work.
+        # It could try to create it so user profile picture uploads don't fail due to missing parent dir.
+        try:
+            os.makedirs(RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER, exist_ok=True)
+            print(f"JULES_DEBUG: Created RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER as it was missing: {RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER}")
+        except OSError as e:
+             print(f"JULES_ERROR: Could not create missing RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER {RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER}: {e}")
 
 
-# Ensure all upload folders exist
-TMP_LARGE_UPLOADS_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'tmp_large_uploads') # For large file chunks
-for folder in [DOC_UPLOAD_FOLDER, PATCH_UPLOAD_FOLDER, LINK_UPLOAD_FOLDER, MISC_UPLOAD_FOLDER, PROFILE_PICTURES_UPLOAD_FOLDER, DEFAULT_PROFILE_PICTURES_FOLDER, TMP_LARGE_UPLOADS_FOLDER]: # Added PROFILE_PICTURES_UPLOAD_FOLDER and DEFAULT_PROFILE_PICTURES_FOLDER
-    if not os.path.exists(folder):
-        os.makedirs(folder, exist_ok=True) # exist_ok=True is helpful
+    # Initialize database if it doesn't exist
+    print(f"JULES_DEBUG: Checking for database at: {DATABASE_PATH}")
+    if not os.path.exists(DATABASE_PATH):
+        print(f"JULES_INFO: Database not found at {DATABASE_PATH}. Initializing new database using schema: {BUNDLED_SCHEMA_SQL_PATH}")
+        try:
+            # database.init_db should have been updated in the previous plan to accept schema_file_path
+            database.init_db(DATABASE_PATH, schema_file_path=BUNDLED_SCHEMA_SQL_PATH)
+            print(f"JULES_INFO: Database initialized successfully at {DATABASE_PATH}")
+        except FileNotFoundError as e_fnf:
+             print(f"JULES_CRITICAL_ERROR: Schema file not found during database init: {e_fnf}. Ensure BUNDLED_SCHEMA_SQL_PATH is correct and schema.sql is bundled by PyInstaller.")
+        except Exception as e:
+            print(f"JULES_CRITICAL_ERROR: Failed to initialize database at {DATABASE_PATH}: {e}")
+            # This is a critical failure. The application likely cannot run.
+    else:
+        print(f"JULES_INFO: Database already exists at {DATABASE_PATH}.")
+
+ensure_data_initialized_in_install_dir() # Call the function here
 
 ALLOWED_EXTENSIONS = {
     'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif',
@@ -84,11 +193,11 @@ INLINE_PRONE_EXTENSIONS = {
     'md' # Markdown files
 }
 
-# app = Flask(__name__, instance_relative_config=True) # instance_relative_config=True is good practice
-
-app = Flask(__name__, 
-            instance_relative_config=True,
-            static_folder=STATIC_FOLDER)
+# app = Flask(__name__, instance_relative_config=True) # Original line
+app = Flask(__name__,
+            instance_path=INSTANCE_FOLDER_PATH, # Use the absolute APP_ROOT/instance path
+            instance_relative_config=True,      # True: e.g. app.config.from_pyfile('config.py') looks in instance_path
+            static_folder=STATIC_FOLDER)        # STATIC_FOLDER is _MEIPASS relative
 
 CORS(app, resources={
     r"/api/*": {
@@ -104,7 +213,7 @@ allow_headers=["Content-Type", "Authorization", "Cache-Control", "Pragma"],
 methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
 # App Configuration
-app.config['DATABASE'] = os.path.join(INSTANCE_FOLDER_PATH, 'software_dashboard.db') # DB in instance folder
+app.config['DATABASE'] = DATABASE_PATH # DB in user-specific instance folder
 app.config['SECRET_KEY'] = '161549f75b4148cd529620b59c4fd706b40ae5805912a513811e575c7cd23439fa63a8300b6f93295f353520c026bc25b1d07c4e1c369d3839cf74deca7e52210f3ac8967052cc51be1ceb45d81f57b8bd16ab5019d063a2de13ee802e1507d9e4dca8f6114ff1ed81300768acb5a95f48c100ad457ec1f8331f6fe9320bb816' 
 app.config['JWT_SECRET_KEY'] = '991ca90ca06a362033f84c9a295a7c0f880caac7a74aefcf23df09f3b783c8e5a9bb0d8c1fcacf614d78cc3b580540419f55e08a29802eb9ea5e83a16eac641c0c028c814267dc94b261aa6a209462ea052773739f1429b7333185bf2b8bf8ba7ac19bccf691f4eece8d47174b6b3e191766d6a1a5c9a3ad21fd672f864e8a357d3c4b3fb838312a047156965a5756d73504db10b3920a3e6bfba5288443be112953e6b46132f6022280b192087384d6f8e91094bb5bbf21deac4bff2aaeda3f607db786b4847096f6112bad168e5223638c47146c74a9da65a54a86060c5298238169e1f2646f670c5f8014fe4997f9a2d8964e52938b627e31f58a70ece4d7'
 app.config['BCRYPT_LOG_ROUNDS'] = 12
@@ -139,10 +248,10 @@ COMMON_MIME_TO_EXT = {
 # --- End MIME Type to Extension Mapping ---
 app.config['LINK_UPLOAD_FOLDER'] = LINK_UPLOAD_FOLDER
 app.config['MISC_UPLOAD_FOLDER'] = MISC_UPLOAD_FOLDER
-app.config['PROFILE_PICTURES_UPLOAD_FOLDER'] = PROFILE_PICTURES_UPLOAD_FOLDER # Added
-app.config['DEFAULT_PROFILE_PICTURES_FOLDER'] = DEFAULT_PROFILE_PICTURES_FOLDER # New
-app.config['INSTANCE_FOLDER_PATH'] = INSTANCE_FOLDER_PATH # Added for DB backup
-app.config['TMP_LARGE_UPLOADS_FOLDER'] = TMP_LARGE_UPLOADS_FOLDER # For large file chunks
+app.config['PROFILE_PICTURES_UPLOAD_FOLDER'] = PROFILE_PICTURES_UPLOAD_FOLDER
+app.config['DEFAULT_PROFILE_PICTURES_FOLDER'] = RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER # Use runtime copy path
+app.config['INSTANCE_FOLDER_PATH'] = INSTANCE_FOLDER_PATH # User-specific data root
+app.config['TMP_LARGE_UPLOADS_FOLDER'] = TMP_LARGE_UPLOADS_FOLDER
 
 bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
@@ -438,6 +547,9 @@ def initialize_scheduler_and_backups(current_app):
         current_app.logger.error(f"Error starting background scheduler: {e}", exc_info=True)
 
 # Initialize scheduler and perform startup backup checks
+# ensure_user_data_initialized() is called before app instantiation.
+# init_db (called by ensure_user_data_initialized) will create the DB if it doesn't exist.
+# Then, initialize_scheduler_and_backups can proceed.
 initialize_scheduler_and_backups(app)
 
 
@@ -5762,7 +5874,14 @@ def search_api():
 # --- CLI Command ---
 @app.cli.command('init-db')
 def init_db_command():
-    database.init_db(app.config['DATABASE']) # Pass DB path to init_db
+    # ensure_user_data_initialized() is not called here because this is a CLI command
+    # that might be run before the app server starts or in different contexts.
+    # The CLI init-db should directly initialize the DB at the configured path.
+    # It is assumed that if the user runs this, they intend to initialize/re-initialize.
+    # The schema_file_path needs to be correctly determined for this CLI context.
+    # BUNDLED_SCHEMA_SQL_PATH is defined using resource_path() which works in CLI too.
+    print(f"JULES_DEBUG_CLI: Initializing DB via CLI command. DB Path: {DATABASE_PATH}, Schema: {BUNDLED_SCHEMA_SQL_PATH}")
+    database.init_db(DATABASE_PATH, schema_file_path=BUNDLED_SCHEMA_SQL_PATH)
     print('Initialized the database.')
 
     # Initialize global password setting
@@ -6810,49 +6929,31 @@ def serve_spa_catch_all(path): # Renamed function to ensure no endpoint conflict
 
 
 if __name__ == '__main__':
-    db_path = app.config.get('DATABASE')
-    if not db_path:
-        app.logger.error("ERROR: DATABASE configuration not found in app.config. Cannot initialize DB.")
+    # The ensure_user_data_initialized() function handles DB and directory creation logic now.
+    # It is called before app instantiation.
+    # The __main__ block should ideally not need to re-do this,
+    # but it's good to have a fallback or log if DB is still not found.
+    
+    # db_path = app.config.get('DATABASE') # This is already defined globally
+    if not os.path.exists(DATABASE_PATH):
+        app.logger.error(f"CRITICAL: Database not found at {DATABASE_PATH} even after ensure_user_data_initialized was called.")
+        # Optionally, could try to call ensure_user_data_initialized() again, but that might indicate a deeper issue.
+        # For now, just log. The app might fail to start properly if DB is critical.
     else:
-        db_dir = os.path.dirname(db_path)
-        if db_dir and not os.path.exists(db_dir):
+        app.logger.info(f"Database confirmed to exist at {DATABASE_PATH} before starting server.")
+        # Global password initialization inside app context, as before
+        with app.app_context():
+            temp_conn_main = None
             try:
-                os.makedirs(db_dir, exist_ok=True)
-                app.logger.info(f"Created instance directory: {db_dir}")
-            except OSError as e:
-                app.logger.error(f"Error creating instance directory {db_dir}: {e}")
-        
-        if not os.path.exists(db_path):
-            app.logger.info(f"Database file not found at {db_path}. Initializing database schema...")
-            try:
-                database.init_db(db_path) 
-                app.logger.info(f"Database schema initialized successfully at {db_path}.")
-            except Exception as e:
-                app.logger.error(f"An error occurred during database schema initialization: {e}")
-        else:
-            app.logger.info(f"Database file already exists at {db_path}. Skipping schema initialization.")
-
-        if os.path.exists(db_path):
-            with app.app_context(): # Create an app context for get_db()
-                 temp_conn_main = None
-                 try:
-                    # Use get_db() within context to ensure proper handling if it uses 'g'
-                    temp_conn_main = get_db() 
-                    _initialize_global_password(temp_conn_main)
-                 except sqlite3.OperationalError as e_op:
-                     app.logger.error(f"SQLite OperationalError during global password initialization in __main__: {e_op}")
-                 except Exception as e_global_pw:
-                     app.logger.error(f"Error during global password initialization in __main__: {e_global_pw}")
-                 # No explicit close needed for g.db here, teardown_appcontext handles it.
-        else: 
-            app.logger.warning(f"Skipping global password initialization as database file {db_path} was not successfully created/initialized.")
-
-    # Note: Scheduler and backup checks are now initialized by initialize_scheduler_and_backups(app)
-    # called after app creation and configuration.
+                temp_conn_main = get_db()
+                _initialize_global_password(temp_conn_main)
+            except sqlite3.OperationalError as e_op:
+                app.logger.error(f"SQLite OperationalError during global password initialization in __main__: {e_op}")
+            except Exception as e_global_pw:
+                app.logger.error(f"Error during global password initialization in __main__: {e_global_pw}")
 
     try:
-        flask_port = int(os.environ.get('FLASK_RUN_PORT', 7000))
-        app.run(host='0.0.0.0', port=flask_port, debug=True)
+        serve(app, host='0.0.0.0', port=7000)
     except (KeyboardInterrupt, SystemExit):
         app.logger.info("Flask application shutting down...")
     # Removed explicit scheduler shutdown from here as it's handled by atexit

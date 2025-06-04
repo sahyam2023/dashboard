@@ -5731,6 +5731,10 @@ def serve_misc_file(filename):
         mimetype=mimetype_to_use
     )
 
+@app.route('/defaults/profile_pictures/<path:filename>')
+def serve_default_profile_picture(filename):
+    return send_from_directory(app.config['DEFAULT_PROFILE_PICTURES_FOLDER'], filename)
+
 # --- Search API (Keep as is, or enhance later) ---
 @app.route('/api/search', methods=['GET'])
 def search_api():
@@ -6879,6 +6883,23 @@ def get_dashboard_stats():
         app.logger.error(f"Unexpected error in get_dashboard_stats: {e}", exc_info=True)
         return jsonify(error="An unexpected error occurred", details=str(e)), 500
 
+# It's important that app.static_folder is correctly defined earlier in the script,
+# which should be:
+# STATIC_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'frontend', 'dist')
+# app.static_folder = STATIC_FOLDER (implicitly set by Flask(static_folder=STATIC_FOLDER))
+
+@app.route('/assets/<path:filename>')
+def serve_spa_assets(filename):
+    return send_from_directory(os.path.join(app.static_folder, 'assets'), filename)
+
+# This is the catch-all for your SPA's client-side routes
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve_spa_catch_all(path): # Renamed function to ensure no endpoint conflicts
+    # This function now serves index.html for any path not caught above (assets or API routes)
+    # It needs to correctly find index.html within app.static_folder (frontend/dist/index.html)
+    return send_from_directory(app.static_folder, 'index.html')
+
 # --- Helper function for Global Password Initialization ---
 def _initialize_global_password(db: sqlite3.Connection):
     try:
@@ -6905,23 +6926,6 @@ def init_db_command():
         db = get_db() 
         _initialize_global_password(db)
     except Exception as e: print(f"Error during global password initialization in init_db_command: {e}")
-
-# It's important that app.static_folder is correctly defined earlier in the script,
-# which should be:
-# STATIC_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'frontend', 'dist')
-# app.static_folder = STATIC_FOLDER (implicitly set by Flask(static_folder=STATIC_FOLDER))
-
-@app.route('/assets/<path:filename>')
-def serve_spa_assets(filename):
-    return send_from_directory(os.path.join(app.static_folder, 'assets'), filename)
-
-# This is the catch-all for your SPA's client-side routes
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-def serve_spa_catch_all(path): # Renamed function to ensure no endpoint conflicts
-    # This function now serves index.html for any path not caught above (assets or API routes)
-    # It needs to correctly find index.html within app.static_folder (frontend/dist/index.html)
-    return send_from_directory(app.static_folder, 'index.html')
 
 # --- Backup and Scheduler Functions ---
 

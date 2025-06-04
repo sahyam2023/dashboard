@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) [2025] [I2V Systems PVT LTD]
+Copyright (c) 2024 [I2V PVT limited]
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,65 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
--------------------------------------------------------------------------------
-
-# Additional License and Legal Information
-
-This software package ("Dashboard") is distributed under the MIT License above. By using, copying, modifying, or distributing this software, you agree to the following additional terms and notices:
-
--------------------------------------------------------------------------------
-
-## 1. Third-Party Components and Open Source Dependencies
-
-This software includes and depends on open-source components, libraries, and tools, each of which is distributed under its own license. These include, but are not limited to:
-
-- Python, Flask, Flask extensions (CORS, Bcrypt, JWT, SQLAlchemy, etc.)
-- Node.js, React, Vite, Tailwind CSS, Chart.js, and related JavaScript/TypeScript libraries
-- SQLite database engine
-
-A full list of dependencies and their licenses can be found in:
-- `requirements.txt` (Python dependencies)
-- `frontend/package.json` (JavaScript/TypeScript dependencies)
-
-You must comply with the license terms of all third-party components when using, distributing, or modifying this software.
-
--------------------------------------------------------------------------------
-
-## 2. Redistribution and Installer Packaging
-
-If you distribute this software as part of an installer, package, or bundled product, you must:
-- Include this license file and the licenses of all bundled third-party components.
-- Provide attribution to the original authors and copyright holders.
-- Clearly indicate any modifications you have made to the original software.
-- Ensure that end users are aware of and can access all applicable license terms.
-
--------------------------------------------------------------------------------
-
-## 3. Notices and Disclaimers
-
-- This software is provided "as is" without warranty of any kind. The authors and copyright holders are not liable for any damages, losses, or claims arising from the use or misuse of this software.
-- No trademark or patent rights are granted under this license.
-- Use of this software in commercial, governmental, or safety-critical environments is at your own risk. You are responsible for compliance with all applicable laws and regulations.
-- If you use this software to process, store, or transmit personal or sensitive data, you are solely responsible for ensuring compliance with data protection and privacy laws.
-
--------------------------------------------------------------------------------
-
-## 4. Export Control and Compliance
-
-You may not use, export, or re-export this software except as authorized by applicable law. In particular, but without limitation, this software may not be exported or re-exported:
-- Into any U.S. embargoed countries or to anyone on the U.S. Treasury Department's list of Specially Designated Nationals or the U.S. Department of Commerce Denied Person's List or Entity List.
-- For any purpose prohibited by law, including, without limitation, the development, design, manufacture, or production of nuclear, missile, or chemical or biological weapons.
-
--------------------------------------------------------------------------------
-
-## 5. Contact and Support
-
-For questions about licensing, legal compliance, or to request a copy of third-party licenses, please contact:
-
-I2V Systems PVT LTD
-[i2vsys.com]
-
--------------------------------------------------------------------------------
-
-# END OF LICENSE

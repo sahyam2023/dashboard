@@ -312,7 +312,7 @@ export interface UserMentionSuggestion {
 }
 // --- End Comment Management Types ---
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7000';
+const API_BASE_URL = 'http://127.0.0.1:7000';
 
 // Helper to construct Authorization header
 const getAuthHeader = (): Record<string, string> => {

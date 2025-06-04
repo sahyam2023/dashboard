@@ -254,22 +254,22 @@ def check_if_token_in_blocklist(jwt_header, jwt_payload):
 
 
 # --- Helper for Database Backup ---
-def _perform_database_backup():
+def _perform_database_backup(app_instance):
     """
     Performs a database backup.
     Returns: (bool: success, str: backup_path or error_message)
     """
     try:
-        backup_dir = os.path.join(flask.current_app.config['INSTANCE_FOLDER_PATH'], 'backups')
+        backup_dir = os.path.join(app_instance.config['INSTANCE_FOLDER_PATH'], 'backups')
         os.makedirs(backup_dir, exist_ok=True)
-        source_db_path = flask.current_app.config['DATABASE']
+        source_db_path = app_instance.config['DATABASE']
         timestamp = datetime.now(IST).strftime('%Y%m%d_%H%M%S') # Changed to IST
         backup_filename = f"software_dashboard_{timestamp}.db"
         backup_file_path = os.path.join(backup_dir, backup_filename)
         shutil.copy2(source_db_path, backup_file_path)
         return True, backup_file_path
     except Exception as e:
-        flask.current_app.logger.error(f"Database backup helper failed: {e}", exc_info=True)
+        app_instance.logger.error(f"Database backup helper failed: {e}", exc_info=True)
         return False, str(e)
     
 # --- Database Connection & Helpers ---
@@ -296,17 +296,20 @@ def get_db():
     return g.db
 
 # --- Audit Log Helper ---
-def log_audit_action(action_type: str, target_table: str = None, target_id: int = None, details: dict = None, user_id: int = None, username: str = None):
+def log_audit_action(action_type: str, target_table: str = None, target_id: int = None, details: dict = None, user_id: int = None, username: str = None, app_instance=None):
     """
     Logs an action to the audit_logs table.
-    Automatically tries to derive user_id and username from JWT if not provided.
+    Automatically tries to derive user_id and username from JWT if not provided and not in a background task.
     """
     final_user_id = user_id
     final_username = username
+    logger = (app_instance or flask.current_app).logger
 
-    # Try to get user details from JWT if not explicitly provided
-    if final_user_id is None: # Only attempt JWT if user_id isn't already specified
-        if flask.request: # Check if a request context exists
+    # Try to get user details from JWT if not explicitly provided,
+    # only if not running in a context where app_instance is given (e.g. background task)
+    # and a request context is available.
+    if app_instance is None and flask.request:
+        if final_user_id is None: # Only attempt JWT if user_id isn't already specified
             try:
                 # verify_jwt_in_request checks if a JWT is present and valid.
                 # optional=True means it won't raise an error if JWT is missing.
@@ -320,51 +323,53 @@ def log_audit_action(action_type: str, target_table: str = None, target_id: int 
                         
                         # Fetch username if not provided and we have a user_id from JWT
                         if final_username is None:
-                            user_details = find_user_by_id(jwt_user_id)
+                            user_details = find_user_by_id(jwt_user_id) # Assumes find_user_by_id uses get_db()
                             if user_details:
                                 final_username = user_details['username']
                             else:
                                 # This case means JWT has an ID for a user that doesn't exist.
                                 # Log with the ID, but username will remain None or what was passed.
-                                flask.current_app.logger.warning(f"Audit log: User ID {jwt_user_id} from JWT not found in database.")
+                                logger.warning(f"Audit log: User ID {jwt_user_id} from JWT not found in database.")
                     except ValueError:
-                        flask.current_app.logger.error(f"Audit log: Invalid user ID format in JWT: {current_user_id_str}")
+                        logger.error(f"Audit log: Invalid user ID format in JWT: {current_user_id_str}")
                     except Exception as e_jwt_user_fetch:
                         # Catch errors during find_user_by_id or int conversion if any other
-                        flask.current_app.logger.error(f"Audit log: Error processing JWT user identity: {e_jwt_user_fetch}")
+                        logger.error(f"Audit log: Error processing JWT user identity: {e_jwt_user_fetch}")
                 # If no JWT or no identity in JWT, final_user_id and final_username remain as initially passed (or None)
             except Exception as e_jwt_verify:
                 # This might catch errors from verify_jwt_in_request itself if it's called without a request context
                 # even with optional=True, or other unexpected errors during JWT processing.
-                flask.current_app.logger.error(f"Audit log: Error during JWT processing (optional or context issue): {e_jwt_verify}")
-        else:
-            # No request context, so JWT processing is skipped.
-            # final_user_id and final_username will remain as initially passed (or None).
-            flask.current_app.logger.debug("Audit log: No request context, skipping JWT processing for user details.")
+                logger.error(f"Audit log: Error during JWT processing (optional or context issue): {e_jwt_verify}")
+        # If app_instance is provided, or no flask.request, JWT processing is skipped.
+        # final_user_id and final_username will remain as initially passed (or None).
+    elif app_instance and not flask.request: # Explicitly log if app_instance is passed but no request context (expected for background tasks)
+        logger.debug("Audit log: app_instance provided, skipping JWT processing for user details (expected for background tasks).")
+    elif not flask.request: # No app_instance and no flask.request
+        logger.debug("Audit log: No request context and no app_instance, skipping JWT processing for user details.")
+
 
     details_json = None
     if details is not None:
         try:
             details_json = json.dumps(details)
         except TypeError as e_json:
-            flask.current_app.logger.error(f"Audit log: Could not serialize details to JSON for action '{action_type}': {e_json}. Details: {details}")
+            logger.error(f"Audit log: Could not serialize details to JSON for action '{action_type}': {e_json}. Details: {details}")
             details_json = json.dumps({"error": "Could not serialize details", "original_details_type": str(type(details))})
 
     try:
-        db = get_db()
+        db = get_db() # get_db() should work correctly if an app context is active
         db.execute("""
             INSERT INTO audit_logs (user_id, username, action_type, target_table, target_id, details, timestamp)
             VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30'))
         """, (final_user_id, final_username, action_type, target_table, target_id, details_json))
         db.commit()
     except sqlite3.Error as e_db:
-        flask.current_app.logger.error(f"Audit log: Database error logging action '{action_type}': {e_db}")
+        logger.error(f"Audit log: Database error logging action '{action_type}': {e_db}")
         # Depending on policy, you might want to rollback if part of a larger transaction elsewhere,
         # but this function is self-contained for audit logging.
-        # db.rollback() # Not strictly necessary here as it's a single insert attempt.
     except Exception as e_general:
         # Catch any other unexpected errors
-        flask.current_app.logger.error(f"Audit log: General error logging action '{action_type}': {e_general}")
+        logger.error(f"Audit log: General error logging action '{action_type}': {e_general}")
 
 # --- Download Log Helper ---
 def _log_download_activity(filename_to_serve: str, item_type: str, current_db: sqlite3.Connection):
@@ -436,13 +441,13 @@ def _log_download_activity(filename_to_serve: str, item_type: str, current_db: s
         app.logger.error(f"Download log: General error for '{filename_to_serve}': {e_general}")
 
 
-def delete_old_backups():
+def delete_old_backups(app_instance):
     """Deletes backups older than MAX_BACKUP_AGE_DAYS."""
     if not os.path.exists(BACKUP_DIR):
-        flask.current_app.logger.info("Backup directory does not exist. No old backups to delete.")
+        app_instance.logger.info("Backup directory does not exist. No old backups to delete.")
         return
 
-    flask.current_app.logger.info(f"Checking for old backups in {BACKUP_DIR} older than {MAX_BACKUP_AGE_DAYS} days.")
+    app_instance.logger.info(f"Checking for old backups in {BACKUP_DIR} older than {MAX_BACKUP_AGE_DAYS} days.")
     now = datetime.now(IST) # Changed to IST
     deleted_count = 0
     retained_count = 0
@@ -459,33 +464,33 @@ def delete_old_backups():
                 if now - backup_datetime > timedelta(days=MAX_BACKUP_AGE_DAYS):
                     file_path = os.path.join(BACKUP_DIR, filename)
                     os.remove(file_path)
-                    flask.current_app.logger.info(f"Deleted old backup: {filename}")
+                    app_instance.logger.info(f"Deleted old backup: {filename}")
                     deleted_count += 1
                 else:
                     retained_count += 1
             except ValueError:
-                flask.current_app.logger.warning(f"Could not parse timestamp from backup filename: {filename}. Skipping.")
+                app_instance.logger.warning(f"Could not parse timestamp from backup filename: {filename}. Skipping.")
             except Exception as e:
-                flask.current_app.logger.error(f"Error processing backup file {filename}: {e}")
+                app_instance.logger.error(f"Error processing backup file {filename}: {e}")
     
-    flask.current_app.logger.info(f"Old backup cleanup complete. Deleted: {deleted_count}, Retained: {retained_count}.")
+    app_instance.logger.info(f"Old backup cleanup complete. Deleted: {deleted_count}, Retained: {retained_count}.")
 
-def perform_daily_backup_job():
+def perform_daily_backup_job(app_instance):
     """Job function for the scheduler to perform daily backups."""
-    flask.current_app.logger.info("Starting daily backup job...")
+    app_instance.logger.info("Starting daily backup job...")
     try:
-        success, path_or_error = _perform_database_backup() # Assumes _perform_database_backup is defined
+        success, path_or_error = _perform_database_backup(app_instance) # Assumes _perform_database_backup is defined
         if success:
-            flask.current_app.logger.info(f"Daily backup successful. Backup saved to: {path_or_error}")
-            log_audit_action(action_type='AUTO_BACKUP_SUCCESS', details={'backup_path': path_or_error})
-            delete_old_backups() # Delete old backups after a successful new backup
+            app_instance.logger.info(f"Daily backup successful. Backup saved to: {path_or_error}")
+            log_audit_action(action_type='AUTO_BACKUP_SUCCESS', details={'backup_path': path_or_error}, app_instance=app_instance, user_id=None, username="SYSTEM_SCHEDULER")
+            delete_old_backups(app_instance) # Delete old backups after a successful new backup
         else:
-            flask.current_app.logger.error(f"Daily backup failed: {path_or_error}")
-            log_audit_action(action_type='AUTO_BACKUP_FAILED', details={'error': path_or_error})
+            app_instance.logger.error(f"Daily backup failed: {path_or_error}")
+            log_audit_action(action_type='AUTO_BACKUP_FAILED', details={'error': path_or_error}, app_instance=app_instance, user_id=None, username="SYSTEM_SCHEDULER")
     except Exception as e:
-        flask.current_app.logger.error(f"Exception during daily backup job: {e}", exc_info=True)
-        log_audit_action(action_type='AUTO_BACKUP_EXCEPTION', details={'error': str(e)})
-    flask.current_app.logger.info("Daily backup job finished.")
+        app_instance.logger.error(f"Exception during daily backup job: {e}", exc_info=True)
+        log_audit_action(action_type='AUTO_BACKUP_EXCEPTION', details={'error': str(e)}, app_instance=app_instance, user_id=None, username="SYSTEM_SCHEDULER")
+    app_instance.logger.info("Daily backup job finished.")
 
 def get_latest_backup_time():
     """Gets the datetime of the latest backup file."""
@@ -506,21 +511,21 @@ def get_latest_backup_time():
                 continue # Skip files with invalid timestamp format
     return latest_backup_dt
 
-def check_and_perform_missed_backup():
+def check_and_perform_missed_backup(app_instance):
     """Checks if a backup was missed and performs one if necessary."""
-    flask.current_app.logger.info("Checking for missed backups...")
+    app_instance.logger.info("Checking for missed backups...")
     latest_backup_time = get_latest_backup_time()
 
     if latest_backup_time is None:
-        flask.current_app.logger.info("No previous backups found. Performing initial backup.")
-        perform_daily_backup_job()
+        app_instance.logger.info("No previous backups found. Performing initial backup.")
+        perform_daily_backup_job(app_instance) # This line already had app_instance
     else:
         # Check if the latest backup is older than 23 hours (to be safe for a 12 PM schedule)
         if datetime.now(IST) - latest_backup_time > timedelta(hours=23): # Changed to IST
-            flask.current_app.logger.info(f"Latest backup was at {latest_backup_time}. Performing missed backup.")
-            perform_daily_backup_job()
+            app_instance.logger.info(f"Latest backup was at {latest_backup_time}. Performing missed backup.")
+            perform_daily_backup_job(app_instance) # This line already had app_instance
         else:
-            flask.current_app.logger.info(f"Latest backup at {latest_backup_time} is recent enough. No missed backup to perform.")
+            app_instance.logger.info(f"Latest backup at {latest_backup_time} is recent enough. No missed backup to perform.")
 
 # --- Initialize Scheduler and Backups ---
 def initialize_scheduler_and_backups(current_app):
@@ -531,7 +536,7 @@ def initialize_scheduler_and_backups(current_app):
         os.makedirs(BACKUP_DIR, exist_ok=True)
         current_app.logger.info(f"Created backup directory at {BACKUP_DIR}")
 
-    check_and_perform_missed_backup() # This function uses app.logger internally
+    check_and_perform_missed_backup(current_app) # This function uses app.logger internally
 
     def daily_backup_job_with_context():
         with current_app.app_context():
@@ -539,7 +544,7 @@ def initialize_scheduler_and_backups(current_app):
             # or that app.logger works correctly within this context.
             # The perform_daily_backup_job function itself uses app.logger,
             # which should resolve to current_app.logger within an app_context.
-            perform_daily_backup_job()
+            perform_daily_backup_job(current_app)
 
     scheduler = BackgroundScheduler(timezone='Asia/Kolkata') # Changed to Asia/Kolkata
     # Pass the new wrapper function to the scheduler
@@ -6030,7 +6035,7 @@ def database_reset_start():
         # Alternatively, could return an error here if file logging is critical.
 
     # 3. Call database backup logic
-    backup_success, backup_path_or_error = _perform_database_backup()
+    backup_success, backup_path_or_error = _perform_database_backup(flask.current_app)
     if not backup_success:
         log_audit_action(
             action_type='DATABASE_RESET_START_FAILED_BACKUP',
@@ -6064,7 +6069,7 @@ def database_reset_start():
 @jwt_required()
 @super_admin_required
 def backup_database_route(): # Renamed to avoid conflict with the old name if it was a module-level function
-    success, path_or_error = _perform_database_backup()
+    success, path_or_error = _perform_database_backup(flask.current_app)
     if success:
         log_audit_action(
             action_type='DATABASE_BACKUP_SUCCESS', # Keep this specific for direct backup route
@@ -6946,8 +6951,8 @@ if __name__ == '__main__':
         # For now, just log. The app might fail to start properly if DB is critical.
     else:
         app.logger.info(f"Database confirmed to exist at {DATABASE_PATH} before starting server.")
-        # Global password initialization inside app context, as before
-        with app.app_context(): # This context makes flask.current_app available
+        # Global password initialization and server startup now inside app context
+        with app.app_context(): # Outer with app.app_context()
             temp_conn_main = None
             try:
                 temp_conn_main = get_db() # get_db now uses flask.current_app
@@ -6959,10 +6964,18 @@ if __name__ == '__main__':
             except Exception as e_global_pw:
                 app.logger.error(f"Error during global password initialization in __main__: {e_global_pw}")
 
-    try:
-        serve(app, host='0.0.0.0', port=7000)
-    except (KeyboardInterrupt, SystemExit):
-        app.logger.info("Flask application shutting down...")
+            # Moved server startup and its logging inside the app_context
+            app.logger.info(f"MAIN: APP_ROOT before serving: {APP_ROOT}")
+            app.logger.info("MAIN: Attempting to start Waitress server (inside app_context)...")
+            try:
+                serve(app, host='0.0.0.0', port=7000)
+                # This log line below serve() might not be hit if serve() blocks successfully
+                # and is only terminated by KeyboardInterrupt.
+                app.logger.info("MAIN: Waitress server call finished or failed to start immediately (inside app_context).")
+            except (KeyboardInterrupt, SystemExit):
+                app.logger.info("Flask application shutting down (KeyboardInterrupt/SystemExit inside app_context).")
+            except Exception as e_serve: # Catch other exceptions from serve()
+                app.logger.error(f"MAIN: Exception from serve(): {e_serve}", exc_info=True)
     # Removed explicit scheduler shutdown from here as it's handled by atexit
 
 # --- Maintenance Mode Endpoints (Super Admin) ---
@@ -8432,6 +8445,10 @@ def clear_all_user_notifications_api():
 
 @app.route('/assets/<path:filename>')
 def serve_vite_assets(filename):
+    app.logger.info(f"VITE_ASSETS: Request for asset: {filename}")
+    app.logger.info(f"VITE_ASSETS: FRONTEND_ASSETS_DIR: {FRONTEND_ASSETS_DIR}")
+    app.logger.info(f"VITE_ASSETS: Attempting to serve: {os.path.join(FRONTEND_ASSETS_DIR, filename)}")
+    app.logger.info(f"VITE_ASSETS: Asset exists: {os.path.exists(os.path.join(FRONTEND_ASSETS_DIR, filename))}")
     return send_from_directory(FRONTEND_ASSETS_DIR, filename)
 
 # This is the catch-all for your SPA's client-side routes
@@ -8440,4 +8457,8 @@ def serve_vite_assets(filename):
 def serve_spa_catch_all(path): # Renamed function to ensure no endpoint conflicts
     # This function now serves index.html for any path not caught above (assets or API routes)
     # It needs to correctly find index.html within FRONTEND_DIST_DIR (frontend/dist/index.html)
+    app.logger.info(f"SPA_CATCH_ALL: Request for path: {path}")
+    app.logger.info(f"SPA_CATCH_ALL: FRONTEND_DIST_DIR: {FRONTEND_DIST_DIR}")
+    app.logger.info(f"SPA_CATCH_ALL: Attempting to serve: {os.path.join(FRONTEND_DIST_DIR, 'index.html')}")
+    app.logger.info(f"SPA_CATCH_ALL: index.html exists: {os.path.exists(os.path.join(FRONTEND_DIST_DIR, 'index.html'))}")
     return send_from_directory(FRONTEND_DIST_DIR, 'index.html')

@@ -8,7 +8,8 @@ a = Analysis(['app.py'],
              datas=[
                  ('frontend/dist', 'frontend/dist'), # Bundled UI, accessed via _MEIPASS
                  ('schema.sql', '.'),                # Bundled schema for DB init, accessed via _MEIPASS
-                 ('migrations', 'migrations')        # Bundled migrations, accessed via _MEIPASS
+                 ('migrations', 'migrations'),        # Bundled migrations, accessed via _MEIPASS
+                 ('instance/default_profile_pictures', 'instance/default_profile_pictures')
                                                      # instance/default_profile_pictures is NOT bundled here.
                                                      # NSIS will copy them to the install dir.
              ],

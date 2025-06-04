@@ -23,6 +23,7 @@ import zipfile
 import tempfile
 import pytz # Added for IST
 from datetime import datetime, timedelta, timezone # Ensured all are here
+import flask # Added for request context checking
 from flask import Flask, request, g, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
@@ -78,11 +79,13 @@ TMP_LARGE_UPLOADS_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'tmp_large_uploads
 
 # Paths for assets bundled *into* the EXE by PyInstaller (accessed via _MEIPASS)
 # These use meipass_resource_path
-STATIC_FOLDER = meipass_resource_path(os.path.join('frontend', 'dist'))
+FRONTEND_DIST_DIR = meipass_resource_path(os.path.join('frontend', 'dist'))
+FRONTEND_ASSETS_DIR = meipass_resource_path(os.path.join('frontend', 'dist', 'assets'))
 BUNDLED_SCHEMA_SQL_PATH = meipass_resource_path('schema.sql') # Assumes schema.sql is bundled at the root of _MEIPASS
 BUNDLED_MIGRATIONS_PATH = meipass_resource_path('migrations') # Assumes migrations folder is bundled at the root of _MEIPASS
 
 # BUNDLED_DEFAULT_PROFILE_PICTURES_SOURCE_PATH is no longer needed here if NSIS handles placement.
+# STATIC_FOLDER definition removed as it is no longer used.
 # If app.py were to copy them from _MEIPASS on first run (alternative to NSIS placing them):
 # BUNDLED_DEFAULT_PROFILE_PICTURES_SOURCE_PATH_MEIPASS = meipass_resource_path(os.path.join('instance', 'default_profile_pictures'))
 # For the current plan, NSIS places them, so app.py only needs RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER.
@@ -180,9 +183,7 @@ INLINE_PRONE_EXTENSIONS = {
 # app = Flask(__name__, instance_relative_config=True) # Original line
 app = Flask(__name__,
             instance_path=INSTANCE_FOLDER_PATH, # Use the absolute APP_ROOT/instance path
-            instance_relative_config=True,      # True: e.g. app.config.from_pyfile('config.py') looks in instance_path
-            static_folder=STATIC_FOLDER,        # STATIC_FOLDER is _MEIPASS relative
-            static_url_path='/assets')
+            instance_relative_config=True)      # True: e.g. app.config.from_pyfile('config.py') looks in instance_path
 
 CORS(app, resources={
     r"/api/*": {
@@ -259,16 +260,16 @@ def _perform_database_backup():
     Returns: (bool: success, str: backup_path or error_message)
     """
     try:
-        backup_dir = os.path.join(app.config['INSTANCE_FOLDER_PATH'], 'backups')
+        backup_dir = os.path.join(flask.current_app.config['INSTANCE_FOLDER_PATH'], 'backups')
         os.makedirs(backup_dir, exist_ok=True)
-        source_db_path = app.config['DATABASE']
+        source_db_path = flask.current_app.config['DATABASE']
         timestamp = datetime.now(IST).strftime('%Y%m%d_%H%M%S') # Changed to IST
         backup_filename = f"software_dashboard_{timestamp}.db"
         backup_file_path = os.path.join(backup_dir, backup_filename)
         shutil.copy2(source_db_path, backup_file_path)
         return True, backup_file_path
     except Exception as e:
-        app.logger.error(f"Database backup helper failed: {e}", exc_info=True)
+        flask.current_app.logger.error(f"Database backup helper failed: {e}", exc_info=True)
         return False, str(e)
     
 # --- Database Connection & Helpers ---
@@ -290,7 +291,7 @@ def update_site_setting(key: str, value: str) -> None:
 
 def get_db():
     if 'db' not in g:
-        g.db = database.get_db_connection(app.config['DATABASE']) # Pass DB path
+        g.db = database.get_db_connection(flask.current_app.config['DATABASE']) # Pass DB path
         g.db.row_factory = sqlite3.Row
     return g.db
 
@@ -305,42 +306,48 @@ def log_audit_action(action_type: str, target_table: str = None, target_id: int 
 
     # Try to get user details from JWT if not explicitly provided
     if final_user_id is None: # Only attempt JWT if user_id isn't already specified
-        try:
-            # verify_jwt_in_request checks if a JWT is present and valid.
-            # optional=True means it won't raise an error if JWT is missing.
-            verify_jwt_in_request(optional=True) 
-            current_user_id_str = get_jwt_identity() # Returns None if no identity in JWT
+        if flask.request: # Check if a request context exists
+            try:
+                # verify_jwt_in_request checks if a JWT is present and valid.
+                # optional=True means it won't raise an error if JWT is missing.
+                verify_jwt_in_request(optional=True) 
+                current_user_id_str = get_jwt_identity() # Returns None if no identity in JWT
 
-            if current_user_id_str:
-                try:
-                    jwt_user_id = int(current_user_id_str)
-                    final_user_id = jwt_user_id # Set final_user_id from JWT
-                    
-                    # Fetch username if not provided and we have a user_id from JWT
-                    if final_username is None:
-                        user_details = find_user_by_id(jwt_user_id)
-                        if user_details:
-                            final_username = user_details['username']
-                        else:
-                            # This case means JWT has an ID for a user that doesn't exist.
-                            # Log with the ID, but username will remain None or what was passed.
-                            app.logger.warning(f"Audit log: User ID {jwt_user_id} from JWT not found in database.")
-                except ValueError:
-                    app.logger.error(f"Audit log: Invalid user ID format in JWT: {current_user_id_str}")
-                except Exception as e_jwt_user_fetch:
-                    # Catch errors during find_user_by_id or int conversion if any other
-                    app.logger.error(f"Audit log: Error processing JWT user identity: {e_jwt_user_fetch}")
-            # If no JWT or no identity in JWT, final_user_id and final_username remain as initially passed (or None)
-        except Exception as e_jwt_verify:
-            # This might catch errors from verify_jwt_in_request itself, though less common with optional=True
-            app.logger.error(f"Audit log: Error during JWT verification (optional): {e_jwt_verify}")
+                if current_user_id_str:
+                    try:
+                        jwt_user_id = int(current_user_id_str)
+                        final_user_id = jwt_user_id # Set final_user_id from JWT
+                        
+                        # Fetch username if not provided and we have a user_id from JWT
+                        if final_username is None:
+                            user_details = find_user_by_id(jwt_user_id)
+                            if user_details:
+                                final_username = user_details['username']
+                            else:
+                                # This case means JWT has an ID for a user that doesn't exist.
+                                # Log with the ID, but username will remain None or what was passed.
+                                flask.current_app.logger.warning(f"Audit log: User ID {jwt_user_id} from JWT not found in database.")
+                    except ValueError:
+                        flask.current_app.logger.error(f"Audit log: Invalid user ID format in JWT: {current_user_id_str}")
+                    except Exception as e_jwt_user_fetch:
+                        # Catch errors during find_user_by_id or int conversion if any other
+                        flask.current_app.logger.error(f"Audit log: Error processing JWT user identity: {e_jwt_user_fetch}")
+                # If no JWT or no identity in JWT, final_user_id and final_username remain as initially passed (or None)
+            except Exception as e_jwt_verify:
+                # This might catch errors from verify_jwt_in_request itself if it's called without a request context
+                # even with optional=True, or other unexpected errors during JWT processing.
+                flask.current_app.logger.error(f"Audit log: Error during JWT processing (optional or context issue): {e_jwt_verify}")
+        else:
+            # No request context, so JWT processing is skipped.
+            # final_user_id and final_username will remain as initially passed (or None).
+            flask.current_app.logger.debug("Audit log: No request context, skipping JWT processing for user details.")
 
     details_json = None
     if details is not None:
         try:
             details_json = json.dumps(details)
         except TypeError as e_json:
-            app.logger.error(f"Audit log: Could not serialize details to JSON for action '{action_type}': {e_json}. Details: {details}")
+            flask.current_app.logger.error(f"Audit log: Could not serialize details to JSON for action '{action_type}': {e_json}. Details: {details}")
             details_json = json.dumps({"error": "Could not serialize details", "original_details_type": str(type(details))})
 
     try:
@@ -351,13 +358,13 @@ def log_audit_action(action_type: str, target_table: str = None, target_id: int 
         """, (final_user_id, final_username, action_type, target_table, target_id, details_json))
         db.commit()
     except sqlite3.Error as e_db:
-        app.logger.error(f"Audit log: Database error logging action '{action_type}': {e_db}")
+        flask.current_app.logger.error(f"Audit log: Database error logging action '{action_type}': {e_db}")
         # Depending on policy, you might want to rollback if part of a larger transaction elsewhere,
         # but this function is self-contained for audit logging.
         # db.rollback() # Not strictly necessary here as it's a single insert attempt.
     except Exception as e_general:
         # Catch any other unexpected errors
-        app.logger.error(f"Audit log: General error logging action '{action_type}': {e_general}")
+        flask.current_app.logger.error(f"Audit log: General error logging action '{action_type}': {e_general}")
 
 # --- Download Log Helper ---
 def _log_download_activity(filename_to_serve: str, item_type: str, current_db: sqlite3.Connection):
@@ -393,19 +400,25 @@ def _log_download_activity(filename_to_serve: str, item_type: str, current_db: s
             return # Cannot log if item not found
 
         user_id_for_log = None
-        try:
-            # Try to get user_id from JWT. Optional=True means it won't raise error if JWT is missing/invalid.
-            verify_jwt_in_request(optional=True)
-            current_user_jwt_identity = get_jwt_identity()
-            if current_user_jwt_identity:
-                user_id_for_log = int(current_user_jwt_identity)
-        except ValueError:
-            app.logger.warning(f"Download log: Invalid user ID format in JWT for download of '{filename_to_serve}'.")
-        except Exception as e_jwt:
-            # Log other JWT related errors but don't fail download logging
-            app.logger.warning(f"Download log: Error processing JWT for download of '{filename_to_serve}': {e_jwt}")
-
-        ip_address = request.remote_addr
+        if flask.request: # Check for request context
+            try:
+                verify_jwt_in_request(optional=True)
+                current_user_jwt_identity = get_jwt_identity()
+                if current_user_jwt_identity:
+                    user_id_for_log = int(current_user_jwt_identity)
+            except ValueError:
+                app.logger.warning(f"Download log: Invalid user ID format in JWT for download of '{filename_to_serve}'.")
+            except Exception as e_jwt:
+                # Log other JWT related errors but don't fail download logging
+                app.logger.warning(f"Download log: Error processing JWT for download of '{filename_to_serve}': {e_jwt}")
+        else:
+            app.logger.debug("Download log: No request context, cannot get user from JWT.")
+        
+        ip_address = None
+        if flask.request:
+            ip_address = request.remote_addr
+        else:
+            ip_address = "N/A (no request context)"
 
         # Insert into download_log
         current_db.execute("""
@@ -426,10 +439,10 @@ def _log_download_activity(filename_to_serve: str, item_type: str, current_db: s
 def delete_old_backups():
     """Deletes backups older than MAX_BACKUP_AGE_DAYS."""
     if not os.path.exists(BACKUP_DIR):
-        app.logger.info("Backup directory does not exist. No old backups to delete.")
+        flask.current_app.logger.info("Backup directory does not exist. No old backups to delete.")
         return
 
-    app.logger.info(f"Checking for old backups in {BACKUP_DIR} older than {MAX_BACKUP_AGE_DAYS} days.")
+    flask.current_app.logger.info(f"Checking for old backups in {BACKUP_DIR} older than {MAX_BACKUP_AGE_DAYS} days.")
     now = datetime.now(IST) # Changed to IST
     deleted_count = 0
     retained_count = 0
@@ -446,33 +459,33 @@ def delete_old_backups():
                 if now - backup_datetime > timedelta(days=MAX_BACKUP_AGE_DAYS):
                     file_path = os.path.join(BACKUP_DIR, filename)
                     os.remove(file_path)
-                    app.logger.info(f"Deleted old backup: {filename}")
+                    flask.current_app.logger.info(f"Deleted old backup: {filename}")
                     deleted_count += 1
                 else:
                     retained_count += 1
             except ValueError:
-                app.logger.warning(f"Could not parse timestamp from backup filename: {filename}. Skipping.")
+                flask.current_app.logger.warning(f"Could not parse timestamp from backup filename: {filename}. Skipping.")
             except Exception as e:
-                app.logger.error(f"Error processing backup file {filename}: {e}")
+                flask.current_app.logger.error(f"Error processing backup file {filename}: {e}")
     
-    app.logger.info(f"Old backup cleanup complete. Deleted: {deleted_count}, Retained: {retained_count}.")
+    flask.current_app.logger.info(f"Old backup cleanup complete. Deleted: {deleted_count}, Retained: {retained_count}.")
 
 def perform_daily_backup_job():
     """Job function for the scheduler to perform daily backups."""
-    app.logger.info("Starting daily backup job...")
+    flask.current_app.logger.info("Starting daily backup job...")
     try:
         success, path_or_error = _perform_database_backup() # Assumes _perform_database_backup is defined
         if success:
-            app.logger.info(f"Daily backup successful. Backup saved to: {path_or_error}")
+            flask.current_app.logger.info(f"Daily backup successful. Backup saved to: {path_or_error}")
             log_audit_action(action_type='AUTO_BACKUP_SUCCESS', details={'backup_path': path_or_error})
             delete_old_backups() # Delete old backups after a successful new backup
         else:
-            app.logger.error(f"Daily backup failed: {path_or_error}")
+            flask.current_app.logger.error(f"Daily backup failed: {path_or_error}")
             log_audit_action(action_type='AUTO_BACKUP_FAILED', details={'error': path_or_error})
     except Exception as e:
-        app.logger.error(f"Exception during daily backup job: {e}", exc_info=True)
+        flask.current_app.logger.error(f"Exception during daily backup job: {e}", exc_info=True)
         log_audit_action(action_type='AUTO_BACKUP_EXCEPTION', details={'error': str(e)})
-    app.logger.info("Daily backup job finished.")
+    flask.current_app.logger.info("Daily backup job finished.")
 
 def get_latest_backup_time():
     """Gets the datetime of the latest backup file."""
@@ -495,19 +508,19 @@ def get_latest_backup_time():
 
 def check_and_perform_missed_backup():
     """Checks if a backup was missed and performs one if necessary."""
-    app.logger.info("Checking for missed backups...")
+    flask.current_app.logger.info("Checking for missed backups...")
     latest_backup_time = get_latest_backup_time()
 
     if latest_backup_time is None:
-        app.logger.info("No previous backups found. Performing initial backup.")
+        flask.current_app.logger.info("No previous backups found. Performing initial backup.")
         perform_daily_backup_job()
     else:
         # Check if the latest backup is older than 23 hours (to be safe for a 12 PM schedule)
         if datetime.now(IST) - latest_backup_time > timedelta(hours=23): # Changed to IST
-            app.logger.info(f"Latest backup was at {latest_backup_time}. Performing missed backup.")
+            flask.current_app.logger.info(f"Latest backup was at {latest_backup_time}. Performing missed backup.")
             perform_daily_backup_job()
         else:
-            app.logger.info(f"Latest backup at {latest_backup_time} is recent enough. No missed backup to perform.")
+            flask.current_app.logger.info(f"Latest backup at {latest_backup_time} is recent enough. No missed backup to perform.")
 
 # --- Initialize Scheduler and Backups ---
 def initialize_scheduler_and_backups(current_app):
@@ -520,11 +533,20 @@ def initialize_scheduler_and_backups(current_app):
 
     check_and_perform_missed_backup() # This function uses app.logger internally
 
+    def daily_backup_job_with_context():
+        with current_app.app_context():
+            # Call the original logic, ensuring it now uses current_app.logger if needed
+            # or that app.logger works correctly within this context.
+            # The perform_daily_backup_job function itself uses app.logger,
+            # which should resolve to current_app.logger within an app_context.
+            perform_daily_backup_job()
+
     scheduler = BackgroundScheduler(timezone='Asia/Kolkata') # Changed to Asia/Kolkata
-    scheduler.add_job(perform_daily_backup_job, 'cron', hour=12, minute=0)
+    # Pass the new wrapper function to the scheduler
+    scheduler.add_job(daily_backup_job_with_context, 'cron', hour=12, minute=0)
     try:
         scheduler.start()
-        current_app.logger.info("Background scheduler started. Daily backup job scheduled for 12:00 PM UTC.")
+        current_app.logger.info("Background scheduler started. Daily backup job scheduled for 12:00 PM IST.")
         # Register scheduler shutdown
         atexit.register(lambda: scheduler.shutdown())
         current_app.logger.info("Scheduler shutdown registered with atexit.")
@@ -2984,10 +3006,10 @@ def _delete_file_if_exists(file_path):
     if file_path and os.path.exists(file_path):
         try:
             os.remove(file_path)
-            app.logger.info(f"Successfully deleted file: {file_path}")
+            # flask.current_app.logger.info(f"Successfully deleted file: {file_path}") # Already flask.current_app
             return True
         except OSError as e:
-            app.logger.error(f"Error deleting file {file_path}: {e}")
+            # flask.current_app.logger.error(f"Error deleting file {file_path}: {e}") # Already flask.current_app
             return False
     return False # File didn't exist or path was None
 
@@ -3006,13 +3028,13 @@ def _admin_handle_file_upload_and_db_insert(
         resolved_fks = {}
 
     if 'file' not in request.files:
-        app.logger.warning(f"_admin_helper: 'file' not in request.files for table {table_name}")
+        # flask.current_app.logger.warning(f"_admin_helper: 'file' not in request.files for table {table_name}") # Already flask.current_app
         return jsonify(msg="No file part in request"), 400
     
     uploaded_file_obj = request.files['file']
 
     if uploaded_file_obj.filename == '':
-        app.logger.warning(f"_admin_helper: No file selected (filename is empty) for table {table_name}")
+        # flask.current_app.logger.warning(f"_admin_helper: No file selected (filename is empty) for table {table_name}") # Already flask.current_app
         return jsonify(msg="No file selected"), 400
 
     form_data = {}
@@ -3029,18 +3051,18 @@ def _admin_handle_file_upload_and_db_insert(
     for req_field in required_form_fields: # required_form_fields will be adjusted for 'patches'
         if req_field == 'file':
             if not uploaded_file_obj or not uploaded_file_obj.filename:
-                app.logger.warning(f"_admin_helper: Validation failed for 'file' requirement for table {table_name}.")
+                # flask.current_app.logger.warning(f"_admin_helper: Validation failed for 'file' requirement for table {table_name}.") # Already flask.current_app
                 return jsonify(msg="Missing required file upload"), 400
         elif req_field not in form_data or form_data.get(req_field) is None or \
              (isinstance(form_data.get(req_field), str) and str(form_data.get(req_field)).strip() == ""):
-            app.logger.warning(f"_admin_helper: Missing required metadata field '{req_field}' for table {table_name}. Value: {form_data.get(req_field)}")
+            # flask.current_app.logger.warning(f"_admin_helper: Missing required metadata field '{req_field}' for table {table_name}. Value: {form_data.get(req_field)}") # Already flask.current_app
             return jsonify(msg=f"Missing required metadata: {req_field}"), 400
 
     if uploaded_file_obj and allowed_file(uploaded_file_obj.filename):
         original_filename = secure_filename(uploaded_file_obj.filename)
         ext = original_filename.rsplit('.', 1)[1].lower() if '.' in original_filename else ''
         stored_filename = f"{uuid.uuid4().hex}{'.' + ext if ext else ''}"
-        file_save_path = os.path.join(app.config[upload_folder_config_key], stored_filename)
+        file_save_path = os.path.join(flask.current_app.config[upload_folder_config_key], stored_filename) # Already flask.current_app.config
         download_link_or_path = f"{server_path_prefix}/{stored_filename}"
         file_saved_for_cleanup = False # Flag to track if file was saved
 
@@ -3065,13 +3087,13 @@ def _admin_handle_file_upload_and_db_insert(
                 elif param_name_in_tuple in form_data:
                     final_sql_params.append(form_data[param_name_in_tuple])
                 else:
-                    app.logger.warning(f"_admin_helper: SQL param '{param_name_in_tuple}' not found in form_data for table '{table_name}'. Appending None.")
+                    # flask.current_app.logger.warning(f"_admin_helper: SQL param '{param_name_in_tuple}' not found in form_data for table '{table_name}'. Appending None.") # Already flask.current_app
                     final_sql_params.append(None)
 
             db = get_db()
             cursor = db.execute(sql_insert_query, tuple(final_sql_params))
             new_id = cursor.lastrowid # Get new_id before commit for logging
-            app.logger.info(f"_admin_helper: Successfully prepared insert for {table_name}, new ID: {new_id}")
+            # flask.current_app.logger.info(f"_admin_helper: Successfully prepared insert for {table_name}, new ID: {new_id}") # Already flask.current_app
 
             # Conditional Audit Logging for Misc Files creation
             if table_name == 'misc_files': 
@@ -3125,56 +3147,58 @@ def _admin_handle_file_upload_and_db_insert(
             else:
                 # This default is a fallback, but ideally all tables handled by this helper
                 # should have specific fetch-back queries if they need joins.
-                app.logger.warning(f"_admin_helper: Using default fetch-back query for table {table_name} (no uploaded_by_username). No joins performed.")
+                # flask.current_app.logger.warning(f"_admin_helper: Using default fetch-back query for table {table_name} (no uploaded_by_username). No joins performed.") # Already flask.current_app
                 fetch_back_query = f"SELECT * FROM {table_name} WHERE id = ?"
 
-            app.logger.debug(f"_admin_helper: Attempting to fetch back from {table_name} with ID {new_id} using query: {fetch_back_query}")
+            # flask.current_app.logger.debug(f"_admin_helper: Attempting to fetch back from {table_name} with ID {new_id} using query: {fetch_back_query}") # Already flask.current_app
             new_item_cursor = None
             new_item_row = None
             try:
                 new_item_cursor = db.execute(fetch_back_query, (new_id,))
                 new_item_row = new_item_cursor.fetchone()
             except Exception as e_fetch:
-                app.logger.error(f"_admin_helper: EXCEPTION during fetch back for {table_name} ID {new_id}: {e_fetch}")
+                # flask.current_app.logger.error(f"_admin_helper: EXCEPTION during fetch back for {table_name} ID {new_id}: {e_fetch}") # Already flask.current_app
                 return jsonify(msg=f"Item uploaded but DB error during metadata retrieval for {table_name}: {e_fetch}"), 500
             
             if new_item_row:
-                app.logger.info(f"_admin_helper: Successfully fetched back item from {table_name} ID {new_id}.")
+            # flask.current_app.logger.info(f"_admin_helper: Successfully fetched back item from {table_name} ID {new_id}.") # Already flask.current_app
                 try:
                     new_item_dict = dict(new_item_row)
                     # Common timestamp keys for most items created/updated this way
-                    timestamp_keys_to_convert = ['created_at', 'updated_at', 'release_date'] # release_date might be None or not applicable
+                    timestamp_keys_to_convert = ['created_at', 'updated_at', 'release_date']  # release_date might be None or not applicable
                     processed_item = convert_timestamps_to_ist_iso(new_item_dict, timestamp_keys_to_convert)
-                    app.logger.debug(f"_admin_helper: Converted fetched row to dict and processed timestamps: {processed_item}")
+                    # flask.current_app.logger.debug(f"_admin_helper: Converted fetched row to dict and processed timestamps: {processed_item}") # Already flask.current_app
                     return jsonify(processed_item), 201
                 except Exception as e_dict:
-                    app.logger.error(f"_admin_helper: EXCEPTION converting sqlite3.Row to dict or processing timestamps for {table_name} ID {new_id}: {e_dict}. Row data: {new_item_row}")
+                    # flask.current_app.logger.error(f"_admin_helper: EXCEPTION converting sqlite3.Row to dict or processing timestamps for {table_name} ID {new_id}: {e_dict}. Row data: {new_item_row}") # Already flask.current_app
                     return jsonify(msg=f"Item uploaded, metadata fetched but failed to process for {table_name}."), 500
             else:
-                app.logger.error(f"_admin_helper: Failed to retrieve (fetchone() was None) newly uploaded item from {table_name}, ID: {new_id} after using specific query.")
-                # Try a simpler query without the JOIN for diagnosis
+                # flask.current_app.logger.error(f"_admin_helper: Failed to retrieve (fetchone() was None) newly uploaded item from {table_name}, ID: {new_id} after using specific query.") # Already flask.current_app
                 simple_check_cursor = db.execute(f"SELECT * FROM {table_name} WHERE id = ?", (new_id,))
                 simple_row = simple_check_cursor.fetchone()
                 if simple_row:
-                    app.logger.warning(f"_admin_helper: Simple fetch for {table_name} ID {new_id} FOUND a row. Problem might be with the JOIN or data for JOIN in the specific fetch-back query. Simple row: {dict(simple_row)}")
+                    # flask.current_app.logger.warning(f"_admin_helper: Simple fetch for {table_name} ID {new_id} FOUND a row. Problem might be with the JOIN or data for JOIN in the specific fetch-back query. Simple row: {dict(simple_row)}") # Already flask.current_app
+                    pass  # You may optionally log or analyze the issue further
                 else:
-                    app.logger.error(f"_admin_helper: Simple fetch for {table_name} ID {new_id} also FAILED to find the row. This is very unexpected after successful insert.")
+                    # flask.current_app.logger.error(f"_admin_helper: Simple fetch for {table_name} ID {new_id} also FAILED to find the row. This is very unexpected after successful insert.") # Already flask.current_app
+                    pass  # Also optional
                 return jsonify(msg=f"Item uploaded but metadata retrieval failed for {table_name}"), 500
+
 
         except Exception as e: # Catch any error during DB operations or fetch-back
             db.rollback() # Ensure rollback on any error after starting DB operations
             if file_saved_for_cleanup: # Check flag
                 _delete_file_if_exists(file_save_path)
-                app.logger.info(f"_admin_helper: Cleaned up file {file_save_path} for {table_name} due to DB/processing error: {e}")
+                # flask.current_app.logger.info(f"_admin_helper: Cleaned up file {file_save_path} for {table_name} due to DB/processing error: {e}") # Already flask.current_app
 
             if isinstance(e, sqlite3.IntegrityError):
-                app.logger.error(f"Admin upload for {table_name} DB IntegrityError: {e}")
+                # flask.current_app.logger.error(f"Admin upload for {table_name} DB IntegrityError: {e}") # Already flask.current_app
                 return jsonify(msg=f"Database error: {e}"), 409
             else:
-                app.logger.error(f"Admin upload for {table_name} Exception: {e}")
+                # flask.current_app.logger.error(f"Admin upload for {table_name} Exception: {e}") # Already flask.current_app
                 return jsonify(msg=f"Server error during file upload or DB processing: {e}"), 500
     else: # This else corresponds to "if uploaded_file_obj and allowed_file(...)"
-        app.logger.warning(f"_admin_helper: File type not allowed or file object invalid for {uploaded_file_obj.filename if uploaded_file_obj else 'N/A'} for table {table_name}")
+        # flask.current_app.logger.warning(f"_admin_helper: File type not allowed or file object invalid for {uploaded_file_obj.filename if uploaded_file_obj else 'N/A'} for table {table_name}") # Already flask.current_app
         return jsonify(msg="File type not allowed or invalid file object."), 400
 
 def get_or_create_version_id(db: sqlite3.Connection, software_id: int, version_string: str, user_id: int) -> int | None:
@@ -3184,12 +3208,12 @@ def get_or_create_version_id(db: sqlite3.Connection, software_id: int, version_s
     Commits the new version if created.
     """
     if not software_id or not version_string or not user_id:
-        app.logger.error("get_or_create_version_id: Missing required arguments.")
+        # flask.current_app.logger.error("get_or_create_version_id: Missing required arguments.") # Already flask.current_app
         return None
 
     version_string = version_string.strip()
     if not version_string:
-        app.logger.error("get_or_create_version_id: Version string cannot be empty.")
+        # flask.current_app.logger.error("get_or_create_version_id: Version string cannot be empty.") # Already flask.current_app
         return None
 
     try:
@@ -3212,16 +3236,16 @@ def get_or_create_version_id(db: sqlite3.Connection, software_id: int, version_s
             )
             db.commit() # Commit the new version creation immediately
             new_version_id = cursor.lastrowid
-            app.logger.info(f"Created new version '{version_string}' for software_id {software_id}, new version_id: {new_version_id}")
+            # flask.current_app.logger.info(f"Created new version '{version_string}' for software_id {software_id}, new version_id: {new_version_id}") # Already flask.current_app
             return new_version_id
     except sqlite3.IntegrityError as e:
         # This could happen if software_id doesn't exist (FK constraint on versions.software_id)
         db.rollback()
-        app.logger.error(f"get_or_create_version_id: DB integrity error for version '{version_string}', software {software_id}: {e}")
+        # flask.current_app.logger.error(f"get_or_create_version_id: DB integrity error for version '{version_string}', software {software_id}: {e}") # Already flask.current_app
         return None # Propagate error by returning None
     except Exception as e:
         db.rollback()
-        app.logger.error(f"get_or_create_version_id: General exception for version '{version_string}', software {software_id}: {e}")
+        # flask.current_app.logger.error(f"get_or_create_version_id: General exception for version '{version_string}', software {software_id}: {e}") # Already flask.current_app
         return None # Propagate error
 
 def _admin_add_item_with_external_link(
@@ -3235,11 +3259,11 @@ def _admin_add_item_with_external_link(
         if adder_user:
             adder_username = adder_user['username']
     except ValueError:
-        app.logger.error(f"ADMIN_HELPER_LINK: Invalid user ID format in JWT: {current_user_id_str} for table {table_name}")
+        # flask.current_app.logger.error(f"ADMIN_HELPER_LINK: Invalid user ID format in JWT: {current_user_id_str} for table {table_name}") # Already flask.current_app
         return jsonify(msg="Invalid user identity in token"), 400
 
     if not data:
-        app.logger.warning(f"ADMIN_HELPER_LINK: Missing JSON data for table {table_name}")
+        # flask.current_app.logger.warning(f"ADMIN_HELPER_LINK: Missing JSON data for table {table_name}") # Already flask.current_app
         return jsonify(msg="Missing JSON data"), 400
 
     # Prepare form_data by extracting relevant fields from the JSON payload (data)
@@ -3267,7 +3291,7 @@ def _admin_add_item_with_external_link(
     
     if not all_present:
         error_msg = f"Missing one or more required fields: {', '.join(missing_fields_list)}"
-        app.logger.warning(f"ADMIN_HELPER_LINK: {error_msg} for table {table_name}. Data: {data}")
+        # flask.current_app.logger.warning(f"ADMIN_HELPER_LINK: {error_msg} for table {table_name}. Data: {data}") # Already flask.current_app
         return jsonify(msg=error_msg), 400
 
     # Convert IDs (example, adapt if more ID fields are used by different tables)
@@ -3304,11 +3328,11 @@ def _admin_add_item_with_external_link(
 
     db = get_db()
     try:
-        app.logger.info(f"ADMIN_HELPER_LINK: Attempting to insert into {table_name}. Params: {final_sql_params}")
+        # flask.current_app.logger.info(f"ADMIN_HELPER_LINK: Attempting to insert into {table_name}. Params: {final_sql_params}") # Already flask.current_app
         cursor = db.execute(sql_insert_query, tuple(final_sql_params))
         db.commit()
         new_id = cursor.lastrowid
-        app.logger.info(f"ADMIN_HELPER_LINK: Inserted into {table_name} with ID: {new_id}. Fetching back...")
+        # flask.current_app.logger.info(f"ADMIN_HELPER_LINK: Inserted into {table_name} with ID: {new_id}. Fetching back...") # Already flask.current_app
 
         # --- MODIFIED FETCH-BACK SECTION for _admin_add_item_with_external_link ---
         fetch_back_query = ""
@@ -3323,7 +3347,7 @@ def _admin_add_item_with_external_link(
         elif table_name == 'misc_files': 
             fetch_back_query = "SELECT mf.*, u.username as uploaded_by_username FROM misc_files mf JOIN users u ON mf.created_by_user_id = u.id WHERE mf.id = ?"
         else: # Fallback, though ideally all relevant tables are covered
-            app.logger.warning(f"ADMIN_HELPER_LINK: Using default fetch-back for {table_name} (no uploaded_by_username).")
+            # flask.current_app.logger.warning(f"ADMIN_HELPER_LINK: Using default fetch-back for {table_name} (no uploaded_by_username).") # Already flask.current_app
             fetch_back_query = f"SELECT * FROM {table_name} WHERE id = ?"
 
         new_item_row = db.execute(fetch_back_query, (new_id,)).fetchone()
@@ -3332,19 +3356,19 @@ def _admin_add_item_with_external_link(
             new_item_dict = dict(new_item_row)
             timestamp_keys_to_convert = ['created_at', 'updated_at', 'release_date'] # release_date might be None or not applicable
             processed_item = convert_timestamps_to_ist_iso(new_item_dict, timestamp_keys_to_convert)
-            app.logger.info(f"ADMIN_HELPER_LINK: Successfully fetched back and processed new item from {table_name}: {processed_item}")
+            # flask.current_app.logger.info(f"ADMIN_HELPER_LINK: Successfully fetched back and processed new item from {table_name}: {processed_item}") # Already flask.current_app
             return jsonify(processed_item), 201
         else:
-            app.logger.error(f"ADMIN_HELPER_LINK: CRITICAL - Failed to fetch newly added item from {table_name} with ID: {new_id} immediately after commit using query: {fetch_back_query}")
+            # flask.current_app.logger.error(f"ADMIN_HELPER_LINK: CRITICAL - Failed to fetch newly added item from {table_name} with ID: {new_id} immediately after commit using query: {fetch_back_query}") # Already flask.current_app
             return jsonify(msg=f"Item added to {table_name} (ID: {new_id}) but could not be immediately retrieved with full details. Please refresh the list."), 207
 
     except sqlite3.IntegrityError as e:
         db.rollback() # Rollback on integrity error
-        app.logger.error(f"ADMIN_HELPER_LINK: DB IntegrityError for {table_name}: {e}. Data: {form_data}")
+        # flask.current_app.logger.error(f"ADMIN_HELPER_LINK: DB IntegrityError for {table_name}: {e}. Data: {form_data}") # Already flask.current_app
         return jsonify(msg=f"Database integrity error (e.g., duplicate entry for context): {e}"), 409
     except Exception as e:
         db.rollback() # Rollback on any other error
-        app.logger.error(f"ADMIN_HELPER_LINK: General Exception for {table_name}: {e}. Data: {form_data}")
+        # flask.current_app.logger.error(f"ADMIN_HELPER_LINK: General Exception for {table_name}: {e}. Data: {form_data}") # Already flask.current_app
         return jsonify(msg=f"Server error while adding item to {table_name}: {e}"), 500
 
 # --- Specific Admin Endpoints using Helpers ---
@@ -4877,7 +4901,7 @@ def _admin_handle_large_file_db_insert(
     # The 'mime_type' parameter received by this function is the client-provided/detected MIME type for the chunk.
     # We'll use this for the database 'file_type' column.
     db_file_type_to_store = mime_type 
-    app.logger.info(f"Large file DB insert: Storing file_type='{db_file_type_to_store}' for {original_filename}.")
+    # flask.current_app.logger.info(f"Large file DB insert: Storing file_type='{db_file_type_to_store}' for {original_filename}.") # Already flask.current_app
 
     if item_type == 'document':
         table_name = 'documents'
@@ -4961,7 +4985,7 @@ def _admin_handle_large_file_db_insert(
     else:
         # If item_type is unsupported, temp_part_filepath might still exist if passed, so clean it up.
         _delete_file_if_exists(temp_part_filepath_for_cleanup)
-        app.logger.warning(f"Large file DB insert: Unsupported item_type '{item_type}'. Cleaned up temp file: {temp_part_filepath_for_cleanup}")
+        # flask.current_app.logger.warning(f"Large file DB insert: Unsupported item_type '{item_type}'. Cleaned up temp file: {temp_part_filepath_for_cleanup}") # Already flask.current_app
         return None, jsonify(msg=f"Unsupported item_type for large file DB insert: {item_type}"), 400
 
     try:
@@ -4976,7 +5000,7 @@ def _admin_handle_large_file_db_insert(
         cursor = db.execute(sql_insert_query, tuple(sql_params_list))
         new_id = cursor.lastrowid
         db.commit()
-        app.logger.info(f"Large file DB insert: Successfully inserted {item_type} '{item_name_for_log}', new ID: {new_id}")
+        # flask.current_app.logger.info(f"Large file DB insert: Successfully inserted {item_type} '{item_name_for_log}', new ID: {new_id}") # Already flask.current_app
         # If commit is successful, the temp file should have already been deleted by the caller after successful move.
         # And the final file should remain. So, no cleanup needed here on success.
 
@@ -4996,17 +5020,17 @@ def _admin_handle_large_file_db_insert(
             if new_item_row:
                 return dict(new_item_row), None, 201 # item, error_response, status_code
             else:
-                app.logger.error(f"Large file DB insert: Failed to fetch back {item_type} ID {new_id}")
+                # flask.current_app.logger.error(f"Large file DB insert: Failed to fetch back {item_type} ID {new_id}") # Already flask.current_app
                 return None, jsonify(msg=f"{item_type.capitalize()} created (ID: {new_id}) but failed to retrieve details."), 207 # Partial success
         else: # Should not happen if table_name is set
             # This is an internal logic error, but attempt cleanup of final_filepath if it exists.
             _delete_file_if_exists(final_filepath_for_cleanup)
-            app.logger.error(f"Large file DB insert: Internal error - fetch_back_query not defined for {item_type}. Cleaned up final file: {final_filepath_for_cleanup}")
+            # flask.current_app.logger.error(f"Large file DB insert: Internal error - fetch_back_query not defined for {item_type}. Cleaned up final file: {final_filepath_for_cleanup}") # Already flask.current_app
             return None, jsonify(msg="Internal error: Fetch back query not defined."), 500
 
     except Exception as e:
         db.rollback()
-        app.logger.error(f"Large file DB insert: Exception for {item_type} '{item_name_for_log}': {e}", exc_info=True)
+        # flask.current_app.logger.error(f"Large file DB insert: Exception for {item_type} '{item_name_for_log}': {e}", exc_info=True) # Already flask.current_app
         # If an error occurs during DB operations, the file might have already been moved to its final destination.
         # So, we need to clean up the final_filepath.
         # The temp_part_filepath should have been deleted by the caller if the move was successful.
@@ -5014,10 +5038,10 @@ def _admin_handle_large_file_db_insert(
         # This function's responsibility is to clean up final_filepath if DB fails *after* a successful move.
         if final_filepath_for_cleanup: # This implies the move was done by the caller
              _delete_file_if_exists(final_filepath_for_cleanup)
-             app.logger.info(f"Large file DB insert: Cleaned up final file {final_filepath_for_cleanup} for {item_type} due to DB error: {e}")
+             # flask.current_app.logger.info(f"Large file DB insert: Cleaned up final file {final_filepath_for_cleanup} for {item_type} due to DB error: {e}") # Already flask.current_app
         else: # This implies the move might not have happened or 'final_filepath_moved' wasn't passed
             _delete_file_if_exists(temp_part_filepath_for_cleanup) # Fallback to cleaning temp if final path not available
-            app.logger.info(f"Large file DB insert: Cleaned up temp file {temp_part_filepath_for_cleanup} for {item_type} due to DB error (final_filepath not provided): {e}")
+            # flask.current_app.logger.info(f"Large file DB insert: Cleaned up temp file {temp_part_filepath_for_cleanup} for {item_type} due to DB error (final_filepath not provided): {e}") # Already flask.current_app
 
 
         if isinstance(e, sqlite3.IntegrityError):
@@ -6912,18 +6936,25 @@ if __name__ == '__main__':
     
     # db_path = app.config.get('DATABASE') # This is already defined globally
     if not os.path.exists(DATABASE_PATH):
+        # Use flask.current_app.logger here if you want this specific log message to use it,
+        # but this part of the code runs when __name__ == '__main__',
+        # so an app context might not be reliably available in all invocation scenarios (e.g. if not run via `flask run`).
+        # For waitress.serve, the global `app` object and its logger are generally used.
+        # Sticking to global `app.logger` for this specific startup block.
         app.logger.error(f"CRITICAL: Database not found at {DATABASE_PATH} even after ensure_user_data_initialized was called.")
         # Optionally, could try to call ensure_user_data_initialized() again, but that might indicate a deeper issue.
         # For now, just log. The app might fail to start properly if DB is critical.
     else:
         app.logger.info(f"Database confirmed to exist at {DATABASE_PATH} before starting server.")
         # Global password initialization inside app context, as before
-        with app.app_context():
+        with app.app_context(): # This context makes flask.current_app available
             temp_conn_main = None
             try:
-                temp_conn_main = get_db()
-                _initialize_global_password(temp_conn_main)
+                temp_conn_main = get_db() # get_db now uses flask.current_app
+                _initialize_global_password(temp_conn_main) # _initialize_global_password uses print, not logger
             except sqlite3.OperationalError as e_op:
+                # Use flask.current_app.logger if preferred, but app.logger is fine here too
+                # as we are within an app_context block.
                 app.logger.error(f"SQLite OperationalError during global password initialization in __main__: {e_op}")
             except Exception as e_global_pw:
                 app.logger.error(f"Error during global password initialization in __main__: {e_global_pw}")
@@ -8398,10 +8429,15 @@ def clear_all_user_notifications_api():
         return jsonify(msg="An error occurred while clearing all notifications."), 500
 
 # SPA serving routes
+
+@app.route('/assets/<path:filename>')
+def serve_vite_assets(filename):
+    return send_from_directory(FRONTEND_ASSETS_DIR, filename)
+
 # This is the catch-all for your SPA's client-side routes
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve_spa_catch_all(path): # Renamed function to ensure no endpoint conflicts
     # This function now serves index.html for any path not caught above (assets or API routes)
-    # It needs to correctly find index.html within app.static_folder (frontend/dist/index.html)
-    return send_from_directory(app.static_folder, 'index.html')
+    # It needs to correctly find index.html within FRONTEND_DIST_DIR (frontend/dist/index.html)
+    return send_from_directory(FRONTEND_DIST_DIR, 'index.html')

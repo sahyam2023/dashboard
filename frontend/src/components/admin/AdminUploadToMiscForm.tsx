@@ -174,7 +174,7 @@ const role = user?.role; // Access role safely, as user can be null
           metadata,
           (progress) => setUploadProgress(progress)
         );
-        showSuccessToast(`File "${resultFile.original_filename}" uploaded successfully!`);
+        // showSuccessToast(`File "${resultFile.original_filename}" uploaded successfully!`); // Removed as per subtask
         if (onUploadSuccess) onUploadSuccess(resultFile); // Use onUploadSuccess for new/replaced file
          reset({
             selectedCategoryId: preselectedCategoryId?.toString() || data.selectedCategoryId,
@@ -192,7 +192,7 @@ const role = user?.role; // Access role safely, as user can be null
         // No file is appended here for metadata-only update
 
         resultFile = await editAdminMiscFile(fileToEdit.id, formDataPayload);
-        showSuccessToast(`File "${resultFile.user_provided_title || resultFile.original_filename}" metadata updated successfully!`);
+        // showSuccessToast(`File "${resultFile.user_provided_title || resultFile.original_filename}" metadata updated successfully!`); // Removed as per subtask
         if (onFileUpdated) onFileUpdated(resultFile); // Use onFileUpdated for metadata changes
 
       } else {

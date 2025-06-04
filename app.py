@@ -17,6 +17,8 @@ from functools import wraps
 # import pstats # Removed
 # import io # Removed
 import random
+import shutil # Added for file replication
+import sys # Added for PyInstaller path handling
 import zipfile
 import tempfile
 import pytz # Added for IST
@@ -35,29 +37,59 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
 from waitress import serve
 
+# --- Helper function for PyInstaller ---
+def get_application_path():
+    """Get the application path, accounting for PyInstaller."""
+    if getattr(sys, 'frozen', False):
+        # Running as a PyInstaller bundle
+        # For INSTANCE_FOLDER_PATH, use the directory of the executable
+        # For STATIC_FOLDER and other bundled resources, use sys._MEIPASS
+        return os.path.dirname(sys.executable) # Base for instance folder
+    else:
+        # Running as a normal script
+        return os.path.dirname(os.path.abspath(__file__))
+
 # --- Configuration ---
 # Best practice: Use app.instance_path for user-generated content if possible
 # This ensures files are not in your main app directory.
-INSTANCE_FOLDER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance')
+# INSTANCE_FOLDER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance')
+# if not os.path.exists(INSTANCE_FOLDER_PATH):
+#     os.makedirs(INSTANCE_FOLDER_PATH, exist_ok=True)
+
+# BACKUP_DIR = os.path.join(INSTANCE_FOLDER_PATH, 'backups')
+MAX_BACKUP_AGE_DAYS = 30
+
+# --- Path Definitions using Helper ---
+APP_ROOT_PATH = get_application_path()
+
+if getattr(sys, 'frozen', False):
+    # PyInstaller bundle paths
+    INSTANCE_FOLDER_PATH = os.path.join(APP_ROOT_PATH, 'instance')
+    STATIC_FOLDER = os.path.join(sys._MEIPASS, 'frontend', 'dist')
+    # Ensure sys._MEIPASS is used for other bundled resources if accessed directly in app.py
+else:
+    # Normal script paths
+    INSTANCE_FOLDER_PATH = os.path.join(APP_ROOT_PATH, 'instance')
+    STATIC_FOLDER = os.path.join(APP_ROOT_PATH, 'frontend', 'dist')
+
 if not os.path.exists(INSTANCE_FOLDER_PATH):
     os.makedirs(INSTANCE_FOLDER_PATH, exist_ok=True)
 
-BACKUP_DIR = os.path.join(INSTANCE_FOLDER_PATH, 'backups')
-MAX_BACKUP_AGE_DAYS = 30
-
 # Define separate upload folders for clarity and potential different serving rules
+# These will now correctly use the potentially redefined INSTANCE_FOLDER_PATH
+BACKUP_DIR = os.path.join(INSTANCE_FOLDER_PATH, 'backups')
 DOC_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'official_uploads', 'documents')
 PATCH_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'official_uploads', 'patches')
 LINK_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'official_uploads', 'links')
 MISC_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'misc_uploads')
 PROFILE_PICTURES_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'profile_pictures') # Added
 DEFAULT_PROFILE_PICTURES_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'default_profile_pictures') # New
-STATIC_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'frontend', 'dist')
+# STATIC_FOLDER is defined above based on frozen status
 
 
 # Ensure all upload folders exist
 TMP_LARGE_UPLOADS_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'tmp_large_uploads') # For large file chunks
-for folder in [DOC_UPLOAD_FOLDER, PATCH_UPLOAD_FOLDER, LINK_UPLOAD_FOLDER, MISC_UPLOAD_FOLDER, PROFILE_PICTURES_UPLOAD_FOLDER, DEFAULT_PROFILE_PICTURES_FOLDER, TMP_LARGE_UPLOADS_FOLDER]: # Added PROFILE_PICTURES_UPLOAD_FOLDER and DEFAULT_PROFILE_PICTURES_FOLDER
+for folder in [BACKUP_DIR, DOC_UPLOAD_FOLDER, PATCH_UPLOAD_FOLDER, LINK_UPLOAD_FOLDER, MISC_UPLOAD_FOLDER, PROFILE_PICTURES_UPLOAD_FOLDER, DEFAULT_PROFILE_PICTURES_FOLDER, TMP_LARGE_UPLOADS_FOLDER]: # Added PROFILE_PICTURES_UPLOAD_FOLDER and DEFAULT_PROFILE_PICTURES_FOLDER and BACKUP_DIR
     if not os.path.exists(folder):
         os.makedirs(folder, exist_ok=True) # exist_ok=True is helpful
 
@@ -494,6 +526,71 @@ def convert_timestamps_to_ist_iso(row_dict, timestamp_keys):
 # The client_max_body_size should be larger than the MAX_CONTENT_LENGTH in Flask for individual chunks.
 # If not using chunking and sending whole large files, these limits must accommodate the entire file size.
 
+# --- Function to replicate default files when bundled ---
+def replicate_default_files_if_bundled():
+    """
+    If running as a PyInstaller bundle, this function replicates necessary default
+    files (e.g., default profile pictures) from the bundle's read-only
+    _MEIPASS directory to a writable location (e.g., instance folder).
+    """
+    if getattr(sys, 'frozen', False):
+        app.logger.info("Running as a PyInstaller bundle. Checking for default file replication.")
+
+        # --- Default Profile Pictures Replication ---
+        try:
+            # This path name 'default_profile_pictures_bundle_location' MUST match
+            # the destination folder name used in the .spec file's 'datas' section.
+            bundled_default_pics_path = os.path.join(sys._MEIPASS, 'default_profile_pictures_bundle_location')
+
+            # This is DEFAULT_PROFILE_PICTURES_FOLDER, ensure it's correctly defined globally in app.py
+            # It should use INSTANCE_FOLDER_PATH which is already PyInstaller-aware.
+            target_default_pics_path = DEFAULT_PROFILE_PICTURES_FOLDER
+
+            app.logger.info(f"Bundled default profile pictures path: {bundled_default_pics_path}")
+            app.logger.info(f"Target default profile pictures path: {target_default_pics_path}")
+
+            if not os.path.exists(bundled_default_pics_path):
+                app.logger.warning(f"Bundled default profile pictures directory not found at: {bundled_default_pics_path}. Skipping replication.")
+                return
+
+            # Ensure target directory exists (it should have been created by startup logic)
+            if not os.path.exists(target_default_pics_path):
+                os.makedirs(target_default_pics_path, exist_ok=True)
+                app.logger.info(f"Created target directory for default profile pictures: {target_default_pics_path}")
+
+            # Check if target directory is empty to prevent re-copying on every run.
+            # A more robust method could be a marker file, but empty check is simpler for now.
+            if not os.listdir(target_default_pics_path): # Check if empty
+                app.logger.info(f"Target default profile pictures directory '{target_default_pics_path}' is empty. Replicating files...")
+                copied_count = 0
+                for filename in os.listdir(bundled_default_pics_path):
+                    source_file = os.path.join(bundled_default_pics_path, filename)
+                    dest_file = os.path.join(target_default_pics_path, filename)
+                    if os.path.isfile(source_file): # Ensure it's a file
+                        try:
+                            shutil.copy2(source_file, dest_file)
+                            app.logger.info(f"Copied default profile picture: {filename} to {target_default_pics_path}")
+                            copied_count +=1
+                        except Exception as e_copy:
+                            app.logger.error(f"Error copying default profile picture {filename}: {e_copy}")
+                app.logger.info(f"Replicated {copied_count} default profile pictures.")
+            else:
+                app.logger.info(f"Target default profile pictures directory '{target_default_pics_path}' is not empty. Assuming files are already replicated.")
+
+        except Exception as e:
+            app.logger.error(f"Error during default profile picture replication: {e}", exc_info=True)
+
+        # --- Add replication for other default files/folders here if needed ---
+        # Example:
+        # try:
+        #     bundled_other_files_path = os.path.join(sys._MEIPASS, 'other_bundle_data_location')
+        #     target_other_files_path = os.path.join(INSTANCE_FOLDER_PATH, 'other_data_runtime')
+        #     # ... similar logic ...
+        # except Exception as e:
+        #     app.logger.error(f"Error during other default file replication: {e}", exc_info=True)
+
+    else:
+        app.logger.info("Not running as a PyInstaller bundle. Skipping default file replication.")
 
 
 # --- Maintenance Mode Helper ---
@@ -8314,6 +8411,11 @@ if __name__ == '__main__':
 
     # Note: Scheduler and backup checks are now initialized by initialize_scheduler_and_backups(app)
     # called after app creation and configuration.
+
+    # --- Replicate default files if running as a bundle ---
+    # This needs to be called after INSTANCE_FOLDER_PATH and DEFAULT_PROFILE_PICTURES_FOLDER are defined.
+    replicate_default_files_if_bundled()
+    # --- End replication call ---
 
     try:
         flask_port = int(os.environ.get('FLASK_RUN_PORT', 7000))

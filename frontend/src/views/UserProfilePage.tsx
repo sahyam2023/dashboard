@@ -9,7 +9,7 @@ import { showSuccessToast, showErrorToast } from '../utils/toastUtils'; // showE
 const UserProfilePage: React.FC = () => {
   const auth = useAuth();
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7000';
+const API_BASE_URL = 'http://127.0.0.1:7000';
   // State for Profile Picture
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);

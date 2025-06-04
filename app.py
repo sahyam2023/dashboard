@@ -6792,70 +6792,7 @@ def init_db_command():
 # STATIC_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'frontend', 'dist')
 # app.static_folder = STATIC_FOLDER (implicitly set by Flask(static_folder=STATIC_FOLDER))
 
-@app.route('/assets/<path:filename>')
-def serve_spa_assets(filename):
-    return send_from_directory(os.path.join(app.static_folder, 'assets'), filename)
 
-# This is the catch-all for your SPA's client-side routes
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-def serve_spa_catch_all(path): # Renamed function to ensure no endpoint conflicts
-    # This function now serves index.html for any path not caught above (assets or API routes)
-    # It needs to correctly find index.html within app.static_folder (frontend/dist/index.html)
-    return send_from_directory(app.static_folder, 'index.html')
-
-# --- Backup and Scheduler Functions ---
-
-
-
-
-if __name__ == '__main__':
-    db_path = app.config.get('DATABASE')
-    if not db_path:
-        app.logger.error("ERROR: DATABASE configuration not found in app.config. Cannot initialize DB.")
-    else:
-        db_dir = os.path.dirname(db_path)
-        if db_dir and not os.path.exists(db_dir):
-            try:
-                os.makedirs(db_dir, exist_ok=True)
-                app.logger.info(f"Created instance directory: {db_dir}")
-            except OSError as e:
-                app.logger.error(f"Error creating instance directory {db_dir}: {e}")
-        
-        if not os.path.exists(db_path):
-            app.logger.info(f"Database file not found at {db_path}. Initializing database schema...")
-            try:
-                database.init_db(db_path) 
-                app.logger.info(f"Database schema initialized successfully at {db_path}.")
-            except Exception as e:
-                app.logger.error(f"An error occurred during database schema initialization: {e}")
-        else:
-            app.logger.info(f"Database file already exists at {db_path}. Skipping schema initialization.")
-
-        if os.path.exists(db_path):
-            with app.app_context(): # Create an app context for get_db()
-                 temp_conn_main = None
-                 try:
-                    # Use get_db() within context to ensure proper handling if it uses 'g'
-                    temp_conn_main = get_db() 
-                    _initialize_global_password(temp_conn_main)
-                 except sqlite3.OperationalError as e_op:
-                     app.logger.error(f"SQLite OperationalError during global password initialization in __main__: {e_op}")
-                 except Exception as e_global_pw:
-                     app.logger.error(f"Error during global password initialization in __main__: {e_global_pw}")
-                 # No explicit close needed for g.db here, teardown_appcontext handles it.
-        else: 
-            app.logger.warning(f"Skipping global password initialization as database file {db_path} was not successfully created/initialized.")
-
-    # Note: Scheduler and backup checks are now initialized by initialize_scheduler_and_backups(app)
-    # called after app creation and configuration.
-
-    try:
-        flask_port = int(os.environ.get('FLASK_RUN_PORT', 7000))
-        app.run(host='0.0.0.0', port=flask_port, debug=True)
-    except (KeyboardInterrupt, SystemExit):
-        app.logger.info("Flask application shutting down...")
-    # Removed explicit scheduler shutdown from here as it's handled by atexit
 
 # --- Maintenance Mode Endpoints (Super Admin) ---
 @app.route('/api/admin/maintenance-mode', methods=['GET'])
@@ -8318,3 +8255,68 @@ def clear_all_user_notifications_api():
     except Exception as e:
         app.logger.error(f"Error clearing all notifications for user {user_id}: {e}", exc_info=True)
         return jsonify(msg="An error occurred while clearing all notifications."), 500
+    
+@app.route('/assets/<path:filename>')
+def serve_spa_assets(filename):
+    return send_from_directory(os.path.join(app.static_folder, 'assets'), filename)
+
+# This is the catch-all for your SPA's client-side routes
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve_spa_catch_all(path): # Renamed function to ensure no endpoint conflicts
+    # This function now serves index.html for any path not caught above (assets or API routes)
+    # It needs to correctly find index.html within app.static_folder (frontend/dist/index.html)
+    return send_from_directory(app.static_folder, 'index.html')
+
+# --- Backup and Scheduler Functions ---
+
+
+
+
+if __name__ == '__main__':
+    db_path = app.config.get('DATABASE')
+    if not db_path:
+        app.logger.error("ERROR: DATABASE configuration not found in app.config. Cannot initialize DB.")
+    else:
+        db_dir = os.path.dirname(db_path)
+        if db_dir and not os.path.exists(db_dir):
+            try:
+                os.makedirs(db_dir, exist_ok=True)
+                app.logger.info(f"Created instance directory: {db_dir}")
+            except OSError as e:
+                app.logger.error(f"Error creating instance directory {db_dir}: {e}")
+        
+        if not os.path.exists(db_path):
+            app.logger.info(f"Database file not found at {db_path}. Initializing database schema...")
+            try:
+                database.init_db(db_path) 
+                app.logger.info(f"Database schema initialized successfully at {db_path}.")
+            except Exception as e:
+                app.logger.error(f"An error occurred during database schema initialization: {e}")
+        else:
+            app.logger.info(f"Database file already exists at {db_path}. Skipping schema initialization.")
+
+        if os.path.exists(db_path):
+            with app.app_context(): # Create an app context for get_db()
+                 temp_conn_main = None
+                 try:
+                    # Use get_db() within context to ensure proper handling if it uses 'g'
+                    temp_conn_main = get_db() 
+                    _initialize_global_password(temp_conn_main)
+                 except sqlite3.OperationalError as e_op:
+                     app.logger.error(f"SQLite OperationalError during global password initialization in __main__: {e_op}")
+                 except Exception as e_global_pw:
+                     app.logger.error(f"Error during global password initialization in __main__: {e_global_pw}")
+                 # No explicit close needed for g.db here, teardown_appcontext handles it.
+        else: 
+            app.logger.warning(f"Skipping global password initialization as database file {db_path} was not successfully created/initialized.")
+
+    # Note: Scheduler and backup checks are now initialized by initialize_scheduler_and_backups(app)
+    # called after app creation and configuration.
+
+    try:
+        flask_port = int(os.environ.get('FLASK_RUN_PORT', 7000))
+        app.run(host='0.0.0.0', port=flask_port, debug=True)
+    except (KeyboardInterrupt, SystemExit):
+        app.logger.info("Flask application shutting down...")
+    # Removed explicit scheduler shutdown from here as it's handled by atexit

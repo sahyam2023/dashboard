@@ -3,7 +3,8 @@ import React, { useState, useEffect } from 'react';
 import { useForm, SubmitHandler, FieldErrors } from 'react-hook-form';
 import * as yup from 'yup';
 import { yupResolver } from '@hookform/resolvers/yup';
-import { toast } from 'react-toastify';
+import { toast } from 'react-toastify'; // Keep for toast.info, or remove if toastUtils handles info too
+import { showSuccessToast, showErrorToast } from '../../utils/toastUtils';
 import { MiscCategory, AddCategoryPayload, EditCategoryPayload } from '../../types';
 import { addAdminMiscCategory, editAdminMiscCategory } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
@@ -95,7 +96,8 @@ const role = user?.role; // Access role safely, as user can be null
         };
         resultCategory = await addAdminMiscCategory(payload);
       }
-      toast.success(`Category "${resultCategory.name}" ${isEditMode ? 'updated' : 'added'} successfully!`);
+      // toast.success(`Category "${resultCategory.name}" ${isEditMode ? 'updated' : 'added'} successfully!`);
+      showSuccessToast('Category saved successfully!');
       
       if (!isEditMode) {
         reset({ name: '', description: '' }); // Reset form on successful add
@@ -103,8 +105,9 @@ const role = user?.role; // Access role safely, as user can be null
       if (onSuccess) onSuccess(resultCategory); 
 
     } catch (err: any) {
-      const message = err.response?.data?.msg || err.message || `Failed to ${isEditMode ? 'update' : 'add'} category.`;
-      toast.error(message);
+      const apiErrorMessage = err.response?.data?.msg || err.message;
+      // showErrorToast(apiErrorMessage || `Failed to ${isEditMode ? 'update' : 'add'} category.`);
+      showErrorToast(apiErrorMessage || 'Failed to save category.');
     } finally {
       setIsLoading(false);
     }

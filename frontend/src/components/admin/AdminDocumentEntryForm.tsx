@@ -224,32 +224,13 @@ const role = user?.role; // Access role safely, as user can be null
           if (!isEditMode) resetFormDefaults(true); // Reset only if it was a new add, not edit->url
         }
       } else { // inputMode === 'upload'
-        if (!data.selectedFile) {
-          // This case should ideally be caught by Yup validation if a file is required.
-          // For edit mode, if no new file is selected, and it was previously an upload,
-          // it implies a metadata-only update, which needs a different endpoint or handling.
-          // For this subtask, if it's 'upload' mode, we expect a file.
-          // If in edit mode and user wants to only update metadata of an *existing uploaded file*,
-          // that's a scenario not directly covered by replacing with uploadFileInChunks without backend changes
-          // to support replacing file content for an existing ID via chunks.
-          // The current simplified plan: upload as new if file is present.
-          // If no file, and in edit mode for an existing uploaded file, this is an edge case.
-          // Let's assume for now yup ensures selectedFile is present if mode is 'upload' and it's a new item,
-          // or if user explicitly selects a file in edit mode.
-          if (isEditMode && documentToEdit && !documentToEdit.is_external_link && !data.selectedFile) {
-             showErrorToast("To update metadata of an existing uploaded file without re-uploading, please use a different form or feature (not implemented in this version of chunked upload). To replace the file, select a new file.");
-             setIsLoading(false);
-             return;
-          }
-          if (!data.selectedFile && !isEditMode) { // Should be caught by yup
-            showErrorToast("No file selected for upload.");
-            setIsLoading(false);
-            return;
-          }
+        // Ensure a file is selected when inputMode is 'upload'.
+        // Yup validation should ideally prevent submission if a file is required but not provided.
+        if (data.selectedFile) {
           // If data.selectedFile is present, proceed with chunked upload.
           // This will always create a NEW document entry as per current backend capabilities.
           resultDocument = await uploadFileInChunks(
-            data.selectedFile!, // Assert not null, yup should have caught if needed
+            data.selectedFile, // No longer need non-null assertion if logic guarantees it here
             'document',
             commonMetadata,
             (progress) => setUploadProgress(progress)
@@ -258,6 +239,28 @@ const role = user?.role; // Access role safely, as user can be null
           showSuccessToast(`Document "${resultDocument.doc_name}" added successfully via chunked upload!`);
           if (onDocumentAdded) onDocumentAdded(resultDocument); // Treat as new document added
           resetFormDefaults(true); // Reset form as it's a new entry
+        } else {
+          // This block handles cases where inputMode is 'upload' but no file is selected.
+          // This should ideally be caught by Yup. If reached, it's a fallback.
+          if (isEditMode && documentToEdit && !documentToEdit.is_external_link) {
+            // User is in edit mode, for a previously uploaded file, and did not select a new file.
+            // This implies they might want to update metadata only, which is not supported by this flow.
+            showErrorToast("No new file selected. If you intended to replace the existing file, please select one. Metadata-only updates for uploaded files are not supported via this form currently.");
+          } else if (!isEditMode) {
+            // New document submission in 'upload' mode without a file.
+            showErrorToast("No file selected for upload. Please select a file.");
+          } else {
+            // Edge case: Edit mode, was URL, switched to 'upload' but no file provided.
+            showErrorToast("Switched to upload mode but no file selected. Please select a file or use the URL mode.");
+          }
+          setIsLoading(false);
+          // No return here, as we want to fall through to finally, but after setting loading false.
+          // The submit handler will exit due to lack of resultDocument or other conditions.
+          // However, for clarity and safety, explicit return might be better if not falling through to error handling.
+          // For now, let's ensure isLoading is false and an error is shown. The function will then go to finally.
+          // A 'return' here would be cleaner.
+          setIsUploading(false); // Also ensure this is reset
+          return; // Explicitly stop processing if no file in upload mode.
         }
       }
     } catch (err: any) {

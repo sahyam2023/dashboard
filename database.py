@@ -22,8 +22,7 @@ def get_db_connection(db_path: str):
 
 def init_db(db_path: str):
     """Initializes the database at the specified path using schema.sql."""
-    print(f"[database.init_db] Called with db_path: {db_path}") # Added diagnostic
-    # print(f"DB_HELPER: Attempting to initialize database at: {db_path}") # Original, replaced by above
+    print(f"DB_HELPER: Attempting to initialize database at: {db_path}")
     
     # Ensure the directory for the database file exists
     db_dir = os.path.dirname(db_path)
@@ -44,28 +43,22 @@ def init_db(db_path: str):
         else:
             # Running as a normal script
             schema_path = os.path.join(BASE_DIR, 'schema.sql') # Assumes schema.sql is in the same dir as database.py
-        print(f"[database.init_db] Determined schema_path: {schema_path}") # Added diagnostic
-
-        print(f"[database.init_db] Checking existence of schema_path '{schema_path}': {os.path.exists(schema_path)}") # Added diagnostic
-        if getattr(sys, 'frozen', False) and not os.path.exists(schema_path): # Added diagnostic block
-            try:
-                meipass_contents = os.listdir(sys._MEIPASS)
-                print(f"[database.init_db] Contents of sys._MEIPASS: {meipass_contents}")
-            except Exception as e_meipass:
-                print(f"[database.init_db] Error listing sys._MEIPASS: {e_meipass}")
 
         if not os.path.exists(schema_path):
-            print(f"DB_HELPER: ERROR - schema.sql not found at {schema_path}") # Original error log
-            # The listing logic from original code was moved up and enhanced
+            print(f"DB_HELPER: ERROR - schema.sql not found at {schema_path}")
+            # Attempt to list files in MEIPASS if frozen, for debugging
+            if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+                try:
+                    print(f"DB_HELPER: Listing files in sys._MEIPASS ({sys._MEIPASS}): {os.listdir(sys._MEIPASS)}")
+                except Exception as e_ls:
+                    print(f"DB_HELPER: Error listing sys._MEIPASS: {e_ls}")
             return
 
         with open(schema_path, 'r') as f:
             sql_script = f.read()
-            print("[database.init_db] Attempting to execute schema script.") # Added diagnostic
             conn.executescript(sql_script)
         conn.commit()
-        print("[database.init_db] Schema script executed and committed successfully.") # Added diagnostic
-        # print("DB_HELPER: Database schema initialized successfully.") # Original, replaced by above
+        print("DB_HELPER: Database schema initialized successfully.")
 
         # Add initial software data (only if table is empty)
         cursor = conn.cursor() # Standard cursor for this operation
@@ -106,15 +99,12 @@ def init_db(db_path: str):
             print("DB_HELPER: Could not determine count from security_questions table (table might not exist - check schema).")
 
     except sqlite3.Error as e:
-        print(f"DB_HELPER: An error occurred during DB initialization: {e}") # Original log
-        print(f"[database.init_db] SQLite error during schema execution or initial data insert: {e}") # Added diagnostic
+        print(f"DB_HELPER: An error occurred during DB initialization: {e}")
     except Exception as e: # Catch any other potential errors
-        print(f"DB_HELPER: A general error occurred during DB initialization: {e}") # Original log
-        print(f"[database.init_db] General error during schema execution or initial data insert: {e}") # Added diagnostic
+        print(f"DB_HELPER: A general error occurred during DB initialization: {e}")
     finally:
         if conn:
             conn.close()
-        print("[database.init_db] Completed.") # Added diagnostic
 
 # Note: No other functions needed in this file for basic connection and init.
 # Data fetching logic is now in app.py or will be called by app.py's route handlers.

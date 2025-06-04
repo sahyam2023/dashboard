@@ -23,7 +23,7 @@ import zipfile
 import tempfile
 import pytz # Added for IST
 from datetime import datetime, timedelta, timezone # Ensured all are here
-from flask import Flask, request, g, jsonify, send_from_directory
+from flask import Flask, request, g, jsonify, send_from_directory, has_request_context
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
 from flask_jwt_extended import (
@@ -244,35 +244,36 @@ def log_audit_action(action_type: str, target_table: str = None, target_id: int 
 
     # Try to get user details from JWT if not explicitly provided
     if final_user_id is None: # Only attempt JWT if user_id isn't already specified
-        try:
-            # verify_jwt_in_request checks if a JWT is present and valid.
-            # optional=True means it won't raise an error if JWT is missing.
-            verify_jwt_in_request(optional=True) 
-            current_user_id_str = get_jwt_identity() # Returns None if no identity in JWT
+        if has_request_context():
+            try:
+                # verify_jwt_in_request checks if a JWT is present and valid.
+                # optional=True means it won't raise an error if JWT is missing.
+                verify_jwt_in_request(optional=True) 
+                current_user_id_str = get_jwt_identity() # Returns None if no identity in JWT
 
-            if current_user_id_str:
-                try:
-                    jwt_user_id = int(current_user_id_str)
-                    final_user_id = jwt_user_id # Set final_user_id from JWT
-                    
-                    # Fetch username if not provided and we have a user_id from JWT
-                    if final_username is None:
-                        user_details = find_user_by_id(jwt_user_id)
-                        if user_details:
-                            final_username = user_details['username']
-                        else:
-                            # This case means JWT has an ID for a user that doesn't exist.
-                            # Log with the ID, but username will remain None or what was passed.
-                            app.logger.warning(f"Audit log: User ID {jwt_user_id} from JWT not found in database.")
-                except ValueError:
-                    app.logger.error(f"Audit log: Invalid user ID format in JWT: {current_user_id_str}")
-                except Exception as e_jwt_user_fetch:
-                    # Catch errors during find_user_by_id or int conversion if any other
-                    app.logger.error(f"Audit log: Error processing JWT user identity: {e_jwt_user_fetch}")
-            # If no JWT or no identity in JWT, final_user_id and final_username remain as initially passed (or None)
-        except Exception as e_jwt_verify:
-            # This might catch errors from verify_jwt_in_request itself, though less common with optional=True
-            app.logger.error(f"Audit log: Error during JWT verification (optional): {e_jwt_verify}")
+                if current_user_id_str:
+                    try:
+                        jwt_user_id = int(current_user_id_str)
+                        final_user_id = jwt_user_id # Set final_user_id from JWT
+                        
+                        # Fetch username if not provided and we have a user_id from JWT
+                        if final_username is None:
+                            # Ensure get_db() is callable here, meaning an app_context must exist
+                            user_details = find_user_by_id(jwt_user_id) 
+                            if user_details:
+                                final_username = user_details['username']
+                            else:
+                                app.logger.warning(f"Audit log: User ID {jwt_user_id} from JWT not found in database.")
+                    except ValueError:
+                        app.logger.error(f"Audit log: Invalid user ID format in JWT: {current_user_id_str}")
+                    except Exception as e_jwt_user_fetch:
+                        app.logger.error(f"Audit log: Error processing JWT user identity: {e_jwt_user_fetch}")
+                # If no JWT or no identity in JWT, final_user_id and final_username remain as initially passed (or None)
+            except Exception as e_jwt_verify:
+                app.logger.error(f"Audit log: Error during JWT verification (optional): {e_jwt_verify}")
+        else:
+            # Optional: Log that JWT processing is skipped due to no request context
+            app.logger.info("Audit log: Skipping JWT user derivation as no request context is available.") 
 
     details_json = None
     if details is not None:
@@ -398,20 +399,21 @@ def delete_old_backups():
 
 def perform_daily_backup_job():
     """Job function for the scheduler to perform daily backups."""
-    app.logger.info("Starting daily backup job...")
-    try:
-        success, path_or_error = _perform_database_backup() # Assumes _perform_database_backup is defined
-        if success:
-            app.logger.info(f"Daily backup successful. Backup saved to: {path_or_error}")
-            log_audit_action(action_type='AUTO_BACKUP_SUCCESS', details={'backup_path': path_or_error})
-            delete_old_backups() # Delete old backups after a successful new backup
-        else:
-            app.logger.error(f"Daily backup failed: {path_or_error}")
-            log_audit_action(action_type='AUTO_BACKUP_FAILED', details={'error': path_or_error})
-    except Exception as e:
-        app.logger.error(f"Exception during daily backup job: {e}", exc_info=True)
-        log_audit_action(action_type='AUTO_BACKUP_EXCEPTION', details={'error': str(e)})
-    app.logger.info("Daily backup job finished.")
+    with app.app_context():
+        app.logger.info("Starting daily backup job...")
+        try:
+            success, path_or_error = _perform_database_backup() # Assumes _perform_database_backup is defined
+            if success:
+                app.logger.info(f"Daily backup successful. Backup saved to: {path_or_error}")
+                log_audit_action(action_type='AUTO_BACKUP_SUCCESS', details={'backup_path': path_or_error})
+                delete_old_backups() # Delete old backups after a successful new backup
+            else:
+                app.logger.error(f"Daily backup failed: {path_or_error}")
+                log_audit_action(action_type='AUTO_BACKUP_FAILED', details={'error': path_or_error})
+        except Exception as e:
+            app.logger.error(f"Exception during daily backup job: {e}", exc_info=True)
+            log_audit_action(action_type='AUTO_BACKUP_EXCEPTION', details={'error': str(e)})
+        app.logger.info("Daily backup job finished.")
 
 def get_latest_backup_time():
     """Gets the datetime of the latest backup file."""
@@ -469,11 +471,6 @@ def initialize_scheduler_and_backups(current_app):
         current_app.logger.info("Scheduler shutdown registered with atexit.")
     except Exception as e:
         current_app.logger.error(f"Error starting background scheduler: {e}", exc_info=True)
-
-# Initialize scheduler and perform startup backup checks
-initialize_scheduler_and_backups(app)
-
-
 
 # Helper function to convert specific timestamp fields in a dictionary to IST ISO format
 def convert_timestamps_to_ist_iso(row_dict, timestamp_keys):
@@ -8408,6 +8405,9 @@ if __name__ == '__main__':
                  # No explicit close needed for g.db here, teardown_appcontext handles it.
         else: 
             app.logger.warning(f"Skipping global password initialization as database file {db_path} was not successfully created/initialized.")
+
+    # Initialize scheduler and backups AFTER DB setup
+    initialize_scheduler_and_backups(app)
 
     # Note: Scheduler and backup checks are now initialized by initialize_scheduler_and_backups(app)
     # called after app creation and configuration.

@@ -73,7 +73,7 @@ PATCH_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'official_uploads', 'pa
 LINK_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'official_uploads', 'links')
 MISC_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'misc_uploads')
 PROFILE_PICTURES_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'profile_pictures') # For user-uploaded pictures
-RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'default_profile_pictures') # Location of defaults after NSIS install
+RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER = meipass_resource_path(os.path.join('instance', 'default_profile_pictures'))
 TMP_LARGE_UPLOADS_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'tmp_large_uploads')
 
 # Paths for assets bundled *into* the EXE by PyInstaller (accessed via _MEIPASS)
@@ -135,22 +135,6 @@ def ensure_data_initialized_in_install_dir():
                 print(f"JULES_ERROR: Could not create data subdirectory {dir_path}: {e}")
                 # Decide if this is critical enough to stop
 
-    # Check if the default profile pictures folder (expected to be created by NSIS) exists and has content
-    if os.path.exists(RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER):
-        if not os.listdir(RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER): # Check if directory is empty
-            print(f"JULES_WARNING: The runtime default profile pictures folder '{RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER}' was found but is empty. NSIS should have populated this.")
-    else:
-        print(f"JULES_WARNING: The runtime default profile pictures folder '{RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER}' was not found. NSIS should have created and populated this.")
-        # As a fallback, app.py could create this folder, but it cannot populate it if images are not bundled.
-        # For this plan, we rely on NSIS. If NSIS fails this, avatars might not work.
-        # It could try to create it so user profile picture uploads don't fail due to missing parent dir.
-        try:
-            os.makedirs(RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER, exist_ok=True)
-            print(f"JULES_DEBUG: Created RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER as it was missing: {RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER}")
-        except OSError as e:
-             print(f"JULES_ERROR: Could not create missing RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER {RUNTIME_DEFAULT_PROFILE_PICTURES_FOLDER}: {e}")
-
-
     # Initialize database if it doesn't exist
     print(f"JULES_DEBUG: Checking for database at: {DATABASE_PATH}")
     if not os.path.exists(DATABASE_PATH):
@@ -197,7 +181,8 @@ INLINE_PRONE_EXTENSIONS = {
 app = Flask(__name__,
             instance_path=INSTANCE_FOLDER_PATH, # Use the absolute APP_ROOT/instance path
             instance_relative_config=True,      # True: e.g. app.config.from_pyfile('config.py') looks in instance_path
-            static_folder=STATIC_FOLDER)        # STATIC_FOLDER is _MEIPASS relative
+            static_folder=STATIC_FOLDER,        # STATIC_FOLDER is _MEIPASS relative
+            static_url_path='/assets')
 
 CORS(app, resources={
     r"/api/*": {
@@ -6886,19 +6871,6 @@ def get_dashboard_stats():
 # It's important that app.static_folder is correctly defined earlier in the script,
 # which should be:
 # STATIC_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'frontend', 'dist')
-# app.static_folder = STATIC_FOLDER (implicitly set by Flask(static_folder=STATIC_FOLDER))
-
-@app.route('/assets/<path:filename>')
-def serve_spa_assets(filename):
-    return send_from_directory(os.path.join(app.static_folder, 'assets'), filename)
-
-# This is the catch-all for your SPA's client-side routes
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-def serve_spa_catch_all(path): # Renamed function to ensure no endpoint conflicts
-    # This function now serves index.html for any path not caught above (assets or API routes)
-    # It needs to correctly find index.html within app.static_folder (frontend/dist/index.html)
-    return send_from_directory(app.static_folder, 'index.html')
 
 # --- Helper function for Global Password Initialization ---
 def _initialize_global_password(db: sqlite3.Connection):
@@ -7371,6 +7343,7 @@ def admin_upload_large_file():
         app.logger.error(f"Error in /api/admin/upload_large_file: {e}", exc_info=True)
         # Consider cleaning up temp_part_filepath if an error occurs at a higher level
         return jsonify(msg=f"An unexpected server error occurred: {str(e)}"), 500
+
 
 
 # --- Profile Picture Serving Endpoint ---
@@ -8423,3 +8396,12 @@ def clear_all_user_notifications_api():
     except Exception as e:
         app.logger.error(f"Error clearing all notifications for user {user_id}: {e}", exc_info=True)
         return jsonify(msg="An error occurred while clearing all notifications."), 500
+
+# SPA serving routes
+# This is the catch-all for your SPA's client-side routes
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve_spa_catch_all(path): # Renamed function to ensure no endpoint conflicts
+    # This function now serves index.html for any path not caught above (assets or API routes)
+    # It needs to correctly find index.html within app.static_folder (frontend/dist/index.html)
+    return send_from_directory(app.static_folder, 'index.html')

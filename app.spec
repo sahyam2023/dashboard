@@ -8,7 +8,8 @@ a = Analysis(['app.py'],
              datas=[
                  ('frontend/dist', 'frontend/dist'), # Bundled UI, accessed via _MEIPASS
                  ('schema.sql', '.'),                # Bundled schema for DB init, accessed via _MEIPASS
-                 ('migrations', 'migrations')        # Bundled migrations, accessed via _MEIPASS
+                 ('migrations', 'migrations'),        # Bundled migrations, accessed via _MEIPASS
+                 ('instance/default_profile_pictures', 'instance/default_profile_pictures')
                                                      # instance/default_profile_pictures is NOT bundled here.
                                                      # NSIS will copy them to the install dir.
              ],
@@ -45,7 +46,7 @@ exe = EXE(pyz,
           bootloader_ignore_signals=False,
           strip=False,
           upx=True,
-          console=False, # No console window for the service
+          console=True, # No console window for the service
           onefile=True,  # Single file executable
           icon=r'C:\Users\i2v\Documents\GitHub\dashboard\dashboard.ico')     # User can specify an icon path here, e.g., 'your_icon.ico'
 

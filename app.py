@@ -398,20 +398,21 @@ def delete_old_backups():
 
 def perform_daily_backup_job():
     """Job function for the scheduler to perform daily backups."""
-    app.logger.info("Starting daily backup job...")
-    try:
-        success, path_or_error = _perform_database_backup() # Assumes _perform_database_backup is defined
-        if success:
-            app.logger.info(f"Daily backup successful. Backup saved to: {path_or_error}")
-            log_audit_action(action_type='AUTO_BACKUP_SUCCESS', details={'backup_path': path_or_error})
-            delete_old_backups() # Delete old backups after a successful new backup
-        else:
-            app.logger.error(f"Daily backup failed: {path_or_error}")
-            log_audit_action(action_type='AUTO_BACKUP_FAILED', details={'error': path_or_error})
-    except Exception as e:
-        app.logger.error(f"Exception during daily backup job: {e}", exc_info=True)
-        log_audit_action(action_type='AUTO_BACKUP_EXCEPTION', details={'error': str(e)})
-    app.logger.info("Daily backup job finished.")
+    with app.app_context(): # Ensure app context for DB operations and logging
+        app.logger.info("Starting daily backup job...")
+        try:
+            success, path_or_error = _perform_database_backup() # Assumes _perform_database_backup is defined
+            if success:
+                app.logger.info(f"Daily backup successful. Backup saved to: {path_or_error}")
+                log_audit_action(action_type='AUTO_BACKUP_SUCCESS', details={'backup_path': path_or_error}, system_action=True)
+                delete_old_backups() # Delete old backups after a successful new backup
+            else:
+                app.logger.error(f"Daily backup failed: {path_or_error}")
+                log_audit_action(action_type='AUTO_BACKUP_FAILED', details={'error': path_or_error}, system_action=True)
+        except Exception as e:
+            app.logger.error(f"Exception during daily backup job: {e}", exc_info=True)
+            log_audit_action(action_type='AUTO_BACKUP_EXCEPTION', details={'error': str(e)}, system_action=True)
+        app.logger.info("Daily backup job finished.")
 
 def get_latest_backup_time():
     """Gets the datetime of the latest backup file."""
@@ -6859,37 +6860,85 @@ def get_dashboard_stats():
         return jsonify(error="An unexpected error occurred", details=str(e)), 500
 
 # --- Helper function for Global Password Initialization ---
-def _initialize_global_password(db: sqlite3.Connection):
-    try:
-        cursor = db.execute("SELECT setting_value FROM site_settings WHERE setting_key = 'global_password_hash'")
-        existing_setting = cursor.fetchone()
-        if not existing_setting:
-            print("Initializing default global password...")
-            default_password = "Admin@123"
-            hashed_password = bcrypt.generate_password_hash(default_password).decode('utf-8')
-            db.execute("INSERT INTO site_settings (setting_key, setting_value) VALUES (?, ?)", ('global_password_hash', hashed_password))
-            db.commit()
-            print("Default global password initialized.")
-        else:
-            print("Global password already set.")
-    except sqlite3.Error as e: print(f"SQLite error during global password initialization: {e}")
-    except Exception as e: print(f"An unexpected error occurred during global password initialization: {e}")
+def _initialize_global_password(current_app_for_context: Flask):
+    with current_app_for_context.app_context():
+        db = get_db() # Use get_db() within app context
+        try:
+            cursor = db.execute("SELECT setting_value FROM site_settings WHERE setting_key = 'global_password_hash'")
+            existing_setting = cursor.fetchone()
+            if not existing_setting:
+                current_app_for_context.logger.info("Initializing default global password...")
+                default_password = "Admin@123"
+                hashed_password = bcrypt.generate_password_hash(default_password).decode('utf-8')
+                db.execute("INSERT INTO site_settings (setting_key, setting_value) VALUES (?, ?)", ('global_password_hash', hashed_password))
+                db.commit()
+                current_app_for_context.logger.info("Default global password initialized.")
+            else:
+                current_app_for_context.logger.info("Global password already set.")
+        except sqlite3.Error as e:
+            current_app_for_context.logger.error(f"SQLite error during global password initialization: {e}")
+        except Exception as e:
+            current_app_for_context.logger.error(f"An unexpected error occurred during global password initialization: {e}")
+
+# --- Database Initialization Function ---
+def ensure_database_initialized(current_app_for_init: Flask):
+    """
+    Ensures the database directory exists, schema is initialized,
+    and global password is set.
+    """
+    db_path = current_app_for_init.config.get('DATABASE')
+    if not db_path:
+        current_app_for_init.logger.error("ERROR: DATABASE configuration not found. Cannot initialize DB.")
+        return
+
+    db_dir = os.path.dirname(db_path)
+    if db_dir and not os.path.exists(db_dir):
+        try:
+            os.makedirs(db_dir, exist_ok=True)
+            current_app_for_init.logger.info(f"Created instance directory: {db_dir}")
+        except OSError as e:
+            current_app_for_init.logger.error(f"Error creating instance directory {db_dir}: {e}")
+            return # Stop if instance directory cannot be created
+
+    if not os.path.exists(db_path):
+        current_app_for_init.logger.info(f"Database file not found at {db_path}. Initializing database schema...")
+        try:
+            database.init_db(db_path)
+            current_app_for_init.logger.info(f"Database schema initialized successfully at {db_path}.")
+        except Exception as e:
+            current_app_for_init.logger.error(f"An error occurred during database schema initialization: {e}")
+            return # Stop if schema init fails
+    else:
+        current_app_for_init.logger.info(f"Database file already exists at {db_path}. Skipping schema initialization.")
+
+    if os.path.exists(db_path):
+        # _initialize_global_password now handles its own app context for get_db()
+        _initialize_global_password(current_app_for_init)
+    else:
+        current_app_for_init.logger.warning(
+            f"Skipping global password initialization as database file {db_path} was not successfully created/initialized."
+        )
+
 
 # --- CLI Command ---
 @app.cli.command('init-db')
 def init_db_command():
-    database.init_db(app.config['DATABASE'])
-    print('Initialized the database.')
-    try:
-        db = get_db() 
-        _initialize_global_password(db)
-    except Exception as e: print(f"Error during global password initialization in init_db_command: {e}")
+    # This command can now leverage the new function, ensuring consistency.
+    # It requires an app context to run ensure_database_initialized if that function
+    # relies on app context for logging or config.
+    # For CLI, Flask automatically provides an app context for commands.
+    ensure_database_initialized(app) # 'app' should be the global Flask app instance
+    # The old print and direct _initialize_global_password call are handled by ensure_database_initialized.
+    # print('Initialized the database.') # ensure_database_initialized logs this
+    # try:
+    #     db = get_db()
+    #     _initialize_global_password(db) # Now handled by ensure_database_initialized
+    # except Exception as e: print(f"Error during global password initialization in init_db_command: {e}")
 
 # It's important that app.static_folder is correctly defined earlier in the script,
 # which should be:
 # STATIC_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'frontend', 'dist')
 # app.static_folder = STATIC_FOLDER (implicitly set by Flask(static_folder=STATIC_FOLDER))
-
 
 
 # --- Maintenance Mode Endpoints (Super Admin) ---
@@ -8368,58 +8417,28 @@ def serve_spa_catch_all(path): # Renamed function to ensure no endpoint conflict
 
 # --- Backup and Scheduler Functions ---
 
-
-
-
 if __name__ == '__main__':
-    db_path = app.config.get('DATABASE')
-    if not db_path:
-        app.logger.error("ERROR: DATABASE configuration not found in app.config. Cannot initialize DB.")
-    else:
-        db_dir = os.path.dirname(db_path)
-        if db_dir and not os.path.exists(db_dir):
-            try:
-                os.makedirs(db_dir, exist_ok=True)
-                app.logger.info(f"Created instance directory: {db_dir}")
-            except OSError as e:
-                app.logger.error(f"Error creating instance directory {db_dir}: {e}")
-        
-        if not os.path.exists(db_path):
-            app.logger.info(f"Database file not found at {db_path}. Initializing database schema...")
-            try:
-                database.init_db(db_path) 
-                app.logger.info(f"Database schema initialized successfully at {db_path}.")
-            except Exception as e:
-                app.logger.error(f"An error occurred during database schema initialization: {e}")
-        else:
-            app.logger.info(f"Database file already exists at {db_path}. Skipping schema initialization.")
+    # 1. Create Flask app object (already defined globally as 'app')
 
-        if os.path.exists(db_path):
-            with app.app_context(): # Create an app context for get_db()
-                 temp_conn_main = None
-                 try:
-                    # Use get_db() within context to ensure proper handling if it uses 'g'
-                    temp_conn_main = get_db() 
-                    _initialize_global_password(temp_conn_main)
-                 except sqlite3.OperationalError as e_op:
-                     app.logger.error(f"SQLite OperationalError during global password initialization in __main__: {e_op}")
-                 except Exception as e_global_pw:
-                     app.logger.error(f"Error during global password initialization in __main__: {e_global_pw}")
-                 # No explicit close needed for g.db here, teardown_appcontext handles it.
-        else: 
-            app.logger.warning(f"Skipping global password initialization as database file {db_path} was not successfully created/initialized.")
+    # 2. Ensure Database is Initialized (this now includes global password setup)
+    # ensure_database_initialized must be called *after* app is created and configured,
+    # but *before* anything that relies on the DB being fully ready (like the scheduler).
+    ensure_database_initialized(app)
 
-    # Note: Scheduler and backup checks are now initialized by initialize_scheduler_and_backups(app)
-    # called after app creation and configuration.
+    # 3. Initialize Scheduler and Backups (relies on app.logger and potentially DB)
+    # This was already being called after app creation and before serve.
+    # Now it's explicitly after DB initialization.
+    initialize_scheduler_and_backups(app) # Existing call, moved for clarity
 
-    # --- Replicate default files if running as a bundle ---
-    # This needs to be called after INSTANCE_FOLDER_PATH and DEFAULT_PROFILE_PICTURES_FOLDER are defined.
-    replicate_default_files_if_bundled()
-    # --- End replication call ---
+    # 4. Replicate default files if running as a bundle
+    # This needs INSTANCE_FOLDER_PATH, which is app config dependent or globally set.
+    # It should be safe here, after app creation and config, and after instance dir is ensured by ensure_database_initialized.
+    replicate_default_files_if_bundled() # Existing call, moved for clarity
 
+    # 5. Start the Waitress server
     try:
         flask_port = int(os.environ.get('FLASK_RUN_PORT', 7000))
         serve(app, host='0.0.0.0', port=flask_port)
     except (KeyboardInterrupt, SystemExit):
         app.logger.info("Flask application shutting down...")
-    # Removed explicit scheduler shutdown from here as it's handled by atexit
+    # atexit handles scheduler shutdown.

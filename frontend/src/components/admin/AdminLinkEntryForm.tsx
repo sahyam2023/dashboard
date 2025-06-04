@@ -188,14 +188,14 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
         const existingVersionInList = versionsList.find(v => v.id === linkToEdit.version_id);
         if (existingVersionInList) {
           defaultValues.selectedVersionId = linkToEdit.version_id.toString();
-          defaultValues.typedVersionString = linkToEdit.version_number; 
+          defaultValues.typedVersionString = linkToEdit.version_name; 
         } else {
           defaultValues.selectedVersionId = CREATE_NEW_VERSION_SENTINEL;
-          defaultValues.typedVersionString = linkToEdit.version_number;
+          defaultValues.typedVersionString = linkToEdit.version_name;
         }
-      } else if (linkToEdit.version_number) { // Fallback if versionsList not ready or software ID mismatch
+      } else if (linkToEdit.version_name) { // Fallback if versionsList not ready or software ID mismatch
           defaultValues.selectedVersionId = CREATE_NEW_VERSION_SENTINEL;
-          defaultValues.typedVersionString = linkToEdit.version_number;
+          defaultValues.typedVersionString = linkToEdit.version_name;
       }
 
       reset(defaultValues); // RHF reset with all values

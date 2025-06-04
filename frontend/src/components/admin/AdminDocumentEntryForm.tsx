@@ -189,6 +189,7 @@ const role = user?.role; // Access role safely, as user can be null
   };
 
   const onSubmit: SubmitHandler<DocumentFormData> = async (data) => {
+    // console.log("AdminDocumentEntryForm onSubmit, data:", data);
     setIsLoading(true);
     if (data.inputMode === 'upload' && data.selectedFile) {
       setIsUploading(true);
@@ -224,9 +225,12 @@ const role = user?.role; // Access role safely, as user can be null
           if (!isEditMode) resetFormDefaults(true); // Reset only if it was a new add, not edit->url
         }
       } else { // inputMode === 'upload'
+        console.log("AdminDocumentEntryForm: inputMode is 'upload'. data.selectedFile before check:", data.selectedFile);
         // Ensure a file is selected when inputMode is 'upload'.
         // Yup validation should ideally prevent submission if a file is required but not provided.
         if (data.selectedFile) {
+          console.log("AdminDocumentEntryForm: Attempting to upload file:", data.selectedFile);
+          console.log("AdminDocumentEntryForm: Calling uploadFileInChunks with metadata:", commonMetadata);
           // If data.selectedFile is present, proceed with chunked upload.
           // This will always create a NEW document entry as per current backend capabilities.
           resultDocument = await uploadFileInChunks(
@@ -240,16 +244,20 @@ const role = user?.role; // Access role safely, as user can be null
           if (onDocumentAdded) onDocumentAdded(resultDocument); // Treat as new document added
           resetFormDefaults(true); // Reset form as it's a new entry
         } else {
+          console.log("AdminDocumentEntryForm: No file selected for upload mode.");
           // This block handles cases where inputMode is 'upload' but no file is selected.
           // This should ideally be caught by Yup. If reached, it's a fallback.
           if (isEditMode && documentToEdit && !documentToEdit.is_external_link) {
+            console.log("AdminDocumentEntryForm: No file selected for upload mode. Condition: Edit mode, no new file.");
             // User is in edit mode, for a previously uploaded file, and did not select a new file.
             // This implies they might want to update metadata only, which is not supported by this flow.
             showErrorToast("No new file selected. If you intended to replace the existing file, please select one. Metadata-only updates for uploaded files are not supported via this form currently.");
           } else if (!isEditMode) {
+            console.log("AdminDocumentEntryForm: No file selected for upload mode. Condition: New mode, no file.");
             // New document submission in 'upload' mode without a file.
             showErrorToast("No file selected for upload. Please select a file.");
           } else {
+            console.log("AdminDocumentEntryForm: No file selected for upload mode. Condition: Edit mode, switched from URL, no file.");
             // Edge case: Edit mode, was URL, switched to 'upload' but no file provided.
             showErrorToast("Switched to upload mode but no file selected. Please select a file or use the URL mode.");
           }
@@ -264,10 +272,12 @@ const role = user?.role; // Access role safely, as user can be null
         }
       }
     } catch (err: any) {
+      console.error("Error in AdminDocumentEntryForm onSubmit:", err);
       const message = err.response?.data?.msg || err.message || `Failed to ${isEditMode && data.inputMode === 'url' ? 'update' : 'add'} document.`;
       showErrorToast(message);
       if (data.inputMode === 'upload') setIsUploading(false); // Also set isUploading to false on error
     } finally {
+      console.log("AdminDocumentEntryForm onSubmit finally block reached.");
       setIsLoading(false);
       if (data.inputMode === 'upload') setIsUploading(false); // Ensure isUploading is reset
       // Optionally reset progress after a short delay or based on success/failure
@@ -277,7 +287,8 @@ const role = user?.role; // Access role safely, as user can be null
   };
   
   const onFormError = (formErrors: FieldErrors<DocumentFormData>) => {
-    console.error("Form validation errors:", formErrors);
+    console.error("Form validation errors (onFormError) in AdminDocumentEntryForm:", formErrors);
+    console.log("AdminDocumentEntryForm onFormError, active element:", document.activeElement);
     showErrorToast("Please correct the errors highlighted in the form."); // Changed to showErrorToast
   };
 

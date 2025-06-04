@@ -33,6 +33,7 @@ from tempfile import NamedTemporaryFile
 import database # Your database.py helper
 from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
+from waitress import serve
 
 # --- Configuration ---
 # Best practice: Use app.instance_path for user-generated content if possible
@@ -8316,7 +8317,7 @@ if __name__ == '__main__':
 
     try:
         flask_port = int(os.environ.get('FLASK_RUN_PORT', 7000))
-        app.run(host='0.0.0.0', port=flask_port, debug=True)
+        serve(app, host='0.0.0.0', port=flask_port)
     except (KeyboardInterrupt, SystemExit):
         app.logger.info("Flask application shutting down...")
     # Removed explicit scheduler shutdown from here as it's handled by atexit

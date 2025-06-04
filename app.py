@@ -61,16 +61,21 @@ MAX_BACKUP_AGE_DAYS = 30
 
 # --- Path Definitions using Helper ---
 APP_ROOT_PATH = get_application_path()
+print(f"[GLOBAL] APP_ROOT_PATH = {APP_ROOT_PATH}") # Added diagnostic
 
 if getattr(sys, 'frozen', False):
     # PyInstaller bundle paths
     INSTANCE_FOLDER_PATH = os.path.join(APP_ROOT_PATH, 'instance')
     STATIC_FOLDER = os.path.join(sys._MEIPASS, 'frontend', 'dist')
+    print(f"[GLOBAL FROZEN] INSTANCE_FOLDER_PATH = {INSTANCE_FOLDER_PATH}") # Added diagnostic
+    print(f"[GLOBAL FROZEN] STATIC_FOLDER = {STATIC_FOLDER}") # Added diagnostic
     # Ensure sys._MEIPASS is used for other bundled resources if accessed directly in app.py
 else:
     # Normal script paths
     INSTANCE_FOLDER_PATH = os.path.join(APP_ROOT_PATH, 'instance')
     STATIC_FOLDER = os.path.join(APP_ROOT_PATH, 'frontend', 'dist')
+    print(f"[GLOBAL NORMAL] INSTANCE_FOLDER_PATH = {INSTANCE_FOLDER_PATH}") # Added diagnostic
+    print(f"[GLOBAL NORMAL] STATIC_FOLDER = {STATIC_FOLDER}") # Added diagnostic
 
 if not os.path.exists(INSTANCE_FOLDER_PATH):
     os.makedirs(INSTANCE_FOLDER_PATH, exist_ok=True)
@@ -135,9 +140,11 @@ CORS(app, resources={
 supports_credentials=True,
 allow_headers=["Content-Type", "Authorization", "Cache-Control", "Pragma"],
 methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
+print(f"[GLOBAL] app.static_folder = {app.static_folder}") # Added diagnostic
 
 # App Configuration
 app.config['DATABASE'] = os.path.join(INSTANCE_FOLDER_PATH, 'software_dashboard.db') # DB in instance folder
+print(f"[GLOBAL] app.config['DATABASE'] initially set to = {app.config['DATABASE']}") # Added diagnostic
 app.config['SECRET_KEY'] = '161549f75b4148cd529620b59c4fd706b40ae5805912a513811e575c7cd23439fa63a8300b6f93295f353520c026bc25b1d07c4e1c369d3839cf74deca7e52210f3ac8967052cc51be1ceb45d81f57b8bd16ab5019d063a2de13ee802e1507d9e4dca8f6114ff1ed81300768acb5a95f48c100ad457ec1f8331f6fe9320bb816' 
 app.config['JWT_SECRET_KEY'] = '991ca90ca06a362033f84c9a295a7c0f880caac7a74aefcf23df09f3b783c8e5a9bb0d8c1fcacf614d78cc3b580540419f55e08a29802eb9ea5e83a16eac641c0c028c814267dc94b261aa6a209462ea052773739f1429b7333185bf2b8bf8ba7ac19bccf691f4eece8d47174b6b3e191766d6a1a5c9a3ad21fd672f864e8a357d3c4b3fb838312a047156965a5756d73504db10b3920a3e6bfba5288443be112953e6b46132f6022280b192087384d6f8e91094bb5bbf21deac4bff2aaeda3f607db786b4847096f6112bad168e5223638c47146c74a9da65a54a86060c5298238169e1f2646f670c5f8014fe4997f9a2d8964e52938b627e31f58a70ece4d7'
 app.config['BCRYPT_LOG_ROUNDS'] = 12
@@ -197,13 +204,31 @@ def _perform_database_backup():
     Performs a database backup.
     Returns: (bool: success, str: backup_path or error_message)
     """
+    # These logs must be app.logger if app context is guaranteed, otherwise print for safety.
+    # Assuming app context is now correctly handled by the caller (perform_daily_backup_job)
+    app.logger.info(f"[_perform_database_backup] ENTERING FUNCTION.")
     try:
+        db_config_path = app.config.get('DATABASE')
+        app.logger.info(f"[_perform_database_backup] app.config['DATABASE'] = {db_config_path}")
+    except Exception as e_conf:
+        app.logger.error(f"[_perform_database_backup] Error accessing app.config['DATABASE']: {e_conf}")
+        # Fallback or re-raise, but at least log it. For now, let it proceed to see further errors.
+
+    try:
+        # Existing diagnostic logs moved to the top of the try block
+        app.logger.info(f"[_perform_database_backup] Attempting backup.")
+        # source_db_path_for_log = app.config.get('DATABASE') # Already logged above
+        source_db_path_for_log = db_config_path # Use the variable from above to avoid re-accessing config
+        app.logger.info(f"[_perform_database_backup] Resolved source_db_path = {source_db_path_for_log}")
+
         backup_dir = os.path.join(app.config['INSTANCE_FOLDER_PATH'], 'backups')
         os.makedirs(backup_dir, exist_ok=True)
-        source_db_path = app.config['DATABASE']
+        source_db_path = source_db_path_for_log # Use the variable defined above
         timestamp = datetime.now(IST).strftime('%Y%m%d_%H%M%S') # Changed to IST
         backup_filename = f"software_dashboard_{timestamp}.db"
         backup_file_path = os.path.join(backup_dir, backup_filename)
+
+        app.logger.info(f"[_perform_database_backup] Checking existence of source_db_path '{source_db_path_for_log}': {os.path.exists(source_db_path_for_log)}")
         shutil.copy2(source_db_path, backup_file_path)
         return True, backup_file_path
     except Exception as e:
@@ -234,20 +259,22 @@ def get_db():
     return g.db
 
 # --- Audit Log Helper ---
-def log_audit_action(action_type: str, target_table: str = None, target_id: int = None, details: dict = None, user_id: int = None, username: str = None):
+def log_audit_action(action_type: str, target_table: str = None, target_id: int = None, details: dict = None, user_id: int = None, username: str = None, system_action: bool = False):
     """
     Logs an action to the audit_logs table.
-    Automatically tries to derive user_id and username from JWT if not provided.
+    Automatically tries to derive user_id and username from JWT if not provided, unless system_action is True.
     """
     final_user_id = user_id
     final_username = username
 
-    # Try to get user details from JWT if not explicitly provided
-    if final_user_id is None: # Only attempt JWT if user_id isn't already specified
+    if system_action:
+        final_user_id = None  # Or a specific system user ID if you have one
+        final_username = "SystemEvent"
+    elif final_user_id is None: # Only attempt JWT if not a system_action and user_id isn't already specified
         try:
             # verify_jwt_in_request checks if a JWT is present and valid.
             # optional=True means it won't raise an error if JWT is missing.
-            verify_jwt_in_request(optional=True) 
+            verify_jwt_in_request(optional=True)
             current_user_id_str = get_jwt_identity() # Returns None if no identity in JWT
 
             if current_user_id_str:
@@ -6886,7 +6913,9 @@ def ensure_database_initialized(current_app_for_init: Flask):
     Ensures the database directory exists, schema is initialized,
     and global password is set.
     """
+    current_app_for_init.logger.info("[ensure_database_initialized] Called.") # Added diagnostic
     db_path = current_app_for_init.config.get('DATABASE')
+    current_app_for_init.logger.info(f"[ensure_database_initialized] Received db_path = {db_path}") # Added diagnostic
     if not db_path:
         current_app_for_init.logger.error("ERROR: DATABASE configuration not found. Cannot initialize DB.")
         return
@@ -6903,7 +6932,9 @@ def ensure_database_initialized(current_app_for_init: Flask):
     if not os.path.exists(db_path):
         current_app_for_init.logger.info(f"Database file not found at {db_path}. Initializing database schema...")
         try:
+            current_app_for_init.logger.info(f"[ensure_database_initialized] Calling database.init_db with path: {db_path}") # Added diagnostic
             database.init_db(db_path)
+            current_app_for_init.logger.info("[ensure_database_initialized] Returned from database.init_db.") # Added diagnostic
             current_app_for_init.logger.info(f"Database schema initialized successfully at {db_path}.")
         except Exception as e:
             current_app_for_init.logger.error(f"An error occurred during database schema initialization: {e}")
@@ -6913,11 +6944,14 @@ def ensure_database_initialized(current_app_for_init: Flask):
 
     if os.path.exists(db_path):
         # _initialize_global_password now handles its own app context for get_db()
+        current_app_for_init.logger.info("[ensure_database_initialized] Calling _initialize_global_password.") # Added diagnostic
         _initialize_global_password(current_app_for_init)
+        current_app_for_init.logger.info("[ensure_database_initialized] Returned from _initialize_global_password.") # Added diagnostic
     else:
         current_app_for_init.logger.warning(
             f"Skipping global password initialization as database file {db_path} was not successfully created/initialized."
         )
+    current_app_for_init.logger.info("[ensure_database_initialized] Completed.") # Added diagnostic
 
 
 # --- CLI Command ---

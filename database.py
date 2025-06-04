@@ -1,6 +1,7 @@
 # database.py
 import sqlite3
 import os
+import sys # Added for PyInstaller path handling
 import pytz
 from datetime import datetime, timezone # ensure timezone is imported if needed
 
@@ -34,11 +35,23 @@ def init_db(db_path: str):
         conn = get_db_connection(db_path) # Use the modified function
         # It's good practice to set row_factory on the connection used for initialization too
         # if you rely on dict-like access in the software insertion part.
-        conn.row_factory = sqlite3.Row 
+        conn.row_factory = sqlite3.Row
 
-        schema_path = os.path.join(BASE_DIR, 'schema.sql') # Assumes schema.sql is in the same dir as database.py
+        if getattr(sys, 'frozen', False):
+            # Running as a PyInstaller bundle
+            schema_path = os.path.join(sys._MEIPASS, 'schema.sql')
+        else:
+            # Running as a normal script
+            schema_path = os.path.join(BASE_DIR, 'schema.sql') # Assumes schema.sql is in the same dir as database.py
+
         if not os.path.exists(schema_path):
             print(f"DB_HELPER: ERROR - schema.sql not found at {schema_path}")
+            # Attempt to list files in MEIPASS if frozen, for debugging
+            if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+                try:
+                    print(f"DB_HELPER: Listing files in sys._MEIPASS ({sys._MEIPASS}): {os.listdir(sys._MEIPASS)}")
+                except Exception as e_ls:
+                    print(f"DB_HELPER: Error listing sys._MEIPASS: {e_ls}")
             return
 
         with open(schema_path, 'r') as f:

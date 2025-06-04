@@ -398,20 +398,21 @@ def delete_old_backups():
 
 def perform_daily_backup_job():
     """Job function for the scheduler to perform daily backups."""
-    app.logger.info("Starting daily backup job...")
-    try:
-        success, path_or_error = _perform_database_backup() # Assumes _perform_database_backup is defined
-        if success:
-            app.logger.info(f"Daily backup successful. Backup saved to: {path_or_error}")
-            log_audit_action(action_type='AUTO_BACKUP_SUCCESS', details={'backup_path': path_or_error})
-            delete_old_backups() # Delete old backups after a successful new backup
-        else:
-            app.logger.error(f"Daily backup failed: {path_or_error}")
-            log_audit_action(action_type='AUTO_BACKUP_FAILED', details={'error': path_or_error})
-    except Exception as e:
-        app.logger.error(f"Exception during daily backup job: {e}", exc_info=True)
-        log_audit_action(action_type='AUTO_BACKUP_EXCEPTION', details={'error': str(e)})
-    app.logger.info("Daily backup job finished.")
+    with app.app_context():
+        app.logger.info("Starting daily backup job...")
+        try:
+            success, path_or_error = _perform_database_backup() # Assumes _perform_database_backup is defined
+            if success:
+                app.logger.info(f"Daily backup successful. Backup saved to: {path_or_error}")
+                log_audit_action(action_type='AUTO_BACKUP_SUCCESS', details={'backup_path': path_or_error})
+                delete_old_backups() # Delete old backups after a successful new backup
+            else:
+                app.logger.error(f"Daily backup failed: {path_or_error}")
+                log_audit_action(action_type='AUTO_BACKUP_FAILED', details={'error': path_or_error})
+        except Exception as e:
+            app.logger.error(f"Exception during daily backup job: {e}", exc_info=True)
+            log_audit_action(action_type='AUTO_BACKUP_EXCEPTION', details={'error': str(e)})
+        app.logger.info("Daily backup job finished.")
 
 def get_latest_backup_time():
     """Gets the datetime of the latest backup file."""
@@ -469,11 +470,6 @@ def initialize_scheduler_and_backups(current_app):
         current_app.logger.info("Scheduler shutdown registered with atexit.")
     except Exception as e:
         current_app.logger.error(f"Error starting background scheduler: {e}", exc_info=True)
-
-# Initialize scheduler and perform startup backup checks
-initialize_scheduler_and_backups(app)
-
-
 
 # Helper function to convert specific timestamp fields in a dictionary to IST ISO format
 def convert_timestamps_to_ist_iso(row_dict, timestamp_keys):
@@ -8408,6 +8404,9 @@ if __name__ == '__main__':
                  # No explicit close needed for g.db here, teardown_appcontext handles it.
         else: 
             app.logger.warning(f"Skipping global password initialization as database file {db_path} was not successfully created/initialized.")
+
+    # Initialize scheduler and backups AFTER DB setup
+    initialize_scheduler_and_backups(app)
 
     # Note: Scheduler and backup checks are now initialized by initialize_scheduler_and_backups(app)
     # called after app creation and configuration.

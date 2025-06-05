@@ -48,5 +48,5 @@ exe = EXE(pyz,
           upx=True, # Compresses the executable
           upx_exclude=[],
           runtime_tmpdir=None,
-          console=True, # True for web servers to see logs
+          console=False, # True for web servers to see logs
           onefile=True) # Create a one-file bundled executable

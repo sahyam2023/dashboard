@@ -2452,6 +2452,22 @@ export async function confirmDatabaseReset(payload: DatabaseResetConfirmPayload)
 
 // --- Large File Upload (Chunked) ---
 
+function generateUUID() { // Public Domain/MIT
+  let d = new Date().getTime();//Timestamp
+  let d2 = ((typeof performance !== 'undefined') && performance.now && (performance.now()*1000)) || 0;//Time in microseconds since page-load or 0 if unsupported
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    let r = Math.random() * 16;//random number between 0 and 16
+    if(d > 0){//Use timestamp until depleted
+      r = (d + r)%16 | 0;
+      d = Math.floor(d/16);
+    } else {//Use microseconds since page-load if supported
+      r = (d2 + r)%16 | 0;
+      d2 = Math.floor(d2/16);
+    }
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+
 /**
  * Uploads a file in chunks to the backend.
  * @param file The file to upload.
@@ -2468,7 +2484,7 @@ export async function uploadFileInChunks(
 ): Promise<any> { // The return type 'any' should ideally be the specific type of the uploaded item (DocumentType, Patch, etc.)
   const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB per chunk
   const total_chunks = Math.ceil(file.size / CHUNK_SIZE);
-  const upload_id = crypto.randomUUID(); // Generate a unique ID for this upload session
+  const upload_id = (crypto.randomUUID ? crypto.randomUUID() : generateUUID()); // Generate a unique ID for this upload session
 
   let finalResponse: any = null;
 

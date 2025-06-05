@@ -128,7 +128,9 @@ CORS(app, resources={
         "origins": [
             "http://localhost:5173",
             "http://localhost:7000",
-            "http://127.0.0.1:7000"
+            "http://127.0.0.1:7000",
+            "http://192.168.3.40:7000",
+            "http://192.168.3.129:7000"
         ]
     }
 },

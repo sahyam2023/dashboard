@@ -981,7 +981,8 @@ export async function fetchLinks(
   // <<< --- ADD NEW PARAMETERS HERE (linkType, createdFrom, createdTo) --- >>>
   linkType?: 'external' | 'uploaded' | string,
   createdFrom?: string,
-  createdTo?: string
+  createdTo?: string,
+  search?: string // Added search parameter
 ): Promise<PaginatedLinksResponse> {
   try {
     const params = new URLSearchParams();
@@ -996,6 +997,7 @@ export async function fetchLinks(
     if (linkType) params.append('link_type', linkType);
     if (createdFrom) params.append('created_from', createdFrom);
     if (createdTo) params.append('created_to', createdTo);
+    if (search && search.trim() !== '') params.append('search', search); // Add search to params if provided
     
     const queryString = params.toString();
     const url = `${API_BASE_URL}/api/links${queryString ? `?${queryString}` : ''}`;
@@ -1031,7 +1033,8 @@ export async function fetchDocuments(
   createdFrom?: string, // New
   createdTo?: string, // New
   updatedFrom?: string, // New
-  updatedTo?: string // New
+  updatedTo?: string, // New
+  search?: string // Added search parameter
 ): Promise<PaginatedDocumentsResponse> {
   try {
     const params = new URLSearchParams();
@@ -1047,6 +1050,7 @@ export async function fetchDocuments(
     if (createdTo) params.append('created_to', createdTo);
     if (updatedFrom) params.append('updated_from', updatedFrom);
     if (updatedTo) params.append('updated_to', updatedTo);
+    if (search && search.trim() !== '') params.append('search', search); // Add search to params if provided
     // <<< --- END OF NEW LOGIC --- >>>
 
     const queryString = params.toString();
@@ -1078,10 +1082,10 @@ export async function fetchPatches(
   perPage?: number,
   sortBy?: string,
   sortOrder?: 'asc' | 'desc',
-  // <<< --- ADD NEW PARAMETERS HERE --- >>>
   releaseFrom?: string,
   releaseTo?: string,
-  patchedByDeveloper?: string
+  patchedByDeveloper?: string,
+  search?: string // Added search parameter
 ): Promise<PaginatedPatchesResponse> {
   try {
     const params = new URLSearchParams();
@@ -1091,10 +1095,10 @@ export async function fetchPatches(
     if (sortBy) params.append('sort_by', sortBy);
     if (sortOrder) params.append('sort_order', sortOrder);
 
-    // <<< --- ADD LOGIC HERE TO APPEND NEW FILTER PARAMETERS --- >>>
     if (releaseFrom) params.append('release_from', releaseFrom);
     if (releaseTo) params.append('release_to', releaseTo);
     if (patchedByDeveloper) params.append('patched_by_developer', patchedByDeveloper);
+    if (search && search.trim() !== '') params.append('search', search); // Add search to params if provided
 
     const queryString = params.toString();
     const url = `${API_BASE_URL}/api/patches${queryString ? `?${queryString}` : ''}`;
@@ -1102,7 +1106,6 @@ export async function fetchPatches(
     const response = await fetch(url, {
       method: 'GET',
       headers: {
-        // Patches can be public or require auth depending on permissions
         ...getAuthHeader(),
         'Cache-Control': 'no-cache',
         'Pragma': 'no-cache',
@@ -1425,7 +1428,8 @@ export async function fetchMiscFiles(
   page?: number,
   perPage?: number,
   sortBy?: string,
-  sortOrder?: 'asc' | 'desc'
+  sortOrder?: 'asc' | 'desc',
+  search?: string // Added search parameter
 ): Promise<PaginatedMiscFilesResponse> {
   try {
     const params = new URLSearchParams();
@@ -1434,6 +1438,7 @@ export async function fetchMiscFiles(
     if (perPage) params.append('per_page', perPage.toString());
     if (sortBy) params.append('sort_by', sortBy);
     if (sortOrder) params.append('sort_order', sortOrder);
+    if (search && search.trim() !== '') params.append('search', search); // Add search to params if provided
 
     const queryString = params.toString();
     const url = `${API_BASE_URL}/api/misc_files${queryString ? `?${queryString}` : ''}`;

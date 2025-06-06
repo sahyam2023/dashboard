@@ -49,6 +49,7 @@ const LinksView: React.FC = () => {
   const [totalPages, setTotalPages] = useState<number>(0);
   const [totalLinks, setTotalLinks] = useState<number>(0);
 
+  // searchTerm from useOutletContext is already available globally in the component
   const [sortBy, setSortBy] = useState<string>('title');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
@@ -101,7 +102,8 @@ const LinksView: React.FC = () => {
       const response: PaginatedLinksResponse = await fetchLinks(
         activeSoftwareId || undefined, activeVersionId || undefined,
         pageToLoad, itemsPerPage, sortBy, sortOrder,
-        linkTypeFilter || undefined, debouncedCreatedFromFilter || undefined, debouncedCreatedToFilter || undefined
+        linkTypeFilter || undefined, debouncedCreatedFromFilter || undefined, debouncedCreatedToFilter || undefined,
+        searchTerm // Pass searchTerm here
       );
       setLinks(response.links);
       setTotalPages(response.total_pages);
@@ -119,7 +121,7 @@ const LinksView: React.FC = () => {
     } finally {
       if (isNewQuery) setIsLoadingInitial(false);
     }
-  }, [activeSoftwareId, activeVersionId, itemsPerPage, sortBy, sortOrder, linkTypeFilter, debouncedCreatedFromFilter, debouncedCreatedToFilter, isAuthenticated]);
+  }, [activeSoftwareId, activeVersionId, itemsPerPage, sortBy, sortOrder, linkTypeFilter, debouncedCreatedFromFilter, debouncedCreatedToFilter, isAuthenticated, searchTerm]); // Added searchTerm to dependency array
 
   // Debounce effects for date filters
   useEffect(() => {
@@ -229,14 +231,12 @@ const LinksView: React.FC = () => {
     finally { setIsProcessingSingleItem(false); }
   };
 
-  const filteredLinksBySearch = useMemo(() => {
-    if (!searchTerm) return links;
-    const lower = searchTerm.toLowerCase();
-    return links.filter(l => l.title.toLowerCase().includes(lower) || (l.description || '').toLowerCase().includes(lower) || (l.software_name || '').toLowerCase().includes(lower) || (l.version_name || '').toLowerCase().includes(lower));
-  }, [links, searchTerm]);
+  // No longer need filteredLinksBySearch, links state will be used directly
+  // const filteredLinksBySearch = useMemo(() => { ... }, [links, searchTerm]);
 
   const handleSelectItem = (id: number, isSelected: boolean) => setSelectedLinkIds(prev => { const n = new Set(prev); if (isSelected) n.add(id); else n.delete(id); return n; });
-  const handleSelectAllItems = (isSelected: boolean) => { const n = new Set<number>(); if (isSelected) filteredLinksBySearch.forEach(l => n.add(l.id)); setSelectedLinkIds(n); };
+  // handleSelectAllItems will now use 'links' directly as filtering is backend-driven
+  const handleSelectAllItems = (isSelected: boolean) => { const n = new Set<number>(); if (isSelected) links.forEach(l => n.add(l.id)); setSelectedLinkIds(n); };
 
   const handleBulkDeleteLinksClick = () => { if (selectedLinkIds.size === 0) { showErrorToast("No items selected."); return; } setShowBulkDeleteConfirmModal(true); };
   const confirmBulkDeleteLinks = async () => {
@@ -525,7 +525,7 @@ const LinksView: React.FC = () => {
           {filtersAreActive && (<button onClick={handleClearAllFiltersAndSearch} className="mt-6 btn-primary text-sm">Clear All Filters & Search</button>)}
         </div>
       ) : (
-        <DataTable columns={columns} data={filteredLinksBySearch} rowClassName="group" isLoading={isLoadingInitial || isProcessingSingleItem} currentPage={currentPage} totalPages={totalPages} onPageChange={handlePageChange} itemsPerPage={itemsPerPage} totalItems={totalLinks} sortColumn={sortBy} sortOrder={sortOrder} onSort={handleSort} isSelectionEnabled={true} selectedItemIds={selectedLinkIds} onSelectItem={handleSelectItem} onSelectAllItems={handleSelectAllItems} />
+        <DataTable columns={columns} data={links} rowClassName="group" isLoading={isLoadingInitial || isProcessingSingleItem} currentPage={currentPage} totalPages={totalPages} onPageChange={handlePageChange} itemsPerPage={itemsPerPage} totalItems={totalLinks} sortColumn={sortBy} sortOrder={sortOrder} onSort={handleSort} isSelectionEnabled={true} selectedItemIds={selectedLinkIds} onSelectItem={handleSelectItem} onSelectAllItems={handleSelectAllItems} />
       )}
 
       {showDeleteConfirm && linkToDelete && (<ConfirmationModal isOpen={showDeleteConfirm} title="Delete Link" message={`Delete "${linkToDelete.title}"?`} onConfirm={handleDeleteLinkConfirm} onCancel={closeDeleteConfirm} isConfirming={isProcessingSingleItem} confirmButtonText="Delete" confirmButtonVariant="danger" />)}

@@ -17,11 +17,13 @@ from functools import wraps
 # import pstats # Removed
 # import io # Removed
 import random
+import shutil # Added for file replication
+import sys # Added for PyInstaller path handling
 import zipfile
 import tempfile
 import pytz # Added for IST
 from datetime import datetime, timedelta, timezone # Ensured all are here
-from flask import Flask, request, g, jsonify, send_from_directory
+from flask import Flask, request, g, jsonify, send_from_directory, has_request_context
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
 from flask_jwt_extended import (
@@ -33,30 +35,61 @@ from tempfile import NamedTemporaryFile
 import database # Your database.py helper
 from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
+from waitress import serve
+
+# --- Helper function for PyInstaller ---
+def get_application_path():
+    """Get the application path, accounting for PyInstaller."""
+    if getattr(sys, 'frozen', False):
+        # Running as a PyInstaller bundle
+        # For INSTANCE_FOLDER_PATH, use the directory of the executable
+        # For STATIC_FOLDER and other bundled resources, use sys._MEIPASS
+        return os.path.dirname(sys.executable) # Base for instance folder
+    else:
+        # Running as a normal script
+        return os.path.dirname(os.path.abspath(__file__))
 
 # --- Configuration ---
 # Best practice: Use app.instance_path for user-generated content if possible
 # This ensures files are not in your main app directory.
-INSTANCE_FOLDER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance')
+# INSTANCE_FOLDER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance')
+# if not os.path.exists(INSTANCE_FOLDER_PATH):
+#     os.makedirs(INSTANCE_FOLDER_PATH, exist_ok=True)
+
+# BACKUP_DIR = os.path.join(INSTANCE_FOLDER_PATH, 'backups')
+MAX_BACKUP_AGE_DAYS = 30
+
+# --- Path Definitions using Helper ---
+APP_ROOT_PATH = get_application_path()
+
+if getattr(sys, 'frozen', False):
+    # PyInstaller bundle paths
+    INSTANCE_FOLDER_PATH = os.path.join(APP_ROOT_PATH, 'instance')
+    STATIC_FOLDER = os.path.join(sys._MEIPASS, 'frontend', 'dist')
+    # Ensure sys._MEIPASS is used for other bundled resources if accessed directly in app.py
+else:
+    # Normal script paths
+    INSTANCE_FOLDER_PATH = os.path.join(APP_ROOT_PATH, 'instance')
+    STATIC_FOLDER = os.path.join(APP_ROOT_PATH, 'frontend', 'dist')
+
 if not os.path.exists(INSTANCE_FOLDER_PATH):
     os.makedirs(INSTANCE_FOLDER_PATH, exist_ok=True)
 
-BACKUP_DIR = os.path.join(INSTANCE_FOLDER_PATH, 'backups')
-MAX_BACKUP_AGE_DAYS = 30
-
 # Define separate upload folders for clarity and potential different serving rules
+# These will now correctly use the potentially redefined INSTANCE_FOLDER_PATH
+BACKUP_DIR = os.path.join(INSTANCE_FOLDER_PATH, 'backups')
 DOC_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'official_uploads', 'documents')
 PATCH_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'official_uploads', 'patches')
 LINK_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'official_uploads', 'links')
 MISC_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'misc_uploads')
 PROFILE_PICTURES_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'profile_pictures') # Added
 DEFAULT_PROFILE_PICTURES_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'default_profile_pictures') # New
-STATIC_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'frontend', 'dist')
+# STATIC_FOLDER is defined above based on frozen status
 
 
 # Ensure all upload folders exist
 TMP_LARGE_UPLOADS_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'tmp_large_uploads') # For large file chunks
-for folder in [DOC_UPLOAD_FOLDER, PATCH_UPLOAD_FOLDER, LINK_UPLOAD_FOLDER, MISC_UPLOAD_FOLDER, PROFILE_PICTURES_UPLOAD_FOLDER, DEFAULT_PROFILE_PICTURES_FOLDER, TMP_LARGE_UPLOADS_FOLDER]: # Added PROFILE_PICTURES_UPLOAD_FOLDER and DEFAULT_PROFILE_PICTURES_FOLDER
+for folder in [BACKUP_DIR, DOC_UPLOAD_FOLDER, PATCH_UPLOAD_FOLDER, LINK_UPLOAD_FOLDER, MISC_UPLOAD_FOLDER, PROFILE_PICTURES_UPLOAD_FOLDER, DEFAULT_PROFILE_PICTURES_FOLDER, TMP_LARGE_UPLOADS_FOLDER]: # Added PROFILE_PICTURES_UPLOAD_FOLDER and DEFAULT_PROFILE_PICTURES_FOLDER and BACKUP_DIR
     if not os.path.exists(folder):
         os.makedirs(folder, exist_ok=True) # exist_ok=True is helpful
 
@@ -95,7 +128,9 @@ CORS(app, resources={
         "origins": [
             "http://localhost:5173",
             "http://localhost:7000",
-            "http://127.0.0.1:7000"
+            "http://127.0.0.1:7000",
+            "http://192.168.3.40:7000",
+            "http://192.168.3.129:7000"
         ]
     }
 },
@@ -211,35 +246,36 @@ def log_audit_action(action_type: str, target_table: str = None, target_id: int 
 
     # Try to get user details from JWT if not explicitly provided
     if final_user_id is None: # Only attempt JWT if user_id isn't already specified
-        try:
-            # verify_jwt_in_request checks if a JWT is present and valid.
-            # optional=True means it won't raise an error if JWT is missing.
-            verify_jwt_in_request(optional=True) 
-            current_user_id_str = get_jwt_identity() # Returns None if no identity in JWT
+        if has_request_context():
+            try:
+                # verify_jwt_in_request checks if a JWT is present and valid.
+                # optional=True means it won't raise an error if JWT is missing.
+                verify_jwt_in_request(optional=True) 
+                current_user_id_str = get_jwt_identity() # Returns None if no identity in JWT
 
-            if current_user_id_str:
-                try:
-                    jwt_user_id = int(current_user_id_str)
-                    final_user_id = jwt_user_id # Set final_user_id from JWT
-                    
-                    # Fetch username if not provided and we have a user_id from JWT
-                    if final_username is None:
-                        user_details = find_user_by_id(jwt_user_id)
-                        if user_details:
-                            final_username = user_details['username']
-                        else:
-                            # This case means JWT has an ID for a user that doesn't exist.
-                            # Log with the ID, but username will remain None or what was passed.
-                            app.logger.warning(f"Audit log: User ID {jwt_user_id} from JWT not found in database.")
-                except ValueError:
-                    app.logger.error(f"Audit log: Invalid user ID format in JWT: {current_user_id_str}")
-                except Exception as e_jwt_user_fetch:
-                    # Catch errors during find_user_by_id or int conversion if any other
-                    app.logger.error(f"Audit log: Error processing JWT user identity: {e_jwt_user_fetch}")
-            # If no JWT or no identity in JWT, final_user_id and final_username remain as initially passed (or None)
-        except Exception as e_jwt_verify:
-            # This might catch errors from verify_jwt_in_request itself, though less common with optional=True
-            app.logger.error(f"Audit log: Error during JWT verification (optional): {e_jwt_verify}")
+                if current_user_id_str:
+                    try:
+                        jwt_user_id = int(current_user_id_str)
+                        final_user_id = jwt_user_id # Set final_user_id from JWT
+                        
+                        # Fetch username if not provided and we have a user_id from JWT
+                        if final_username is None:
+                            # Ensure get_db() is callable here, meaning an app_context must exist
+                            user_details = find_user_by_id(jwt_user_id) 
+                            if user_details:
+                                final_username = user_details['username']
+                            else:
+                                app.logger.warning(f"Audit log: User ID {jwt_user_id} from JWT not found in database.")
+                    except ValueError:
+                        app.logger.error(f"Audit log: Invalid user ID format in JWT: {current_user_id_str}")
+                    except Exception as e_jwt_user_fetch:
+                        app.logger.error(f"Audit log: Error processing JWT user identity: {e_jwt_user_fetch}")
+                # If no JWT or no identity in JWT, final_user_id and final_username remain as initially passed (or None)
+            except Exception as e_jwt_verify:
+                app.logger.error(f"Audit log: Error during JWT verification (optional): {e_jwt_verify}")
+        else:
+            # Optional: Log that JWT processing is skipped due to no request context
+            app.logger.info("Audit log: Skipping JWT user derivation as no request context is available.") 
 
     details_json = None
     if details is not None:
@@ -365,20 +401,21 @@ def delete_old_backups():
 
 def perform_daily_backup_job():
     """Job function for the scheduler to perform daily backups."""
-    app.logger.info("Starting daily backup job...")
-    try:
-        success, path_or_error = _perform_database_backup() # Assumes _perform_database_backup is defined
-        if success:
-            app.logger.info(f"Daily backup successful. Backup saved to: {path_or_error}")
-            log_audit_action(action_type='AUTO_BACKUP_SUCCESS', details={'backup_path': path_or_error})
-            delete_old_backups() # Delete old backups after a successful new backup
-        else:
-            app.logger.error(f"Daily backup failed: {path_or_error}")
-            log_audit_action(action_type='AUTO_BACKUP_FAILED', details={'error': path_or_error})
-    except Exception as e:
-        app.logger.error(f"Exception during daily backup job: {e}", exc_info=True)
-        log_audit_action(action_type='AUTO_BACKUP_EXCEPTION', details={'error': str(e)})
-    app.logger.info("Daily backup job finished.")
+    with app.app_context():
+        app.logger.info("Starting daily backup job...")
+        try:
+            success, path_or_error = _perform_database_backup() # Assumes _perform_database_backup is defined
+            if success:
+                app.logger.info(f"Daily backup successful. Backup saved to: {path_or_error}")
+                log_audit_action(action_type='AUTO_BACKUP_SUCCESS', details={'backup_path': path_or_error})
+                delete_old_backups() # Delete old backups after a successful new backup
+            else:
+                app.logger.error(f"Daily backup failed: {path_or_error}")
+                log_audit_action(action_type='AUTO_BACKUP_FAILED', details={'error': path_or_error})
+        except Exception as e:
+            app.logger.error(f"Exception during daily backup job: {e}", exc_info=True)
+            log_audit_action(action_type='AUTO_BACKUP_EXCEPTION', details={'error': str(e)})
+        app.logger.info("Daily backup job finished.")
 
 def get_latest_backup_time():
     """Gets the datetime of the latest backup file."""
@@ -437,11 +474,6 @@ def initialize_scheduler_and_backups(current_app):
     except Exception as e:
         current_app.logger.error(f"Error starting background scheduler: {e}", exc_info=True)
 
-# Initialize scheduler and perform startup backup checks
-initialize_scheduler_and_backups(app)
-
-
-
 # Helper function to convert specific timestamp fields in a dictionary to IST ISO format
 def convert_timestamps_to_ist_iso(row_dict, timestamp_keys):
     if not row_dict:
@@ -493,6 +525,71 @@ def convert_timestamps_to_ist_iso(row_dict, timestamp_keys):
 # The client_max_body_size should be larger than the MAX_CONTENT_LENGTH in Flask for individual chunks.
 # If not using chunking and sending whole large files, these limits must accommodate the entire file size.
 
+# --- Function to replicate default files when bundled ---
+def replicate_default_files_if_bundled():
+    """
+    If running as a PyInstaller bundle, this function replicates necessary default
+    files (e.g., default profile pictures) from the bundle's read-only
+    _MEIPASS directory to a writable location (e.g., instance folder).
+    """
+    if getattr(sys, 'frozen', False):
+        app.logger.info("Running as a PyInstaller bundle. Checking for default file replication.")
+
+        # --- Default Profile Pictures Replication ---
+        try:
+            # This path name 'default_profile_pictures_bundle_location' MUST match
+            # the destination folder name used in the .spec file's 'datas' section.
+            bundled_default_pics_path = os.path.join(sys._MEIPASS, 'default_profile_pictures_bundle_location')
+
+            # This is DEFAULT_PROFILE_PICTURES_FOLDER, ensure it's correctly defined globally in app.py
+            # It should use INSTANCE_FOLDER_PATH which is already PyInstaller-aware.
+            target_default_pics_path = DEFAULT_PROFILE_PICTURES_FOLDER
+
+            app.logger.info(f"Bundled default profile pictures path: {bundled_default_pics_path}")
+            app.logger.info(f"Target default profile pictures path: {target_default_pics_path}")
+
+            if not os.path.exists(bundled_default_pics_path):
+                app.logger.warning(f"Bundled default profile pictures directory not found at: {bundled_default_pics_path}. Skipping replication.")
+                return
+
+            # Ensure target directory exists (it should have been created by startup logic)
+            if not os.path.exists(target_default_pics_path):
+                os.makedirs(target_default_pics_path, exist_ok=True)
+                app.logger.info(f"Created target directory for default profile pictures: {target_default_pics_path}")
+
+            # Check if target directory is empty to prevent re-copying on every run.
+            # A more robust method could be a marker file, but empty check is simpler for now.
+            if not os.listdir(target_default_pics_path): # Check if empty
+                app.logger.info(f"Target default profile pictures directory '{target_default_pics_path}' is empty. Replicating files...")
+                copied_count = 0
+                for filename in os.listdir(bundled_default_pics_path):
+                    source_file = os.path.join(bundled_default_pics_path, filename)
+                    dest_file = os.path.join(target_default_pics_path, filename)
+                    if os.path.isfile(source_file): # Ensure it's a file
+                        try:
+                            shutil.copy2(source_file, dest_file)
+                            app.logger.info(f"Copied default profile picture: {filename} to {target_default_pics_path}")
+                            copied_count +=1
+                        except Exception as e_copy:
+                            app.logger.error(f"Error copying default profile picture {filename}: {e_copy}")
+                app.logger.info(f"Replicated {copied_count} default profile pictures.")
+            else:
+                app.logger.info(f"Target default profile pictures directory '{target_default_pics_path}' is not empty. Assuming files are already replicated.")
+
+        except Exception as e:
+            app.logger.error(f"Error during default profile picture replication: {e}", exc_info=True)
+
+        # --- Add replication for other default files/folders here if needed ---
+        # Example:
+        # try:
+        #     bundled_other_files_path = os.path.join(sys._MEIPASS, 'other_bundle_data_location')
+        #     target_other_files_path = os.path.join(INSTANCE_FOLDER_PATH, 'other_data_runtime')
+        #     # ... similar logic ...
+        # except Exception as e:
+        #     app.logger.error(f"Error during other default file replication: {e}", exc_info=True)
+
+    else:
+        app.logger.info("Not running as a PyInstaller bundle. Skipping default file replication.")
 
 
 # --- Maintenance Mode Helper ---
@@ -2314,8 +2411,11 @@ def get_all_documents_api():
         filter_conditions.append("d.software_id = ?")
         params.append(software_id_filter)
     if doc_type_filter:
-        filter_conditions.append("LOWER(d.doc_type) LIKE ?")
-        params.append(f"%{doc_type_filter.lower()}%")
+        search_terms = doc_type_filter.lower().split()
+        for term in search_terms:
+            if term: # Ensure term is not empty after split
+                filter_conditions.append("LOWER(d.doc_type) LIKE ?")
+                params.append(f"%{term}%")
     if created_from_filter:
         filter_conditions.append("date(d.created_at) >= date(?)")
         params.append(created_from_filter)
@@ -2572,6 +2672,7 @@ def get_all_links_api():
     per_page = request.args.get('per_page', default=10, type=int)
     sort_by_param = request.args.get('sort_by', default='title', type=str) 
     sort_order = request.args.get('sort_order', default='asc', type=str).lower()
+    searchTerm = request.args.get('search', type=str) # Added searchTerm
 
     # Get existing filter parameters
     software_id_filter = request.args.get('software_id', type=int)
@@ -2606,10 +2707,10 @@ def get_all_links_api():
 
     # Construct Base Query and Parameters for Filtering
     base_query_select_fields = "l.id, l.title, l.description, l.software_id, l.version_id, l.is_external_link, l.url, l.stored_filename, l.original_filename_ref, l.file_size, l.file_type, l.created_by_user_id, u.username as uploaded_by_username, l.created_at, l.updated_by_user_id, upd_u.username as updated_by_username, l.updated_at, s.name as software_name, v.version_number as version_name, (SELECT COUNT(*) FROM comments c WHERE c.item_id = l.id AND c.item_type = 'link' AND c.parent_comment_id IS NULL) as comment_count"
-    base_query_from = "FROM links l JOIN software s ON l.software_id = s.id LEFT JOIN versions v ON l.version_id = v.id LEFT JOIN users u ON l.created_by_user_id = u.id LEFT JOIN users upd_u ON l.updated_by_user_id = upd_u.id"
+    base_query_from = "FROM links l JOIN software s ON l.software_id = s.id LEFT JOIN versions v ON l.version_id = v.id LEFT JOIN users u ON l.created_by_user_id = u.id LEFT JOIN users upd_u ON l.updated_by_user_id = upd_u.id" # upd_u for updated_by_username
     
     params = []
-    user_id_param_for_join = []
+    # user_id_param_for_join = [] # Not used in this structure
 
     # Attempt to get user_id for favorites and permissions
     logged_in_user_id = None
@@ -2630,25 +2731,27 @@ def get_all_links_api():
     else:
         select_clause = f"SELECT {base_query_select_fields_with_aliases}, NULL AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download IS FALSE THEN 0 ELSE 1 END) AS is_downloadable"
 
-    from_clause = "FROM links l JOIN software s ON l.software_id = s.id LEFT JOIN versions v ON l.version_id = v.id LEFT JOIN users u ON l.created_by_user_id = u.id LEFT JOIN users upd_u ON l.updated_by_user_id = upd_u.id"
+    from_clause_main_query = "FROM links l JOIN software s ON l.software_id = s.id LEFT JOIN versions v ON l.version_id = v.id LEFT JOIN users u ON l.created_by_user_id = u.id LEFT JOIN users upd_u ON l.updated_by_user_id = upd_u.id" # upd_u for updated_by_username
     
-    params = [] # Params for WHERE clause filters
-    permission_join_params = [logged_in_user_id] # Param for the LEFT JOIN fp.user_id = ?
+    # Params for the main query's WHERE clause (excluding permission join params for now)
+    main_query_filter_params = [] 
+    # Params for the permission part of the main query's JOIN/WHERE.
+    # For main query, fp.user_id = ? uses logged_in_user_id.
+    main_query_permission_params = [logged_in_user_id] 
+    
     filter_conditions = []
 
-    # Permission Join and Conditions
-    # --- PERMISSION MODEL CHANGE ---
-    from_clause += " LEFT JOIN file_permissions fp ON l.id = fp.file_id AND fp.file_type = 'link' AND fp.user_id = ?" # View permission join
-    filter_conditions.append("(fp.id IS NULL OR fp.can_view = 1)") # Final view condition
-    # logged_in_user_id for join is added to permission_join_params
+    # Permission related JOIN for main query (fp for view permission)
+    from_clause_main_query += " LEFT JOIN file_permissions fp ON l.id = fp.file_id AND fp.file_type = 'link' AND fp.user_id = ?"
+    filter_conditions.append("(fp.id IS NULL OR fp.can_view = 1)")
         
     # Existing Filters
     if software_id_filter:
         filter_conditions.append("l.software_id = ?")
-        params.append(software_id_filter)
+        main_query_filter_params.append(software_id_filter)
     if version_id_filter:
         filter_conditions.append("l.version_id = ?")
-        params.append(version_id_filter)
+        main_query_filter_params.append(version_id_filter)
     if link_type_filter:
         if link_type_filter.lower() == 'external':
             filter_conditions.append("l.is_external_link = TRUE")
@@ -2656,25 +2759,111 @@ def get_all_links_api():
             filter_conditions.append("l.is_external_link = FALSE")
     if created_from_filter:
         filter_conditions.append("date(l.created_at) >= date(?)")
-        params.append(created_from_filter)
+        main_query_filter_params.append(created_from_filter)
     if created_to_filter:
         filter_conditions.append("date(l.created_at) <= date(?)")
-        params.append(created_to_filter)
+        main_query_filter_params.append(created_to_filter)
+
+    # Search Term Processing
+    search_terms = []
+    if searchTerm:
+        search_terms = [term.strip().lower() for term in searchTerm.split(',') if term.strip()]
+
+    if search_terms:
+        search_conditions_group = []
+        for term_val in search_terms:
+            term_param_like = f"%{term_val}%"
+            # Note: All searched fields are text, so direct LIKE is fine.
+            # For non-text fields, ensure they are cast or handled appropriately.
+            # u.username and upd_u.username are from users table (creator and updater)
+            search_conditions_group.append(
+                """(LOWER(l.title) LIKE ? OR 
+                    LOWER(l.description) LIKE ? OR 
+                    LOWER(l.url) LIKE ? OR
+                    LOWER(s.name) LIKE ? OR 
+                    LOWER(v.version_number) LIKE ? OR
+                    LOWER(u.username) LIKE ? OR
+                    LOWER(upd_u.username) LIKE ?)"""
+            )
+            main_query_filter_params.extend([term_param_like] * 7) # 7 fields being searched per term
+        filter_conditions.append(" AND ".join(search_conditions_group))
     
     where_clause = ""
     if filter_conditions:
         where_clause = " WHERE " + " AND ".join(filter_conditions)
 
-    # Count Query
-    count_params = permission_join_params + params
-    count_query = f"SELECT COUNT(l.id) as count {from_clause}{where_clause}"
+    # --- Count Query Construction ---
+    # Base for count query
+    count_query_base_from = "FROM links l"
+    count_query_joins = []
+    count_query_conditions = []
+    count_query_params = []
+
+    # Joins needed for count query if specific filters or search terms are active
+    # Software join (s) - needed for software_id_filter OR if search_terms exist (s.name)
+    if software_id_filter or search_terms:
+        count_query_joins.append("JOIN software s ON l.software_id = s.id")
+    # Version join (v) - needed for version_id_filter OR if search_terms exist (v.version_number)
+    if version_id_filter or search_terms:
+        count_query_joins.append("LEFT JOIN versions v ON l.version_id = v.id") # LEFT JOIN as version can be NULL
+    # User join for uploader (u) - needed if search_terms exist (u.username)
+    if search_terms:
+        count_query_joins.append("LEFT JOIN users u ON l.created_by_user_id = u.id")
+    # User join for updater (upd_u) - needed if search_terms exist (upd_u.username)
+    if search_terms:
+        count_query_joins.append("LEFT JOIN users upd_u ON l.updated_by_user_id = upd_u.id")
+    
+    # Permission join for count query (fp_count) - uses logged_in_user_id
+    # This is always added to correctly count accessible items.
+    count_query_joins.append("LEFT JOIN file_permissions fp_count ON l.id = fp_count.file_id AND fp_count.file_type = 'link' AND fp_count.user_id = ?")
+    count_query_params.append(logged_in_user_id) # Param for fp_count join
+    count_query_conditions.append("(fp_count.id IS NULL OR fp_count.can_view = 1)")
+
+
+    # Add existing filter conditions to count_query_conditions
+    if software_id_filter:
+        count_query_conditions.append("l.software_id = ?")
+        count_query_params.append(software_id_filter)
+    if version_id_filter:
+        count_query_conditions.append("l.version_id = ?")
+        count_query_params.append(version_id_filter)
+    if link_type_filter: # Same logic as main query
+        if link_type_filter.lower() == 'external': count_query_conditions.append("l.is_external_link = TRUE")
+        elif link_type_filter.lower() == 'uploaded': count_query_conditions.append("l.is_external_link = FALSE")
+    if created_from_filter:
+        count_query_conditions.append("date(l.created_at) >= date(?)")
+        count_query_params.append(created_from_filter)
+    if created_to_filter:
+        count_query_conditions.append("date(l.created_at) <= date(?)")
+        count_query_params.append(created_to_filter)
+
+    # Add search term conditions to count_query_conditions
+    if search_terms:
+        search_conditions_group_for_count = []
+        for term_val_count in search_terms:
+            term_param_like_count = f"%{term_val_count}%"
+            search_conditions_group_for_count.append(
+                 """(LOWER(l.title) LIKE ? OR 
+                     LOWER(l.description) LIKE ? OR 
+                     LOWER(l.url) LIKE ? OR
+                     LOWER(s.name) LIKE ? OR 
+                     LOWER(v.version_number) LIKE ? OR
+                     LOWER(u.username) LIKE ? OR
+                     LOWER(upd_u.username) LIKE ?)"""
+            )
+            count_query_params.extend([term_param_like_count] * 7)
+        count_query_conditions.append(" AND ".join(search_conditions_group_for_count))
+
+    final_count_query = f"SELECT COUNT(DISTINCT l.id) as count {count_query_base_from} {' '.join(count_query_joins)}"
+    if count_query_conditions:
+        final_count_query += " WHERE " + " AND ".join(count_query_conditions)
+    
     try:
-        # app.logger.info(f"Links Count Query for user {logged_in_user_id}: {count_query}") # Removed
-        # app.logger.info(f"Links Count Params: {tuple(count_params)}") # Removed
-        total_links_cursor = db.execute(count_query, tuple(count_params))
-        total_links = total_links_cursor.fetchone()['count']
+        total_links_cursor = db.execute(final_count_query, tuple(count_query_params))
+        total_links_result = total_links_cursor.fetchone()
+        total_links = total_links_result['count'] if total_links_result else 0
     except Exception as e:
-        app.logger.error(f"Error fetching total link count with permissions: {e} using query {count_query} and params {tuple(count_params)}")
+        app.logger.error(f"Error fetching total link count with permissions: {e} using query {final_count_query} and params {tuple(count_query_params)}")
         return jsonify(msg="Error fetching link count."), 500
 
     # Pagination Details
@@ -2684,40 +2873,33 @@ def get_all_links_api():
         page = total_pages
         offset = (page - 1) * per_page
     
-    # Main Data Query
-    final_from_clause_for_data = from_clause # from_clause already includes the LEFT JOIN for view permissions (fp)
-    # final_params_for_data = list(permission_join_params) # Start with user_id for the view permission JOIN (fp)
-    # final_params_for_data.extend(params) # Add other filter params
+    # --- Main Data Query Construction ---
+    # Params for main query are: permission_join_params + specific_join_params (favorites, fp_dl) + filter_params + pagination_params
+    final_main_query_params = list(main_query_permission_params) # Starts with [logged_in_user_id] for fp join
 
-    # New logic for assembling final_params_for_data
-    final_params_for_data = list(permission_join_params)  # Start with permission join params
-
+    # Add joins and params for favorites and download permissions (fp_dl) to main query
     if logged_in_user_id:
-        # Add JOIN for favorite status
-        final_from_clause_for_data += " LEFT JOIN user_favorites uf ON l.id = uf.item_id AND uf.item_type = 'link' AND uf.user_id = ?"
-        final_params_for_data.append(logged_in_user_id) # Param for uf join
+        from_clause_main_query += " LEFT JOIN user_favorites uf ON l.id = uf.item_id AND uf.item_type = 'link' AND uf.user_id = ?"
+        final_main_query_params.append(logged_in_user_id) # Param for uf join
         
-        # Add separate LEFT JOIN for download permission (fp_dl)
-        final_from_clause_for_data += " LEFT JOIN file_permissions fp_dl ON l.id = fp_dl.file_id AND fp_dl.file_type = 'link' AND fp_dl.user_id = ?"
-        final_params_for_data.append(logged_in_user_id) # Param for fp_dl join
-    else:
-        # Add fp_dl join for anonymous users
-        final_from_clause_for_data += " LEFT JOIN file_permissions fp_dl ON l.id = fp_dl.file_id AND fp_dl.file_type = 'link' AND fp_dl.user_id = ?"
-        final_params_for_data.append(None) # Param for fp_dl join (None for anonymous)
+        from_clause_main_query += " LEFT JOIN file_permissions fp_dl ON l.id = fp_dl.file_id AND fp_dl.file_type = 'link' AND fp_dl.user_id = ?"
+        final_main_query_params.append(logged_in_user_id) # Param for fp_dl join
+    else: # Anonymous user
+        from_clause_main_query += " LEFT JOIN file_permissions fp_dl ON l.id = fp_dl.file_id AND fp_dl.file_type = 'link' AND fp_dl.user_id = ?"
+        final_main_query_params.append(None) # Param for fp_dl join (None for anonymous)
         
-    final_params_for_data.extend(params) # Add WHERE clause filter parameters
-    final_params_for_data.extend([per_page, offset]) # Add pagination params
-    final_query = f"{select_clause} {final_from_clause_for_data}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
+    final_main_query_params.extend(main_query_filter_params) # Add filter params (software, version, search terms etc.)
+    final_main_query_params.extend([per_page, offset]) # Add pagination params
+
+    final_query = f"{select_clause} {from_clause_main_query}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
     
     try:
-        # app.logger.info(f"Links Data Query for user {logged_in_user_id}: {final_query}") # Removed
-        # app.logger.info(f"Links Data Params: {tuple(final_params_for_data)}") # Removed
-        links_cursor = db.execute(final_query, tuple(final_params_for_data))
+        links_cursor = db.execute(final_query, tuple(final_main_query_params))
         links_list_raw = [dict(row) for row in links_cursor.fetchall()]
         ts_keys = ['created_at', 'updated_at']
         links_list = [convert_timestamps_to_ist_iso(link, ts_keys) for link in links_list_raw]
     except Exception as e:
-        app.logger.error(f"Error fetching paginated links with permissions: {e} with query {final_query} and params {final_params_for_data}")
+        app.logger.error(f"Error fetching paginated links with permissions: {e} with query {final_query} and params {tuple(final_main_query_params)}")
         return jsonify(msg="Error fetching links."), 500
 
     return jsonify({
@@ -2742,6 +2924,7 @@ def get_all_misc_files_api():
     per_page = request.args.get('per_page', default=10, type=int)
     sort_by_param = request.args.get('sort_by', default='user_provided_title', type=str) 
     sort_order = request.args.get('sort_order', default='asc', type=str).lower()
+    searchTerm = request.args.get('search', type=str) # Added searchTerm
 
     # Get existing filter parameters
     category_id_filter = request.args.get('category_id', type=int)
@@ -2771,10 +2954,10 @@ def get_all_misc_files_api():
 
     # Construct Base Query and Parameters for Filtering
     base_query_select_fields = "mf.id, mf.misc_category_id, mf.user_id, mf.user_provided_title, mf.user_provided_description, mf.original_filename, mf.stored_filename, mf.file_path, mf.file_type, mf.file_size, mf.created_by_user_id, u.username as uploaded_by_username, mf.created_at, mf.updated_by_user_id, upd_u.username as updated_by_username, mf.updated_at, mc.name as category_name, (SELECT COUNT(*) FROM comments c WHERE c.item_id = mf.id AND c.item_type = 'misc_file' AND c.parent_comment_id IS NULL) as comment_count"
-    base_query_from = "FROM misc_files mf JOIN misc_categories mc ON mf.misc_category_id = mc.id LEFT JOIN users u ON mf.created_by_user_id = u.id LEFT JOIN users upd_u ON mf.updated_by_user_id = upd_u.id"
+    base_query_from = "FROM misc_files mf JOIN misc_categories mc ON mf.misc_category_id = mc.id LEFT JOIN users u ON mf.created_by_user_id = u.id LEFT JOIN users upd_u ON mf.updated_by_user_id = upd_u.id" # upd_u for updated_by_username
     
-    params = []
-    user_id_param_for_join = []
+    # params = [] # Replaced by main_query_filter_params
+    # user_id_param_for_join = [] # Not used
 
     # Attempt to get user_id for favorites and permissions
     logged_in_user_id = None
@@ -2795,37 +2978,95 @@ def get_all_misc_files_api():
     else:
         select_clause = f"SELECT {base_query_select_fields_with_aliases}, NULL AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download IS FALSE THEN 0 ELSE 1 END) AS is_downloadable"
 
-    from_clause = "FROM misc_files mf JOIN misc_categories mc ON mf.misc_category_id = mc.id LEFT JOIN users u ON mf.created_by_user_id = u.id LEFT JOIN users upd_u ON mf.updated_by_user_id = upd_u.id"
+    from_clause_main_query = "FROM misc_files mf JOIN misc_categories mc ON mf.misc_category_id = mc.id LEFT JOIN users u ON mf.created_by_user_id = u.id LEFT JOIN users upd_u ON mf.updated_by_user_id = upd_u.id" # upd_u for updated_by_username
     
-    params = [] # Params for WHERE clause filters
-    permission_join_params = [logged_in_user_id] # Param for the LEFT JOIN fp.user_id = ?
+    main_query_filter_params = []
+    main_query_permission_params = [logged_in_user_id]
     filter_conditions = []
 
-    # Permission Join and Conditions
-    # --- PERMISSION MODEL CHANGE ---
-    from_clause += " LEFT JOIN file_permissions fp ON mf.id = fp.file_id AND fp.file_type = 'misc_file' AND fp.user_id = ?" # View permission join
-    filter_conditions.append("(fp.id IS NULL OR fp.can_view = 1)") # Final view condition
-    # logged_in_user_id for join is added to permission_join_params.
+    # Permission Join for main query
+    from_clause_main_query += " LEFT JOIN file_permissions fp ON mf.id = fp.file_id AND fp.file_type = 'misc_file' AND fp.user_id = ?"
+    filter_conditions.append("(fp.id IS NULL OR fp.can_view = 1)")
 
     # Existing Filters
     if category_id_filter:
         filter_conditions.append("mf.misc_category_id = ?")
-        params.append(category_id_filter)
+        main_query_filter_params.append(category_id_filter)
+
+    # Search Term Processing
+    search_terms = []
+    if searchTerm:
+        search_terms = [term.strip().lower() for term in searchTerm.split(',') if term.strip()]
+
+    if search_terms:
+        search_conditions_group = []
+        for term_val in search_terms:
+            term_param_like = f"%{term_val}%"
+            search_conditions_group.append(
+                """(LOWER(mf.user_provided_title) LIKE ? OR
+                    LOWER(mf.user_provided_description) LIKE ? OR
+                    LOWER(mf.original_filename) LIKE ? OR
+                    LOWER(mc.name) LIKE ? OR
+                    LOWER(u.username) LIKE ? OR
+                    LOWER(upd_u.username) LIKE ?)"""
+            )
+            main_query_filter_params.extend([term_param_like] * 6) # 6 fields being searched per term
+        filter_conditions.append(" AND ".join(search_conditions_group))
     
     where_clause = ""
     if filter_conditions:
         where_clause = " WHERE " + " AND ".join(filter_conditions)
 
-    # Count Query
-    count_params = permission_join_params + params
-    count_query = f"SELECT COUNT(mf.id) as count {from_clause}{where_clause}"
+    # --- Count Query Construction ---
+    count_query_base_from = "FROM misc_files mf"
+    count_query_joins = []
+    count_query_conditions = []
+    count_query_params = []
+
+    # Category join (mc) - needed for category_id_filter OR if search_terms exist (mc.name)
+    if category_id_filter or search_terms:
+        count_query_joins.append("JOIN misc_categories mc ON mf.misc_category_id = mc.id")
+    # User join for uploader (u) - needed if search_terms exist (u.username)
+    if search_terms:
+        count_query_joins.append("LEFT JOIN users u ON mf.created_by_user_id = u.id")
+    # User join for updater (upd_u) - needed if search_terms exist (upd_u.username)
+    if search_terms:
+        count_query_joins.append("LEFT JOIN users upd_u ON mf.updated_by_user_id = upd_u.id")
+
+    # Permission join for count query (fp_count)
+    count_query_joins.append("LEFT JOIN file_permissions fp_count ON mf.id = fp_count.file_id AND fp_count.file_type = 'misc_file' AND fp_count.user_id = ?")
+    count_query_params.append(logged_in_user_id)
+    count_query_conditions.append("(fp_count.id IS NULL OR fp_count.can_view = 1)")
+
+    if category_id_filter:
+        count_query_conditions.append("mf.misc_category_id = ?")
+        count_query_params.append(category_id_filter)
+    
+    if search_terms:
+        search_conditions_group_for_count = []
+        for term_val_count in search_terms:
+            term_param_like_count = f"%{term_val_count}%"
+            search_conditions_group_for_count.append(
+                 """(LOWER(mf.user_provided_title) LIKE ? OR
+                     LOWER(mf.user_provided_description) LIKE ? OR
+                     LOWER(mf.original_filename) LIKE ? OR
+                     LOWER(mc.name) LIKE ? OR
+                     LOWER(u.username) LIKE ? OR
+                     LOWER(upd_u.username) LIKE ?)"""
+            )
+            count_query_params.extend([term_param_like_count] * 6)
+        count_query_conditions.append(" AND ".join(search_conditions_group_for_count))
+
+    final_count_query = f"SELECT COUNT(DISTINCT mf.id) as count {count_query_base_from} {' '.join(count_query_joins)}"
+    if count_query_conditions:
+        final_count_query += " WHERE " + " AND ".join(count_query_conditions)
+
     try:
-        # app.logger.info(f"Misc Files Count Query for user {logged_in_user_id}: {count_query}") # Removed
-        # app.logger.info(f"Misc Files Count Params: {tuple(count_params)}") # Removed
-        total_misc_files_cursor = db.execute(count_query, tuple(count_params))
-        total_misc_files = total_misc_files_cursor.fetchone()['count']
+        total_misc_files_cursor = db.execute(final_count_query, tuple(count_query_params))
+        total_misc_files_result = total_misc_files_cursor.fetchone()
+        total_misc_files = total_misc_files_result['count'] if total_misc_files_result else 0
     except Exception as e:
-        app.logger.error(f"Error fetching total misc_files count with permissions: {e} using query {count_query} and params {tuple(count_params)}")
+        app.logger.error(f"Error fetching total misc_files count: {e} using query {final_count_query} and params {tuple(count_query_params)}")
         return jsonify(msg="Error fetching misc_files count."), 500
 
     # Pagination Details
@@ -2835,40 +3076,31 @@ def get_all_misc_files_api():
         page = total_pages
         offset = (page - 1) * per_page
     
-    # Main Data Query
-    final_from_clause_for_data = from_clause # from_clause already includes the LEFT JOIN for view permissions (fp)
-    # final_params_for_data = list(permission_join_params) # Start with user_id for the view permission JOIN (fp)
-    # final_params_for_data.extend(params) # Add other filter params
-
-    # New logic for assembling final_params_for_data
-    final_params_for_data = list(permission_join_params)  # Start with permission join params
+    # --- Main Data Query Construction ---
+    final_main_query_params = list(main_query_permission_params)
 
     if logged_in_user_id:
-        # Add JOIN for favorite status
-        final_from_clause_for_data += " LEFT JOIN user_favorites uf ON mf.id = uf.item_id AND uf.item_type = 'misc_file' AND uf.user_id = ?"
-        final_params_for_data.append(logged_in_user_id) # Param for uf join
+        from_clause_main_query += " LEFT JOIN user_favorites uf ON mf.id = uf.item_id AND uf.item_type = 'misc_file' AND uf.user_id = ?"
+        final_main_query_params.append(logged_in_user_id)
         
-        # Add separate LEFT JOIN for download permission (fp_dl)
-        final_from_clause_for_data += " LEFT JOIN file_permissions fp_dl ON mf.id = fp_dl.file_id AND fp_dl.file_type = 'misc_file' AND fp_dl.user_id = ?"
-        final_params_for_data.append(logged_in_user_id) # Param for fp_dl join
+        from_clause_main_query += " LEFT JOIN file_permissions fp_dl ON mf.id = fp_dl.file_id AND fp_dl.file_type = 'misc_file' AND fp_dl.user_id = ?"
+        final_main_query_params.append(logged_in_user_id)
     else:
-        # Add fp_dl join for anonymous users
-        final_from_clause_for_data += " LEFT JOIN file_permissions fp_dl ON mf.id = fp_dl.file_id AND fp_dl.file_type = 'misc_file' AND fp_dl.user_id = ?"
-        final_params_for_data.append(None) # Param for fp_dl join (None for anonymous)
+        from_clause_main_query += " LEFT JOIN file_permissions fp_dl ON mf.id = fp_dl.file_id AND fp_dl.file_type = 'misc_file' AND fp_dl.user_id = ?"
+        final_main_query_params.append(None)
     
-    final_params_for_data.extend(params) # Add WHERE clause filter parameters
-    final_params_for_data.extend([per_page, offset]) # Add pagination params
-    final_query = f"{select_clause} {final_from_clause_for_data}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
+    final_main_query_params.extend(main_query_filter_params)
+    final_main_query_params.extend([per_page, offset])
+    
+    final_query = f"{select_clause} {from_clause_main_query}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
     
     try:
-        # app.logger.info(f"Misc Files Data Query for user {logged_in_user_id}: {final_query}") # Removed
-        # app.logger.info(f"Misc Files Data Params: {tuple(final_params_for_data)}") # Removed
-        misc_files_cursor = db.execute(final_query, tuple(final_params_for_data))
+        misc_files_cursor = db.execute(final_query, tuple(final_main_query_params))
         misc_files_list_raw = [dict(row) for row in misc_files_cursor.fetchall()]
         ts_keys = ['created_at', 'updated_at']
         misc_files_list = [convert_timestamps_to_ist_iso(mf, ts_keys) for mf in misc_files_list_raw]
     except Exception as e:
-        app.logger.error(f"Error fetching paginated misc_files with permissions: {e} with query {final_query} and params {final_params_for_data}")
+        app.logger.error(f"Error fetching paginated misc_files: {e} with query {final_query} and params {tuple(final_main_query_params)}")
         return jsonify(msg="Error fetching misc_files."), 500
 
     return jsonify({
@@ -5619,143 +5851,180 @@ def serve_misc_file(filename):
         mimetype=mimetype_to_use
     )
 
-# --- Search API (Keep as is, or enhance later) ---
 @app.route('/api/search', methods=['GET'])
+@jwt_required(optional=True)
 def search_api():
     query_term = request.args.get('q', '').strip()
-
-    if not query_term:
-        return jsonify({"error": "Search query parameter 'q' is required and cannot be empty."}), 400
-
-    db = get_db()
     results = []
-    
-    # Prepare the search term for LIKE queries
-    like_query_term = f"%{query_term.lower()}%"
+    db = get_db()
 
     logged_in_user_id = None
     try:
-        verify_jwt_in_request(optional=True)
         current_user_identity = get_jwt_identity()
         if current_user_identity:
             logged_in_user_id = int(current_user_identity)
     except Exception as e:
-        app.logger.error(f"Error getting user_id in search: {e}")
+        app.logger.error(f"Error getting user_id in search_api: {e}")
+
+    if not query_term:
+        return jsonify(results)
+
+    search_terms = query_term.split()
+
+    def build_search_conditions(fields, terms):
+        conditions = []
+        params = []
+        for term in terms:
+            term_condition_group = []
+            like_term = f"%{term.lower()}%" # Ensure term is lowercased for LIKE
+            for field in fields:
+                term_condition_group.append(f"{field} LIKE ?") # Field should already be LOWER() in usage
+                params.append(like_term)
+            if term_condition_group:
+                conditions.append(f"({' OR '.join(term_condition_group)})")
+        return " AND ".join(conditions), params
+
+    base_permission_where_clause = "(fp.id IS NULL OR fp.can_view IS NOT FALSE)"
 
     # Documents
     doc_select_base = "SELECT d.id, d.doc_name AS name, d.description, 'document' AS type, (SELECT COUNT(*) FROM comments c WHERE c.item_id = d.id AND c.item_type = 'document' AND c.parent_comment_id IS NULL) as comment_count"
-    # --- PERMISSION MODEL CHANGE for SEARCH ---
-    # Using final revised explicit conditions:
-    # View: (fp.id IS NULL OR fp.can_view = 1)
-    # Download: (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download IS FALSE THEN 0 ELSE 1 END)
-    # Note: The search logic needs to align with the listing logic, meaning two joins for permissions:
-    # one for view ('fp') and one for download ('fp_dl').
-    doc_from_base = "FROM documents d LEFT JOIN file_permissions fp ON d.id = fp.file_id AND fp.file_type = 'document' AND fp.user_id = ?"
-    doc_params = [logged_in_user_id, like_query_term, like_query_term] # user_id for view JOIN, then search terms
-    doc_where_base = "(fp.id IS NULL OR fp.can_view IS NOT FALSE) AND (LOWER(d.doc_name) LIKE ? OR LOWER(d.description) LIKE ?)" # Standardized view condition
+    doc_from_base = "FROM documents d LEFT JOIN users u_up ON d.created_by_user_id = u_up.id LEFT JOIN users u_upd ON d.updated_by_user_id = u_upd.id LEFT JOIN file_permissions fp ON d.id = fp.file_id AND fp.file_type = 'document' AND fp.user_id = ?"
+    doc_fields_to_search = ['LOWER(d.doc_name)', 'LOWER(d.description)', 'LOWER(u_up.username)', 'LOWER(u_upd.username)']
+    doc_search_conditions, doc_search_params = build_search_conditions(doc_fields_to_search, search_terms)
+
+    doc_params = [logged_in_user_id] + doc_search_params
     
+    doc_where_combined = base_permission_where_clause
+    if doc_search_conditions:
+        doc_where_combined += f" AND ({doc_search_conditions})"
+        
     if logged_in_user_id:
-        doc_select_final = f"{doc_select_base}, uf.id AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download IS FALSE THEN 0 ELSE 1 END) AS is_downloadable" # Final download condition
-        # Add fp_dl join for download status, and uf for favorites
+        doc_select_final = f"{doc_select_base}, uf.id AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download = 0 THEN 0 ELSE 1 END) AS is_downloadable"
         doc_from_final = f"{doc_from_base} LEFT JOIN file_permissions fp_dl ON d.id = fp_dl.file_id AND fp_dl.file_type = 'document' AND fp_dl.user_id = ? LEFT JOIN user_favorites uf ON d.id = uf.item_id AND uf.item_type = 'document' AND uf.user_id = ?"
-        doc_params.extend([logged_in_user_id, logged_in_user_id]) # Params for fp_dl and uf joins
+        doc_params.extend([logged_in_user_id, logged_in_user_id])
     else:
-        doc_select_final = f"{doc_select_base}, NULL AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download IS FALSE THEN 0 ELSE 1 END) AS is_downloadable" # Final download condition
-        # Add fp_dl join for download status, with NULL user_id
+        doc_select_final = f"{doc_select_base}, NULL AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download = 0 THEN 0 ELSE 1 END) AS is_downloadable"
         doc_from_final = f"{doc_from_base} LEFT JOIN file_permissions fp_dl ON d.id = fp_dl.file_id AND fp_dl.file_type = 'document' AND fp_dl.user_id = ?"
-        doc_params.append(None) # Param for fp_dl.user_id = NULL
-    
-    sql_documents = f"{doc_select_final} {doc_from_final} WHERE {doc_where_base}"
-    # app.logger.info(f"Search API - Documents Query for user {logged_in_user_id}: {sql_documents}") # Removed
-    # app.logger.info(f"Search API - Documents Params: {tuple(doc_params)}") # Removed
+        doc_params.append(None)
+
+    sql_documents = f"{doc_select_final} {doc_from_final} WHERE {doc_where_combined}"
     results.extend([dict(row) for row in db.execute(sql_documents, tuple(doc_params)).fetchall()])
 
     # Patches
     patch_select_base = "SELECT p.id, p.patch_name AS name, p.description, 'patch' AS type, (SELECT COUNT(*) FROM comments c WHERE c.item_id = p.id AND c.item_type = 'patch' AND c.parent_comment_id IS NULL) as comment_count"
-    patch_from_base = "FROM patches p LEFT JOIN file_permissions fp ON p.id = fp.file_id AND fp.file_type = 'patch' AND fp.user_id = ?"
-    patch_params = [logged_in_user_id, like_query_term, like_query_term]
-    patch_where_base = "(fp.id IS NULL OR fp.can_view IS NOT FALSE) AND (LOWER(p.patch_name) LIKE ? OR LOWER(p.description) LIKE ?)" # Standardized view condition
+    patch_from_base = "FROM patches p LEFT JOIN users u_up ON p.created_by_user_id = u_up.id LEFT JOIN users u_upd ON p.updated_by_user_id = u_upd.id LEFT JOIN file_permissions fp ON p.id = fp.file_id AND fp.file_type = 'patch' AND fp.user_id = ?"
+    patch_fields_to_search = ['LOWER(p.patch_name)', 'LOWER(p.description)', 'LOWER(u_up.username)', 'LOWER(u_upd.username)'] # Added user fields
+    patch_search_conditions, patch_search_params = build_search_conditions(patch_fields_to_search, search_terms)
 
+    patch_params = [logged_in_user_id] + patch_search_params
+    
+    patch_where_combined = base_permission_where_clause
+    if patch_search_conditions:
+        patch_where_combined += f" AND ({patch_search_conditions})"
+        
     if logged_in_user_id:
-        patch_select_final = f"{patch_select_base}, uf.id AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download IS FALSE THEN 0 ELSE 1 END) AS is_downloadable" # Final download condition
+        patch_select_final = f"{patch_select_base}, uf.id AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download IS FALSE THEN 0 ELSE 1 END) AS is_downloadable"
         patch_from_final = f"{patch_from_base} LEFT JOIN file_permissions fp_dl ON p.id = fp_dl.file_id AND fp_dl.file_type = 'patch' AND fp_dl.user_id = ? LEFT JOIN user_favorites uf ON p.id = uf.item_id AND uf.item_type = 'patch' AND uf.user_id = ?"
         patch_params.extend([logged_in_user_id, logged_in_user_id])
     else:
-        patch_select_final = f"{patch_select_base}, NULL AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download IS FALSE THEN 0 ELSE 1 END) AS is_downloadable" # Final download condition
+        patch_select_final = f"{patch_select_base}, NULL AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download IS FALSE THEN 0 ELSE 1 END) AS is_downloadable"
         patch_from_final = f"{patch_from_base} LEFT JOIN file_permissions fp_dl ON p.id = fp_dl.file_id AND fp_dl.file_type = 'patch' AND fp_dl.user_id = ?"
         patch_params.append(None)
 
-    sql_patches = f"{patch_select_final} {patch_from_final} WHERE {patch_where_base}"
-    # app.logger.info(f"Search API - Patches Query for user {logged_in_user_id}: {sql_patches}") # Removed
-    # app.logger.info(f"Search API - Patches Params: {tuple(patch_params)}") # Removed
+    sql_patches = f"{patch_select_final} {patch_from_final} WHERE {patch_where_combined}"
     results.extend([dict(row) for row in db.execute(sql_patches, tuple(patch_params)).fetchall()])
-
+    
     # Links
     link_select_base = "SELECT l.id, l.title AS name, l.description, l.url, l.is_external_link, l.stored_filename, 'link' AS type, (SELECT COUNT(*) FROM comments c WHERE c.item_id = l.id AND c.item_type = 'link' AND c.parent_comment_id IS NULL) as comment_count"
-    link_from_base = "FROM links l LEFT JOIN file_permissions fp ON l.id = fp.file_id AND fp.file_type = 'link' AND fp.user_id = ?"
-    link_params = [logged_in_user_id, like_query_term, like_query_term, like_query_term]
-    link_where_base = "(fp.id IS NULL OR fp.can_view IS NOT FALSE) AND (LOWER(l.title) LIKE ? OR LOWER(l.description) LIKE ? OR LOWER(l.url) LIKE ?)" # Standardized view condition
+    link_from_base = "FROM links l LEFT JOIN users u_up ON l.created_by_user_id = u_up.id LEFT JOIN users u_upd ON l.updated_by_user_id = u_upd.id LEFT JOIN file_permissions fp ON l.id = fp.file_id AND fp.file_type = 'link' AND fp.user_id = ?"
+    link_fields_to_search = ['LOWER(l.title)', 'LOWER(l.description)', 'LOWER(l.url)', 'LOWER(u_up.username)', 'LOWER(u_upd.username)'] # Added user fields
+    link_search_conditions, link_search_params = build_search_conditions(link_fields_to_search, search_terms)
+    
+    link_params = [logged_in_user_id] + link_search_params
 
+    link_where_combined = base_permission_where_clause
+    if link_search_conditions:
+        link_where_combined += f" AND ({link_search_conditions})"
+        
     if logged_in_user_id:
-        link_select_final = f"{link_select_base}, uf.id AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download IS FALSE THEN 0 ELSE 1 END) AS is_downloadable" # Final download condition
+        link_select_final = f"{link_select_base}, uf.id AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download IS FALSE THEN 0 ELSE 1 END) AS is_downloadable"
         link_from_final = f"{link_from_base} LEFT JOIN file_permissions fp_dl ON l.id = fp_dl.file_id AND fp_dl.file_type = 'link' AND fp_dl.user_id = ? LEFT JOIN user_favorites uf ON l.id = uf.item_id AND uf.item_type = 'link' AND uf.user_id = ?"
         link_params.extend([logged_in_user_id, logged_in_user_id])
     else:
-        link_select_final = f"{link_select_base}, NULL AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download IS FALSE THEN 0 ELSE 1 END) AS is_downloadable" # Final download condition
+        link_select_final = f"{link_select_base}, NULL AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download IS FALSE THEN 0 ELSE 1 END) AS is_downloadable"
         link_from_final = f"{link_from_base} LEFT JOIN file_permissions fp_dl ON l.id = fp_dl.file_id AND fp_dl.file_type = 'link' AND fp_dl.user_id = ?"
         link_params.append(None)
         
-    sql_links = f"{link_select_final} {link_from_final} WHERE {link_where_base}"
-    # app.logger.info(f"Search API - Links Query for user {logged_in_user_id}: {sql_links}") # Removed
-    # app.logger.info(f"Search API - Links Params: {tuple(link_params)}") # Removed
+    sql_links = f"{link_select_final} {link_from_final} WHERE {link_where_combined}"
     results.extend([dict(row) for row in db.execute(sql_links, tuple(link_params)).fetchall()])
 
     # Misc Files
     misc_select_base = "SELECT mf.id, mf.user_provided_title AS name, mf.original_filename, mf.user_provided_description AS description, mf.stored_filename, 'misc_file' AS type, (SELECT COUNT(*) FROM comments c WHERE c.item_id = mf.id AND c.item_type = 'misc_file' AND c.parent_comment_id IS NULL) as comment_count"
-    misc_from_base = "FROM misc_files mf LEFT JOIN file_permissions fp ON mf.id = fp.file_id AND fp.file_type = 'misc_file' AND fp.user_id = ?"
-    misc_params = [logged_in_user_id, like_query_term, like_query_term, like_query_term]
-    misc_where_base = "(fp.id IS NULL OR fp.can_view IS NOT FALSE) AND (LOWER(mf.user_provided_title) LIKE ? OR LOWER(mf.user_provided_description) LIKE ? OR LOWER(mf.original_filename) LIKE ?)" # Standardized view condition
+    misc_from_base = "FROM misc_files mf LEFT JOIN users u_up ON mf.created_by_user_id = u_up.id LEFT JOIN users u_upd ON mf.updated_by_user_id = u_upd.id LEFT JOIN file_permissions fp ON mf.id = fp.file_id AND fp.file_type = 'misc_file' AND fp.user_id = ?"
+    misc_fields_to_search = ['LOWER(mf.user_provided_title)', 'LOWER(mf.user_provided_description)', 'LOWER(mf.original_filename)', 'LOWER(u_up.username)', 'LOWER(u_upd.username)'] # Added user fields
+    misc_search_conditions, misc_search_params = build_search_conditions(misc_fields_to_search, search_terms)
+
+    misc_params = [logged_in_user_id] + misc_search_params
+
+    misc_where_combined = base_permission_where_clause
+    if misc_search_conditions:
+        misc_where_combined += f" AND ({misc_search_conditions})"
 
     if logged_in_user_id:
-        misc_select_final = f"{misc_select_base}, uf.id AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download IS FALSE THEN 0 ELSE 1 END) AS is_downloadable" # Final download condition
+        misc_select_final = f"{misc_select_base}, uf.id AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download IS FALSE THEN 0 ELSE 1 END) AS is_downloadable"
         misc_from_final = f"{misc_from_base} LEFT JOIN file_permissions fp_dl ON mf.id = fp_dl.file_id AND fp_dl.file_type = 'misc_file' AND fp_dl.user_id = ? LEFT JOIN user_favorites uf ON mf.id = uf.item_id AND uf.item_type = 'misc_file' AND uf.user_id = ?"
         misc_params.extend([logged_in_user_id, logged_in_user_id])
     else:
-        misc_select_final = f"{misc_select_base}, NULL AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download IS FALSE THEN 0 ELSE 1 END) AS is_downloadable" # Final download condition
+        misc_select_final = f"{misc_select_base}, NULL AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download IS FALSE THEN 0 ELSE 1 END) AS is_downloadable"
         misc_from_final = f"{misc_from_base} LEFT JOIN file_permissions fp_dl ON mf.id = fp_dl.file_id AND fp_dl.file_type = 'misc_file' AND fp_dl.user_id = ?"
         misc_params.append(None)
 
-    sql_misc_files = f"{misc_select_final} {misc_from_final} WHERE {misc_where_base}"
-    # app.logger.info(f"Search API - Misc Files Query for user {logged_in_user_id}: {sql_misc_files}") # Removed
-    # app.logger.info(f"Search API - Misc Files Params: {tuple(misc_params)}") # Removed
+    sql_misc_files = f"{misc_select_final} {misc_from_final} WHERE {misc_where_combined}"
     results.extend([dict(row) for row in db.execute(sql_misc_files, tuple(misc_params)).fetchall()])
 
-    # Software (No direct file_permissions, viewability depends on other factors or is public)
-    # Favorite status is still relevant for software.
+    # Software
+    software_fields_to_search = ['LOWER(s.name)', 'LOWER(s.description)']
+    software_search_conditions, software_search_params = build_search_conditions(software_fields_to_search, search_terms)
+    
     sql_software_select = "SELECT s.id, s.name, s.description, 'software' AS type"
     sql_software_from = "FROM software s"
-    software_params = [like_query_term, like_query_term]
-    if logged_in_user_id: # For favorite status
+    
+    final_software_params = list(software_search_params) 
+    if logged_in_user_id:
         sql_software_select += ", uf.id AS favorite_id"
         sql_software_from += " LEFT JOIN user_favorites uf ON s.id = uf.item_id AND uf.item_type = 'software' AND uf.user_id = ?"
-        software_params.append(logged_in_user_id)
-    else: # Ensure favorite_id column exists
+        final_software_params.append(logged_in_user_id)
+    else:
         sql_software_select += ", NULL AS favorite_id"
-    sql_software_query = f"{sql_software_select} {sql_software_from} WHERE (LOWER(s.name) LIKE ? OR LOWER(s.description) LIKE ?)"
-    results.extend([dict(row) for row in db.execute(sql_software_query, tuple(software_params)).fetchall()])
+    
+    if software_search_conditions:
+        sql_software_query = f"{sql_software_select} {sql_software_from} WHERE {software_search_conditions}"
+    else: 
+        sql_software_query = f"{sql_software_select} {sql_software_from}"
 
-    # Versions (No direct file_permissions, viewability depends on other factors or is public)
-    sql_versions_select = "SELECT v.id, v.version_number AS name, v.changelog, v.known_bugs, v.software_id, sw.name AS software_name, 'version' AS type" # Renamed s to sw to avoid conflict
-    sql_versions_from = "FROM versions v JOIN software sw ON v.software_id = sw.id" # Renamed s to sw
-    version_params = [like_query_term, like_query_term, like_query_term]
-    if logged_in_user_id: # For favorite status
+    results.extend([dict(row) for row in db.execute(sql_software_query, tuple(final_software_params)).fetchall()])
+
+    # Versions
+    version_fields_to_search = ['LOWER(v.version_number)', 'LOWER(v.changelog)', 'LOWER(v.known_bugs)']
+    version_search_conditions, version_search_params = build_search_conditions(version_fields_to_search, search_terms)
+
+    sql_versions_select = "SELECT v.id, v.version_number AS name, v.changelog, v.known_bugs, v.software_id, sw.name AS software_name, 'version' AS type"
+    sql_versions_from = "FROM versions v JOIN software sw ON v.software_id = sw.id"
+    
+    final_version_params = list(version_search_params)
+    if logged_in_user_id:
         sql_versions_select += ", uf.id AS favorite_id"
         sql_versions_from += " LEFT JOIN user_favorites uf ON v.id = uf.item_id AND uf.item_type = 'version' AND uf.user_id = ?"
-        version_params.append(logged_in_user_id)
-    else: # Ensure favorite_id column exists
+        final_version_params.append(logged_in_user_id)
+    else:
         sql_versions_select += ", NULL AS favorite_id"
-    sql_versions_query = f"{sql_versions_select} {sql_versions_from} WHERE (LOWER(v.version_number) LIKE ? OR LOWER(v.changelog) LIKE ? OR LOWER(v.known_bugs) LIKE ?)"
-    results.extend([dict(row) for row in db.execute(sql_versions_query, tuple(version_params)).fetchall()])
+
+    if version_search_conditions:
+        sql_versions_query = f"{sql_versions_select} {sql_versions_from} WHERE {version_search_conditions}"
+    else:
+        sql_versions_query = f"{sql_versions_select} {sql_versions_from}"
+        
+    results.extend([dict(row) for row in db.execute(sql_versions_query, tuple(final_version_params)).fetchall()])
 
     return jsonify(results)
 
@@ -8311,12 +8580,20 @@ if __name__ == '__main__':
         else: 
             app.logger.warning(f"Skipping global password initialization as database file {db_path} was not successfully created/initialized.")
 
+    # Initialize scheduler and backups AFTER DB setup
+    initialize_scheduler_and_backups(app)
+
     # Note: Scheduler and backup checks are now initialized by initialize_scheduler_and_backups(app)
     # called after app creation and configuration.
 
+    # --- Replicate default files if running as a bundle ---
+    # This needs to be called after INSTANCE_FOLDER_PATH and DEFAULT_PROFILE_PICTURES_FOLDER are defined.
+    replicate_default_files_if_bundled()
+    # --- End replication call ---
+
     try:
         flask_port = int(os.environ.get('FLASK_RUN_PORT', 7000))
-        app.run(host='0.0.0.0', port=flask_port, debug=True)
+        serve(app, host='0.0.0.0', port=flask_port)
     except (KeyboardInterrupt, SystemExit):
         app.logger.info("Flask application shutting down...")
     # Removed explicit scheduler shutdown from here as it's handled by atexit

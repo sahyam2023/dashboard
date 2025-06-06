@@ -22,6 +22,7 @@ import LoadingState from '../components/LoadingState';
 import ErrorState from '../components/ErrorState';
 import { useAuth } from '../context/AuthContext';
 import AdminDocumentEntryForm from '../components/admin/AdminDocumentEntryForm';
+import Fuse from 'fuse.js';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
 import Modal from '../components/shared/Modal';
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils';
@@ -124,7 +125,8 @@ const fetchAndSetDocuments = useCallback(async (pageToLoad: number, isNewQuery: 
       selectedSoftwareId === null ? undefined : selectedSoftwareId,
       pageToLoad, ITEMS_PER_PAGE, sortBy, sortOrder,
       debouncedDocTypeFilter || undefined, debouncedCreatedFromFilter || undefined, debouncedCreatedToFilter || undefined,
-      debouncedUpdatedFromFilter || undefined, debouncedUpdatedToFilter || undefined
+      debouncedUpdatedFromFilter || undefined, debouncedUpdatedToFilter || undefined,
+      searchTerm // Pass searchTerm to the API call
     );
     const newDocs = response.documents;
     setDocuments(prevDocuments => {
@@ -172,7 +174,7 @@ const fetchAndSetDocuments = useCallback(async (pageToLoad: number, isNewQuery: 
   selectedSoftwareId, ITEMS_PER_PAGE, sortBy, sortOrder, 
   debouncedDocTypeFilter, debouncedCreatedFromFilter, debouncedCreatedToFilter, 
   debouncedUpdatedFromFilter, debouncedUpdatedToFilter, 
-  isAuthenticated
+  isAuthenticated, searchTerm // Added searchTerm to dependency array
 ]);
 
 // Debounce effects for each filter input
@@ -333,13 +335,15 @@ useEffect(() => {
   };
 
   const filteredDocumentsBySearch = useMemo(() => {
-    if (!searchTerm) return documents; 
-    const lowerSearchTerm = searchTerm.toLowerCase();
-    return documents.filter(doc => 
-      doc.doc_name.toLowerCase().includes(lowerSearchTerm) ||
-      (doc.description || '').toLowerCase().includes(lowerSearchTerm) ||
-      (doc.software_name || '').toLowerCase().includes(lowerSearchTerm)
-    );
+    if (!searchTerm) {
+      return documents;
+    }
+    const fuse = new Fuse(documents, {
+      keys: ['doc_name', 'description', 'software_name', 'uploaded_by_username', 'updated_by_username'],
+      includeScore: true,
+      threshold: 0.4,
+    });
+    return fuse.search(searchTerm).map(item => item.item);
   }, [documents, searchTerm]);
 
   const handleSelectItem = (itemId: number, isSelected: boolean) => {

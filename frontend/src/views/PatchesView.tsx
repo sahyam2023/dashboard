@@ -25,6 +25,7 @@ import LoadingState from '../components/LoadingState';
 import ErrorState from '../components/ErrorState';
 import { useAuth } from '../context/AuthContext';
 import AdminPatchEntryForm from '../components/admin/AdminPatchEntryForm';
+import Fuse from 'fuse.js';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
 import Modal from '../components/shared/Modal';
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils'; 
@@ -107,7 +108,7 @@ const role = user?.role; // Access role safely, as user can be null
     // Note: fetchAndSetPatches(1, true) will be called by useEffect due to filter state changes.
   }, [setSearchTerm]);
 
-  const handleApplyAdvancedFilters = () => {
+const handleApplyAdvancedFilters = () => {
     fetchAndSetPatches(1, true);
   };
 
@@ -125,7 +126,10 @@ const role = user?.role; // Access role safely, as user can be null
     try {
       const response: PaginatedPatchesResponse = await fetchPatches(
         selectedSoftwareId ?? undefined, pageToLoad, itemsPerPage, sortBy, sortOrder,
-        debouncedReleaseFromFilter || undefined, debouncedReleaseToFilter || undefined, debouncedPatchedByDeveloperFilter || undefined
+        debouncedReleaseFromFilter || undefined, 
+        debouncedReleaseToFilter || undefined, 
+        debouncedPatchedByDeveloperFilter || undefined,
+        searchTerm // Pass searchTerm to the API call
       );
       setPatches(response.patches);
       setTotalPages(response.total_pages);
@@ -147,7 +151,11 @@ const role = user?.role; // Access role safely, as user can be null
     } finally {
       if (isNewQuery) setIsLoadingInitial(false);
     }
-  }, [selectedSoftwareId, itemsPerPage, sortBy, sortOrder, debouncedReleaseFromFilter, debouncedReleaseToFilter, debouncedPatchedByDeveloperFilter, isAuthenticated]);
+  }, [
+    selectedSoftwareId, itemsPerPage, sortBy, sortOrder, 
+    debouncedReleaseFromFilter, debouncedReleaseToFilter, debouncedPatchedByDeveloperFilter, 
+    isAuthenticated, searchTerm // Added searchTerm to dependency array
+  ]);
 
 // Debounce effects for filter inputs
 useEffect(() => {
@@ -247,14 +255,15 @@ useEffect(() => {
   };
 
   const filteredPatchesBySearch = useMemo(() => {
-    if (!searchTerm) return patches;
-    const lower = searchTerm.toLowerCase();
-    return patches.filter(p => 
-      p.patch_name.toLowerCase().includes(lower) ||
-      (p.description || '').toLowerCase().includes(lower) ||
-      (p.software_name || '').toLowerCase().includes(lower) ||
-      (p.version_number || '').toLowerCase().includes(lower)
-    );
+    if (!searchTerm) {
+      return patches;
+    }
+    const fuse = new Fuse(patches, {
+      keys: ['patch_name', 'description', 'software_name', 'version_number', 'uploaded_by_username', 'updated_by_username'],
+      includeScore: true,
+      threshold: 0.4,
+    });
+    return fuse.search(searchTerm).map(item => item.item);
   }, [patches, searchTerm]);
 
   const handleSelectItem = (id: number, isSelected: boolean) => setSelectedPatchIds(prev => { const n = new Set(prev); if (isSelected) n.add(id); else n.delete(id); return n; });

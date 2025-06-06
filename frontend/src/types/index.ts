@@ -304,3 +304,50 @@ export interface PaginatedNotificationsResponse {
   total_pages: number;
   status_filter?: string; // To reflect the filter applied in the request
 }
+
+// --- VA/VMS Version Compatibility Types ---
+export interface AdminVaVmsCompatibilityEntry {
+  id: number;
+  va_version_id: number;
+  va_version_number: string; // From JOIN with versions table (aliased va_v)
+  va_software_id?: number;    // From JOIN with versions then software table (aliased va_s)
+  va_software_name: string;  // From JOIN with software table (aliased va_s)
+  vms_version_id: number;
+  vms_version_number: string; // From JOIN with versions table (aliased vms_v)
+  vms_software_id?: number;   // From JOIN with versions then software table (aliased vms_s)
+  vms_software_name: string; // From JOIN with software table (aliased vms_s)
+  description?: string | null;
+  created_at: string; // ISO date string
+  updated_at: string; // ISO date string
+}
+
+export interface VaVmsCompatibilityPayload { // For POST/PUT requests to admin endpoint
+  va_version_id: number;
+  vms_version_id: number;
+  description?: string | null;
+}
+
+export interface PaginatedAdminVaVmsCompatibilityResponse {
+  compatibility_records: AdminVaVmsCompatibilityEntry[];
+  page: number;
+  per_page: number;
+  total_records: number;
+  total_pages: number;
+}
+
+// Public API response types for VA/VMS Compatibility
+export interface PublicVmsCompatibilityInfo {
+  compatibility_id: number;
+  vms_version_id: number;
+  vms_version_number: string;
+  vms_software_name: string;
+  description?: string | null;
+}
+
+export interface PublicVaCompatibilityInfo {
+  compatibility_id: number;
+  va_version_id: number;
+  va_version_number: string;
+  va_software_name: string;
+  description?: string | null;
+}

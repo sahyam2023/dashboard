@@ -8,6 +8,7 @@ DROP TABLE IF EXISTS links;
 DROP TABLE IF EXISTS patches;
 DROP TABLE IF EXISTS documents;
 DROP TABLE IF EXISTS versions;
+DROP TABLE IF EXISTS va_vms_version_compatibility;
 DROP TABLE IF EXISTS users;
 DROP TABLE IF EXISTS software;
 DROP TABLE IF EXISTS site_settings;
@@ -325,6 +326,26 @@ INSERT INTO system_settings (setting_name, is_enabled) VALUES ('maintenance_mode
 ON CONFLICT(setting_name) DO NOTHING;
 -- 'ON CONFLICT' ensures this doesn't error if schema is run multiple times,
 -- though for a fresh DB it's just an insert.
+
+CREATE TABLE IF NOT EXISTS va_vms_version_compatibility (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    va_version_id INTEGER NOT NULL,
+    vms_version_id INTEGER NOT NULL,
+    description TEXT,
+    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
+    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
+    FOREIGN KEY (va_version_id) REFERENCES versions (id) ON DELETE RESTRICT,
+    FOREIGN KEY (vms_version_id) REFERENCES versions (id) ON DELETE RESTRICT,
+    UNIQUE (va_version_id, vms_version_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_va_vms_compatibility_va_version_id ON va_vms_version_compatibility (va_version_id);
+CREATE INDEX IF NOT EXISTS idx_va_vms_compatibility_vms_version_id ON va_vms_version_compatibility (vms_version_id);
+
+CREATE TRIGGER IF NOT EXISTS update_va_vms_compatibility_updated_at
+AFTER UPDATE ON va_vms_version_compatibility FOR EACH ROW BEGIN
+    UPDATE va_vms_version_compatibility SET updated_at = (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')) WHERE id = OLD.id;
+END;
 
 CREATE TABLE IF NOT EXISTS notifications (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

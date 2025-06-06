@@ -5350,6 +5350,262 @@ def admin_create_version():
         app.logger.error(f"Admin create version Exception: {e}")
         return jsonify(msg="Server error creating version."), 500
 
+# --- VA-VMS Version Compatibility Admin Endpoints ---
+
+@app.route('/api/admin/va_vms_compatibility', methods=['POST'])
+@jwt_required()
+@admin_required
+def admin_add_va_vms_compatibility():
+    current_user_id = int(get_jwt_identity())
+    db = get_db()
+    data = request.get_json()
+
+    if not data:
+        return jsonify(msg="Missing JSON data"), 400
+
+    va_version_id = data.get('va_version_id')
+    vms_version_id = data.get('vms_version_id')
+    description = data.get('description', None) # Optional
+
+    if not va_version_id or not isinstance(va_version_id, int):
+        return jsonify(msg="va_version_id (integer) is required."), 400
+    if not vms_version_id or not isinstance(vms_version_id, int):
+        return jsonify(msg="vms_version_id (integer) is required."), 400
+
+    if description is not None and not isinstance(description, str):
+        return jsonify(msg="Description must be a string if provided."), 400
+
+    try:
+        # Check if both versions exist
+        va_exists = db.execute("SELECT 1 FROM versions WHERE id = ?", (va_version_id,)).fetchone()
+        vms_exists = db.execute("SELECT 1 FROM versions WHERE id = ?", (vms_version_id,)).fetchone()
+
+        if not va_exists:
+            return jsonify(msg=f"VA Version with ID {va_version_id} not found."), 404
+        if not vms_exists:
+            return jsonify(msg=f"VMS Version with ID {vms_version_id} not found."), 404
+
+        cursor = db.execute("""
+            INSERT INTO va_vms_version_compatibility (va_version_id, vms_version_id, description)
+            VALUES (?, ?, ?)
+        """, (va_version_id, vms_version_id, description))
+        new_compatibility_id = cursor.lastrowid
+        db.commit()
+
+        log_audit_action(
+            action_type='CREATE_VA_VMS_COMPATIBILITY',
+            target_table='va_vms_version_compatibility',
+            target_id=new_compatibility_id,
+            details={
+                'va_version_id': va_version_id,
+                'vms_version_id': vms_version_id,
+                'description': description
+            }
+        )
+
+        # Fetch the newly created record to return
+        new_compatibility_row = db.execute("SELECT * FROM va_vms_version_compatibility WHERE id = ?", (new_compatibility_id,)).fetchone()
+        if not new_compatibility_row:
+            app.logger.error(f"Failed to fetch newly created va_vms_compatibility record ID {new_compatibility_id}")
+            return jsonify(msg="Compatibility record created but failed to retrieve."), 500
+
+        processed_compatibility = convert_timestamps_to_ist_iso(dict(new_compatibility_row), ['created_at', 'updated_at'])
+        return jsonify(processed_compatibility), 201
+
+    except sqlite3.IntegrityError as e:
+        db.rollback()
+        if "UNIQUE constraint failed: va_vms_version_compatibility.va_version_id, va_vms_version_compatibility.vms_version_id" in str(e):
+            return jsonify(msg="This VA-VMS version compatibility link already exists."), 409
+        app.logger.error(f"Admin add VA-VMS compatibility DB IntegrityError: {e}")
+        return jsonify(msg=f"Database integrity error: {e}"), 409
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"Admin add VA-VMS compatibility Exception: {e}")
+        return jsonify(msg="Server error creating VA-VMS compatibility record."), 500
+
+@app.route('/api/admin/va_vms_compatibility', methods=['GET'])
+@jwt_required()
+@admin_required
+def admin_get_va_vms_compatibility_list():
+    db = get_db()
+    page = request.args.get('page', default=1, type=int)
+    per_page = request.args.get('per_page', default=10, type=int)
+    va_version_id_filter = request.args.get('va_version_id', type=int)
+    vms_version_id_filter = request.args.get('vms_version_id', type=int)
+
+    if page <= 0: page = 1
+    if per_page <= 0: per_page = 10
+    if per_page > 100: per_page = 100
+
+    select_query = """
+        SELECT
+            vc.id,
+            vc.va_version_id,
+            va_v.version_number as va_version_number,
+            va_s.name as va_software_name,
+            vc.vms_version_id,
+            vms_v.version_number as vms_version_number,
+            vms_s.name as vms_software_name,
+            vc.description,
+            vc.created_at,
+            vc.updated_at
+        FROM va_vms_version_compatibility vc
+        JOIN versions va_v ON vc.va_version_id = va_v.id
+        JOIN software va_s ON va_v.software_id = va_s.id
+        JOIN versions vms_v ON vc.vms_version_id = vms_v.id
+        JOIN software vms_s ON vms_v.software_id = vms_s.id
+    """
+    count_query = "SELECT COUNT(vc.id) as count FROM va_vms_version_compatibility vc"
+
+    params = []
+    filter_conditions = []
+
+    if va_version_id_filter:
+        filter_conditions.append("vc.va_version_id = ?")
+        params.append(va_version_id_filter)
+
+    if vms_version_id_filter:
+        filter_conditions.append("vc.vms_version_id = ?")
+        params.append(vms_version_id_filter)
+
+    if filter_conditions:
+        where_clause = " WHERE " + " AND ".join(filter_conditions)
+        select_query += where_clause
+        count_query += where_clause
+
+    try:
+        total_records_cursor = db.execute(count_query, tuple(params))
+        total_records = total_records_cursor.fetchone()['count']
+
+        total_pages = math.ceil(total_records / per_page) if total_records > 0 else 1
+        offset = (page - 1) * per_page
+        if page > total_pages and total_records > 0:
+            page = total_pages
+            offset = (page - 1) * per_page
+
+        select_query += " ORDER BY vc.id DESC LIMIT ? OFFSET ?"
+        params.extend([per_page, offset])
+
+        records_cursor = db.execute(select_query, tuple(params))
+        records_list_raw = [dict(row) for row in records_cursor.fetchall()]
+
+        timestamp_keys = ['created_at', 'updated_at']
+        records_list = [convert_timestamps_to_ist_iso(record, timestamp_keys) for record in records_list_raw]
+
+        return jsonify({
+            "compatibility_records": records_list,
+            "page": page,
+            "per_page": per_page,
+            "total_records": total_records,
+            "total_pages": total_pages
+        }), 200
+
+    except Exception as e:
+        app.logger.error(f"Admin get VA-VMS compatibility list Exception: {e}")
+        return jsonify(msg="Server error retrieving VA-VMS compatibility list."), 500
+
+@app.route('/api/admin/va_vms_compatibility/<int:compatibility_id>', methods=['PUT'])
+@jwt_required()
+@admin_required
+def admin_update_va_vms_compatibility(compatibility_id):
+    current_user_id = int(get_jwt_identity())
+    db = get_db()
+    data = request.get_json()
+
+    if not data:
+        return jsonify(msg="Missing JSON data"), 400
+
+    description = data.get('description') # Only description is updatable
+
+    if description is None: # If description is explicitly set to null or not provided
+        return jsonify(msg="Description field is required in the payload."), 400
+    if not isinstance(description, str):
+        return jsonify(msg="Description must be a string."), 400
+
+    try:
+        # Check if the record exists
+        existing_record = db.execute("SELECT * FROM va_vms_version_compatibility WHERE id = ?", (compatibility_id,)).fetchone()
+        if not existing_record:
+            return jsonify(msg=f"VA-VMS Compatibility record with ID {compatibility_id} not found."), 404
+
+        db.execute("""
+            UPDATE va_vms_version_compatibility
+            SET description = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (description, compatibility_id))
+        # The updated_at trigger should handle the timestamp, but explicit update is fine.
+        # If using the trigger, `updated_at = CURRENT_TIMESTAMP` can be removed from here.
+        # For now, keeping it explicit as per schema definition for other tables.
+        # Let's rely on the trigger:
+        # db.execute("UPDATE va_vms_version_compatibility SET description = ? WHERE id = ?", (description, compatibility_id))
+
+        db.commit()
+
+        log_audit_action(
+            action_type='UPDATE_VA_VMS_COMPATIBILITY',
+            target_table='va_vms_version_compatibility',
+            target_id=compatibility_id,
+            details={
+                'old_description': existing_record['description'],
+                'new_description': description
+            }
+        )
+
+        updated_record_row = db.execute("SELECT * FROM va_vms_version_compatibility WHERE id = ?", (compatibility_id,)).fetchone()
+        if not updated_record_row: # Should not happen
+             app.logger.error(f"Failed to fetch updated va_vms_compatibility record ID {compatibility_id}")
+             return jsonify(msg="Compatibility record updated but failed to retrieve."), 500
+
+        processed_record = convert_timestamps_to_ist_iso(dict(updated_record_row), ['created_at', 'updated_at'])
+        return jsonify(processed_record), 200
+
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"Admin update VA-VMS compatibility ID {compatibility_id} Exception: {e}")
+        return jsonify(msg="Server error updating VA-VMS compatibility record."), 500
+
+@app.route('/api/admin/va_vms_compatibility/<int:compatibility_id>', methods=['DELETE'])
+@jwt_required()
+@admin_required
+def admin_delete_va_vms_compatibility(compatibility_id):
+    current_user_id = int(get_jwt_identity())
+    db = get_db()
+
+    try:
+        # Check if the record exists for logging old data
+        existing_record = db.execute("SELECT * FROM va_vms_version_compatibility WHERE id = ?", (compatibility_id,)).fetchone()
+        if not existing_record:
+            return jsonify(msg=f"VA-VMS Compatibility record with ID {compatibility_id} not found."), 404
+
+        delete_cursor = db.execute("DELETE FROM va_vms_version_compatibility WHERE id = ?", (compatibility_id,))
+        db.commit()
+
+        if delete_cursor.rowcount == 0: # Should be caught by the check above, but as a safeguard
+            return jsonify(msg=f"VA-VMS Compatibility record with ID {compatibility_id} not found or already deleted."), 404
+
+        log_audit_action(
+            action_type='DELETE_VA_VMS_COMPATIBILITY',
+            target_table='va_vms_version_compatibility',
+            target_id=compatibility_id,
+            details={
+                'deleted_va_version_id': existing_record['va_version_id'],
+                'deleted_vms_version_id': existing_record['vms_version_id'],
+                'deleted_description': existing_record['description']
+            }
+        )
+
+        return jsonify(msg="VA-VMS Compatibility record deleted successfully."), 200 # Or 204 No Content
+
+    except sqlite3.IntegrityError as e:
+        # This might happen if other tables have RESTRICT FKs to this table, though unlikely for this specific table.
+        db.rollback()
+        app.logger.error(f"Admin delete VA-VMS compatibility ID {compatibility_id} IntegrityError: {e}")
+        return jsonify(msg=f"Database integrity error: Cannot delete record. It might be referenced by other data. Details: {e}"), 409
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"Admin delete VA-VMS compatibility ID {compatibility_id} Exception: {e}")
+        return jsonify(msg="Server error deleting VA-VMS compatibility record."), 500
+
 @app.route('/api/admin/versions', methods=['GET'])
 @jwt_required()
 @admin_required
@@ -6027,6 +6283,73 @@ def search_api():
     results.extend([dict(row) for row in db.execute(sql_versions_query, tuple(final_version_params)).fetchall()])
 
     return jsonify(results)
+
+# --- Public VA-VMS Version Compatibility Endpoints ---
+
+@app.route('/api/compatibility/va_version/<int:va_version_id>', methods=['GET'])
+def get_vms_compatibility_for_va_version(va_version_id):
+    db = get_db()
+    try:
+        # Check if the provided va_version_id exists
+        va_version_exists = db.execute("SELECT 1 FROM versions WHERE id = ?", (va_version_id,)).fetchone()
+        if not va_version_exists:
+            return jsonify(msg=f"VA Version with ID {va_version_id} not found."), 404
+
+        query = """
+            SELECT
+                vc.id as compatibility_id,
+                vc.vms_version_id,
+                vms_v.version_number as vms_version_number,
+                vms_s.name as vms_software_name,
+                vc.description
+            FROM va_vms_version_compatibility vc
+            JOIN versions vms_v ON vc.vms_version_id = vms_v.id
+            JOIN software vms_s ON vms_v.software_id = vms_s.id
+            WHERE vc.va_version_id = ?
+            ORDER BY vms_s.name, vms_v.release_date DESC, vms_v.version_number DESC;
+        """
+        compatibilities_cursor = db.execute(query, (va_version_id,))
+        compatibilities_list = [dict(row) for row in compatibilities_cursor.fetchall()]
+
+        # Timestamps are not included in the response for these public endpoints as per requirements.
+        # If they were, convert_timestamps_to_ist_iso would be used here.
+
+        return jsonify(compatibilities_list), 200
+
+    except Exception as e:
+        app.logger.error(f"Error getting VMS compatibility for VA version {va_version_id}: {e}")
+        return jsonify(msg="Server error retrieving compatibility data."), 500
+
+@app.route('/api/compatibility/vms_version/<int:vms_version_id>', methods=['GET'])
+def get_va_compatibility_for_vms_version(vms_version_id):
+    db = get_db()
+    try:
+        # Check if the provided vms_version_id exists
+        vms_version_exists = db.execute("SELECT 1 FROM versions WHERE id = ?", (vms_version_id,)).fetchone()
+        if not vms_version_exists:
+            return jsonify(msg=f"VMS Version with ID {vms_version_id} not found."), 404
+
+        query = """
+            SELECT
+                vc.id as compatibility_id,
+                vc.va_version_id,
+                va_v.version_number as va_version_number,
+                va_s.name as va_software_name,
+                vc.description
+            FROM va_vms_version_compatibility vc
+            JOIN versions va_v ON vc.va_version_id = va_v.id
+            JOIN software va_s ON va_v.software_id = va_s.id
+            WHERE vc.vms_version_id = ?
+            ORDER BY va_s.name, va_v.release_date DESC, va_v.version_number DESC;
+        """
+        compatibilities_cursor = db.execute(query, (vms_version_id,))
+        compatibilities_list = [dict(row) for row in compatibilities_cursor.fetchall()]
+
+        return jsonify(compatibilities_list), 200
+
+    except Exception as e:
+        app.logger.error(f"Error getting VA compatibility for VMS version {vms_version_id}: {e}")
+        return jsonify(msg="Server error retrieving compatibility data."), 500
 
 # --- CLI Command ---
 @app.cli.command('init-db')

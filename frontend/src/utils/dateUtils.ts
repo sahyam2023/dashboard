@@ -33,7 +33,8 @@ export function formatDateDisplay(dateString: string | null | undefined): string
   }
 }
 
-export function formatToISTLocaleString(isoTimestamp: string): string {
+// Renamed from formatToISTLocaleString to be more generic for UI display
+export function formatDate(isoTimestamp: string | null | undefined): string {
   if (!isoTimestamp) {
     return 'N/A';
   }
@@ -55,7 +56,7 @@ export function formatToISTLocaleString(isoTimestamp: string): string {
 
     return date.toLocaleString('en-IN', options); // e.g., "dd/mm/yyyy, h:mm:ss AM/PM"
   } catch (error) {
-    console.error('Error formatting timestamp to IST locale string:', isoTimestamp, error);
+    console.error('Error formatting timestamp to locale string:', isoTimestamp, error);
     // Check if the original string was "Invalid Date" or similar from backend already
     if (typeof isoTimestamp === 'string' && isoTimestamp.toLowerCase().includes('invalid date')) {
         return isoTimestamp;
@@ -65,6 +66,7 @@ export function formatToISTLocaleString(isoTimestamp: string): string {
 }
 
 // Utility to format just the date part in YYYY-MM-DD for input fields
+// Keeps the original formatDateForInput as it serves a different purpose
 export function formatDateForInput(isoTimestamp: string | null | undefined): string {
   if (!isoTimestamp) {
     return '';

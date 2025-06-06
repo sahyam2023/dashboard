@@ -15,9 +15,13 @@ import {
   bulkDownloadItems,
   bulkMoveItems,
   BulkItemType,
+  getPublicVmsCompatibilityForVaVersion, // Added for VMS compat
+  PublicVmsCompatibilityInfo, // Added for VMS compat
 } from '../services/api';
 import { Patch as PatchType, Software, SoftwareVersion } from '../types';
-import CommentSection from '../components/comments/CommentSection'; // Added CommentSection
+// PublicVmsCompatibilityInfo might also be in types, but api.ts re-declares it for now.
+// If it's moved to types/index.ts, this import might change.
+import CommentSection from '../components/comments/CommentSection';
 import DataTable, { ColumnDef } from '../components/DataTable';
 import { formatToISTLocaleString, formatDateDisplay } from '../utils'; // Updated import
 import FilterTabs from '../components/FilterTabs';
@@ -88,6 +92,11 @@ const role = user?.role; // Access role safely, as user can be null
   const [selectedPatchForComments, setSelectedPatchForComments] = useState<PatchType | null>(null);
   const commentSectionRef = useRef<HTMLDivElement>(null);
   const location = useLocation(); // Added useLocation
+
+  // State for VMS Compatibility
+  const [compatibilityInfo, setCompatibilityInfo] = useState<PublicVmsCompatibilityInfo[] | null>(null);
+  const [loadingCompatibility, setLoadingCompatibility] = useState<boolean>(false);
+  const [selectedVaPatchForCompat, setSelectedVaPatchForCompat] = useState<PatchType | null>(null);
 
   const filtersAreActive = useMemo(() => {
     return (
@@ -176,6 +185,9 @@ useEffect(() => {
   useEffect(() => {
     if (isAuthenticated) fetchAndSetPatches(1, true);
     else { setPatches([]); setIsLoadingInitial(false); }
+    // Reset compatibility info when main filters change
+    setSelectedVaPatchForCompat(null);
+    setCompatibilityInfo(null);
   }, [isAuthenticated, selectedSoftwareId, sortBy, sortOrder, debouncedReleaseFromFilter, debouncedReleaseToFilter, debouncedPatchedByDeveloperFilter, searchTerm, fetchAndSetPatches]); // Added searchTerm
 
   // Effect to handle focusing on a comment if item_id and comment_id are in URL
@@ -232,6 +244,9 @@ useEffect(() => {
 
   const handleOperationSuccess = (message: string) => {
     setShowAddOrEditForm(false); setEditingPatch(null); /* showSuccessToast(message); */ fetchAndSetPatches(1, true);
+    // Reset compatibility info when form (add/edit) succeeds, as version might change
+    setSelectedVaPatchForCompat(null);
+    setCompatibilityInfo(null);
   };
   
   const openAddForm = () => { setEditingPatch(null); setShowAddOrEditForm(true); };
@@ -376,6 +391,45 @@ useEffect(() => {
   const columns: ColumnDef<PatchType>[] = [
     { key: 'patch_name', header: 'Patch Name', sortable: true }, { key: 'software_name', header: 'Software', sortable: true },
     { key: 'version_number', header: 'Version', sortable: true },
+    {
+      key: 'vms_compatibility',
+      header: 'VMS Compatibility',
+      render: (p: PatchType) => {
+        if (p.software_name?.toUpperCase() !== 'VA') {
+          return <Typography variant="caption" color="textSecondary">-</Typography>;
+        }
+        // If this patch is the one for which we have compatibility info
+        if (selectedVaPatchForCompat && selectedVaPatchForCompat.id === p.id) {
+          if (loadingCompatibility) {
+            return <CircularProgress size={16} />;
+          }
+          if (compatibilityInfo && compatibilityInfo.length > 0) {
+            return (
+              <Box sx={{ fontSize: '0.75rem', maxHeight: '100px', overflowY: 'auto' }}>
+                {compatibilityInfo.map(comp => (
+                  <Typography key={comp.compatibility_id} variant="caption" display="block" title={comp.description || ''}>
+                    {`${comp.vms_software_name} ${comp.vms_version_number}`}{comp.description ? ` (${comp.description.substring(0,30)}${comp.description.length > 30 ? '...' : ''})` : ''}
+                  </Typography>
+                ))}
+              </Box>
+            );
+          }
+          if (compatibilityInfo && compatibilityInfo.length === 0) {
+             return <Typography variant="caption" color="textSecondary">None specified.</Typography>;
+          }
+        }
+        // Button to load/show compatibility
+        return (
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={(e) => { e.stopPropagation(); fetchCompatibilityForVaPatch(p); }}
+          >
+            Show VMS Info
+          </Button>
+        );
+      }
+    },
     { key: 'patch_by_developer', header: 'Developer', sortable: true, render: p => p.patch_by_developer || '-' },
     { key: 'description', header: 'Description', render: p => <span className="text-sm text-gray-600 block max-w-xs truncate" title={p.description||''}>{p.description||'-'}</span> },
     { key: 'release_date', header: 'Release Date', sortable: true, render: (item: PatchType) => formatDateDisplay(item.release_date) }, // Stays the same
@@ -463,6 +517,26 @@ useEffect(() => {
   ];
   
   const loadPatchesCallback = useCallback(() => { fetchAndSetPatches(1, true); }, [fetchAndSetPatches]);
+
+  const fetchCompatibilityForVaPatch = async (vaPatch: PatchType) => {
+    if (vaPatch.software_name?.toUpperCase() === 'VA' && vaPatch.version_id) {
+      setSelectedVaPatchForCompat(vaPatch);
+      setLoadingCompatibility(true);
+      setCompatibilityInfo(null); // Clear previous info
+      try {
+        const data = await getPublicVmsCompatibilityForVaVersion(vaPatch.version_id);
+        setCompatibilityInfo(data);
+      } catch (error) {
+        showErrorToast('Failed to load VMS compatibility for this VA patch.');
+        setCompatibilityInfo([]); // Set to empty array on error to indicate fetch attempt
+      } finally {
+        setLoadingCompatibility(false);
+      }
+    } else {
+      setSelectedVaPatchForCompat(null);
+      setCompatibilityInfo(null);
+    }
+  };
 
   const handleFavoriteToggle = async (item: PatchType, itemType: FavoriteItemType) => {
     if (!isAuthenticated) { showErrorToast("Please log in to manage favorites."); return; }

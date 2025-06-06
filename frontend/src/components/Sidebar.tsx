@@ -8,7 +8,8 @@ import {
   MoreHorizontal,
   UploadCloud as UploadIcon, // <-- Import an icon for Upload
   Settings as SettingsIcon, // Icon for "Manage Versions"
-  Star as StarIcon // Added for Favorites
+  Star as StarIcon, // Added for Favorites
+  GitMerge, // Added for VA/VMS Compatibility
   // LogIn as LogInIcon, 
   // UserPlus as RegisterIcon 
 } from 'lucide-react';
@@ -71,6 +72,13 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       icon: (isCollapsed) => <SettingsIcon size={isCollapsed ? 24 : 20} />,
       requiresAuth: true,
       roles: ['admin', 'super_admin'], // Only for admin and super_admin
+    },
+    {
+      path: '/admin/va-vms-compatibility',
+      label: 'VA/VMS Compatibility',
+      icon: (isCollapsed) => <GitMerge size={isCollapsed ? 24 : 20} />,
+      requiresAuth: true,
+      roles: ['admin', 'super_admin'],
     },
     // Example: Login/Register links in sidebar (though typically in header)
     // {

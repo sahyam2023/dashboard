@@ -142,6 +142,7 @@ function AppContent() {
               <Route path="dashboard" element={<AdminDashboardPage />} />
               <Route path="versions" element={<AdminVersionsPage />} />
               <Route path="audit-logs" element={<AuditLogViewer />} />
+              <Route path="va-vms-compatibility" element={<AdminVaVmsCompatibilityPage />} />
               {/* Add other admin routes here */}
             </Route>
           </Route>

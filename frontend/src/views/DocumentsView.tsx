@@ -27,6 +27,7 @@ import ConfirmationModal from '../components/shared/ConfirmationModal';
 import Modal from '../components/shared/Modal';
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils';
 import CommentSection from '../components/comments/CommentSection';
+import { Box, Typography } from '@mui/material'; // Ensure Box and Typography are imported
 
 interface OutletContextType {
   searchTerm: string;
@@ -431,7 +432,22 @@ useEffect(() => {
 
   const columns: ColumnDef<DocumentType>[] = [
     { key: 'doc_name', header: 'Name', sortable: true }, { key: 'doc_type', header: 'Type', sortable: true },
-    { key: 'software_name', header: 'Software', sortable: true },
+    // { key: 'software_name', header: 'Software', sortable: true },
+    {
+      key: 'software_name',
+      header: 'Software',
+      sortable: true,
+      render: (d: DocumentType) => (
+        <Box>
+          <Typography variant="body2">{d.software_name}</Typography>
+          {d.software_name?.toUpperCase() === 'VA' && (
+            <Typography variant="caption" color="textSecondary" display="block" sx={{ mt: 0.5 }}>
+              (Note: VMS compatibility is managed at the VA version level.)
+            </Typography>
+          )}
+        </Box>
+      )
+    },
     { key: 'description', header: 'Description', render: (d: DocumentType) => <span className="text-sm text-gray-600 block max-w-xs truncate" title={d.description||''}>{d.description||'-'}</span> },
     { 
       key: 'download_link', 

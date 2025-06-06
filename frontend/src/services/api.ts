@@ -2455,6 +2455,39 @@ export async function confirmDatabaseReset(payload: DatabaseResetConfirmPayload)
 }
 // --- End Super Admin Database Reset Functions ---
 
+// --- Public VA-VMS Compatibility API Functions ---
+export interface PublicVmsCompatibilityInfo { // Re-declaring here, ensure it matches types/index.ts if moved
+  compatibility_id: number;
+  vms_version_id: number;
+  vms_version_number: string;
+  vms_software_name: string;
+  description?: string | null;
+}
+
+export const getPublicVmsCompatibilityForVaVersion = async (vaVersionId: number): Promise<PublicVmsCompatibilityInfo[]> => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/compatibility/va_version/${vaVersionId}`, {
+      method: 'GET',
+      headers: {
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
+    });
+    // Assuming handleApiError can parse a simple array response.
+    // If the endpoint returns an object like { compatibilities: [] }, this needs adjustment.
+    // Based on the backend implementation, it directly returns an array.
+    return handleApiError(response, `Failed to fetch VMS compatibility for VA version ${vaVersionId}`);
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error(`Error fetching VMS compatibility for VA version ${vaVersionId}:`, error);
+    throw error;
+  }
+};
+// --- End Public VA-VMS Compatibility API Functions ---
+
 // --- Large File Upload (Chunked) ---
 
 function generateUUID() { // Public Domain/MIT

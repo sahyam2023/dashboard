@@ -4,10 +4,13 @@ import { useOutletContext, useLocation } from 'react-router-dom';
 import {
   fetchLinks, fetchSoftware, fetchVersionsForSoftware, deleteAdminLink,
   PaginatedLinksResponse, addFavoriteApi, removeFavoriteApi, FavoriteItemType,
-  bulkDeleteItems, bulkDownloadItems, bulkMoveItems, BulkItemType
+  bulkDeleteItems, bulkDownloadItems, bulkMoveItems, BulkItemType,
+  getPublicVmsCompatibilityForVaVersion, // Added for VMS compat
+  PublicVmsCompatibilityInfo, // Added for VMS compat
 } from '../services/api';
 import { Link as LinkType, Software, SoftwareVersion } from '../types'; // LinkType is already here
-import CommentSection from '../components/comments/CommentSection'; // Added CommentSection
+// PublicVmsCompatibilityInfo might also be in types, but api.ts re-declares it for now.
+import CommentSection from '../components/comments/CommentSection';
 import DataTable, { ColumnDef } from '../components/DataTable';
 import { formatToISTLocaleString } from '../utils'; // Updated import
 import FilterTabs from '../components/FilterTabs';
@@ -82,6 +85,11 @@ const LinksView: React.FC = () => {
   const commentSectionRef = useRef<HTMLDivElement>(null);
   const location = useLocation(); // Added useLocation
 
+  // State for VMS Compatibility
+  const [linkCompatibilityInfo, setLinkCompatibilityInfo] = useState<PublicVmsCompatibilityInfo[] | null>(null);
+  const [loadingLinkCompatibility, setLoadingLinkCompatibility] = useState<boolean>(false);
+  const [selectedVaLinkForCompat, setSelectedVaLinkForCompat] = useState<LinkType | null>(null);
+
   const filtersAreActive = useMemo(() => {
     return activeSoftwareId !== null || activeVersionId !== null || linkTypeFilter !== '' || createdFromFilter !== '' || createdToFilter !== '' || searchTerm !== '';
   }, [activeSoftwareId, activeVersionId, linkTypeFilter, createdFromFilter, createdToFilter, searchTerm]);
@@ -139,6 +147,9 @@ const LinksView: React.FC = () => {
   useEffect(() => {
     if (isAuthenticated) fetchAndSetLinks(1, true);
     else { setLinks([]); setIsLoadingInitial(false); }
+    // Reset compatibility info when main filters change
+    setSelectedVaLinkForCompat(null);
+    setLinkCompatibilityInfo(null);
   }, [isAuthenticated, activeSoftwareId, activeVersionId, sortBy, sortOrder, linkTypeFilter, debouncedCreatedFromFilter, debouncedCreatedToFilter, searchTerm, fetchAndSetLinks]); // Added searchTerm
 
   useEffect(() => { setSelectedLinkIds(new Set()); }, [activeSoftwareId, activeVersionId, sortBy, sortOrder, linkTypeFilter, debouncedCreatedFromFilter, debouncedCreatedToFilter, searchTerm, currentPage]);
@@ -192,6 +203,9 @@ const LinksView: React.FC = () => {
     setEditingLink(null);
     /* showSuccessToast(message); */
     await fetchAndSetLinks(1, true); // Await this
+    // Reset compatibility info when form (add/edit) succeeds
+    setSelectedVaLinkForCompat(null);
+    setLinkCompatibilityInfo(null);
 
     // After successful link addition/update, refresh versionList if a software filter is active
     if (activeSoftwareId) {
@@ -301,6 +315,45 @@ const LinksView: React.FC = () => {
   const columns: ColumnDef<LinkType>[] = [
     { key: 'title', header: 'Title', sortable: true }, { key: 'software_name', header: 'Software', sortable: true },
     { key: 'version_name', header: 'Version', sortable: true, render: l => l.version_name || 'N/A' },
+    {
+      key: 'vms_compatibility',
+      header: 'VMS Compatibility',
+      render: (l: LinkType) => {
+        // Ensure software_name and version_id are present on LinkType if they can be optional
+        if (l.software_name?.toUpperCase() !== 'VA' || !l.version_id) {
+          return <Typography variant="caption" color="textSecondary">-</Typography>;
+        }
+        if (selectedVaLinkForCompat && selectedVaLinkForCompat.id === l.id) {
+          if (loadingLinkCompatibility) {
+            return <CircularProgress size={16} />;
+          }
+          if (linkCompatibilityInfo && linkCompatibilityInfo.length > 0) {
+            return (
+              <Box sx={{ fontSize: '0.75rem', maxHeight: '100px', overflowY: 'auto' }}>
+                {linkCompatibilityInfo.map(comp => (
+                  <Typography key={comp.compatibility_id} variant="caption" display="block" title={comp.description || undefined}>
+                    {`${comp.vms_software_name} ${comp.vms_version_number}`}{comp.description ? ` (${comp.description.substring(0,30)}${comp.description.length > 30 ? '...' : ''})` : ''}
+                  </Typography>
+                ))}
+              </Box>
+            );
+          }
+          if (linkCompatibilityInfo && linkCompatibilityInfo.length === 0) {
+             return <Typography variant="caption" color="textSecondary">None specified.</Typography>;
+          }
+        }
+        return (
+          <Button
+            size="small"
+            variant="text" // Using text variant for a less prominent look initially
+            onClick={(e) => { e.stopPropagation(); fetchCompatibilityForVaLink(l); }}
+            sx={{p:0, minWidth: 'auto', textTransform: 'none'}} // Minimal styling
+          >
+            Show VMS Info
+          </Button>
+        );
+      }
+    },
     { key: 'description', header: 'Description', render: l => <span className="text-sm text-gray-600 block max-w-xs truncate" title={l.description || ''}>{l.description || '-'}</span> },
     {
       // THIS IS THE PART TO CHANGE
@@ -397,6 +450,26 @@ const LinksView: React.FC = () => {
   ];
 
   const loadLinksCallback = useCallback(() => { fetchAndSetLinks(1, true); }, [fetchAndSetLinks]);
+
+  const fetchCompatibilityForVaLink = async (vaLink: LinkType) => {
+    if (vaLink.software_name?.toUpperCase() === 'VA' && vaLink.version_id) {
+      setSelectedVaLinkForCompat(vaLink);
+      setLoadingLinkCompatibility(true);
+      setLinkCompatibilityInfo(null);
+      try {
+        const data = await getPublicVmsCompatibilityForVaVersion(vaLink.version_id); // API function from previous step
+        setLinkCompatibilityInfo(data);
+      } catch (error) {
+        showErrorToast('Failed to load VMS compatibility for this VA link.');
+        setLinkCompatibilityInfo([]);
+      } finally {
+        setLoadingLinkCompatibility(false);
+      }
+    } else {
+      setSelectedVaLinkForCompat(null);
+      setLinkCompatibilityInfo(null);
+    }
+  };
 
   const handleFavoriteToggle = async (item: LinkType, itemType: FavoriteItemType) => {
     if (!isAuthenticated) { showErrorToast("Please log in to manage favorites."); return; }

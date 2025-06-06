@@ -10,3 +10,5 @@ Werkzeug
 APScheduler
 click
 waitress
+thefuzz
+python-Levenshtein

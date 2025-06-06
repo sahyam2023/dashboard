@@ -132,7 +132,8 @@ const role = user?.role; // Access role safely, as user can be null
 
     try {
       const response: PaginatedMiscFilesResponse = await fetchMiscFiles(
-        activeCategoryId || undefined, pageToLoad, itemsPerPage, sortBy, sortOrder
+        activeCategoryId || undefined, pageToLoad, itemsPerPage, sortBy, sortOrder,
+        searchTerm // Pass searchTerm here
       );
       setMiscFiles(response.misc_files);
       setTotalPages(response.total_pages);
@@ -150,12 +151,12 @@ const role = user?.role; // Access role safely, as user can be null
     } finally {
       if (isNewQuery) setIsLoadingInitial(false);
     }
-  }, [activeCategoryId, itemsPerPage, sortBy, sortOrder, isAuthenticated]);
+  }, [activeCategoryId, itemsPerPage, sortBy, sortOrder, isAuthenticated, searchTerm]); // Added searchTerm to dependency array
 
   useEffect(() => {
     if (isAuthenticated) fetchAndSetMiscFiles(1, true);
     else { setMiscFiles([]); setIsLoadingInitial(false); }
-  }, [isAuthenticated, activeCategoryId, sortBy, sortOrder, fetchAndSetMiscFiles]);
+  }, [isAuthenticated, activeCategoryId, sortBy, sortOrder, searchTerm, fetchAndSetMiscFiles]); // Added searchTerm to fetchAndSetMiscFiles call
   
   useEffect(() => { setSelectedMiscFileIds(new Set()); }, [activeCategoryId, sortBy, sortOrder, searchTerm, currentPage]);
 
@@ -209,14 +210,12 @@ const role = user?.role; // Access role safely, as user can be null
     finally { setIsProcessingSingleItem(false); }
   };
 
-  const filteredMiscFilesBySearch = useMemo(() => {
-    if (!searchTerm) return miscFiles;
-    const lower = searchTerm.toLowerCase();
-    return miscFiles.filter(f => (f.user_provided_title||'').toLowerCase().includes(lower) || f.original_filename.toLowerCase().includes(lower) || (f.user_provided_description||'').toLowerCase().includes(lower) || (f.category_name||'').toLowerCase().includes(lower));
-  }, [miscFiles, searchTerm]);
+  // No longer need filteredMiscFilesBySearch, miscFiles state will be used directly
+  // const filteredMiscFilesBySearch = useMemo(() => { ... }, [miscFiles, searchTerm]);
 
   const handleSelectItem = (id: number, isSelected: boolean) => setSelectedMiscFileIds(prev => { const n = new Set(prev); if (isSelected) n.add(id); else n.delete(id); return n; });
-  const handleSelectAllItems = (isSelected: boolean) => { const n = new Set<number>(); if (isSelected) filteredMiscFilesBySearch.forEach(f => n.add(f.id)); setSelectedMiscFileIds(n); };
+  // handleSelectAllItems will now use 'miscFiles' directly
+  const handleSelectAllItems = (isSelected: boolean) => { const n = new Set<number>(); if (isSelected) miscFiles.forEach(f => n.add(f.id)); setSelectedMiscFileIds(n); };
 
   const handleBulkDeleteMiscFilesClick = () => { if (selectedMiscFileIds.size === 0) { showErrorToast("No items selected."); return; } setShowBulkDeleteConfirmModal(true); };
   const confirmBulkDeleteMiscFiles = async () => {
@@ -451,7 +450,7 @@ const role = user?.role; // Access role safely, as user can be null
             {filtersAreActive && (<button onClick={handleClearAllFiltersAndSearch} className="mt-6 btn-primary text-sm">Clear All Filters & Search</button>)}
           </div>
         ) : (
-          <DataTable columns={columns} data={filteredMiscFilesBySearch} rowClassName="group" isLoading={isLoadingInitial || isProcessingSingleItem} currentPage={currentPage} totalPages={totalPages} onPageChange={handlePageChange} itemsPerPage={itemsPerPage} totalItems={totalMiscFiles} sortColumn={sortBy} sortOrder={sortOrder} onSort={handleSort} isSelectionEnabled={true} selectedItemIds={selectedMiscFileIds} onSelectItem={handleSelectItem} onSelectAllItems={handleSelectAllItems} />
+        <DataTable columns={columns} data={miscFiles} rowClassName="group" isLoading={isLoadingInitial || isProcessingSingleItem} currentPage={currentPage} totalPages={totalPages} onPageChange={handlePageChange} itemsPerPage={itemsPerPage} totalItems={totalMiscFiles} sortColumn={sortBy} sortOrder={sortOrder} onSort={handleSort} isSelectionEnabled={true} selectedItemIds={selectedMiscFileIds} onSelectItem={handleSelectItem} onSelectAllItems={handleSelectAllItems} />
       )}
 
       {showDeleteCategoryConfirm && categoryToDelete && (<ConfirmationModal isOpen={showDeleteCategoryConfirm} title="Delete Category" message={`Delete category "${categoryToDelete.name}"? Files in it won't be deleted but will become uncategorized.`} onConfirm={handleDeleteCategoryConfirm} onCancel={closeDeleteCategoryConfirm} isConfirming={isProcessingCategory} confirmButtonText="Delete" confirmButtonVariant="danger"/>)}

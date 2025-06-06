@@ -981,7 +981,8 @@ export async function fetchLinks(
   // <<< --- ADD NEW PARAMETERS HERE (linkType, createdFrom, createdTo) --- >>>
   linkType?: 'external' | 'uploaded' | string,
   createdFrom?: string,
-  createdTo?: string
+  createdTo?: string,
+  search?: string // Added search parameter
 ): Promise<PaginatedLinksResponse> {
   try {
     const params = new URLSearchParams();
@@ -996,6 +997,7 @@ export async function fetchLinks(
     if (linkType) params.append('link_type', linkType);
     if (createdFrom) params.append('created_from', createdFrom);
     if (createdTo) params.append('created_to', createdTo);
+    if (search && search.trim() !== '') params.append('search', search); // Add search to params if provided
     
     const queryString = params.toString();
     const url = `${API_BASE_URL}/api/links${queryString ? `?${queryString}` : ''}`;
@@ -1031,7 +1033,8 @@ export async function fetchDocuments(
   createdFrom?: string, // New
   createdTo?: string, // New
   updatedFrom?: string, // New
-  updatedTo?: string // New
+  updatedTo?: string, // New
+  search?: string // Added search parameter
 ): Promise<PaginatedDocumentsResponse> {
   try {
     const params = new URLSearchParams();
@@ -1047,6 +1050,7 @@ export async function fetchDocuments(
     if (createdTo) params.append('created_to', createdTo);
     if (updatedFrom) params.append('updated_from', updatedFrom);
     if (updatedTo) params.append('updated_to', updatedTo);
+    if (search && search.trim() !== '') params.append('search', search); // Add search to params if provided
     // <<< --- END OF NEW LOGIC --- >>>
 
     const queryString = params.toString();
@@ -1078,10 +1082,10 @@ export async function fetchPatches(
   perPage?: number,
   sortBy?: string,
   sortOrder?: 'asc' | 'desc',
-  // <<< --- ADD NEW PARAMETERS HERE --- >>>
   releaseFrom?: string,
   releaseTo?: string,
-  patchedByDeveloper?: string
+  patchedByDeveloper?: string,
+  search?: string // Added search parameter
 ): Promise<PaginatedPatchesResponse> {
   try {
     const params = new URLSearchParams();
@@ -1091,10 +1095,10 @@ export async function fetchPatches(
     if (sortBy) params.append('sort_by', sortBy);
     if (sortOrder) params.append('sort_order', sortOrder);
 
-    // <<< --- ADD LOGIC HERE TO APPEND NEW FILTER PARAMETERS --- >>>
     if (releaseFrom) params.append('release_from', releaseFrom);
     if (releaseTo) params.append('release_to', releaseTo);
     if (patchedByDeveloper) params.append('patched_by_developer', patchedByDeveloper);
+    if (search && search.trim() !== '') params.append('search', search); // Add search to params if provided
 
     const queryString = params.toString();
     const url = `${API_BASE_URL}/api/patches${queryString ? `?${queryString}` : ''}`;
@@ -1102,7 +1106,6 @@ export async function fetchPatches(
     const response = await fetch(url, {
       method: 'GET',
       headers: {
-        // Patches can be public or require auth depending on permissions
         ...getAuthHeader(),
         'Cache-Control': 'no-cache',
         'Pragma': 'no-cache',
@@ -1425,7 +1428,8 @@ export async function fetchMiscFiles(
   page?: number,
   perPage?: number,
   sortBy?: string,
-  sortOrder?: 'asc' | 'desc'
+  sortOrder?: 'asc' | 'desc',
+  search?: string // Added search parameter
 ): Promise<PaginatedMiscFilesResponse> {
   try {
     const params = new URLSearchParams();
@@ -1434,6 +1438,7 @@ export async function fetchMiscFiles(
     if (perPage) params.append('per_page', perPage.toString());
     if (sortBy) params.append('sort_by', sortBy);
     if (sortOrder) params.append('sort_order', sortOrder);
+    if (search && search.trim() !== '') params.append('search', search); // Add search to params if provided
 
     const queryString = params.toString();
     const url = `${API_BASE_URL}/api/misc_files${queryString ? `?${queryString}` : ''}`;
@@ -2565,72 +2570,3 @@ export async function uploadFileInChunks(
     throw error;
   }
 }
-
-// --- How to use uploadFileInChunks in a UI component ---
-//
-// import React, { useState } from 'react';
-// import { uploadFileInChunks } from './services/api'; // Adjust path as needed
-//
-// const FileUploaderComponent: React.FC = () => {
-//   const [uploadProgress, setUploadProgress] = useState(0);
-//   const [isUploading, setIsUploading] = useState(false);
-//   const [error, setError] = useState<string | null>(null);
-//   const [uploadResult, setUploadResult] = useState<any | null>(null);
-//
-//   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-//     const file = event.target.files?.[0];
-//     if (!file) return;
-//
-//     setIsUploading(true);
-//     setUploadProgress(0);
-//     setError(null);
-//     setUploadResult(null);
-//
-//     // Example metadata - this would come from your form state
-//     const itemType = 'document'; // Or 'patch', 'misc_file'
-//     const metadata = {
-//       software_id: '1', // Example: replace with actual ID
-//       doc_name: 'My Large Document via Chunks', // Example
-//       description: 'This is a description for the large file.',
-//       // Add other relevant metadata based on itemType:
-//       // For 'document': doc_type
-//       // For 'patch': version_id, patch_name, release_date, patch_by_developer
-//       // For 'misc_file': misc_category_id, user_provided_title (optional)
-//       // For 'link_file': software_id, version_id (optional), title
-//     };
-//
-//     try {
-//       const result = await uploadFileInChunks(file, itemType, metadata, (progress) => {
-//         setUploadProgress(progress);
-//         console.log(`Upload Progress: ${progress.toFixed(2)}%`);
-//       });
-//       setUploadResult(result);
-//       console.log('Upload successful:', result);
-//       // Handle successful upload (e.g., show success message, update UI state, clear file input)
-//     } catch (err: any) {
-//       console.error('Upload failed:', err);
-//       setError(err.message || 'An unknown error occurred during upload.');
-//       // Handle upload error (e.g., show error message to user)
-//     } finally {
-//       setIsUploading(false);
-//     }
-//   };
-//
-//   return (
-//     <div>
-//       <input type="file" onChange={handleFileChange} disabled={isUploading} />
-//       {isUploading && (
-//         <div>
-//           <p>Uploading: {uploadProgress.toFixed(2)}%</p>
-//           {/* You can use a proper progress bar component here */}
-//           <progress value={uploadProgress} max="100" style={{ width: '100%' }} />
-//         </div>
-//       )}
-//       {error && <p style={{ color: 'red' }}>Error: {error}</p>}
-//       {uploadResult && <p style={{ color: 'green' }}>Success! Server response: {JSON.stringify(uploadResult)}</p>}
-//     </div>
-//   );
-// };
-//
-// export default FileUploaderComponent;
-// --- End Large File Upload (Chunked) ---

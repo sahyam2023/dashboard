@@ -22,6 +22,7 @@ import ConfirmationModal from '../components/shared/ConfirmationModal';
 import Modal from '../components/shared/Modal';
 import { PlusCircle, Edit3, Trash2, ExternalLink, Star, Filter, ChevronUp, Link as LinkIconLucide, Download, Move, AlertTriangle, MessageSquare } from 'lucide-react'; // Added MessageSquare
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils';
+import { Box, Typography, CircularProgress, Button } from '@mui/material'; // Added MUI imports
 
 interface OutletContextType {
   searchTerm: string;

@@ -23,7 +23,8 @@ import { Patch as PatchType, Software, SoftwareVersion } from '../types';
 // If it's moved to types/index.ts, this import might change.
 import CommentSection from '../components/comments/CommentSection';
 import DataTable, { ColumnDef } from '../components/DataTable';
-import { formatToISTLocaleString, formatDateDisplay } from '../utils'; // Updated import
+// Ensure formatToISTLocaleString is used, formatDateDisplay for specific date-only fields
+import { formatToISTLocaleString, formatDateDisplay } from '../utils';
 import FilterTabs from '../components/FilterTabs';
 import LoadingState from '../components/LoadingState';
 import ErrorState from '../components/ErrorState';
@@ -33,6 +34,7 @@ import Fuse from 'fuse.js';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
 import Modal from '../components/shared/Modal';
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils'; 
+import { Box, Typography, CircularProgress, Button } from '@mui/material'; // Added MUI imports
 
 interface OutletContextType {
   searchTerm: string;
@@ -432,7 +434,7 @@ useEffect(() => {
     },
     { key: 'patch_by_developer', header: 'Developer', sortable: true, render: p => p.patch_by_developer || '-' },
     { key: 'description', header: 'Description', render: p => <span className="text-sm text-gray-600 block max-w-xs truncate" title={p.description||''}>{p.description||'-'}</span> },
-    { key: 'release_date', header: 'Release Date', sortable: true, render: (item: PatchType) => formatDateDisplay(item.release_date) }, // Stays the same
+    { key: 'release_date', header: 'Release Date', sortable: true, render: (item: PatchType) => formatDateDisplay(item.release_date) }, // formatDateDisplay is correct here
     { 
       key: 'download_link', 
       header: 'Link', 
@@ -464,8 +466,8 @@ useEffect(() => {
     },
     { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: p => p.uploaded_by_username||'N/A' },
     { key: 'updated_by_username', header: 'Updated By', sortable: false, render: p => p.updated_by_username||'N/A' },
-    { key: 'created_at', header: 'Created At', sortable: true, render: (item: PatchType) => formatToISTLocaleString(item.created_at ?? '') },
-    { key: 'updated_at', header: 'Updated At', sortable: true, render: (item: PatchType) => formatToISTLocaleString(item.updated_at ?? '') },
+    { key: 'created_at', header: 'Created At', sortable: true, render: (item: PatchType) => formatToISTLocaleString(item.created_at ?? '') }, // Corrected: Was already using formatToISTLocaleString
+    { key: 'updated_at', header: 'Updated At', sortable: true, render: (item: PatchType) => formatToISTLocaleString(item.updated_at ?? '') }, // Corrected: Was already using formatToISTLocaleString
     { 
       key: 'actions' as any, 
       header: 'Actions', 

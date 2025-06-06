@@ -8,7 +8,7 @@ import { Edit, Delete, FilterList } from '@mui/icons-material';
 import { AdminVaVmsCompatibilityEntry, fetchAdminVaVmsCompatibility, deleteAdminVaVmsCompatibility, SoftwareVersion, fetchVersionsForSoftware, Software, fetchSoftware } from '../../../services/api';
 import { showErrorToast, showSuccessToast } from '../../../utils/toastUtils';
 import ConfirmationModal from '../../shared/ConfirmationModal'; // Assuming path
-import { formatDate } from '../../../utils/dateUtils'; // Assuming path
+import { formatToISTLocaleString } from '../../../utils/dateUtils'; // Corrected import name
 
 interface VaVmsCompatibilityTableProps {
   onEdit: (compatibility: AdminVaVmsCompatibilityEntry) => void;
@@ -253,8 +253,8 @@ const VaVmsCompatibilityTable: React.FC<VaVmsCompatibilityTableProps> = ({ onEdi
                   <TableCell sx={{ maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.description || ''}>
                      {row.description || '-'}
                   </TableCell>
-                  <TableCell>{formatDate(row.created_at)}</TableCell>
-                  <TableCell>{formatDate(row.updated_at)}</TableCell>
+                  <TableCell>{formatToISTLocaleString(row.created_at)}</TableCell>
+                  <TableCell>{formatToISTLocaleString(row.updated_at)}</TableCell>
                   <TableCell align="right">
                     <IconButton onClick={() => onEdit(row)} size="small" aria-label="edit" color="primary"><Edit /></IconButton>
                     <IconButton onClick={() => handleDeleteClick(row)} size="small" aria-label="delete" color="error"><Delete /></IconButton>

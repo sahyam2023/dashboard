@@ -2488,6 +2488,96 @@ export const getPublicVmsCompatibilityForVaVersion = async (vaVersionId: number)
 };
 // --- End Public VA-VMS Compatibility API Functions ---
 
+// --- Admin VA-VMS Compatibility API Functions ---
+export async function fetchAdminVaVmsCompatibility(params: URLSearchParams): Promise<PaginatedAdminVaVmsCompatibilityResponse> {
+  try {
+    const queryString = params.toString();
+    const url = `${API_BASE_URL}/api/admin/va_vms_compatibility${queryString ? `?${queryString}` : ''}`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        ...getAuthHeader(),
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
+    });
+    return handleApiError(response, 'Failed to fetch VA/VMS compatibility data');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error fetching VA/VMS compatibility data:', error);
+    throw error;
+  }
+}
+
+export async function addAdminVaVmsCompatibility(payload: VaVmsCompatibilityPayload): Promise<AdminVaVmsCompatibilityEntry> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/admin/va_vms_compatibility`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeader(),
+      },
+      body: JSON.stringify(payload),
+    });
+    return handleApiError(response, 'Failed to add VA/VMS compatibility');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error adding VA/VMS compatibility:', error);
+    throw error;
+  }
+}
+
+export async function updateAdminVaVmsCompatibility(compatibilityId: number, payload: VaVmsCompatibilityPayload): Promise<AdminVaVmsCompatibilityEntry> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/admin/va_vms_compatibility/${compatibilityId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeader(),
+      },
+      body: JSON.stringify(payload),
+    });
+    return handleApiError(response, 'Failed to update VA/VMS compatibility');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error(`Error updating VA/VMS compatibility ID ${compatibilityId}:`, error);
+    throw error;
+  }
+}
+
+export async function deleteAdminVaVmsCompatibility(compatibilityId: number): Promise<void> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/admin/va_vms_compatibility/${compatibilityId}`, {
+      method: 'DELETE',
+      headers: {
+        ...getAuthHeader(),
+      },
+    });
+    // For DELETE, backend might return 200 with a message or 204 No Content.
+    // handleApiError should correctly handle this.
+    // If it returns { msg: "..." }, it will be parsed. If 204, it returns null.
+    await handleApiError(response, 'Failed to delete VA/VMS compatibility');
+    // No explicit return value needed for void Promise if successful.
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error(`Error deleting VA/VMS compatibility ID ${compatibilityId}:`, error);
+    throw error;
+  }
+}
+// --- End Admin VA-VMS Compatibility API Functions ---
+
 // --- Large File Upload (Chunked) ---
 
 function generateUUID() { // Public Domain/MIT

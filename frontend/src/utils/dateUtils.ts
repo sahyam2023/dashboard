@@ -33,32 +33,28 @@ export function formatDateDisplay(dateString: string | null | undefined): string
   }
 }
 
-// Renamed from formatToISTLocaleString to be more generic for UI display
-export function formatDate(isoTimestamp: string | null | undefined): string {
-  if (!isoTimestamp) {
-    return 'N/A';
-  }
-
+// Restored to formatToISTLocaleString for general IST display.
+// Other components needing specific formats should use their own or more specific utilities.
+export function formatToISTLocaleString(dateString: string | null | undefined): string {
+  if (!dateString) return 'N/A';
   try {
-    const date = new Date(isoTimestamp); // Correctly parses "YYYY-MM-DDTHH:MM:SS+05:30"
-
-    // Format date and time parts using 'en-IN' locale and IST timezone.
+    const date = new Date(dateString);
+    // Standard IST display, including date and time.
+    // Components can further format this if only date or time is needed, or use a more specific utility.
     const options: Intl.DateTimeFormatOptions = {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
-      second: '2-digit',
+      // second: '2-digit', // Decided to omit seconds for brevity in tables by default
       hour12: true,
-      timeZone: 'Asia/Kolkata', // Ensures the output is IST
+      timeZone: 'Asia/Kolkata'
     };
-
-    return date.toLocaleString('en-IN', options); // e.g., "dd/mm/yyyy, h:mm:ss AM/PM"
+    return date.toLocaleString('en-IN', options);
   } catch (error) {
-    console.error('Error formatting timestamp to locale string:', isoTimestamp, error);
-    // Check if the original string was "Invalid Date" or similar from backend already
-    if (typeof isoTimestamp === 'string' && isoTimestamp.toLowerCase().includes('invalid date')) {
+    console.error("Error formatting date to IST:", dateString, error);
+    if (typeof dateString === 'string' && dateString.toLowerCase().includes('invalid date')) {
         return isoTimestamp;
     }
     return 'Invalid Date'; // Fallback for other invalid timestamps

@@ -27,6 +27,7 @@ const SuperAdminDashboard = lazy(() => import('./views/SuperAdminDashboard'));
 const AdminDashboardPage = lazy(() => import('./views/AdminDashboardPage'));
 const AdminVersionsPage = lazy(() => import('./views/AdminVersionsPage'));
 const AuditLogViewer = lazy(() => import('./components/admin/AuditLogViewer')); // Path is components/admin
+const AdminVaVmsCompatibilityPage = lazy(() => import('./views/AdminVaVmsCompatibilityPage')); // Added this line
 
 import { useAuth } from './context/AuthContext'; 
 import AuthModal from './components/shared/AuthModal'; 

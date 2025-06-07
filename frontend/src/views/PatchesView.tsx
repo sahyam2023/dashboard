@@ -377,6 +377,31 @@ useEffect(() => {
     { key: 'patch_name', header: 'Patch Name', sortable: true }, { key: 'software_name', header: 'Software', sortable: true },
     { key: 'version_number', header: 'Version', sortable: true },
     { key: 'patch_by_developer', header: 'Developer', sortable: true, render: p => p.patch_by_developer || '-' },
+    {
+      key: 'compatible_vms_versions',
+      header: 'VMS Compatibility',
+      sortable: true, // Backend supports sorting by this string
+      render: (patch: PatchType) => {
+        // software_name is directly available on the PatchType from the backend join
+        const isRelevantSoftware = patch.software_name === 'VMS' || patch.software_name === 'VA';
+        if (isRelevantSoftware) {
+          if (patch.compatible_vms_versions && patch.compatible_vms_versions.length > 0) {
+            // If it's an array of strings (version numbers)
+            if (Array.isArray(patch.compatible_vms_versions)) {
+              return patch.compatible_vms_versions.join(', ');
+            }
+            // If it's a single string (comma-separated, as GROUP_CONCAT produces)
+            // This check might be redundant if frontend type enforces array, but good for safety
+            if (typeof patch.compatible_vms_versions === 'string') {
+                return patch.compatible_vms_versions;
+            }
+            return 'N/A'; // VMS/VA but data is in unexpected format or empty
+          }
+          return 'N/A'; // VMS/VA but no compatibility versions set
+        }
+        return '-'; // Not a VMS or VA patch
+      }
+    },
     { key: 'description', header: 'Description', render: p => <span className="text-sm text-gray-600 block max-w-xs truncate" title={p.description||''}>{p.description||'-'}</span> },
     { key: 'release_date', header: 'Release Date', sortable: true, render: (item: PatchType) => formatDateDisplay(item.release_date) }, // Stays the same
     { 

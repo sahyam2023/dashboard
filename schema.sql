@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS software (
 );
 CREATE INDEX IF NOT EXISTS idx_software_name ON software (name);
 
+INSERT INTO software (name, description) VALUES ('VA', 'Vulnerability Analysis');
+
 CREATE TABLE IF NOT EXISTS versions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     software_id INTEGER NOT NULL,
@@ -139,6 +141,15 @@ AFTER UPDATE ON patches FOR EACH ROW BEGIN
     UPDATE patches SET updated_at = (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')) WHERE id = OLD.id;
 END;
 
+CREATE TABLE IF NOT EXISTS patch_vms_compatibility (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    patch_id INTEGER NOT NULL,
+    vms_version_id INTEGER NOT NULL,
+    FOREIGN KEY (patch_id) REFERENCES patches (id) ON DELETE CASCADE,
+    FOREIGN KEY (vms_version_id) REFERENCES versions (id),
+    UNIQUE (patch_id, vms_version_id)
+);
+
 CREATE TABLE IF NOT EXISTS links (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
@@ -167,6 +178,15 @@ CREATE TRIGGER IF NOT EXISTS update_links_updated_at
 AFTER UPDATE ON links FOR EACH ROW BEGIN
     UPDATE links SET updated_at = (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')) WHERE id = OLD.id;
 END;
+
+CREATE TABLE IF NOT EXISTS link_vms_compatibility (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    link_id INTEGER NOT NULL,
+    vms_version_id INTEGER NOT NULL,
+    FOREIGN KEY (link_id) REFERENCES links (id) ON DELETE CASCADE,
+    FOREIGN KEY (vms_version_id) REFERENCES versions (id),
+    UNIQUE (link_id, vms_version_id)
+);
 
 CREATE TABLE IF NOT EXISTS misc_categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -2533,8 +2533,8 @@ def get_all_patches_api():
         'patch_by_developer': 'p.patch_by_developer', # Retained
         'uploaded_by_username': 'u.username', # Retained (creator)
         'created_at': 'p.created_at',
-        'updated_at': 'p.updated_at'
-        # updated_by_username can be added if sorting by editor is needed
+        'updated_at': 'p.updated_at',
+        'compatible_vms_versions': 'compatible_vms_versions' # New sort option
     }
     
     sort_by_column = allowed_sort_by_map.get(sort_by_param, 'p.patch_name') 
@@ -2543,8 +2543,31 @@ def get_all_patches_api():
         sort_order = 'asc'
 
     # Construct Base Query and Parameters for Filtering
-    base_query_select_fields = "p.id, p.version_id, p.patch_name, p.description, p.release_date, p.is_external_link, p.download_link, p.stored_filename, p.original_filename_ref, p.file_size, p.file_type, p.patch_by_developer, p.created_by_user_id, u.username as uploaded_by_username, p.created_at, p.updated_by_user_id, upd_u.username as updated_by_username, p.updated_at, s.name as software_name, s.id as software_id, v.version_number, (SELECT COUNT(*) FROM comments c WHERE c.item_id = p.id AND c.item_type = 'patch' AND c.parent_comment_id IS NULL) as comment_count"
-    base_query_from = "FROM patches p JOIN versions v ON p.version_id = v.id JOIN software s ON v.software_id = s.id LEFT JOIN users u ON p.created_by_user_id = u.id LEFT JOIN users upd_u ON p.updated_by_user_id = upd_u.id"
+    # Added GROUP_CONCAT for compatible_vms_versions
+    base_query_select_fields = """
+        p.id, p.version_id, p.patch_name, p.description, p.release_date,
+        p.is_external_link, p.download_link, p.stored_filename, p.original_filename_ref,
+        p.file_size, p.file_type, p.patch_by_developer,
+        p.created_by_user_id, u.username as uploaded_by_username, p.created_at,
+        p.updated_by_user_id, upd_u.username as updated_by_username, p.updated_at,
+        s.name as software_name, s.id as software_id, v.version_number,
+        (SELECT COUNT(*) FROM comments c WHERE c.item_id = p.id AND c.item_type = 'patch' AND c.parent_comment_id IS NULL) as comment_count,
+        CASE
+            WHEN s.name IN ('VMS', 'VA') THEN GROUP_CONCAT(DISTINCT vms_v.version_number)
+            ELSE NULL
+        END as compatible_vms_versions
+    """
+    base_query_from = """
+    FROM patches p
+    JOIN versions v ON p.version_id = v.id
+    JOIN software s ON v.software_id = s.id
+    LEFT JOIN users u ON p.created_by_user_id = u.id
+    LEFT JOIN users upd_u ON p.updated_by_user_id = upd_u.id
+    LEFT JOIN patch_vms_compatibility pvc ON p.id = pvc.patch_id AND s.name IN ('VMS', 'VA')
+    LEFT JOIN versions vms_v ON pvc.vms_version_id = vms_v.id
+    """
+    # Note: The condition `s.name IN ('VMS', 'VA')` in the JOIN for pvc ensures we only join for relevant software.
+    # The GROUP_CONCAT will only populate for these software types due to the CASE statement.
     
     params = [] 
     user_id_param_for_join = []
@@ -2560,15 +2583,17 @@ def get_all_patches_api():
         app.logger.error(f"Error getting user_id in get_all_patches_api: {e}")
 
     # Base query components
-    base_query_select_fields_with_aliases = "p.id, p.version_id, p.patch_name, p.description, p.release_date, p.is_external_link, p.download_link, p.stored_filename, p.original_filename_ref, p.file_size, p.file_type, p.patch_by_developer, p.created_by_user_id, u.username as uploaded_by_username, p.created_at, p.updated_by_user_id, upd_u.username as updated_by_username, p.updated_at, s.name as software_name, s.id as software_id, v.version_number, (SELECT COUNT(*) FROM comments c WHERE c.item_id = p.id AND c.item_type = 'patch' AND c.parent_comment_id IS NULL) as comment_count"
+    # base_query_select_fields_with_aliases is now base_query_select_fields itself
+    # The select_clause will build upon base_query_select_fields
 
     # --- PERMISSION MODEL CHANGE ---
     if logged_in_user_id:
-        select_clause = f"SELECT {base_query_select_fields_with_aliases}, uf.id AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download IS FALSE THEN 0 ELSE 1 END) AS is_downloadable"
+        select_clause = f"SELECT {base_query_select_fields}, uf.id AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download IS FALSE THEN 0 ELSE 1 END) AS is_downloadable"
     else:
-        select_clause = f"SELECT {base_query_select_fields_with_aliases}, NULL AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download IS FALSE THEN 0 ELSE 1 END) AS is_downloadable"
+        select_clause = f"SELECT {base_query_select_fields}, NULL AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download IS FALSE THEN 0 ELSE 1 END) AS is_downloadable"
 
-    from_clause = "FROM patches p JOIN versions v ON p.version_id = v.id JOIN software s ON v.software_id = s.id LEFT JOIN users u ON p.created_by_user_id = u.id LEFT JOIN users upd_u ON p.updated_by_user_id = upd_u.id"
+    # from_clause is now base_query_from
+    from_clause_for_main_query = base_query_from # Use the new base_query_from which includes VMS compatibility joins
     
     params = [] # Params for WHERE clause filters
     permission_join_params = [logged_in_user_id] # Param for the LEFT JOIN fp.user_id = ?
@@ -2576,7 +2601,9 @@ def get_all_patches_api():
 
     # Permission Join and Conditions
     # --- PERMISSION MODEL CHANGE ---
-    from_clause += " LEFT JOIN file_permissions fp ON p.id = fp.file_id AND fp.file_type = 'patch' AND fp.user_id = ?" # View permission join
+    # The base_query_from already includes joins needed for s.name and patch_vms_compatibility.
+    # We add the file_permissions join here.
+    from_clause_for_main_query += " LEFT JOIN file_permissions fp ON p.id = fp.file_id AND fp.file_type = 'patch' AND fp.user_id = ?" # View permission join
     # Param for this join (logged_in_user_id) will be added to permission_join_params.
     filter_conditions.append("(fp.id IS NULL OR fp.can_view = 1)") # Final view condition
     # No need to append logged_in_user_id to `params` here for this filter condition.
@@ -2600,11 +2627,16 @@ def get_all_patches_api():
         where_clause = " WHERE " + " AND ".join(filter_conditions)
 
     # Count Query
-    count_params = permission_join_params + params
-    count_query = f"SELECT COUNT(p.id) as count {from_clause}{where_clause}"
+    count_params = permission_join_params + params # permission_join_params includes user_id for fp join
+    # The from_clause_for_main_query is used here as it contains all necessary joins for filtering.
+    # However, for COUNT, we only need to ensure the WHERE conditions are applied correctly based on these joins.
+    # The base_query_from already includes the necessary joins for s.name (software) and vms_v (vms versions for potential future filtering if needed)
+    # The permission join (fp) is added to from_clause_for_main_query.
+    # So, from_clause_for_main_query is appropriate here.
+    # IMPORTANT: GROUP BY for count query if base_query_from has LEFT JOINs that multiply rows (like pvc, vms_v)
+    # To count distinct patches: COUNT(DISTINCT p.id)
+    count_query = f"SELECT COUNT(DISTINCT p.id) as count {from_clause_for_main_query}{where_clause}"
     try:
-        # app.logger.info(f"Patches Count Query for user {logged_in_user_id}: {count_query}") # Removed
-        # app.logger.info(f"Patches Count Params: {tuple(count_params)}") # Removed
         total_patches_cursor = db.execute(count_query, tuple(count_params))
         total_patches = total_patches_cursor.fetchone()['count']
     except Exception as e:
@@ -2619,40 +2651,47 @@ def get_all_patches_api():
         offset = (page - 1) * per_page
     
     # Main Data Query
-    final_from_clause_for_data = from_clause # from_clause already includes the LEFT JOIN for view permissions (fp)
-    # final_params_for_data = list(permission_join_params) # Start with user_id for the view permission JOIN (fp)
-    # final_params_for_data.extend(params) # Add other filter params
+    # final_from_clause_for_data should be from_clause_for_main_query
+    # final_params_for_data needs to be assembled carefully
 
-    # New logic for assembling final_params_for_data
-    final_params_for_data = list(permission_join_params)  # Start with permission join params
+    final_params_for_data = list(permission_join_params) # Starts with user_id for fp join
 
     if logged_in_user_id:
-        # Add JOIN for favorite status
-        final_from_clause_for_data += " LEFT JOIN user_favorites uf ON p.id = uf.item_id AND uf.item_type = 'patch' AND uf.user_id = ?"
+        # Add JOIN for favorite status to from_clause_for_main_query for the data query part
+        from_clause_for_data_with_fav = from_clause_for_main_query + " LEFT JOIN user_favorites uf ON p.id = uf.item_id AND uf.item_type = 'patch' AND uf.user_id = ?"
         final_params_for_data.append(logged_in_user_id) # Param for uf join
         
         # Add separate LEFT JOIN for download permission (fp_dl)
-        final_from_clause_for_data += " LEFT JOIN file_permissions fp_dl ON p.id = fp_dl.file_id AND fp_dl.file_type = 'patch' AND fp_dl.user_id = ?"
+        from_clause_for_data_with_fav_dl = from_clause_for_data_with_fav + " LEFT JOIN file_permissions fp_dl ON p.id = fp_dl.file_id AND fp_dl.file_type = 'patch' AND fp_dl.user_id = ?"
         final_params_for_data.append(logged_in_user_id) # Param for fp_dl join
     else:
         # Add fp_dl join for anonymous users as well
-        final_from_clause_for_data += " LEFT JOIN file_permissions fp_dl ON p.id = fp_dl.file_id AND fp_dl.file_type = 'patch' AND fp_dl.user_id = ?"
+        from_clause_for_data_with_fav_dl = from_clause_for_main_query + " LEFT JOIN file_permissions fp_dl ON p.id = fp_dl.file_id AND fp_dl.file_type = 'patch' AND fp_dl.user_id = ?"
         final_params_for_data.append(None) # Param for fp_dl join (None for anonymous)
 
     final_params_for_data.extend(params) # Add WHERE clause filter parameters
+
+    # Add GROUP BY clause here, before ORDER BY
+    # Group by all selected fields from 'p', 's', 'v', 'u', 'upd_u' to ensure GROUP_CONCAT works correctly
+    # The fields in base_query_select_fields (excluding GROUP_CONCAT and comment_count) should be in GROUP BY.
+    # This is a simplified GROUP BY; a more precise one would list all non-aggregated columns.
+    # For SQLite, grouping by primary key of the main table (p.id) is often sufficient if other columns are functionally dependent.
+    group_by_clause = " GROUP BY p.id " # Grouping by p.id should be enough for GROUP_CONCAT
+
     final_params_for_data.extend([per_page, offset]) # Add pagination params
-    final_query = f"{select_clause} {final_from_clause_for_data}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
+
+    # If sort_by_column is 'compatible_vms_versions', it's an aggregated field,
+    # so it should work with GROUP BY. Otherwise, it should be part of the GROUP BY or functionally dependent.
+    # For simplicity, we assume SQLite handles this correctly with `GROUP BY p.id`.
+    final_query = f"{select_clause} {from_clause_for_data_with_fav_dl}{where_clause}{group_by_clause}ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
     
     try:
-        # app.logger.info(f"Patches Data Query for user {logged_in_user_id}: {final_query}") # Removed
-        # app.logger.info(f"Patches Data Params: {tuple(final_params_for_data)}") # Removed
         patches_cursor = db.execute(final_query, tuple(final_params_for_data))
         patches_list_raw = [dict(row) for row in patches_cursor.fetchall()]
-        # Note: 'release_date' in patches is a DATE, not TIMESTAMP, so not included here.
-        ts_keys = ['created_at', 'updated_at']
+        ts_keys = ['created_at', 'updated_at'] # release_date is DATE
         patches_list = [convert_timestamps_to_ist_iso(patch, ts_keys) for patch in patches_list_raw]
     except Exception as e:
-        app.logger.error(f"Error fetching paginated patches with permissions: {e} with query {final_query} and params {final_params_for_data}")
+        app.logger.error(f"Error fetching paginated patches with permissions: {e} with query {final_query} and params {tuple(final_params_for_data)}")
         return jsonify(msg="Error fetching patches."), 500
 
     return jsonify({
@@ -2696,8 +2735,8 @@ def get_all_links_api():
         'version_name': 'v.version_number', 
         'uploaded_by_username': 'u.username', # Added for sorting by creator
         'created_at': 'l.created_at',
-        'updated_at': 'l.updated_at'
-        # patch_by_developer is not applicable to links
+        'updated_at': 'l.updated_at',
+        'compatible_vms_versions': 'compatible_vms_versions' # New sort option for links
     }
     
     sort_by_column = allowed_sort_by_map.get(sort_by_param, 'l.title') 
@@ -2706,8 +2745,30 @@ def get_all_links_api():
         sort_order = 'asc'
 
     # Construct Base Query and Parameters for Filtering
-    base_query_select_fields = "l.id, l.title, l.description, l.software_id, l.version_id, l.is_external_link, l.url, l.stored_filename, l.original_filename_ref, l.file_size, l.file_type, l.created_by_user_id, u.username as uploaded_by_username, l.created_at, l.updated_by_user_id, upd_u.username as updated_by_username, l.updated_at, s.name as software_name, v.version_number as version_name, (SELECT COUNT(*) FROM comments c WHERE c.item_id = l.id AND c.item_type = 'link' AND c.parent_comment_id IS NULL) as comment_count"
-    base_query_from = "FROM links l JOIN software s ON l.software_id = s.id LEFT JOIN versions v ON l.version_id = v.id LEFT JOIN users u ON l.created_by_user_id = u.id LEFT JOIN users upd_u ON l.updated_by_user_id = upd_u.id" # upd_u for updated_by_username
+    base_query_select_fields = """
+        l.id, l.title, l.description, l.software_id, l.version_id,
+        l.is_external_link, l.url, l.stored_filename, l.original_filename_ref,
+        l.file_size, l.file_type,
+        l.created_by_user_id, u.username as uploaded_by_username, l.created_at,
+        l.updated_by_user_id, upd_u.username as updated_by_username, l.updated_at,
+        s.name as software_name, s.id as link_software_id, v.version_number as version_name,
+        (SELECT COUNT(*) FROM comments c WHERE c.item_id = l.id AND c.item_type = 'link' AND c.parent_comment_id IS NULL) as comment_count,
+        CASE
+            WHEN s.name IN ('VMS', 'VA') THEN GROUP_CONCAT(DISTINCT vms_v_link.version_number)
+            ELSE NULL
+        END as compatible_vms_versions
+    """
+    # Added s.id as link_software_id to avoid conflict if vms_v also has software_id selected
+    base_query_from = """
+    FROM links l
+    JOIN software s ON l.software_id = s.id
+    LEFT JOIN versions v ON l.version_id = v.id
+    LEFT JOIN users u ON l.created_by_user_id = u.id
+    LEFT JOIN users upd_u ON l.updated_by_user_id = upd_u.id
+    LEFT JOIN link_vms_compatibility lvc ON l.id = lvc.link_id AND s.name IN ('VMS', 'VA')
+    LEFT JOIN versions vms_v_link ON lvc.vms_version_id = vms_v_link.id
+    """
+    # Aliased vms_v to vms_v_link for clarity and to avoid conflicts if patches section also uses vms_v
     
     params = []
     # user_id_param_for_join = [] # Not used in this structure
@@ -2723,18 +2784,20 @@ def get_all_links_api():
         app.logger.error(f"Error getting user_id in get_all_links_api: {e}")
 
     # Base query components
-    base_query_select_fields_with_aliases = "l.id, l.title, l.description, l.software_id, l.version_id, l.is_external_link, l.url, l.stored_filename, l.original_filename_ref, l.file_size, l.file_type, l.created_by_user_id, u.username as uploaded_by_username, l.created_at, l.updated_by_user_id, upd_u.username as updated_by_username, l.updated_at, s.name as software_name, v.version_number as version_name, (SELECT COUNT(*) FROM comments c WHERE c.item_id = l.id AND c.item_type = 'link' AND c.parent_comment_id IS NULL) as comment_count"
+    # base_query_select_fields_with_aliases is now base_query_select_fields
     
     # --- PERMISSION MODEL CHANGE ---
     if logged_in_user_id:
-        select_clause = f"SELECT {base_query_select_fields_with_aliases}, uf.id AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download IS FALSE THEN 0 ELSE 1 END) AS is_downloadable"
+        select_clause = f"SELECT {base_query_select_fields}, uf.id AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download IS FALSE THEN 0 ELSE 1 END) AS is_downloadable"
     else:
-        select_clause = f"SELECT {base_query_select_fields_with_aliases}, NULL AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download IS FALSE THEN 0 ELSE 1 END) AS is_downloadable"
+        select_clause = f"SELECT {base_query_select_fields}, NULL AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download IS FALSE THEN 0 ELSE 1 END) AS is_downloadable"
 
-    from_clause_main_query = "FROM links l JOIN software s ON l.software_id = s.id LEFT JOIN versions v ON l.version_id = v.id LEFT JOIN users u ON l.created_by_user_id = u.id LEFT JOIN users upd_u ON l.updated_by_user_id = upd_u.id" # upd_u for updated_by_username
+    # from_clause_main_query will use the new base_query_from
+    from_clause_main_query = base_query_from
     
     # Params for the main query's WHERE clause (excluding permission join params for now)
     main_query_filter_params = [] 
+    count_query_conditions = [] # Initialize count_query_conditions
     # Params for the permission part of the main query's JOIN/WHERE.
     # For main query, fp.user_id = ? uses logged_in_user_id.
     main_query_permission_params = [logged_in_user_id] 
@@ -2742,6 +2805,8 @@ def get_all_links_api():
     filter_conditions = []
 
     # Permission related JOIN for main query (fp for view permission)
+    # The base_query_from for links already includes necessary software, version, user joins.
+    # Add file_permissions join here.
     from_clause_main_query += " LEFT JOIN file_permissions fp ON l.id = fp.file_id AND fp.file_type = 'link' AND fp.user_id = ?"
     filter_conditions.append("(fp.id IS NULL OR fp.can_view = 1)")
         
@@ -2793,70 +2858,17 @@ def get_all_links_api():
         where_clause = " WHERE " + " AND ".join(filter_conditions)
 
     # --- Count Query Construction ---
-    # Base for count query
-    count_query_base_from = "FROM links l"
-    count_query_joins = []
-    count_query_conditions = []
-    count_query_params = []
-
-    # Joins needed for count query if specific filters or search terms are active
-    # Software join (s) - needed for software_id_filter OR if search_terms exist (s.name)
-    if software_id_filter or search_terms:
-        count_query_joins.append("JOIN software s ON l.software_id = s.id")
-    # Version join (v) - needed for version_id_filter OR if search_terms exist (v.version_number)
-    if version_id_filter or search_terms:
-        count_query_joins.append("LEFT JOIN versions v ON l.version_id = v.id") # LEFT JOIN as version can be NULL
-    # User join for uploader (u) - needed if search_terms exist (u.username)
-    if search_terms:
-        count_query_joins.append("LEFT JOIN users u ON l.created_by_user_id = u.id")
-    # User join for updater (upd_u) - needed if search_terms exist (upd_u.username)
-    if search_terms:
-        count_query_joins.append("LEFT JOIN users upd_u ON l.updated_by_user_id = upd_u.id")
+    # Base for count query will use from_clause_main_query as it includes all necessary joins for filtering.
+    # This ensures consistency in which items are counted vs. fetched.
+    # Need to use COUNT(DISTINCT l.id) due to potential row multiplication from LEFT JOINs (esp. vms_v_link).
     
-    # Permission join for count query (fp_count) - uses logged_in_user_id
-    # This is always added to correctly count accessible items.
-    count_query_joins.append("LEFT JOIN file_permissions fp_count ON l.id = fp_count.file_id AND fp_count.file_type = 'link' AND fp_count.user_id = ?")
-    count_query_params.append(logged_in_user_id) # Param for fp_count join
-    count_query_conditions.append("(fp_count.id IS NULL OR fp_count.can_view = 1)")
+    # Correctly initialize count_query_params: only permission and filter parameters
+    count_query_params = list(main_query_permission_params) 
+    count_query_params.extend(main_query_filter_params)
 
-
-    # Add existing filter conditions to count_query_conditions
-    if software_id_filter:
-        count_query_conditions.append("l.software_id = ?")
-        count_query_params.append(software_id_filter)
-    if version_id_filter:
-        count_query_conditions.append("l.version_id = ?")
-        count_query_params.append(version_id_filter)
-    if link_type_filter: # Same logic as main query
-        if link_type_filter.lower() == 'external': count_query_conditions.append("l.is_external_link = TRUE")
-        elif link_type_filter.lower() == 'uploaded': count_query_conditions.append("l.is_external_link = FALSE")
-    if created_from_filter:
-        count_query_conditions.append("date(l.created_at) >= date(?)")
-        count_query_params.append(created_from_filter)
-    if created_to_filter:
-        count_query_conditions.append("date(l.created_at) <= date(?)")
-        count_query_params.append(created_to_filter)
-
-    # Add search term conditions to count_query_conditions
-    if search_terms:
-        search_conditions_group_for_count = []
-        for term_val_count in search_terms:
-            term_param_like_count = f"%{term_val_count}%"
-            search_conditions_group_for_count.append(
-                 """(LOWER(l.title) LIKE ? OR 
-                     LOWER(l.description) LIKE ? OR 
-                     LOWER(l.url) LIKE ? OR
-                     LOWER(s.name) LIKE ? OR 
-                     LOWER(v.version_number) LIKE ? OR
-                     LOWER(u.username) LIKE ? OR
-                     LOWER(upd_u.username) LIKE ?)"""
-            )
-            count_query_params.extend([term_param_like_count] * 7)
-        count_query_conditions.append(" AND ".join(search_conditions_group_for_count))
-
-    final_count_query = f"SELECT COUNT(DISTINCT l.id) as count {count_query_base_from} {' '.join(count_query_joins)}"
-    if count_query_conditions:
-        final_count_query += " WHERE " + " AND ".join(count_query_conditions)
+    # The from_clause_main_query already has the permission join.
+    # The where_clause is built from filter_conditions which also includes permission check.
+    final_count_query = f"SELECT COUNT(DISTINCT l.id) as count {from_clause_main_query}{where_clause}"
     
     try:
         total_links_cursor = db.execute(final_count_query, tuple(count_query_params))
@@ -2874,32 +2886,43 @@ def get_all_links_api():
         offset = (page - 1) * per_page
     
     # --- Main Data Query Construction ---
-    # Params for main query are: permission_join_params + specific_join_params (favorites, fp_dl) + filter_params + pagination_params
-    final_main_query_params = list(main_query_permission_params) # Starts with [logged_in_user_id] for fp join
+    # Correctly order parameters for the final query
+    final_main_query_params = []
+    final_main_query_params.extend(main_query_permission_params) # For fp.user_id = ? (view permission join)
 
-    # Add joins and params for favorites and download permissions (fp_dl) to main query
+    from_clause_for_data_with_fav_dl = from_clause_main_query # Start with the from clause used for count (which includes fp join)
+
     if logged_in_user_id:
-        from_clause_main_query += " LEFT JOIN user_favorites uf ON l.id = uf.item_id AND uf.item_type = 'link' AND uf.user_id = ?"
-        final_main_query_params.append(logged_in_user_id) # Param for uf join
+        # Add JOIN and param for user_favorites (uf)
+        from_clause_for_data_with_fav_dl += " LEFT JOIN user_favorites uf ON l.id = uf.item_id AND uf.item_type = 'link' AND uf.user_id = ?"
+        final_main_query_params.append(logged_in_user_id) # Param for uf.user_id = ?
         
-        from_clause_main_query += " LEFT JOIN file_permissions fp_dl ON l.id = fp_dl.file_id AND fp_dl.file_type = 'link' AND fp_dl.user_id = ?"
-        final_main_query_params.append(logged_in_user_id) # Param for fp_dl join
-    else: # Anonymous user
-        from_clause_main_query += " LEFT JOIN file_permissions fp_dl ON l.id = fp_dl.file_id AND fp_dl.file_type = 'link' AND fp_dl.user_id = ?"
-        final_main_query_params.append(None) # Param for fp_dl join (None for anonymous)
+        # Add JOIN and param for file_permissions for download (fp_dl)
+        from_clause_for_data_with_fav_dl += " LEFT JOIN file_permissions fp_dl ON l.id = fp_dl.file_id AND fp_dl.file_type = 'link' AND fp_dl.user_id = ?"
+        final_main_query_params.append(logged_in_user_id) # Param for fp_dl.user_id = ? (for logged-in user)
+    else:
+        # Add JOIN and param for file_permissions for download (fp_dl) for anonymous user
+        from_clause_for_data_with_fav_dl += " LEFT JOIN file_permissions fp_dl ON l.id = fp_dl.file_id AND fp_dl.file_type = 'link' AND fp_dl.user_id = ?"
+        final_main_query_params.append(None) # Param for fp_dl.user_id = ? (for anonymous user)
         
-    final_main_query_params.extend(main_query_filter_params) # Add filter params (software, version, search terms etc.)
-    final_main_query_params.extend([per_page, offset]) # Add pagination params
+    # Add parameters for the WHERE clause conditions
+    final_main_query_params.extend(main_query_filter_params)
 
-    final_query = f"{select_clause} {from_clause_main_query}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
+    # Add pagination parameters
+    final_main_query_params.extend([per_page, offset])
+
+    # Add GROUP BY for the main data query, similar to patches
+    group_by_clause_links = " GROUP BY l.id "
+
+    final_query = f"{select_clause} {from_clause_for_data_with_fav_dl}{where_clause}{group_by_clause_links}ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
     
     try:
-        links_cursor = db.execute(final_query, tuple(final_main_query_params))
+        links_cursor = db.execute(final_query, tuple(final_main_query_params)) # Use final_main_query_params
         links_list_raw = [dict(row) for row in links_cursor.fetchall()]
         ts_keys = ['created_at', 'updated_at']
         links_list = [convert_timestamps_to_ist_iso(link, ts_keys) for link in links_list_raw]
     except Exception as e:
-        app.logger.error(f"Error fetching paginated links with permissions: {e} with query {final_query} and params {tuple(final_main_query_params)}")
+        app.logger.error(f"Error fetching paginated links with permissions: {e} with query {final_query} and params {tuple(count_query_params)}")
         return jsonify(msg="Error fetching links."), 500
 
     return jsonify({
@@ -3639,7 +3662,61 @@ def admin_add_patch_with_url():
                 'patch_by_developer': new_patch_data.get('patch_by_developer') 
             }
         )
+
+    # === VMS Compatibility Logic for admin_add_patch_with_url ===
+    if response[1] == 201: # Check if patch creation was successful
+        new_patch_data_json = response[0].get_json()
+        new_patch_id = new_patch_data_json.get('id')
+        patch_version_id = new_patch_data_json.get('version_id') # version_id of the patch itself
+
+        if new_patch_id and patch_version_id:
+            # Check if the patch's software is 'VMS' or 'VA'
+            version_info = db.execute("SELECT software_id FROM versions WHERE id = ?", (patch_version_id,)).fetchone()
+            if version_info:
+                software_info = db.execute("SELECT name FROM software WHERE id = ?", (version_info['software_id'],)).fetchone()
+                if software_info and software_info['name'] in ('VMS', 'VA'):
+                    compatible_vms_version_ids = data.get('compatible_vms_version_ids') # Get from original request data
+                    if compatible_vms_version_ids and isinstance(compatible_vms_version_ids, list):
+                        vms_software_id_row = db.execute("SELECT id FROM software WHERE name = 'VMS'").fetchone()
+                        vms_software_id = vms_software_id_row['id'] if vms_software_id_row else None
+
+                        if not vms_software_id:
+                            app.logger.error("Could not find software_id for 'VMS' to validate compatible_vms_version_ids.")
+                        else:
+                            for vms_ver_id in compatible_vms_version_ids:
+                                try:
+                                    vms_ver_id_int = int(vms_ver_id)
+                                    # Validate that vms_ver_id actually belongs to 'VMS' software
+                                    vms_version_check = db.execute(
+                                        "SELECT id FROM versions WHERE id = ? AND software_id = ?",
+                                        (vms_ver_id_int, vms_software_id)
+                                    ).fetchone()
+
+                                    if vms_version_check:
+                                        db.execute(
+                                            "INSERT INTO patch_vms_compatibility (patch_id, vms_version_id) VALUES (?, ?)",
+                                            (new_patch_id, vms_ver_id_int)
+                                        )
+                                        log_audit_action(
+                                            action_type='ADD_PATCH_VMS_COMPATIBILITY',
+                                            target_table='patch_vms_compatibility',
+                                            target_id=new_patch_id, # Or the ID of the compatibility entry if it has one
+                                            details={'patch_id': new_patch_id, 'vms_version_id': vms_ver_id_int, 'method': 'add_with_url'}
+                                        )
+                                    else:
+                                        app.logger.warning(f"Skipping compatibility for vms_version_id {vms_ver_id_int}: Not a valid 'VMS' software version.")
+                                except ValueError:
+                                    app.logger.warning(f"Invalid vms_version_id format: {vms_ver_id}. Skipping.")
+                                except sqlite3.IntegrityError as e_integ:
+                                    db.rollback() # Rollback on integrity error for this specific compatibility entry
+                                    app.logger.error(f"Integrity error adding patch VMS compatibility for patch {new_patch_id}, VMS version {vms_ver_id_int}: {e_integ}")
+                                    # Optionally, add to a list of errors to return to the user
+                                except Exception as e_compat:
+                                    db.rollback()
+                                    app.logger.error(f"Error adding patch VMS compatibility for patch {new_patch_id}, VMS version {vms_ver_id_int}: {e_compat}")
+                            db.commit() # Commit all successful compatibility entries
     return response
+
 @app.route('/api/admin/patches/upload_file', methods=['POST'])
 @jwt_required()
 @admin_required
@@ -3656,7 +3733,6 @@ def admin_upload_patch_file():
     if provided_version_id_str and provided_version_id_str.strip():
         try:
             final_version_id = int(provided_version_id_str)
-            # Optional: verify against software_id if needed
         except ValueError:
             return jsonify(msg="Invalid format for provided version_id."), 400
     elif typed_version_string and typed_version_string.strip():
@@ -3673,49 +3749,95 @@ def admin_upload_patch_file():
     else:
         return jsonify(msg="Either version_id or typed_version_string is required for a patch."), 400
     
-    # Original form data for logging
     patch_name_val = request.form.get('patch_name')
     release_date_val = request.form.get('release_date')
     patch_by_developer_val = request.form.get('patch_by_developer') 
-
-    # metadata_fields for _admin_handle_file_upload_and_db_insert should include 'patch_by_developer'
-    # The helper will then populate form_data['patch_by_developer'] from request.form
     current_metadata_fields = ['patch_name', 'description', 'release_date', 'patch_by_developer']
 
     response = _admin_handle_file_upload_and_db_insert(
         table_name='patches',
         upload_folder_config_key='PATCH_UPLOAD_FOLDER',
         server_path_prefix='/official_uploads/patches',
-        metadata_fields=current_metadata_fields, # Includes 'patch_by_developer'
-        required_form_fields=['patch_name'], # patch_by_developer is optional here for form validation
+        metadata_fields=current_metadata_fields,
+        required_form_fields=['patch_name'],
         sql_insert_query="""INSERT INTO patches (version_id, patch_name, download_link, description, release_date, patch_by_developer,
                                              is_external_link, stored_filename, original_filename_ref, file_size, file_type,
                                              created_by_user_id, updated_by_user_id)
-                              VALUES (?, ?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)""", # 13 placeholders
+                              VALUES (?, ?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)""",
         sql_params_tuple=(
-            'version_id', # Resolved FK
-            'patch_name', 'download_link_or_url', 'description', 'release_date', 
-            'patch_by_developer', # Now correctly expected from form_data by the helper
-            # is_external_link is hardcoded FALSE
-            'stored_filename', 'original_filename_ref', 'file_size', 'file_type', # File details
-            'created_by_user_id', 'updated_by_user_id' # User details
-        ), # Tuple has 12 elements, matching non-hardcoded placeholders
+            'version_id', 'patch_name', 'download_link_or_url', 'description', 'release_date',
+            'patch_by_developer', 'stored_filename', 'original_filename_ref', 'file_size', 'file_type',
+            'created_by_user_id', 'updated_by_user_id'
+        ),
         resolved_fks={'version_id': final_version_id}
     )
-    if response[1] == 201: # Check if creation was successful
-        new_patch_data = response[0].get_json()
+    if response[1] == 201:
+        new_patch_data_json = response[0].get_json()
+        new_patch_id = new_patch_data_json.get('id')
+        # Use final_version_id directly as it's the one associated with the patch
+        patch_version_id_for_compat_check = final_version_id
+
         log_audit_action(
             action_type='CREATE_PATCH_FILE',
             target_table='patches',
-            target_id=new_patch_data.get('id'),
+            target_id=new_patch_id,
             details={
                 'patch_name': patch_name_val,
-                'filename': new_patch_data.get('original_filename_ref'), 
-                'version_id': final_version_id, # Resolved version_id
+                'filename': new_patch_data_json.get('original_filename_ref'),
+                'version_id': patch_version_id_for_compat_check,
                 'release_date': release_date_val,
-                'patch_by_developer': patch_by_developer_val # Added
+                'patch_by_developer': patch_by_developer_val
             }
         )
+
+        # === VMS Compatibility Logic for admin_upload_patch_file ===
+        if new_patch_id and patch_version_id_for_compat_check:
+            version_info = db.execute("SELECT software_id FROM versions WHERE id = ?", (patch_version_id_for_compat_check,)).fetchone()
+            if version_info:
+                software_info = db.execute("SELECT name FROM software WHERE id = ?", (version_info['software_id'],)).fetchone()
+                if software_info and software_info['name'] in ('VMS', 'VA'):
+                    compatible_vms_ids_json = request.form.get('compatible_vms_version_ids_json')
+                    if compatible_vms_ids_json:
+                        try:
+                            compatible_vms_version_ids = json.loads(compatible_vms_ids_json)
+                            if isinstance(compatible_vms_version_ids, list):
+                                vms_software_id_row = db.execute("SELECT id FROM software WHERE name = 'VMS'").fetchone()
+                                vms_software_id = vms_software_id_row['id'] if vms_software_id_row else None
+
+                                if not vms_software_id:
+                                    app.logger.error("Could not find software_id for 'VMS' to validate compatible_vms_version_ids (file upload).")
+                                else:
+                                    for vms_ver_id in compatible_vms_version_ids:
+                                        try:
+                                            vms_ver_id_int = int(vms_ver_id)
+                                            vms_version_check = db.execute(
+                                                "SELECT id FROM versions WHERE id = ? AND software_id = ?",
+                                                (vms_ver_id_int, vms_software_id)
+                                            ).fetchone()
+                                            if vms_version_check:
+                                                db.execute(
+                                                    "INSERT INTO patch_vms_compatibility (patch_id, vms_version_id) VALUES (?, ?)",
+                                                    (new_patch_id, vms_ver_id_int)
+                                                )
+                                                log_audit_action(
+                                                    action_type='ADD_PATCH_VMS_COMPATIBILITY',
+                                                    target_table='patch_vms_compatibility',
+                                                    target_id=new_patch_id,
+                                                    details={'patch_id': new_patch_id, 'vms_version_id': vms_ver_id_int, 'method': 'upload_file'}
+                                                )
+                                            else:
+                                                app.logger.warning(f"Skipping compatibility for vms_version_id {vms_ver_id_int} (file upload): Not a valid 'VMS' software version.")
+                                        except ValueError:
+                                            app.logger.warning(f"Invalid vms_version_id format in JSON (file upload): {vms_ver_id}. Skipping.")
+                                        except sqlite3.IntegrityError as e_integ_file:
+                                            db.rollback()
+                                            app.logger.error(f"Integrity error adding VMS compatibility (file upload) for patch {new_patch_id}, VMS ver {vms_ver_id_int}: {e_integ_file}")
+                                        except Exception as e_compat_file:
+                                            db.rollback()
+                                            app.logger.error(f"Error adding VMS compatibility (file upload) for patch {new_patch_id}, VMS ver {vms_ver_id_int}: {e_compat_file}")
+                                    db.commit() # Commit all successful compatibility entries
+                        except json.JSONDecodeError:
+                            app.logger.error("Failed to parse compatible_vms_version_ids_json from form data.")
     return response
 
 
@@ -4049,6 +4171,55 @@ def admin_upload_link_file():
                 'version_id': final_version_id_for_db
             }
         )
+
+        # === VMS Compatibility Logic for admin_upload_link_file ===
+        new_link_id = new_link_data.get('id')
+        link_software_id_for_compat_check = software_id # Resolved from form or typed_version_string logic
+
+        if new_link_id and link_software_id_for_compat_check:
+            software_info = db.execute("SELECT name FROM software WHERE id = ?", (link_software_id_for_compat_check,)).fetchone()
+            if software_info and software_info['name'] in ('VMS', 'VA'):
+                compatible_vms_ids_json = request.form.get('compatible_vms_version_ids_json')
+                if compatible_vms_ids_json:
+                    try:
+                        compatible_vms_version_ids = json.loads(compatible_vms_ids_json)
+                        if isinstance(compatible_vms_version_ids, list):
+                            vms_software_id_row = db.execute("SELECT id FROM software WHERE name = 'VMS'").fetchone()
+                            vms_software_id = vms_software_id_row['id'] if vms_software_id_row else None
+
+                            if not vms_software_id:
+                                app.logger.error("Could not find software_id for 'VMS' to validate compatible_vms_version_ids for link (file upload).")
+                            else:
+                                for vms_ver_id in compatible_vms_version_ids:
+                                    try:
+                                        vms_ver_id_int = int(vms_ver_id)
+                                        vms_version_check = db.execute(
+                                            "SELECT id FROM versions WHERE id = ? AND software_id = ?",
+                                            (vms_ver_id_int, vms_software_id)
+                                        ).fetchone()
+                                        if vms_version_check:
+                                            db.execute(
+                                                "INSERT INTO link_vms_compatibility (link_id, vms_version_id) VALUES (?, ?)",
+                                                (new_link_id, vms_ver_id_int)
+                                            )
+                                            log_audit_action(
+                                                action_type='ADD_LINK_VMS_COMPATIBILITY',
+                                                target_table='link_vms_compatibility', target_id=new_link_id,
+                                                details={'link_id': new_link_id, 'vms_version_id': vms_ver_id_int, 'method': 'upload_link_file'}
+                                            )
+                                        else:
+                                            app.logger.warning(f"Skipping VMS compatibility for link {new_link_id} (file upload), vms_version_id {vms_ver_id_int}: Not a valid 'VMS' software version.")
+                                    except ValueError:
+                                        app.logger.warning(f"Invalid vms_version_id format in JSON for link (file upload): {vms_ver_id}. Skipping.")
+                                    except sqlite3.IntegrityError as e_integ_link_file:
+                                        db.rollback()
+                                        app.logger.error(f"Integrity error adding VMS compatibility for link {new_link_id} (file upload), VMS ver {vms_ver_id_int}: {e_integ_link_file}")
+                                    except Exception as e_compat_link_file:
+                                        db.rollback()
+                                        app.logger.error(f"Error adding VMS compatibility for link {new_link_id} (file upload), VMS ver {vms_ver_id_int}: {e_compat_link_file}")
+                                db.commit()
+                    except json.JSONDecodeError:
+                        app.logger.error("Failed to parse compatible_vms_version_ids_json from form data for link (file upload).")
     return response
 
 @app.route('/api/admin/patches/<int:patch_id>/edit_url', methods=['PUT'])
@@ -4166,15 +4337,77 @@ def admin_edit_patch_url(patch_id):
         
         if updated_item_row:
             # Note: 'release_date' in patches is DATE, not TIMESTAMP.
-            processed_item = convert_timestamps_to_ist_iso(dict(updated_item_row), ['created_at', 'updated_at'])
-            return jsonify(processed_item), 200
+            processed_item_dict = convert_timestamps_to_ist_iso(dict(updated_item_row), ['created_at', 'updated_at'])
+
+            # === VMS Compatibility Logic for admin_edit_patch_url ===
+            # final_version_id is the potentially updated version_id of the patch
+            version_info = db.execute("SELECT software_id FROM versions WHERE id = ?", (final_version_id,)).fetchone()
+            if version_info:
+                software_info = db.execute("SELECT name FROM software WHERE id = ?", (version_info['software_id'],)).fetchone()
+
+                # Always delete existing compatibility entries for this patch first
+                db.execute("DELETE FROM patch_vms_compatibility WHERE patch_id = ?", (patch_id,))
+                log_audit_action(
+                    action_type='CLEAR_PATCH_VMS_COMPATIBILITY',
+                    target_table='patch_vms_compatibility',
+                    target_id=patch_id,
+                    details={'patch_id': patch_id, 'reason': 'Pre-update clear for edit_url'}
+                )
+
+                if software_info and software_info['name'] in ('VMS', 'VA'):
+                    compatible_vms_version_ids = data.get('compatible_vms_version_ids') # From original request
+                    if compatible_vms_version_ids and isinstance(compatible_vms_version_ids, list):
+                        vms_software_id_row = db.execute("SELECT id FROM software WHERE name = 'VMS'").fetchone()
+                        vms_software_id = vms_software_id_row['id'] if vms_software_id_row else None
+
+                        if not vms_software_id:
+                            app.logger.error("Could not find software_id for 'VMS' to validate compatible_vms_version_ids (edit_url).")
+                        else:
+                            for vms_ver_id in compatible_vms_version_ids:
+                                try:
+                                    vms_ver_id_int = int(vms_ver_id)
+                                    vms_version_check = db.execute(
+                                        "SELECT id FROM versions WHERE id = ? AND software_id = ?",
+                                        (vms_ver_id_int, vms_software_id)
+                                    ).fetchone()
+                                    if vms_version_check:
+                                        db.execute(
+                                            "INSERT INTO patch_vms_compatibility (patch_id, vms_version_id) VALUES (?, ?)",
+                                            (patch_id, vms_ver_id_int)
+                                        )
+                                        log_audit_action(
+                                            action_type='UPDATE_PATCH_VMS_COMPATIBILITY',
+                                            target_table='patch_vms_compatibility', target_id=patch_id,
+                                            details={'patch_id': patch_id, 'vms_version_id_added': vms_ver_id_int, 'method': 'edit_url'}
+                                        )
+                                    else:
+                                        app.logger.warning(f"Skipping compatibility for vms_version_id {vms_ver_id_int} (edit_url): Not a valid 'VMS' software version.")
+                                except ValueError:
+                                    app.logger.warning(f"Invalid vms_version_id format during edit_url: {vms_ver_id}. Skipping.")
+                                except sqlite3.IntegrityError as e_integ_edit_url:
+                                    db.rollback() # Rollback this specific compatibility entry on error
+                                    app.logger.error(f"Integrity error updating VMS compatibility (edit_url) for patch {patch_id}, VMS ver {vms_ver_id_int}: {e_integ_edit_url}")
+                                except Exception as e_compat_edit_url:
+                                    db.rollback()
+                                    app.logger.error(f"Error updating VMS compatibility (edit_url) for patch {patch_id}, VMS ver {vms_ver_id_int}: {e_compat_edit_url}")
+                            db.commit() # Commit all successful VMS compatibility changes for this patch
+
+            # Refetch the patch to include any newly added compatible_vms_versions for the response
+            # This requires the get_all_patches_api logic to be adapted or a specific fetcher for one patch.
+            # For now, returning processed_item_dict which doesn't have live compatible_vms_versions.
+            # The frontend might need to re-fetch to see these.
+            # Or, we can add compatible_vms_versions to processed_item_dict manually here if needed.
+            # This part is complex if we want to return the same full structure as get_all_patches_api.
+            # A simpler approach: The frontend re-fetches the list or item if it needs updated compatibility.
+
+            return jsonify(processed_item_dict), 200
         else:
-            # This case should ideally not be reached if the update was successful.
             app.logger.error(f"Failed to fetch patch with ID {patch_id} after edit_url.")
             return jsonify(msg="Patch updated but failed to retrieve full details."), 500
             
     except sqlite3.IntegrityError as e: db.rollback(); return jsonify(msg=f"DB error: {e}"), 409
     except Exception as e: db.rollback(); return jsonify(msg=f"Server error: {e}"), 500
+
 
 
 @app.route('/api/admin/patches/<int:patch_id>/edit_file', methods=['PUT'])
@@ -4193,19 +4426,15 @@ def admin_edit_patch_file(patch_id):
     patch_name = request.form.get('patch_name', patch['patch_name'])
     description = request.form.get('description', patch['description'])
     release_date = request.form.get('release_date', patch['release_date'])
-    # Retrieve patch_by_developer from form, defaulting to existing if not provided in form
     patch_by_developer = request.form.get('patch_by_developer', patch['patch_by_developer'])
 
-
-    # Determine final version ID using the improved logic from second file
-    final_version_id = patch['version_id']  # Default to current version
+    final_version_id = patch['version_id']
     if provided_version_id_str and provided_version_id_str.strip():
         try:
             final_version_id = int(provided_version_id_str)
         except ValueError:
             return jsonify(msg="Invalid format for provided version_id"), 400
     elif typed_version_string and typed_version_string.strip():
-        # Determine software_id for get_or_create_version_id
         software_id_for_version_logic = None
         if software_id_str:
             try:
@@ -4213,7 +4442,6 @@ def admin_edit_patch_file(patch_id):
             except ValueError:
                 return jsonify(msg="Invalid software_id format"), 400
         else:
-            # Fallback to current patch's version's software_id if not provided
             current_version_details = db.execute(
                 "SELECT software_id FROM versions WHERE id = ?", 
                 (patch['version_id'],)
@@ -4230,7 +4458,6 @@ def admin_edit_patch_file(patch_id):
     if not patch_name:
         return jsonify(msg="Patch name is required"), 400
 
-    # File handling logic
     new_stored_filename = patch['stored_filename']
     new_original_filename = patch['original_filename_ref']
     new_file_size = patch['file_size']
@@ -4274,7 +4501,6 @@ def admin_edit_patch_file(patch_id):
             log_details['updated_fields'].extend(['download_link', 'stored_filename', 'original_filename_ref', 'file_size', 'file_type', 'is_external_link'])
             log_details['is_external_link'] = False
 
-
         db.execute("""
             UPDATE patches SET version_id = ?, patch_name = ?, description = ?, release_date = ?,
             download_link = ?, patch_by_developer = ?, is_external_link = FALSE, stored_filename = ?,
@@ -4290,7 +4516,7 @@ def admin_edit_patch_file(patch_id):
             details=log_details
         )
         db.commit()
-        # Fetch back with JOINs for consistent response, including created_by and updated_by usernames
+
         updated_item_row = db.execute(
             """SELECT p.*, s.name as software_name, v.version_number, 
                       cr_u.username as uploaded_by_username, upd_u.username as updated_by_username
@@ -4304,11 +4530,65 @@ def admin_edit_patch_file(patch_id):
         ).fetchone()
 
         if updated_item_row:
-            # Note: 'release_date' in patches is DATE, not TIMESTAMP.
-            processed_item = convert_timestamps_to_ist_iso(dict(updated_item_row), ['created_at', 'updated_at'])
-            return jsonify(processed_item), 200
+            processed_item_dict = convert_timestamps_to_ist_iso(dict(updated_item_row), ['created_at', 'updated_at'])
+
+            # === VMS Compatibility Logic for admin_edit_patch_file ===
+            version_info = db.execute("SELECT software_id FROM versions WHERE id = ?", (final_version_id,)).fetchone()
+            if version_info:
+                software_info = db.execute("SELECT name FROM software WHERE id = ?", (version_info['software_id'],)).fetchone()
+
+                db.execute("DELETE FROM patch_vms_compatibility WHERE patch_id = ?", (patch_id,))
+                log_audit_action(
+                    action_type='CLEAR_PATCH_VMS_COMPATIBILITY',
+                    target_table='patch_vms_compatibility', target_id=patch_id,
+                    details={'patch_id': patch_id, 'reason': 'Pre-update clear for edit_file'}
+                )
+
+                if software_info and software_info['name'] in ('VMS', 'VA'):
+                    compatible_vms_ids_json = request.form.get('compatible_vms_version_ids_json')
+                    if compatible_vms_ids_json:
+                        try:
+                            compatible_vms_version_ids = json.loads(compatible_vms_ids_json)
+                            if isinstance(compatible_vms_version_ids, list):
+                                vms_software_id_row = db.execute("SELECT id FROM software WHERE name = 'VMS'").fetchone()
+                                vms_software_id = vms_software_id_row['id'] if vms_software_id_row else None
+
+                                if not vms_software_id:
+                                    app.logger.error("Could not find software_id for 'VMS' to validate compatible_vms_version_ids (edit_file).")
+                                else:
+                                    for vms_ver_id in compatible_vms_version_ids:
+                                        try:
+                                            vms_ver_id_int = int(vms_ver_id)
+                                            vms_version_check = db.execute(
+                                                "SELECT id FROM versions WHERE id = ? AND software_id = ?",
+                                                (vms_ver_id_int, vms_software_id)
+                                            ).fetchone()
+                                            if vms_version_check:
+                                                db.execute(
+                                                    "INSERT INTO patch_vms_compatibility (patch_id, vms_version_id) VALUES (?, ?)",
+                                                    (patch_id, vms_ver_id_int)
+                                                )
+                                                log_audit_action(
+                                                    action_type='UPDATE_PATCH_VMS_COMPATIBILITY',
+                                                    target_table='patch_vms_compatibility', target_id=patch_id,
+                                                    details={'patch_id': patch_id, 'vms_version_id_added': vms_ver_id_int, 'method': 'edit_file'}
+                                                )
+                                            else:
+                                                app.logger.warning(f"Skipping compatibility for vms_version_id {vms_ver_id_int} (edit_file): Not a valid 'VMS' software version.")
+                                        except ValueError:
+                                            app.logger.warning(f"Invalid vms_version_id format in JSON (edit_file): {vms_ver_id}. Skipping.")
+                                        except sqlite3.IntegrityError as e_integ_edit_file:
+                                            db.rollback()
+                                            app.logger.error(f"Integrity error updating VMS compatibility (edit_file) for patch {patch_id}, VMS ver {vms_ver_id_int}: {e_integ_edit_file}")
+                                        except Exception as e_compat_edit_file:
+                                            db.rollback()
+                                            app.logger.error(f"Error updating VMS compatibility (edit_file) for patch {patch_id}, VMS ver {vms_ver_id_int}: {e_compat_edit_file}")
+                                    db.commit() # Commit VMS compatibility changes
+                        except json.JSONDecodeError:
+                            app.logger.error("Failed to parse compatible_vms_version_ids_json from form data (edit_file).")
+
+            return jsonify(processed_item_dict), 200
         else:
-            # This case should ideally not be reached if the update was successful.
             app.logger.error(f"Failed to fetch patch with ID {patch_id} after edit_file.")
             return jsonify(msg="Patch updated but failed to retrieve full details."), 500
             
@@ -4519,7 +4799,58 @@ def admin_edit_link_url(link_id_from_url):
             response_data = convert_timestamps_to_ist_iso(dict(updated_item_dict), ['created_at', 'updated_at'])
             # Ensure uploaded_by_username (creator) and updated_by_username (editor) are distinct if needed
             # The query aliases cr_u.username to uploaded_by_username and upd_u.username to updated_by_username
-            return jsonify(response_data), 200
+            response_data_dict = convert_timestamps_to_ist_iso(dict(updated_item_dict), ['created_at', 'updated_at'])
+
+            # === VMS Compatibility Logic for admin_edit_link_url ===
+            link_software_id_for_compat_check = software_id_for_link # software_id_for_link is resolved earlier
+            current_link_software_info = db.execute("SELECT name FROM software WHERE id = ?", (link_software_id_for_compat_check,)).fetchone()
+
+            # Always delete existing compatibility entries for this link first
+            db.execute("DELETE FROM link_vms_compatibility WHERE link_id = ?", (link_id_from_url,))
+            log_audit_action(
+                action_type='CLEAR_LINK_VMS_COMPATIBILITY',
+                target_table='link_vms_compatibility', target_id=link_id_from_url,
+                details={'link_id': link_id_from_url, 'reason': 'Pre-update clear for edit_link_url'}
+            )
+
+            if current_link_software_info and current_link_software_info['name'] in ('VMS', 'VA'):
+                compatible_vms_version_ids = data.get('compatible_vms_version_ids') # From original JSON request data
+                if compatible_vms_version_ids and isinstance(compatible_vms_version_ids, list):
+                    vms_software_id_row = db.execute("SELECT id FROM software WHERE name = 'VMS'").fetchone()
+                    vms_software_id = vms_software_id_row['id'] if vms_software_id_row else None
+
+                    if not vms_software_id:
+                        app.logger.error("Could not find software_id for 'VMS' to validate compatible_vms_version_ids for link (edit_url).")
+                    else:
+                        for vms_ver_id in compatible_vms_version_ids:
+                            try:
+                                vms_ver_id_int = int(vms_ver_id)
+                                vms_version_check = db.execute(
+                                    "SELECT id FROM versions WHERE id = ? AND software_id = ?",
+                                    (vms_ver_id_int, vms_software_id)
+                                ).fetchone()
+                                if vms_version_check:
+                                    db.execute(
+                                        "INSERT INTO link_vms_compatibility (link_id, vms_version_id) VALUES (?, ?)",
+                                        (link_id_from_url, vms_ver_id_int)
+                                    )
+                                    log_audit_action(
+                                        action_type='UPDATE_LINK_VMS_COMPATIBILITY',
+                                        target_table='link_vms_compatibility', target_id=link_id_from_url,
+                                        details={'link_id': link_id_from_url, 'vms_version_id_added': vms_ver_id_int, 'method': 'edit_link_url'}
+                                    )
+                                else:
+                                    app.logger.warning(f"Skipping VMS compatibility for link {link_id_from_url} (edit_url), vms_version_id {vms_ver_id_int}: Not a valid 'VMS' software version.")
+                            except ValueError:
+                                app.logger.warning(f"Invalid vms_version_id format for link (edit_url): {vms_ver_id}. Skipping.")
+                            except sqlite3.IntegrityError as e_integ_link_edit_url:
+                                db.rollback()
+                                app.logger.error(f"Integrity error updating VMS compatibility for link {link_id_from_url} (edit_url), VMS ver {vms_ver_id_int}: {e_integ_link_edit_url}")
+                            except Exception as e_compat_link_edit_url:
+                                db.rollback()
+                                app.logger.error(f"Error updating VMS compatibility for link {link_id_from_url} (edit_url), VMS ver {vms_ver_id_int}: {e_compat_link_edit_url}")
+                        db.commit() # Commit VMS compatibility changes for this link
+            return jsonify(response_data_dict), 200
         else:
             app.logger.error(f"Failed to fetch link with ID {link_id_from_url} after edit_url.")
             return jsonify(msg="Link updated but failed to retrieve full details."), 500
@@ -4541,7 +4872,6 @@ def admin_edit_link_file(link_id_from_url):
     if not link_item:
         return jsonify(msg="Link not found"), 404
 
-    # Resolve software_id for the link
     software_id_from_form = request.form.get('software_id')
     if software_id_from_form:
         try:
@@ -4551,27 +4881,25 @@ def admin_edit_link_file(link_id_from_url):
     else:
         software_id_for_link = link_item['software_id']
 
-    # Resolve other fields from form
     title = request.form.get('title', link_item['title']).strip()
-    description_form = request.form.get('description') # None if not present
+    description_form = request.form.get('description')
     description = description_form.strip() if description_form is not None else link_item['description']
 
     if not title:
         return jsonify(msg="Title is required for edit."), 400
 
-    # --- Version Handling ---
-    final_version_id_for_db = link_item['version_id'] # Default
+    final_version_id_for_db = link_item['version_id']
     software_id_for_version_context = software_id_for_link
 
     typed_version_string_form = request.form.get('typed_version_string')
-    provided_version_id_form = request.form.get('version_id') # Always str or None
+    provided_version_id_form = request.form.get('version_id')
 
     if typed_version_string_form and typed_version_string_form.strip():
         resolved_id = get_or_create_version_id(db, software_id_for_version_context, typed_version_string_form.strip(), current_user_id)
         if resolved_id is None:
             return jsonify(msg=f"Failed to process typed version '{typed_version_string_form}' for software ID {software_id_for_version_context}."), 500
         final_version_id_for_db = resolved_id
-    elif provided_version_id_form and provided_version_id_form.strip(): # Not None and not empty
+    elif provided_version_id_form and provided_version_id_form.strip():
         try:
             parsed_id = int(provided_version_id_form)
             if parsed_id > 0:
@@ -4584,7 +4912,6 @@ def admin_edit_link_file(link_id_from_url):
     if final_version_id_for_db is None:
         return jsonify(msg="A valid version association is mandatory for this link."), 400
 
-    # Validate that final_version_id_for_db belongs to software_id_for_version_context
     version_valid_check = db.execute(
         "SELECT software_id FROM versions WHERE id = ? AND software_id = ?",
         (final_version_id_for_db, software_id_for_version_context)
@@ -4592,20 +4919,15 @@ def admin_edit_link_file(link_id_from_url):
     if not version_valid_check:
         return jsonify(msg=f"Version ID {final_version_id_for_db} is not valid or does not belong to Software ID {software_id_for_version_context}."), 400
 
-    # --- File Handling ---
     new_physical_file = request.files.get('file')
     new_stored_filename = link_item['stored_filename']
     new_original_filename = link_item['original_filename_ref']
     new_file_size = link_item['file_size']
     new_file_type = link_item['file_type']
-    new_url = link_item['url'] # This becomes server path if file uploaded/changed
-    file_actually_saved_path = None # To track if a new file was physically saved, for cleanup on DB error
+    new_url = link_item['url']
+    file_actually_saved_path = None
 
-    if new_physical_file and new_physical_file.filename != '': # A new file is being uploaded
-        # if not allowed_file(new_physical_file.filename): # Assuming allowed_file function exists
-        #     return jsonify(msg="File type not allowed"), 400
-
-        # Delete old file if it existed and was managed by us
+    if new_physical_file and new_physical_file.filename != '':
         if not link_item['is_external_link'] and link_item['stored_filename']:
             _delete_file_if_exists(os.path.join(app.config['LINK_UPLOAD_FOLDER'], link_item['stored_filename']))
         
@@ -4615,24 +4937,19 @@ def admin_edit_link_file(link_id_from_url):
         file_actually_saved_path = os.path.join(app.config['LINK_UPLOAD_FOLDER'], new_stored_filename)
         
         try:
-            os.makedirs(app.config['LINK_UPLOAD_FOLDER'], exist_ok=True) # Ensure directory exists
+            os.makedirs(app.config['LINK_UPLOAD_FOLDER'], exist_ok=True)
             new_physical_file.save(file_actually_saved_path)
             new_file_size = os.path.getsize(file_actually_saved_path)
             new_file_type = new_physical_file.mimetype
             new_original_filename = original_filename_secured
-            new_url = f"/official_uploads/links/{new_stored_filename}" # Update URL to new file path
+            new_url = f"/official_uploads/links/{new_stored_filename}"
         except Exception as e:
-            if file_actually_saved_path and os.path.exists(file_actually_saved_path): # Cleanup partially saved file
+            if file_actually_saved_path and os.path.exists(file_actually_saved_path):
                 _delete_file_if_exists(file_actually_saved_path)
             return jsonify(msg=f"Error saving new file: {e}"), 500
             
-    elif link_item['is_external_link']: # Switching from URL to File, but no new file provided
-        # This case implies the payload wants it to be a file link, but no file was sent.
-        # However, the route is edit_file, so it's assumed to become/remain a file link.
-        # If no new file is provided, and it was previously external, this is an error.
+    elif link_item['is_external_link']:
         return jsonify(msg="To change from an external URL to a file-based link, a new file must be uploaded."), 400
-    # If it was already a file link, and no new file is provided, it's a metadata-only update for the file link.
-    # new_url, new_stored_filename etc. will retain their values from link_item.
 
     try:
         action_type_log = 'UPDATE_LINK_METADATA'
@@ -4672,19 +4989,55 @@ def admin_edit_link_file(link_id_from_url):
             WHERE l.id = ?""", (link_id_from_url,)).fetchone()
 
         if updated_item_dict:
-            processed_item = convert_timestamps_to_ist_iso(dict(updated_item_dict), ['created_at', 'updated_at'])
-            return jsonify(processed_item), 200
+            processed_item_dict = convert_timestamps_to_ist_iso(dict(updated_item_dict), ['created_at', 'updated_at'])
+
+            # === VMS Compatibility Logic for admin_edit_link_file ===
+            link_software_id_for_compat_check = software_id_for_link # software_id_for_link is resolved earlier
+            current_link_software_info = db.execute("SELECT name FROM software WHERE id = ?", (link_software_id_for_compat_check,)).fetchone()
+            db.execute("DELETE FROM link_vms_compatibility WHERE link_id = ?", (link_id_from_url,))
+            log_audit_action(
+                action_type='CLEAR_LINK_VMS_COMPATIBILITY',
+                target_table='link_vms_compatibility', target_id=link_id_from_url,
+                details={'link_id': link_id_from_url, 'reason': 'Pre-update clear for edit_link_file'}
+            )
+
+            if current_link_software_info and current_link_software_info['name'] in ('VMS', 'VA'):
+                compatible_vms_ids_json = request.form.get('compatible_vms_version_ids_json')
+                if compatible_vms_ids_json:
+                    try:
+                        compatible_vms_version_ids = json.loads(compatible_vms_ids_json)
+                        if isinstance(compatible_vms_version_ids, list):
+                            vms_software_id_row = db.execute("SELECT id FROM software WHERE name = 'VMS'").fetchone()
+                            vms_software_id = vms_software_id_row['id'] if vms_software_id_row else None
+                            if not vms_software_id:
+                                app.logger.error("Could not find software_id for 'VMS' to validate compatible_vms_version_ids for link (edit_file).")
+                            else:
+                                for vms_ver_id in compatible_vms_version_ids:
+                                    try:
+                                        vms_ver_id_int = int(vms_ver_id)
+                                        vms_version_check = db.execute("SELECT id FROM versions WHERE id = ? AND software_id = ?", (vms_ver_id_int, vms_software_id)).fetchone()
+                                        if vms_version_check:
+                                            db.execute("INSERT INTO link_vms_compatibility (link_id, vms_version_id) VALUES (?, ?)", (link_id_from_url, vms_ver_id_int))
+                                            log_audit_action(action_type='UPDATE_LINK_VMS_COMPATIBILITY', target_table='link_vms_compatibility', target_id=link_id_from_url, details={'link_id': link_id_from_url, 'vms_version_id_added': vms_ver_id_int, 'method': 'edit_link_file'})
+                                        else:
+                                            app.logger.warning(f"Skipping VMS compatibility for link {link_id_from_url} (edit_file), vms_version_id {vms_ver_id_int}: Not a valid 'VMS' software version.")
+                                    except ValueError: app.logger.warning(f"Invalid vms_version_id format for link (edit_file): {vms_ver_id}. Skipping.")
+                                    except sqlite3.IntegrityError as e_lf_compat_int: db.rollback(); app.logger.error(f"Integrity error for link VMS compat (edit_file) L:{link_id_from_url} V:{vms_ver_id_int}: {e_lf_compat_int}")
+                                    except Exception as e_lf_compat_gen: db.rollback(); app.logger.error(f"General error for link VMS compat (edit_file) L:{link_id_from_url} V:{vms_ver_id_int}: {e_lf_compat_gen}")
+                                db.commit()
+                    except json.JSONDecodeError: app.logger.error("Failed to parse compatible_vms_version_ids_json from form for link (edit_file).")
+            return jsonify(processed_item_dict), 200
         else:
             app.logger.error(f"Failed to fetch link with ID {link_id_from_url} after edit_file.")
             return jsonify(msg="Link updated but failed to retrieve full details."), 500
     except sqlite3.IntegrityError as e:
         db.rollback()
-        if file_actually_saved_path and os.path.exists(file_actually_saved_path): # Cleanup newly saved file on DB error
+        if file_actually_saved_path and os.path.exists(file_actually_saved_path):
              _delete_file_if_exists(file_actually_saved_path)
         return jsonify(msg=f"Database integrity error: {e}"), 409
     except Exception as e:
         db.rollback()
-        if file_actually_saved_path and os.path.exists(file_actually_saved_path): # Cleanup
+        if file_actually_saved_path and os.path.exists(file_actually_saved_path):
              _delete_file_if_exists(file_actually_saved_path)
         return jsonify(msg=f"Server error during link update: {e}"), 500
 
@@ -5261,6 +5614,54 @@ def admin_add_link_with_url():
                 'version_id': new_link_data.get('version_id')
             }
         )
+
+    # === VMS Compatibility Logic for admin_add_link_with_url ===
+    if response[1] == 201: # Check if link creation was successful
+        new_link_data_json = response[0].get_json()
+        new_link_id = new_link_data_json.get('id')
+        link_software_id = new_link_data_json.get('software_id') # software_id of the link itself
+        link_software_id_for_compat_check = link_software_id
+
+        if new_link_id and link_software_id_for_compat_check:
+            # Check if the link's software is 'VMS' or 'VA'
+            software_info = db.execute("SELECT name FROM software WHERE id = ?", (link_software_id_for_compat_check,)).fetchone()
+            if software_info and software_info['name'] in ('VMS', 'VA'):
+                compatible_vms_version_ids = data.get('compatible_vms_version_ids') # Get from original request data
+                if compatible_vms_version_ids and isinstance(compatible_vms_version_ids, list):
+                    vms_software_id_row = db.execute("SELECT id FROM software WHERE name = 'VMS'").fetchone()
+                    vms_software_id = vms_software_id_row['id'] if vms_software_id_row else None
+
+                    if not vms_software_id:
+                        app.logger.error("Could not find software_id for 'VMS' to validate compatible_vms_version_ids for link (add_with_url).")
+                    else:
+                        for vms_ver_id in compatible_vms_version_ids:
+                            try:
+                                vms_ver_id_int = int(vms_ver_id)
+                                vms_version_check = db.execute(
+                                    "SELECT id FROM versions WHERE id = ? AND software_id = ?",
+                                    (vms_ver_id_int, vms_software_id)
+                                ).fetchone()
+                                if vms_version_check:
+                                    db.execute(
+                                        "INSERT INTO link_vms_compatibility (link_id, vms_version_id) VALUES (?, ?)",
+                                        (new_link_id, vms_ver_id_int)
+                                    )
+                                    log_audit_action(
+                                        action_type='ADD_LINK_VMS_COMPATIBILITY',
+                                        target_table='link_vms_compatibility', target_id=new_link_id,
+                                        details={'link_id': new_link_id, 'vms_version_id': vms_ver_id_int, 'method': 'add_link_url'}
+                                    )
+                                else:
+                                    app.logger.warning(f"Skipping VMS compatibility for link {new_link_id}, vms_version_id {vms_ver_id_int}: Not a valid 'VMS' software version.")
+                            except ValueError:
+                                app.logger.warning(f"Invalid vms_version_id format for link (add_with_url): {vms_ver_id}. Skipping.")
+                            except sqlite3.IntegrityError as e_integ_link_url:
+                                db.rollback()
+                                app.logger.error(f"Integrity error adding VMS compatibility for link {new_link_id} (add_with_url), VMS ver {vms_ver_id_int}: {e_integ_link_url}")
+                            except Exception as e_compat_link_url:
+                                db.rollback()
+                                app.logger.error(f"Error adding VMS compatibility for link {new_link_id} (add_with_url), VMS ver {vms_ver_id_int}: {e_compat_link_url}")
+                        db.commit() # Commit all successful VMS compatibility entries for this link
     return response
 
 # --- Software Version Management Endpoints (Admin) ---

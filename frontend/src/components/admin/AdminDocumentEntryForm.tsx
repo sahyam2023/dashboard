@@ -1,6 +1,6 @@
 // src/components/admin/AdminDocumentEntryForm.tsx
 import React, { useState, useEffect, useRef } from 'react';
-import { useForm, Controller, SubmitHandler, FieldErrors } from 'react-hook-form';
+import { useForm, SubmitHandler, FieldErrors } from 'react-hook-form';
 import * as yup from 'yup';
 import { yupResolver } from '@hookform/resolvers/yup';
 // import { toast } from 'react-toastify'; // Replaced with utils
@@ -71,7 +71,7 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
 }) => {
   const isEditMode = !!documentToEdit;
 
-  const { register, handleSubmit, control, formState: { errors }, watch, setValue, reset } = useForm<DocumentFormData>({
+  const { register, handleSubmit, formState: { errors }, watch, setValue, reset } = useForm<DocumentFormData>({
     resolver: yupResolver(documentValidationSchema),
     context: { // Pass context to yup schema
       isEditMode: isEditMode,

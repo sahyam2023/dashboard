@@ -53,6 +53,7 @@ interface PatchFormData {
   externalUrl?: string;
   selectedFile?: File | null | undefined;
   patch_by_developer?: string; // Added
+  compatibleVmsVersionIds: string[]; // New field for VMS compatibility
 }
 
 // Yup validation schema
@@ -85,6 +86,7 @@ const patchValidationSchema = yup.object().shape({
     }),
   description: yup.string().transform(value => value === '' ? undefined : value).optional().max(2000, "Description cannot exceed 2000 characters.").nullable(),
   patch_by_developer: yup.string().transform(value => value === '' ? undefined : value).optional().max(255, "Patch developer name cannot exceed 255 characters.").nullable(), // Added
+  compatibleVmsVersionIds: yup.array().of(yup.string().required()).optional(), // VMS compatibility IDs
 });
 
 
@@ -113,18 +115,21 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
       externalUrl: '',
       selectedFile: null,
       patch_by_developer: '', // Added
+      compatibleVmsVersionIds: [], // Initialize new field
     }
   });
 
   const [softwareList, setSoftwareList] = useState<Software[]>([]);
   const [versionsList, setVersionsList] = useState<SoftwareVersion[]>([]);
+  const [vmsVersionsList, setVmsVersionsList] = useState<SoftwareVersion[]>([]); // State for VMS versions
+  const [isVmsOrVaSoftware, setIsVmsOrVaSoftware] = useState(false); // State to track if software is VMS/VA
   const [existingFileName, setExistingFileName] = useState<string | null>(null);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isFetchingSoftwareOrVersions, setIsFetchingSoftwareOrVersions] = useState(false);
+  const [isFetchingVmsVersions, setIsFetchingVmsVersions] = useState(false); // Separate loading state for VMS versions
   const [uploadProgress, setUploadProgress] = useState<number>(0); // For chunked upload progress
   const [isUploading, setIsUploading] = useState<boolean>(false); // For beforeunload warning
-  // error and successMessage states will be removed, replaced by toast (already done for some)
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { isAuthenticated, user } = useAuth();
@@ -163,25 +168,52 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
 
   // Fetch versions for the version dropdown when a software product is selected
   useEffect(() => {
-    if (watchedSoftwareId) {
+    if (watchedSoftwareId && softwareList.length > 0) {
       setIsFetchingSoftwareOrVersions(true);
       setVersionsList([]);
       setValue('selectedVersionId', '');
       setValue('typedVersionString', '');
+
+      const selectedSoftware = softwareList.find(sw => sw.id.toString() === watchedSoftwareId);
+      if (selectedSoftware && (selectedSoftware.name === 'VMS' || selectedSoftware.name === 'VA')) {
+        setIsVmsOrVaSoftware(true);
+        // Fetch VMS versions specifically for the multi-select
+        const vmsSoftware = softwareList.find(sw => sw.name === 'VMS');
+        if (vmsSoftware) {
+          setIsFetchingVmsVersions(true);
+          fetchVersionsForSoftware(vmsSoftware.id)
+            .then(setVmsVersionsList)
+            .catch(() => showErrorToast('Failed to load VMS versions for compatibility.'))
+            .finally(() => setIsFetchingVmsVersions(false));
+        } else {
+          setVmsVersionsList([]); // Clear if VMS software itself not found
+        }
+      } else {
+        setIsVmsOrVaSoftware(false);
+        setVmsVersionsList([]); // Clear VMS versions if not VMS/VA software
+      }
+
+      // Fetch versions for the selected software for the main version dropdown
       fetchVersionsForSoftware(parseInt(watchedSoftwareId))
         .then(setVersionsList)
-        .catch(() => showErrorToast('Failed to load versions.')) // Standardized
+        .catch(() => showErrorToast('Failed to load versions.'))
         .finally(() => setIsFetchingSoftwareOrVersions(false));
     } else {
       setVersionsList([]);
+      setIsVmsOrVaSoftware(false);
+      setVmsVersionsList([]);
       setValue('selectedVersionId', '');
       setValue('typedVersionString', '');
     }
-  }, [watchedSoftwareId, setValue]);
+  }, [watchedSoftwareId, setValue, softwareList]);
 
   // Pre-fill form when in edit mode
   useEffect(() => {
-    if (isEditMode && patchToEdit) {
+    if (isEditMode && patchToEdit && softwareList.length > 0) { // Ensure softwareList is loaded for VMS/VA check
+      const currentSelectedSoftware = softwareList.find(sw => sw.id === patchToEdit.software_id);
+      const isCurrentSoftwareVmsOrVa = !!currentSelectedSoftware && (currentSelectedSoftware.name === 'VMS' || currentSelectedSoftware.name === 'VA');
+      setIsVmsOrVaSoftware(isCurrentSoftwareVmsOrVa); // Set based on patchToEdit's software
+
       const defaultValues: Partial<PatchFormData> = {
         selectedSoftwareId: patchToEdit.software_id.toString(),
         patchName: patchToEdit.patch_name,
@@ -189,7 +221,14 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
         description: patchToEdit.description || '',
         inputMode: patchToEdit.is_external_link ? 'url' : 'upload',
         externalUrl: patchToEdit.is_external_link ? patchToEdit.download_link : '',
-        patch_by_developer: patchToEdit.patch_by_developer || '', // Added
+        patch_by_developer: patchToEdit.patch_by_developer || '',
+        compatibleVmsVersionIds: isCurrentSoftwareVmsOrVa && patchToEdit.compatible_vms_versions
+                                  ? (typeof patchToEdit.compatible_vms_versions === 'string'
+                                      ? (patchToEdit.compatible_vms_versions as string).split(',').map(s => s.trim()).filter(s => s)
+                                      : Array.isArray(patchToEdit.compatible_vms_versions)
+                                          ? patchToEdit.compatible_vms_versions.map(String)
+                                          : [])
+                                  : [],
       };
 
       // Version pre-filling logic
@@ -197,12 +236,12 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
         const existingVersionInList = versionsList.find(v => v.id === patchToEdit.version_id);
         if (existingVersionInList) {
           defaultValues.selectedVersionId = patchToEdit.version_id.toString();
-          defaultValues.typedVersionString = patchToEdit.version_number;
-        } else { // Version ID from patch not in list, assume new/custom
+          defaultValues.typedVersionString = patchToEdit.version_number; // Keep showing original version string
+        } else {
           defaultValues.selectedVersionId = CREATE_NEW_VERSION_SENTINEL;
           defaultValues.typedVersionString = patchToEdit.version_number;
         }
-      } else if (patchToEdit.version_number) { // Fallback or if versionsList not ready
+      } else if (patchToEdit.version_number) {
         defaultValues.selectedVersionId = CREATE_NEW_VERSION_SENTINEL;
         defaultValues.typedVersionString = patchToEdit.version_number;
       }
@@ -220,7 +259,8 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
     } else if (!isEditMode) {
       resetFormDefaults(!!watchedSoftwareId);
     }
-  }, [isEditMode, patchToEdit, versionsList, watchedSoftwareId, reset, setValue]);
+  }, [isEditMode, patchToEdit, versionsList, watchedSoftwareId, reset, setValue, softwareList]);
+
 
   const resetFormDefaults = (keepSoftware: boolean = false) => {
     const currentSoftwareId = keepSoftware ? watch('selectedSoftwareId') : '';
@@ -235,9 +275,11 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
       externalUrl: '',
       selectedFile: null,
       patch_by_developer: '', // Added
+      compatibleVmsVersionIds: [], // Reset VMS compat IDs
     });
     setExistingFileName(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
+    // setIsVmsOrVaSoftware(false); // This will be reset by the useEffect on watchedSoftwareId
   };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -281,10 +323,16 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
       patch_name: data.patchName.trim(),
       description: data.description?.trim() || undefined,
       release_date: data.releaseDate || undefined,
-      patch_by_developer: data.patch_by_developer?.trim() || undefined, // Added
+      patch_by_developer: data.patch_by_developer?.trim() || undefined,
     };
     if (finalVersionId) basePayload.version_id = finalVersionId;
     if (finalTypedVersionString) basePayload.typed_version_string = finalTypedVersionString;
+
+    // Add VMS compatibility IDs if applicable
+    if (isVmsOrVaSoftware && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0) {
+        basePayload.compatible_vms_version_ids = data.compatibleVmsVersionIds;
+    }
+
 
     try {
       let resultPatch: PatchType;
@@ -335,6 +383,9 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
             ...(data.releaseDate && { release_date: data.releaseDate }),
             description: data.description?.trim() || '',
             patch_by_developer: data.patch_by_developer?.trim() || '',
+            // Add compatibleVmsVersionIds to chunkMetadata if software is VMS/VA
+            ...(isVmsOrVaSoftware && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0 &&
+              { compatible_vms_version_ids_json: JSON.stringify(data.compatibleVmsVersionIds) }),
         };
 
         resultPatch = await uploadFileInChunks(
@@ -471,6 +522,52 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
         />
         {errors.patch_by_developer && <p className="mt-1 text-sm text-red-600">{errors.patch_by_developer.message}</p>}
       </div>
+
+      {/* VMS Compatibility Section */}
+      {isVmsOrVaSoftware && (
+        <div>
+          <label htmlFor="compatibleVmsVersionIds" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            Compatible VMS Versions (for VMS/VA Patches)
+          </label>
+          {isFetchingVmsVersions ? <p className="text-sm text-gray-500 dark:text-gray-400">Loading VMS versions...</p> : (
+            <Controller
+              name="compatibleVmsVersionIds"
+              control={control}
+              defaultValue={[]}
+              render={({ field }) => (
+                <div className="mt-1 block w-full max-h-40 overflow-y-auto p-2 border border-gray-300 rounded-md bg-white dark:bg-gray-700 dark:border-gray-600">
+                  {vmsVersionsList.length === 0 ? (
+                     <p className="text-sm text-gray-500 dark:text-gray-400">No VMS versions available.</p>
+                  ) : (
+                    vmsVersionsList.map(vmsVersion => (
+                      <label key={vmsVersion.id} className="flex items-center space-x-2 p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">
+                        <input
+                          type="checkbox"
+                          className="form-checkbox h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:focus:ring-blue-600"
+                          value={vmsVersion.id.toString()}
+                          checked={field.value?.includes(vmsVersion.id.toString())}
+                          onChange={(e) => {
+                            const selectedId = e.target.value;
+                            const newValue = e.target.checked
+                              ? [...(field.value || []), selectedId]
+                              : (field.value || []).filter((id: string) => id !== selectedId);
+                            field.onChange(newValue);
+                          }}
+                          disabled={isLoading || isFetchingVmsVersions}
+                        />
+                        <span className="text-sm text-gray-700 dark:text-gray-300">{vmsVersion.version_number}</span>
+                      </label>
+                    ))
+                  )}
+                </div>
+              )}
+            />
+          )}
+          {errors.compatibleVmsVersionIds && <p className="mt-1 text-sm text-red-600">{errors.compatibleVmsVersionIds.message}</p>}
+           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Select VMS versions this patch is compatible with. Only applicable if the patch is for 'VMS' or 'VA' software.</p>
+        </div>
+      )}
+
       <div className="my-4">
         <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Patch Source:</span>
         <div className="flex items-center space-x-4">

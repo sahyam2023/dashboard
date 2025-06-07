@@ -33,7 +33,7 @@ const AdminMiscCategoryForm: React.FC<AdminMiscCategoryFormProps> = ({
   onCancel,
 }) => {
   const isEditMode = !!categoryToEdit;
-  const { register, handleSubmit, formState: { errors }, reset, setValue } = useForm<MiscCategoryFormData>({
+  const { register, handleSubmit, formState: { errors }, reset} = useForm<MiscCategoryFormData>({
     resolver: yupResolver(categoryValidationSchema),
     defaultValues: {
       name: '',

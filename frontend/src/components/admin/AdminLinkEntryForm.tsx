@@ -42,6 +42,7 @@ interface LinkFormData {
   externalUrl?: string;
   selectedFile?: File | null | undefined; // Can be File, null (cleared), or undefined (initial)
   description?: string;
+  compatibleVmsVersionIds: string[]; // New field
 }
 
 // Create a Yup validation schema
@@ -67,6 +68,7 @@ const validationSchema = yup.object().shape({
     otherwise: schema => schema.nullable(),
   }),
   description: yup.string().optional().max(1000, 'Description cannot exceed 1000 characters.'),
+  compatibleVmsVersionIds: yup.array().of(yup.string().required()).optional(), // New validation
 });
 
 
@@ -90,24 +92,22 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
       externalUrl: '',
       selectedFile: null,
       description: '',
+      compatibleVmsVersionIds: [], // Initialize new field
     }
   });
 
   const [softwareList, setSoftwareList] = useState<Software[]>([]);
-  // --- Version Handling States (Version is MANDATORY for Links now) ---
   const [versionsList, setVersionsList] = useState<SoftwareVersion[]>([]);
-  // showTypeVersionInput will be derived from watched selectedVersionId
-  // --- End Version Handling States ---
-  
-  // existingFileName needs to be tracked for validation logic if not using context correctly or if it changes
+  const [vmsVersionsList, setVmsVersionsList] = useState<SoftwareVersion[]>([]); // State for VMS versions
+  const [isVmsOrVaSoftware, setIsVmsOrVaSoftware] = useState(false); // State to track if software is VMS/VA
   const [existingFileName, setExistingFileName] = useState<string | null>(null);
 
 
   const [isLoading, setIsLoading] = useState(false); // For API calls
   const [isFetchingSoftwareOrVersions, setIsFetchingSoftwareOrVersions] = useState(false); // For dropdown loading
+  const [isFetchingVmsVersions, setIsFetchingVmsVersions] = useState(false); // Separate loading state for VMS versions
   const [uploadProgress, setUploadProgress] = useState<number>(0); // For chunked upload progress
   const [isUploading, setIsUploading] = useState<boolean>(false); // For beforeunload warning
-  // Error and success messages will be handled by toast (already done for some)
 
   const { isAuthenticated, user } = useAuth();
   const role = user?.role; // Access role safely, as user can be null
@@ -149,41 +149,64 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
   }, [isAuthenticated, role]);
 
   useEffect(() => {
-    // Uses watchedSoftwareId from RHF
-    if (watchedSoftwareId) { 
+    if (watchedSoftwareId && softwareList.length > 0) {
       setIsFetchingSoftwareOrVersions(true);
       setVersionsList([]);
-      setValue('selectedVersionId', ''); // RHF setValue
-      setValue('typedVersionString', ''); // RHF setValue
-      // setShowTypeVersionInput(false); // Derived state
+      setValue('selectedVersionId', '');
+      setValue('typedVersionString', '');
+
+      const selectedSoftware = softwareList.find(sw => sw.id.toString() === watchedSoftwareId);
+      if (selectedSoftware && (selectedSoftware.name === 'VMS' || selectedSoftware.name === 'VA')) {
+        setIsVmsOrVaSoftware(true);
+        const vmsSoftware = softwareList.find(sw => sw.name === 'VMS');
+        if (vmsSoftware) {
+          setIsFetchingVmsVersions(true);
+          fetchVersionsForSoftware(vmsSoftware.id)
+            .then(setVmsVersionsList)
+            .catch(() => showErrorToast('Failed to load VMS versions for compatibility.'))
+            .finally(() => setIsFetchingVmsVersions(false));
+        } else {
+          setVmsVersionsList([]);
+        }
+      } else {
+        setIsVmsOrVaSoftware(false);
+        setVmsVersionsList([]);
+      }
+
       fetchVersionsForSoftware(parseInt(watchedSoftwareId))
         .then(setVersionsList)
-        .catch(() => showErrorToast('Failed to load versions for selected software.')) // Standardized
+        .catch(() => showErrorToast('Failed to load versions for selected software.'))
         .finally(() => setIsFetchingSoftwareOrVersions(false));
     } else {
       setVersionsList([]);
-      setValue('selectedVersionId', ''); // RHF setValue
-      setValue('typedVersionString', ''); // RHF setValue
-      // setShowTypeVersionInput(false); // Derived state
+      setIsVmsOrVaSoftware(false);
+      setVmsVersionsList([]);
+      setValue('selectedVersionId', '');
+      setValue('typedVersionString', '');
     }
-  }, [watchedSoftwareId, setValue]); // Add setValue to dependencies
+  }, [watchedSoftwareId, setValue, softwareList]);
 
   useEffect(() => {
-    if (isEditMode && linkToEdit) {
-      // Use RHF reset or setValue to prefill
+    if (isEditMode && linkToEdit && softwareList.length > 0) {
+      const currentSelectedSoftware = softwareList.find(sw => sw.id === linkToEdit.software_id);
+      const isCurrentSoftwareVmsOrVa = !!currentSelectedSoftware && (currentSelectedSoftware.name === 'VMS' || currentSelectedSoftware.name === 'VA');
+      setIsVmsOrVaSoftware(isCurrentSoftwareVmsOrVa);
+
       const defaultValues: Partial<LinkFormData> = {
         selectedSoftwareId: linkToEdit.software_id.toString(),
         title: linkToEdit.title,
         description: linkToEdit.description || '',
         inputMode: linkToEdit.is_external_link ? 'url' : 'upload',
         externalUrl: linkToEdit.is_external_link ? linkToEdit.url : '',
-        // selectedFile remains null/undefined initially for edit mode
+        compatibleVmsVersionIds: isCurrentSoftwareVmsOrVa && linkToEdit.compatible_vms_versions
+                                  ? (typeof linkToEdit.compatible_vms_versions === 'string'
+                                      ? (linkToEdit.compatible_vms_versions as string).split(',').map(s => s.trim()).filter(s => s)
+                                      : Array.isArray(linkToEdit.compatible_vms_versions)
+                                          ? linkToEdit.compatible_vms_versions.map(String)
+                                          : [])
+                                  : [],
       };
       
-      // Pre-fill version logic using RHF values
-      // This logic depends on versionsList being populated for the selectedSoftwareId
-      // It's important that watchedSoftwareId is already set for this to work correctly,
-      // or this part of the logic needs to run when versionsList is updated.
       if (linkToEdit.version_id && linkToEdit.software_id.toString() === watchedSoftwareId && versionsList.length > 0) {
         const existingVersionInList = versionsList.find(v => v.id === linkToEdit.version_id);
         if (existingVersionInList) {
@@ -193,26 +216,25 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
           defaultValues.selectedVersionId = CREATE_NEW_VERSION_SENTINEL;
           defaultValues.typedVersionString = linkToEdit.version_name;
         }
-      } else if (linkToEdit.version_name) { // Fallback if versionsList not ready or software ID mismatch
+      } else if (linkToEdit.version_name) {
           defaultValues.selectedVersionId = CREATE_NEW_VERSION_SENTINEL;
           defaultValues.typedVersionString = linkToEdit.version_name;
       }
 
-      reset(defaultValues); // RHF reset with all values
+      reset(defaultValues);
 
       if (!linkToEdit.is_external_link) {
         setExistingFileName(linkToEdit.original_filename_ref || linkToEdit.url.split('/').pop() || 'unknown_file');
       } else {
         setExistingFileName(null);
       }
-      setValue('selectedFile', null); // Clear file input field
+      setValue('selectedFile', null);
       if (fileInputRef.current) fileInputRef.current.value = "";
 
     } else if (!isEditMode) {
-      resetFormDefaults(!!watchedSoftwareId); // Use new reset function
+      resetFormDefaults(!!watchedSoftwareId);
     }
-  // Add versionsList and watchedSoftwareId to dependency array to re-run pre-fill if they change
-  }, [isEditMode, linkToEdit, reset, setValue, versionsList, watchedSoftwareId]);
+  }, [isEditMode, linkToEdit, reset, setValue, versionsList, watchedSoftwareId, softwareList]);
 
 
   const resetFormDefaults = (keepSoftware: boolean = false) => {
@@ -227,9 +249,11 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
         externalUrl: '',
         selectedFile: null,
         description: '',
+        compatibleVmsVersionIds: [], // Reset VMS compat IDs
     });
     setExistingFileName(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
+    // setIsVmsOrVaSoftware(false); // This will be reset by the useEffect on watchedSoftwareId
     // Old setError(null) removed
   };
 
@@ -273,12 +297,17 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
     // Yup schema handles other validation cases (e.g. missing typedVersionString when sentinel selected)
 
     const basePayload: Partial<AddLinkPayloadFlexible | EditLinkPayloadFlexible> = {
-      software_id: parseInt(data.selectedSoftwareId), // From RHF data
-      title: data.title.trim(), // From RHF data
-      description: data.description?.trim() || undefined, // From RHF data
+      software_id: parseInt(data.selectedSoftwareId),
+      title: data.title.trim(),
+      description: data.description?.trim() || undefined,
     };
     if (finalVersionId) basePayload.version_id = finalVersionId;
     if (finalTypedVersionString) basePayload.typed_version_string = finalTypedVersionString;
+
+    // Add VMS compatibility IDs if applicable
+    if (isVmsOrVaSoftware && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0) {
+        basePayload.compatible_vms_version_ids = data.compatibleVmsVersionIds;
+    }
 
     try {
       let resultLink: LinkType;
@@ -320,8 +349,11 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
             software_id: data.selectedSoftwareId,
             ...(finalVersionId && { version_id: finalVersionId.toString() }),
             ...(finalTypedVersionString && { typed_version_string: finalTypedVersionString }),
-            link_title: data.title.trim(), // Backend expects 'link_title' for this item_type
+            link_title: data.title.trim(),
             description: data.description?.trim() || '',
+            // Add compatibleVmsVersionIds to chunkMetadata if software is VMS/VA
+            ...(isVmsOrVaSoftware && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0 &&
+              { compatible_vms_version_ids_json: JSON.stringify(data.compatibleVmsVersionIds) }),
         };
 
         resultLink = await uploadFileInChunks(
@@ -437,11 +469,56 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
         {errors.title && <p className="mt-1 text-sm text-red-600">{errors.title.message}</p>}
       </div>
 
+      {/* VMS Compatibility Section */}
+      {isVmsOrVaSoftware && (
+        <div>
+          <label htmlFor="compatibleVmsVersionIds" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            Compatible VMS Versions (for VMS/VA Links)
+          </label>
+          {isFetchingVmsVersions ? <p className="text-sm text-gray-500 dark:text-gray-400">Loading VMS versions...</p> : (
+            <Controller
+              name="compatibleVmsVersionIds"
+              control={control}
+              defaultValue={[]}
+              render={({ field }) => (
+                <div className="mt-1 block w-full max-h-40 overflow-y-auto p-2 border border-gray-300 rounded-md bg-white dark:bg-gray-700 dark:border-gray-600">
+                  {vmsVersionsList.length === 0 ? (
+                    <p className="text-sm text-gray-500 dark:text-gray-400">No VMS versions available.</p>
+                  ) : (
+                    vmsVersionsList.map(vmsVersion => (
+                      <label key={vmsVersion.id} className="flex items-center space-x-2 p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">
+                        <input
+                          type="checkbox"
+                          className="form-checkbox h-5 w-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-900 dark:checked:bg-blue-500"
+                          value={vmsVersion.id.toString()}
+                          checked={field.value?.includes(vmsVersion.id.toString()) || false}
+                          onChange={(e) => {
+                            const selectedId = e.target.value;
+                            const currentValues = field.value || [];
+                            const newValue = e.target.checked
+                              ? [...currentValues, selectedId]
+                              : currentValues.filter((id: string) => id !== selectedId);
+                            field.onChange(newValue);
+                          }}
+                          disabled={isLoading || isFetchingVmsVersions}
+                        />
+                        <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{vmsVersion.version_number}</span>
+                      </label>
+                    ))
+                  )}
+                </div>
+              )}
+            />
+          )}
+          {errors.compatibleVmsVersionIds && <p className="mt-1 text-sm text-red-600">{errors.compatibleVmsVersionIds.message}</p>}
+           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Select VMS versions this link is compatible with. Only applicable if the link is for 'VMS' or 'VA' software.</p>
+        </div>
+      )}
+
       <div className="my-4">
         <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Link Source:</span>
         <div className="flex items-center space-x-4">
             <label className="flex items-center space-x-2 cursor-pointer">
-                {/* RHF register for radio */}
                 <input type="radio" {...register("inputMode")} value="url" className="form-radio h-4 w-4 text-blue-600" disabled={isLoading}/>
                 <span className="flex items-center dark:text-gray-300"><LinkIconLucide size={16} className="mr-1 text-gray-600 dark:text-gray-400"/>Provide External URL</span>
             </label>
@@ -453,7 +530,6 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
         {errors.inputMode && <p className="mt-1 text-sm text-red-600">{errors.inputMode.message}</p>}
       </div>
 
-      {/* Use watchedInputMode from RHF */}
       {watchedInputMode === 'url' && (
         <div>
             <label htmlFor="externalUrl" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Link URL*</label>

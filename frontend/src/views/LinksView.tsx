@@ -4,7 +4,7 @@ import { useOutletContext, useLocation } from 'react-router-dom';
 import {
   fetchLinks, fetchSoftware, fetchVersionsForSoftware, deleteAdminLink,
   PaginatedLinksResponse, addFavoriteApi, removeFavoriteApi, FavoriteItemType,
-  bulkDeleteItems, bulkDownloadItems, bulkMoveItems, BulkItemType
+  bulkDeleteItems, bulkDownloadItems, bulkMoveItems
 } from '../services/api';
 import { Link as LinkType, Software, SoftwareVersion } from '../types'; // LinkType is already here
 import CommentSection from '../components/comments/CommentSection'; // Added CommentSection
@@ -17,7 +17,7 @@ import { useAuth } from '../context/AuthContext';
 import AdminLinkEntryForm from '../components/admin/AdminLinkEntryForm';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
 import Modal from '../components/shared/Modal';
-import { PlusCircle, Edit3, Trash2, ExternalLink, Star, Filter, ChevronUp, Link as LinkIconLucide, Download, Move, AlertTriangle, MessageSquare } from 'lucide-react'; // Added MessageSquare
+import { PlusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Link as LinkIconLucide, Download, Move, AlertTriangle, MessageSquare } from 'lucide-react'; // Added MessageSquare
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils';
 
 interface OutletContextType {
@@ -301,11 +301,36 @@ const LinksView: React.FC = () => {
   const columns: ColumnDef<LinkType>[] = [
     { key: 'title', header: 'Title', sortable: true }, { key: 'software_name', header: 'Software', sortable: true },
     { key: 'version_name', header: 'Version', sortable: true, render: l => l.version_name || 'N/A' },
+    {
+      key: 'compatible_vms_versions',
+      header: 'VMS Compatibility',
+      sortable: true,
+      render: (link: LinkType) => {
+        const isRelevantSoftware = link.software_name === 'VMS' || link.software_name === 'VA';
+        let content: React.ReactNode = '-'; // Default content
+
+        if (isRelevantSoftware) {
+          if (link.compatible_vms_versions && link.compatible_vms_versions.length > 0) {
+            if (Array.isArray(link.compatible_vms_versions)) {
+              content = link.compatible_vms_versions.join(', ');
+            } else if (typeof link.compatible_vms_versions === 'string') {
+              content = link.compatible_vms_versions;
+            } else {
+              content = 'N/A';
+            }
+          } else {
+            content = 'N/A';
+          }
+        }
+        // Wrap the content in a div with text-center
+        // This div will take up the full width of the cell, and its content will be centered.
+        return <div className="text-center">{content}</div>;
+      }
+    },
     { key: 'description', header: 'Description', render: l => <span className="text-sm text-gray-600 block max-w-xs truncate" title={l.description || ''}>{l.description || '-'}</span> },
     {
-      // THIS IS THE PART TO CHANGE
       key: 'url',
-      header: 'Link', // Changed from 'URL/FILE' to 'Link' for consistency with PatchesView
+      header: 'Link',
       render: (l: LinkType) => {
         const isEffectivelyDownloadable = l.is_external_link || l.is_downloadable !== false;
 

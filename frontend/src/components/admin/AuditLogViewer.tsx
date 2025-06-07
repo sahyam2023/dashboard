@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { FiChevronDown, FiChevronUp, FiFilter, FiLoader, FiAlertTriangle } from 'react-icons/fi';
+import { FiChevronDown, FiChevronUp, FiFilter, FiLoader} from 'react-icons/fi';
 import { ListChecks as ListChecksIcon } from 'lucide-react'; // Added
 import { Box, Typography } from '@mui/material'; // Added
 import { fetchAuditLogEntries, AuditLogResponse, AuditLogEntry } from '../../services/api';

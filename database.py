@@ -67,7 +67,7 @@ def init_db(db_path: str):
         count_row = cursor.fetchone()
         if count_row is not None and count_row[0] == 0:
             print("DB_HELPER: Adding initial software entries...")
-            software_list = ['ITMS', 'VMS', 'Analytic Manager', 'ICCC']
+            software_list = ['ITMS', 'VMS', 'Analytic Manager', 'ICCC', 'VA']
             # Use executemany with a list of tuples
             cursor.executemany("INSERT INTO software (name) VALUES (?)", [(s,) for s in software_list])
             conn.commit()

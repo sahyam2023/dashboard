@@ -2797,6 +2797,7 @@ def get_all_links_api():
     
     # Params for the main query's WHERE clause (excluding permission join params for now)
     main_query_filter_params = [] 
+    count_query_conditions = [] # Initialize count_query_conditions
     # Params for the permission part of the main query's JOIN/WHERE.
     # For main query, fp.user_id = ? uses logged_in_user_id.
     main_query_permission_params = [logged_in_user_id] 
@@ -2861,48 +2862,13 @@ def get_all_links_api():
     # This ensures consistency in which items are counted vs. fetched.
     # Need to use COUNT(DISTINCT l.id) due to potential row multiplication from LEFT JOINs (esp. vms_v_link).
     
-    count_query_params = list(main_query_permission_params) # Start with permission params
-    count_query_params.extend(main_query_filter_params)    # Add other filter params
+    # Correctly initialize count_query_params: only permission and filter parameters
+    count_query_params = list(main_query_permission_params) 
+    count_query_params.extend(main_query_filter_params)
 
     # The from_clause_main_query already has the permission join.
     # The where_clause is built from filter_conditions which also includes permission check.
     final_count_query = f"SELECT COUNT(DISTINCT l.id) as count {from_clause_main_query}{where_clause}"
-
-
-    # Add existing filter conditions to count_query_conditions
-    if software_id_filter:
-        count_query_conditions.append("l.software_id = ?")
-        count_query_params.append(software_id_filter)
-    if version_id_filter:
-        count_query_conditions.append("l.version_id = ?")
-        count_query_params.append(version_id_filter)
-    if link_type_filter: # Same logic as main query
-        if link_type_filter.lower() == 'external': count_query_conditions.append("l.is_external_link = TRUE")
-        elif link_type_filter.lower() == 'uploaded': count_query_conditions.append("l.is_external_link = FALSE")
-    if created_from_filter:
-        count_query_conditions.append("date(l.created_at) >= date(?)")
-        count_query_params.append(created_from_filter)
-    if created_to_filter:
-        count_query_conditions.append("date(l.created_at) <= date(?)")
-        count_query_params.append(created_to_filter)
-
-    # Add search term conditions to count_query_conditions
-    if search_terms:
-        search_conditions_group_for_count = []
-        for term_val_count in search_terms:
-            term_param_like_count = f"%{term_val_count}%"
-            search_conditions_group_for_count.append(
-                 """(LOWER(l.title) LIKE ? OR 
-                     LOWER(l.description) LIKE ? OR 
-                     LOWER(l.url) LIKE ? OR
-                     LOWER(s.name) LIKE ? OR 
-                     LOWER(v.version_number) LIKE ? OR
-                     LOWER(u.username) LIKE ? OR
-                     LOWER(upd_u.username) LIKE ?)"""
-            )
-            count_query_params.extend([term_param_like_count] * 7)
-        count_query_conditions.append(" AND ".join(search_conditions_group_for_count))
-
     
     try:
         total_links_cursor = db.execute(final_count_query, tuple(count_query_params))
@@ -2920,26 +2886,30 @@ def get_all_links_api():
         offset = (page - 1) * per_page
     
     # --- Main Data Query Construction ---
-    # Params for main query are: permission_join_params + specific_join_params (favorites, fp_dl) + filter_params + pagination_params
+    # Correctly order parameters for the final query
+    final_main_query_params = []
+    final_main_query_params.extend(main_query_permission_params) # For fp.user_id = ? (view permission join)
 
-    # final_main_query_params are already main_query_permission_params + main_query_filter_params
-    # We need to add params for favorites, download permissions, and pagination.
-
-    from_clause_for_data_with_fav_dl = from_clause_main_query # Start with the from clause used for count
+    from_clause_for_data_with_fav_dl = from_clause_main_query # Start with the from clause used for count (which includes fp join)
 
     if logged_in_user_id:
+        # Add JOIN and param for user_favorites (uf)
         from_clause_for_data_with_fav_dl += " LEFT JOIN user_favorites uf ON l.id = uf.item_id AND uf.item_type = 'link' AND uf.user_id = ?"
-        count_query_params.append(logged_in_user_id) # Add to the correct param list for this phase
+        final_main_query_params.append(logged_in_user_id) # Param for uf.user_id = ?
         
+        # Add JOIN and param for file_permissions for download (fp_dl)
         from_clause_for_data_with_fav_dl += " LEFT JOIN file_permissions fp_dl ON l.id = fp_dl.file_id AND fp_dl.file_type = 'link' AND fp_dl.user_id = ?"
-        count_query_params.append(logged_in_user_id)
+        final_main_query_params.append(logged_in_user_id) # Param for fp_dl.user_id = ? (for logged-in user)
     else:
+        # Add JOIN and param for file_permissions for download (fp_dl) for anonymous user
         from_clause_for_data_with_fav_dl += " LEFT JOIN file_permissions fp_dl ON l.id = fp_dl.file_id AND fp_dl.file_type = 'link' AND fp_dl.user_id = ?"
-        count_query_params.append(None)
+        final_main_query_params.append(None) # Param for fp_dl.user_id = ? (for anonymous user)
         
-    # The main_query_filter_params are already in count_query_params.
-    # Now add pagination params.
-    count_query_params.extend([per_page, offset])
+    # Add parameters for the WHERE clause conditions
+    final_main_query_params.extend(main_query_filter_params)
+
+    # Add pagination parameters
+    final_main_query_params.extend([per_page, offset])
 
     # Add GROUP BY for the main data query, similar to patches
     group_by_clause_links = " GROUP BY l.id "
@@ -2947,7 +2917,7 @@ def get_all_links_api():
     final_query = f"{select_clause} {from_clause_for_data_with_fav_dl}{where_clause}{group_by_clause_links}ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
     
     try:
-        links_cursor = db.execute(final_query, tuple(count_query_params)) # Use the fully assembled count_query_params
+        links_cursor = db.execute(final_query, tuple(final_main_query_params)) # Use final_main_query_params
         links_list_raw = [dict(row) for row in links_cursor.fetchall()]
         ts_keys = ['created_at', 'updated_at']
         links_list = [convert_timestamps_to_ist_iso(link, ts_keys) for link in links_list_raw]
@@ -4203,7 +4173,10 @@ def admin_upload_link_file():
         )
 
         # === VMS Compatibility Logic for admin_upload_link_file ===
-        if new_link_id and link_software_id_for_compat_check: # Defined in the outer scope of this function
+        new_link_id = new_link_data.get('id')
+        link_software_id_for_compat_check = software_id # Resolved from form or typed_version_string logic
+
+        if new_link_id and link_software_id_for_compat_check:
             software_info = db.execute("SELECT name FROM software WHERE id = ?", (link_software_id_for_compat_check,)).fetchone()
             if software_info and software_info['name'] in ('VMS', 'VA'):
                 compatible_vms_ids_json = request.form.get('compatible_vms_version_ids_json')
@@ -4829,8 +4802,8 @@ def admin_edit_link_url(link_id_from_url):
             response_data_dict = convert_timestamps_to_ist_iso(dict(updated_item_dict), ['created_at', 'updated_at'])
 
             # === VMS Compatibility Logic for admin_edit_link_url ===
-            # software_id_for_link is the potentially updated software_id of the link
-            current_link_software_info = db.execute("SELECT name FROM software WHERE id = ?", (software_id_for_link,)).fetchone()
+            link_software_id_for_compat_check = software_id_for_link # software_id_for_link is resolved earlier
+            current_link_software_info = db.execute("SELECT name FROM software WHERE id = ?", (link_software_id_for_compat_check,)).fetchone()
 
             # Always delete existing compatibility entries for this link first
             db.execute("DELETE FROM link_vms_compatibility WHERE link_id = ?", (link_id_from_url,))
@@ -5019,7 +4992,8 @@ def admin_edit_link_file(link_id_from_url):
             processed_item_dict = convert_timestamps_to_ist_iso(dict(updated_item_dict), ['created_at', 'updated_at'])
 
             # === VMS Compatibility Logic for admin_edit_link_file ===
-            current_link_software_info = db.execute("SELECT name FROM software WHERE id = ?", (software_id_for_link,)).fetchone()
+            link_software_id_for_compat_check = software_id_for_link # software_id_for_link is resolved earlier
+            current_link_software_info = db.execute("SELECT name FROM software WHERE id = ?", (link_software_id_for_compat_check,)).fetchone()
             db.execute("DELETE FROM link_vms_compatibility WHERE link_id = ?", (link_id_from_url,))
             log_audit_action(
                 action_type='CLEAR_LINK_VMS_COMPATIBILITY',
@@ -5646,10 +5620,11 @@ def admin_add_link_with_url():
         new_link_data_json = response[0].get_json()
         new_link_id = new_link_data_json.get('id')
         link_software_id = new_link_data_json.get('software_id') # software_id of the link itself
+        link_software_id_for_compat_check = link_software_id
 
-        if new_link_id and link_software_id:
+        if new_link_id and link_software_id_for_compat_check:
             # Check if the link's software is 'VMS' or 'VA'
-            software_info = db.execute("SELECT name FROM software WHERE id = ?", (link_software_id,)).fetchone()
+            software_info = db.execute("SELECT name FROM software WHERE id = ?", (link_software_id_for_compat_check,)).fetchone()
             if software_info and software_info['name'] in ('VMS', 'VA'):
                 compatible_vms_version_ids = data.get('compatible_vms_version_ids') # Get from original request data
                 if compatible_vms_version_ids and isinstance(compatible_vms_version_ids, list):

@@ -1,9 +1,9 @@
 // src/components/admin/AdminUploadToMiscForm.tsx
 import React, { useState, useEffect, useRef } from 'react';
-import { useForm, Controller, SubmitHandler, FieldErrors } from 'react-hook-form';
+import { useForm, SubmitHandler, FieldErrors } from 'react-hook-form';
 import * as yup from 'yup';
 import { yupResolver } from '@hookform/resolvers/yup';
-import { showSuccessToast, showErrorToast } from '../../utils/toastUtils'; // Standardized toast
+import {showErrorToast } from '../../utils/toastUtils'; // Standardized toast
 import { useAuth } from '../../context/AuthContext';
 import {
   // uploadAdminMiscFile, // To be replaced by chunked upload
@@ -53,7 +53,7 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
 }) => {
   const isEditMode = !!fileToEdit;
 
-  const { register, handleSubmit, control, formState: { errors }, watch, setValue, reset } = useForm<MiscUploadFormData>({
+  const { register, handleSubmit, formState: { errors }, watch, setValue, reset } = useForm<MiscUploadFormData>({
     resolver: yupResolver(miscUploadValidationSchema),
     context: { // Pass context to yup schema
         isEditMode: isEditMode, 

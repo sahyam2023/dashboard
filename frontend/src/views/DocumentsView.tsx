@@ -235,7 +235,6 @@ useEffect(() => {
       try {
         const softwareData = await fetchSoftware();
         setSoftwareList(softwareData);
-        console.log('*** Software List loaded:', softwareData);
       } catch (err) {
         console.error("Failed to load software for filters", err);
         showErrorToast("Failed to load software list for filtering.");
@@ -279,7 +278,6 @@ useEffect(() => {
   }, [location.search, documents]);
 
 const handleFilterChange = (softwareId: number | null) => {
-    console.log('*** handleFilterChange called with softwareId:', softwareId); // <--- ADD THIS LINE
     setSelectedSoftwareId(softwareId);
 };
 
@@ -289,7 +287,6 @@ useEffect(() => {
         setDocuments([]); setFavoritedItems(new Map()); setCurrentPage(1);
         setHasMore(false); setIsLoadingInitial(false); return;
     }
-    console.log('*** useEffect triggered for fetch. Current selectedSoftwareId:', selectedSoftwareId, 'searchTerm:', searchTerm); // <--- ADD THIS LINE
     fetchAndSetDocuments(1, true);
 }, [
     isAuthenticated, selectedSoftwareId, sortBy, sortOrder,

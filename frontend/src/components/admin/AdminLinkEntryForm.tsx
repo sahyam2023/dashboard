@@ -199,7 +199,11 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
         inputMode: linkToEdit.is_external_link ? 'url' : 'upload',
         externalUrl: linkToEdit.is_external_link ? linkToEdit.url : '',
         compatibleVmsVersionIds: isCurrentSoftwareVmsOrVa && linkToEdit.compatible_vms_versions
-                                  ? linkToEdit.compatible_vms_versions.map(String)
+                                  ? (typeof linkToEdit.compatible_vms_versions === 'string'
+                                      ? (linkToEdit.compatible_vms_versions as string).split(',').map(s => s.trim()).filter(s => s)
+                                      : Array.isArray(linkToEdit.compatible_vms_versions)
+                                          ? linkToEdit.compatible_vms_versions.map(String)
+                                          : [])
                                   : [],
       };
       
@@ -472,19 +476,39 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
             Compatible VMS Versions (for VMS/VA Links)
           </label>
           {isFetchingVmsVersions ? <p className="text-sm text-gray-500 dark:text-gray-400">Loading VMS versions...</p> : (
-            <select
-              multiple
-              id="compatibleVmsVersionIds"
-              {...register("compatibleVmsVersionIds")}
-              className="mt-1 block w-full h-32 pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600"
-              disabled={isLoading || !vmsVersionsList.length}
-            >
-              {vmsVersionsList.map(vmsVersion => (
-                <option key={vmsVersion.id} value={vmsVersion.id.toString()}>
-                  {vmsVersion.version_number}
-                </option>
-              ))}
-            </select>
+            <Controller
+              name="compatibleVmsVersionIds"
+              control={control}
+              defaultValue={[]}
+              render={({ field }) => (
+                <div className="mt-1 block w-full max-h-40 overflow-y-auto p-2 border border-gray-300 rounded-md bg-white dark:bg-gray-700 dark:border-gray-600">
+                  {vmsVersionsList.length === 0 ? (
+                    <p className="text-sm text-gray-500 dark:text-gray-400">No VMS versions available.</p>
+                  ) : (
+                    vmsVersionsList.map(vmsVersion => (
+                      <label key={vmsVersion.id} className="flex items-center space-x-2 p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">
+                        <input
+                          type="checkbox"
+                          className="form-checkbox h-5 w-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-900 dark:checked:bg-blue-500"
+                          value={vmsVersion.id.toString()}
+                          checked={field.value?.includes(vmsVersion.id.toString()) || false}
+                          onChange={(e) => {
+                            const selectedId = e.target.value;
+                            const currentValues = field.value || [];
+                            const newValue = e.target.checked
+                              ? [...currentValues, selectedId]
+                              : currentValues.filter((id: string) => id !== selectedId);
+                            field.onChange(newValue);
+                          }}
+                          disabled={isLoading || isFetchingVmsVersions}
+                        />
+                        <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{vmsVersion.version_number}</span>
+                      </label>
+                    ))
+                  )}
+                </div>
+              )}
+            />
           )}
           {errors.compatibleVmsVersionIds && <p className="mt-1 text-sm text-red-600">{errors.compatibleVmsVersionIds.message}</p>}
            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Select VMS versions this link is compatible with. Only applicable if the link is for 'VMS' or 'VA' software.</p>

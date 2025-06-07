@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
-import { FiShield, FiFileText, FiGitCommit, FiActivity } from 'react-icons/fi'; // Example icons
+import { FiShield, FiGitCommit, FiActivity } from 'react-icons/fi'; // Example icons
 
 const AdminLayout: React.FC = () => {
   const location = useLocation();

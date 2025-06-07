@@ -18,6 +18,8 @@ DROP TABLE IF EXISTS file_permissions;
 DROP TABLE IF EXISTS system_settings;
 DROP TABLE IF EXISTS notifications;
 DROP TABLE IF EXISTS user_watch_preferences;
+DROP TABLE IF EXISTS messages;
+DROP TABLE IF EXISTS conversations;
 
 CREATE TABLE IF NOT EXISTS user_watch_preferences (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -380,9 +382,41 @@ CREATE TABLE announcements (
     FOREIGN KEY (created_by_user_id) REFERENCES users(id)
 );
 
+-- Conversations Table
+CREATE TABLE IF NOT EXISTS conversations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user1_id INTEGER NOT NULL,
+    user2_id INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user1_id) REFERENCES users (id) ON DELETE CASCADE,
+    FOREIGN KEY (user2_id) REFERENCES users (id) ON DELETE CASCADE,
+    UNIQUE (user1_id, user2_id),
+    CHECK (user1_id < user2_id)
+);
+
+-- Messages Table
+CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id INTEGER NOT NULL,
+    sender_id INTEGER NOT NULL,
+    recipient_id INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_read BOOLEAN DEFAULT FALSE,
+    FOREIGN KEY (conversation_id) REFERENCES conversations (id) ON DELETE CASCADE,
+    FOREIGN KEY (sender_id) REFERENCES users (id) ON DELETE CASCADE,
+    FOREIGN KEY (recipient_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications (user_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_item_id_item_type ON notifications (item_id, item_type);
 CREATE TRIGGER IF NOT EXISTS update_notifications_updated_at
 AFTER UPDATE ON notifications FOR EACH ROW BEGIN
     UPDATE notifications SET updated_at = (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')) WHERE id = OLD.id;
 END;
+
+CREATE INDEX IF NOT EXISTS idx_conversations_user1_id ON conversations (user1_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_user2_id ON conversations (user2_id);
+CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages (conversation_id);
+CREATE INDEX IF NOT EXISTS idx_messages_sender_id ON messages (sender_id);
+CREATE INDEX IF NOT EXISTS idx_messages_recipient_id ON messages (recipient_id);

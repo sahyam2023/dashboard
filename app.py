@@ -3648,8 +3648,8 @@ def admin_add_document_with_url():
                         type='new_content_posted',
                         message=notification_message,
                         item_id=item_id,
-                        item_type=content_type, # 'document'
-                        content_type=content_type, # 'documents'
+                        item_type='document',
+                        content_type=content_type,
                         category=category
                     )
                 if watchers: # Only commit if notifications were potentially created
@@ -3674,8 +3674,8 @@ def admin_add_document_with_url():
                             type='new_content_posted',
                             message=sw_notification_message,
                             item_id=item_id,
-                            item_type=content_type,
-                            content_type=content_type, # 'documents'
+                            item_type='document',
+                            content_type=content_type,
                             category=software_category_name
                         )
                     if software_watchers:
@@ -3749,8 +3749,8 @@ def admin_upload_document_file():
                         type='new_content_posted',
                         message=notification_message,
                         item_id=item_id,
-                        item_type=content_type, # 'document'
-                        content_type=content_type, # 'documents'
+                        item_type='document',
+                        content_type=content_type,
                         category=category
                     )
                 if watchers:
@@ -3775,7 +3775,7 @@ def admin_upload_document_file():
                             type='new_content_posted',
                             message=sw_notification_message_file,
                             item_id=item_id,
-                            item_type=content_type,
+                            item_type='document',
                             content_type=content_type,
                             category=software_category_name_file
                         )
@@ -3960,8 +3960,8 @@ def admin_add_patch_with_url():
                             type='new_content_posted',
                             message=notification_message,
                             item_id=item_id,
-                            item_type=content_type, # 'patch'
-                            content_type=content_type, # 'patches'
+                            item_type='patch',
+                            content_type=content_type,
                             category=category
                         )
                     if watchers:
@@ -4126,8 +4126,8 @@ def admin_upload_patch_file():
                             type='new_content_posted',
                             message=notification_message,
                             item_id=item_id,
-                            item_type=content_type, # 'patch'
-                            content_type=content_type, # 'patches'
+                            item_type='patch',
+                            content_type=content_type,
                             category=category
                         )
                     if watchers:
@@ -4244,7 +4244,7 @@ def admin_edit_document_url(document_id):
                         type='content_updated', # Or a more specific type like 'document_url_updated'
                         message=notification_message,
                         item_id=item_id,
-                        item_type=content_type,
+                        item_type='document',
                         content_type=content_type,
                         category=category
                     )
@@ -4270,7 +4270,7 @@ def admin_edit_document_url(document_id):
                             type='content_updated',
                             message=sw_notification_message_edit_url,
                             item_id=item_id,
-                            item_type=content_type,
+                            item_type='document',
                             content_type=content_type,
                             category=software_category_name_edit_url
                         )
@@ -4435,7 +4435,7 @@ def admin_edit_document_file(document_id):
                         type='content_updated', # Or more specific like 'document_file_updated'
                         message=notification_message,
                         item_id=item_id,
-                        item_type=content_type,
+                        item_type='document',
                         content_type=content_type,
                         category=category
                     )
@@ -4461,7 +4461,7 @@ def admin_edit_document_file(document_id):
                             type='content_updated',
                             message=sw_notification_message_edit_file,
                             item_id=item_id,
-                            item_type=content_type,
+                            item_type='document',
                             content_type=content_type,
                             category=software_category_name_edit_file
                         )
@@ -4674,7 +4674,7 @@ def admin_upload_link_file():
                             type='new_content_posted',
                             message=notification_message,
                             item_id=item_id,
-                            item_type=content_type, 
+                            item_type='link', 
                             content_type=content_type, 
                             category=category
                         )
@@ -4896,7 +4896,7 @@ def admin_edit_patch_url(patch_id):
                                 type='content_updated',
                                 message=notification_message,
                                 item_id=item_id,
-                                item_type=content_type,
+                                item_type='patch',
                                 content_type=content_type,
                                 category=category
                             )
@@ -5134,7 +5134,7 @@ def admin_edit_patch_file(patch_id):
                                 type='content_updated',
                                 message=notification_message,
                                 item_id=item_id,
-                                item_type=content_type,
+                                item_type='link',
                                 content_type=content_type,
                                 category=category
                             )
@@ -5437,7 +5437,7 @@ def admin_edit_link_url(link_id_from_url):
                                 type='content_updated',
                                 message=notification_message,
                                 item_id=item_id,
-                                item_type=content_type,
+                                item_type='link',
                                 content_type=content_type,
                                 category=category
                             )
@@ -5965,7 +5965,7 @@ def admin_edit_misc_file(file_id):
                         type='content_updated',
                         message=notification_message,
                         item_id=item_id,
-                        item_type=content_type, 
+                            item_type='link', 
                         content_type=content_type,
                         category=category # None
                     )
@@ -6246,10 +6246,8 @@ def admin_upload_misc_file():
                         type='new_content_posted',
                         message=notification_message,
                         item_id=item_id,
-                        item_type=content_type, # 'misc' (used as item_type for comments/favorites)
-                                                # but for notifications, content_type='misc', item_type='misc_file' might be better.
-                                                # For now, using 'misc' for item_type to align with content_type.
-                        content_type=content_type, # 'misc'
+                        item_type='misc_file',
+                        content_type=content_type, 
                         category=category # None
                     )
                 if watchers:
@@ -6413,7 +6411,7 @@ def admin_add_link_with_url():
                             type='new_content_posted',
                             message=notification_message,
                             item_id=item_id,
-                            item_type=content_type, 
+                            item_type='link', 
                             content_type=content_type, 
                             category=category
                         )
@@ -8663,13 +8661,13 @@ def admin_upload_large_file():
 
                     if resolved_content_type and (category_for_notification is not None or resolved_content_type == 'misc'):
                         watchers = database.get_watching_users(get_db(), resolved_content_type, category_for_notification)
-                        app.logger.info(f"Watchers for large file upload {resolved_content_type} / {category_for_notification if category_for_notification else 'N/A'}: {len(watchers)} users.")
+                        app.logger.info(f"Watchers for file upload {resolved_content_type} / {category_for_notification if category_for_notification else 'N/A'}: {len(watchers)} users.")
                         for watcher in watchers:
                             # Construct message carefully based on type
                             msg_core = f"New {db_item_type.replace('_', ' ')} '{item_name_for_notification}'"
                             if category_for_notification:
                                 msg_core += f" for {category_for_notification}"
-                            msg_core += f" (large file) uploaded by {actor_username}."
+                            msg_core += f" (file) uploaded by {actor_username}."
                             
                             database.create_notification(
                                 get_db(),
@@ -8677,8 +8675,8 @@ def admin_upload_large_file():
                                 type='new_content_posted',
                                 message=msg_core,
                                 item_id=new_item.get('id'),
-                                item_type=db_item_type, 
-                                content_type=resolved_content_type,
+                                item_type=db_item_type, # e.g. 'document', 'patch', 'link_file', 'misc_file'
+                                content_type=resolved_content_type, # e.g. 'documents', 'patches', 'links', 'misc'
                                 category=category_for_notification
                             )
                         if watchers:
@@ -9382,8 +9380,10 @@ def add_comment_to_item(item_type, item_id):
                         user_id=parent_comment_author_id,
                         type='reply',
                         message=f"{comment_author_username} replied to your comment on {item_type} '{item_name_for_notification}'.",
-                        item_id=comment_id, 
-                        item_type='comment' 
+                        item_id=comment_id,
+                        item_type='comment',
+                        content_type=None,
+                        category=None
                     )
                     app.logger.info(f"Reply notification created for user {parent_comment_author_id} for comment {comment_id}")
                 except Exception as e_notify_reply:
@@ -9408,8 +9408,10 @@ def add_comment_to_item(item_type, item_id):
                             user_id=mentioned_user['id'],
                             type='mention',
                             message=f"{comment_author_username} mentioned you in a comment on {item_type} '{item_name_for_notification}'.",
-                            item_id=comment_id, 
-                            item_type='comment'
+                            item_id=comment_id,
+                            item_type='comment',
+                            content_type=None,
+                            category=None
                         )
                         app.logger.info(f"Mention notification created for user {mentioned_user['id']} (username: {mentioned_username_match}) for comment {comment_id}")
                     except Exception as e_notify_mention:

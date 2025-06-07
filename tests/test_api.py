@@ -117,7 +117,7 @@ class TestAPISearch(unittest.TestCase):
             cursor.execute("""
                 INSERT INTO versions (id, software_id, version_number, changelog, known_bugs, created_by_user_id, updated_by_user_id, release_date) 
                 VALUES (?, ?, ?, ?, ?, ?, ?, date('now'))
-            """, (1, 1, '1.0.0', 'Initial public release.', 'Minor UI glitches.', 1, 1))
+            """, (1, 1, '1.0.1', 'Initial public release.', 'Minor UI glitches.', 1, 1))
             cursor.execute("""
                 INSERT INTO versions (id, software_id, version_number, changelog, known_bugs, created_by_user_id, updated_by_user_id, release_date) 
                 VALUES (?, ?, ?, ?, ?, ?, ?, date('now'))

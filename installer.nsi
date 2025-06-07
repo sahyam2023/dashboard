@@ -48,7 +48,7 @@ RequestExecutionLevel admin
 
 ;--------------------------------
 ; Version Information
-VIProductVersion "1.0.0.0"
+VIProductVersion "1.0.0.1"
 VIAddVersionKey "ProductName" "${APPNAME}"
 VIAddVersionKey "CompanyName" "${COMPANYNAME}"
 VIAddVersionKey "LegalCopyright" "Copyright (c) 2024 ${COMPANYNAME}"

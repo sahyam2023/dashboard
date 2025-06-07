@@ -66,6 +66,16 @@ const MessageList: React.FC<MessageListProps> = ({
             </button>
         </div>
       )}
+      {!isLoadingOlder && messages.length === 0 && (
+        <div className="flex-1 flex flex-col items-center justify-center h-full text-center">
+          <p className="text-gray-500 dark:text-gray-400 text-lg">
+            No messages yet.
+          </p>
+          <p className="text-gray-400 dark:text-gray-500 text-sm">
+            Be the first to say hello!
+          </p>
+        </div>
+      )}
       {messages.map((msg) => (
         // Ensure currentUserId is correctly passed down
         <MessageItem key={msg.id} message={msg} currentUserId={currentUserId} />

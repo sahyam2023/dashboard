@@ -94,6 +94,13 @@ const NotificationBell: React.FC = () => {
   const getNotificationLink = (notification: Notification): string | undefined => {
     if (!notification.type) return undefined; // No type, no specific link
 
+    // Handle announcement notifications
+    if (notification.type === 'announcement' && notification.item_type === 'announcement') {
+      // Announcements don't link anywhere specific, clicking just marks them read.
+      // Return '#' or undefined to allow onClick to fire without navigation.
+      return '#';
+    }
+
     // Handle new content posted notifications
     if (notification.type === 'new_content_posted' || notification.type === 'content_updated') {
       if (notification.content_type && notification.item_id) {
@@ -160,6 +167,7 @@ const NotificationBell: React.FC = () => {
             case 'misc_file': basePath = '/misc'; break;
             case 'software': basePath = '/software'; break;
             case 'version': basePath = '/versions'; break;
+            // Ensure 'announcement' is not in this switch
             default: 
                 console.warn(`Unhandled item_type in fallback: ${notification.item_type}`);
                 return undefined;
@@ -216,7 +224,7 @@ const NotificationBell: React.FC = () => {
                         handleMarkAsRead(notification.id);
                       }
                       // If getNotificationLink returns '#', prevent default to avoid page jump
-                      if (!getNotificationLink(notification)) e.preventDefault(); 
+                      if (getNotificationLink(notification) === '#') e.preventDefault();
                     }}
                     className="block"
                     target="_self" // Always open in the same tab for internal navigation

@@ -353,6 +353,30 @@ def remove_watch_preference(db, user_id: int, content_type: str, category: str =
         print(f"DB_WATCH_PREFS: Error removing watch preference for user {user_id}, type {content_type}, category {category}: {e}")
         return False
 
+def add_default_watch_preferences(db, user_id: int):
+    """Adds a predefined set of default watch preferences for a new user."""
+    default_preferences = [
+        # Content Type, Category (None for all categories of that content type or general)
+        ('documents', 'general'), # General documents
+        ('patches', None),         # All patches
+        ('links', None),           # All links
+        ('misc', None)       # All misc_files (or a common category if defined)
+        # ('comments', 'reply') # Example: if users could opt-in to all replies by default
+    ]
+    
+    added_count = 0
+    print(f"DB_WATCH_PREFS: Adding default watch preferences for user {user_id}.")
+    for content_type, category in default_preferences:
+        try:
+            # add_watch_preference returns lastrowid on success, None on failure/existing
+            if add_watch_preference(db, user_id, content_type, category) is not None:
+                added_count += 1
+        except Exception as e: # Catch any unexpected error from add_watch_preference
+            print(f"DB_WATCH_PREFS: Unexpected error adding default preference ({content_type}, {category}) for user {user_id}: {e}")
+            
+    print(f"DB_WATCH_PREFS: Added {added_count} default watch preferences for user {user_id}.")
+    return added_count
+
 # --- Comment Management Functions ---
 
 def add_comment(db, user_id, item_id, item_type, content, parent_comment_id=None):

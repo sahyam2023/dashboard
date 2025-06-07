@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Typography } from '@mui/material';
 
-const APP_VERSION = "1.0.0"; // Example version, user can change this
+const APP_VERSION = "1.0.1"; // Example version, user can change this
 
 const Footer: React.FC = () => {
   const currentYear = new Date().getFullYear();

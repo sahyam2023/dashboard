@@ -17,6 +17,19 @@ DROP TABLE IF EXISTS password_reset_requests;
 DROP TABLE IF EXISTS file_permissions;
 DROP TABLE IF EXISTS system_settings;
 DROP TABLE IF EXISTS notifications;
+DROP TABLE IF EXISTS user_watch_preferences;
+
+CREATE TABLE IF NOT EXISTS user_watch_preferences (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    content_type TEXT NOT NULL, -- e.g., 'documents', 'patches', 'links', 'misc'
+    category TEXT, -- e.g., 'VA', 'VMS' (for 'documents' content_type, NULL otherwise)
+    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    UNIQUE (user_id, content_type, category)
+);
+CREATE INDEX IF NOT EXISTS idx_user_watch_preferences_user_id ON user_watch_preferences (user_id);
+CREATE INDEX IF NOT EXISTS idx_user_watch_preferences_content_type_category ON user_watch_preferences (content_type, category);
 
 CREATE TABLE IF NOT EXISTS comments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -351,6 +364,8 @@ CREATE TABLE IF NOT EXISTS notifications (
     message TEXT NOT NULL,
     item_id INTEGER,
     item_type TEXT,
+    content_type TEXT,
+    category TEXT,
     is_read BOOLEAN DEFAULT FALSE NOT NULL,
     created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
     updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),

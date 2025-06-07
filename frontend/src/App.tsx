@@ -164,14 +164,17 @@ function AppContent() {
 // Main App component now just sets up BrowserRouter
 import { AuthProvider } from './context/AuthContext'; // Import AuthProvider
 import { NotificationProvider } from './context/NotificationContext'; // Import NotificationProvider
+import { WatchProvider } from './context/WatchContext'; // Import WatchProvider
 
 function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <NotificationProvider>
-          <AppContent />
-        </NotificationProvider>
+        <WatchProvider> {/* Add WatchProvider here */}
+          <NotificationProvider>
+            <AppContent />
+          </NotificationProvider>
+        </WatchProvider>
       </AuthProvider>
     </BrowserRouter>
   );

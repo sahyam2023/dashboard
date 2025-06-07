@@ -92,56 +92,83 @@ const NotificationBell: React.FC = () => {
   
   // Function to generate a link for a notification
   const getNotificationLink = (notification: Notification): string | undefined => {
-    if (!notification.item_type || notification.item_id === null || typeof notification.item_id === 'undefined') {
-      return undefined;
-    }
+    if (!notification.type) return undefined; // No type, no specific link
 
-    let basePath = '';
-
-    switch (notification.item_type) {
-      case 'comment':
-        if (notification.original_item_type && typeof notification.original_item_id === 'number') {
-          let pluralType = '';
-          switch (notification.original_item_type) {
-            case 'document': pluralType = 'documents'; break;
-            case 'patch': pluralType = 'patches'; break;
-            case 'link': pluralType = 'links'; break;
-            case 'misc_file': pluralType = 'misc'; break; // Assuming '/misc' is the route for misc_files list view
-            case 'software': pluralType = 'software'; break; // Route for software list or individual software
-            case 'version': pluralType = 'versions'; break; // Route for versions list or individual version
-            default:
-              console.warn(`Unknown original_item_type for comment notification: ${notification.original_item_type}`);
-              return undefined;
-          }
-          // Ensure notification.item_id (the comment_id itself) is valid
-          if (typeof notification.item_id !== 'number') {
-            console.warn('Comment notification is missing its own item_id (comment_id):', notification);
-            return undefined;
-          }
-          return `/${pluralType}?item_id=${notification.original_item_id}&comment_id=${notification.item_id}`;
-        } else {
-          console.warn('Comment notification is missing original item type or ID:', notification);
-          return undefined;
+    // Handle new content posted notifications
+    if (notification.type === 'new_content_posted' || notification.type === 'content_updated') {
+      if (notification.content_type && notification.item_id) {
+        let basePath = '';
+        switch (notification.content_type) {
+          case 'documents': basePath = '/documents'; break;
+          case 'patches': basePath = '/patches'; break;
+          case 'links': basePath = '/links'; break;
+          case 'misc': basePath = '/misc'; break; // Assuming /misc is the route for misc_file list
+          default:
+            console.warn(`Unknown content_type for new_content_posted notification: ${notification.content_type}`);
+            return undefined; // Or a general link
         }
-      // Direct notifications (not about comments on items) - these links might also need review
-      // to see if they should point to a specific item page or a list view with highlighting.
-      // For now, keeping them as they were, but they might also benefit from /type/id structure if available.
-      case 'document':
-        return `/documents?item_id=${notification.item_id}`; // Changed from highlight to item_id for consistency
-      case 'patch':
-        return `/patches?item_id=${notification.item_id}`;   // Changed from highlight to item_id
-      case 'link':
-        return `/links?item_id=${notification.item_id}`;     // Changed from highlight to item_id
-      case 'misc_file':
-        return `/misc?item_id=${notification.item_id}`;      // Changed from highlight to item_id
-      case 'software':
-        return `/software?item_id=${notification.item_id}`;  // Changed from highlight to item_id
-      case 'version':
-        return `/versions?item_id=${notification.item_id}`;  // Changed from highlight to item_id
-      default:
-        console.warn(`Unknown notification item_type: ${notification.item_type}`);
-        return undefined;
+        
+        let queryParams = `?item_id=${notification.item_id}`;
+        if (notification.category) {
+          // Assuming category in notification corresponds to a filter key, e.g., 'doc_type' for documents, or 'software_name' for patches/links
+          // This part might need adjustment based on actual filtering keys used in each view.
+          // For 'documents', category might be 'doc_type'.
+          // For 'patches'/'links', category might be 'software_name' (which might need to be mapped to software_id for filtering).
+          // For simplicity, let's assume a generic 'category' query param for now, or adjust per content_type.
+          if (notification.content_type === 'documents') {
+            queryParams += `&doc_type=${encodeURIComponent(notification.category)}`;
+          } else if (notification.content_type === 'patches' || notification.content_type === 'links') {
+            // Assuming the category is the software name. The frontend pages might need to handle filtering by this name.
+            queryParams += `&software_name=${encodeURIComponent(notification.category)}`;
+          }
+          // For 'misc', category is null, so no category query param.
+        }
+        return `${basePath}${queryParams}`;
+      }
     }
+
+    // Handle comment-related notifications (reply, mention)
+    if ((notification.type === 'reply' || notification.type === 'mention') && notification.item_type === 'comment') {
+      if (notification.original_item_type && typeof notification.original_item_id === 'number' && typeof notification.item_id === 'number') {
+        let pluralType = '';
+        switch (notification.original_item_type) {
+          case 'document': pluralType = 'documents'; break;
+          case 'patch': pluralType = 'patches'; break;
+          case 'link': pluralType = 'links'; break;
+          case 'misc_file': pluralType = 'misc'; break;
+          case 'software': pluralType = 'software'; break;
+          case 'version': pluralType = 'versions'; break;
+          default:
+            console.warn(`Unknown original_item_type for comment notification: ${notification.original_item_type}`);
+            return undefined;
+        }
+        return `/${pluralType}?item_id=${notification.original_item_id}&comment_id=${notification.item_id}`;
+      } else {
+        console.warn('Comment notification is missing original item type/ID or comment ID:', notification);
+        return undefined;
+      }
+    }
+    
+    // Fallback for older direct item notifications if any (or other types)
+    // This logic might need to be deprecated or adjusted if all notifications adopt the new structure.
+    if (notification.item_type && notification.item_id) {
+        let basePath = '';
+        switch (notification.item_type) {
+            case 'document': basePath = '/documents'; break;
+            case 'patch': basePath = '/patches'; break;
+            case 'link': basePath = '/links'; break;
+            case 'misc_file': basePath = '/misc'; break;
+            case 'software': basePath = '/software'; break;
+            case 'version': basePath = '/versions'; break;
+            default: 
+                console.warn(`Unhandled item_type in fallback: ${notification.item_type}`);
+                return undefined;
+        }
+        return `${basePath}?item_id=${notification.item_id}`;
+    }
+
+    console.warn(`Could not determine link for notification:`, notification);
+    return undefined; // Default undefined if no specific link can be generated
   };
 
 

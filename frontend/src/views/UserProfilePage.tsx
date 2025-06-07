@@ -1,19 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import { changePassword, updateEmail, uploadUserProfilePicture, updateUsername } from '../services/api'; // Added updateUsername
 import { useAuth } from '../context/AuthContext';
+import Modal from '../components/shared/Modal'; // Import Modal
+import { useWatch } from '../context/WatchContext'; // Import useWatch
 import { Navigate } from 'react-router-dom';
-import { Camera } from 'lucide-react'; // For icon
-import { showSuccessToast, showErrorToast } from '../utils/toastUtils'; // showErrorToast was missing from imports
+import { Camera, PlusCircle, CheckCircle } from 'lucide-react'; // For icon
+import { showSuccessToast, showErrorToast } from '../utils/toastUtils'; 
 
 
 const UserProfilePage: React.FC = () => {
   const auth = useAuth();
+  const { 
+    watchPreferences: contextWatchPreferences,
+    isLoading: isLoadingContextWatchPreferences,
+    updatePreference, 
+    isWatching 
+  } = useWatch();
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7000';
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7000';
   // State for Profile Picture
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isWatchModalOpen, setIsWatchModalOpen] = useState(false);
   // const [uploadError, setUploadError] = useState<string | null>(null); // Replaced by toast
   // const [uploadSuccess, setUploadSuccess] = useState<string | null>(null); // Replaced by toast
 
@@ -39,6 +48,28 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7000
   const [usernameSuccess, setUsernameSuccess] = useState<string | null>(null);
   const [isUpdatingUsername, setIsUpdatingUsername] = useState(false);
 
+  // State for Watch Preferences
+  // Using imported types
+  // type WatchPreferenceFromType = import('../types').WatchPreference;
+  // type UpdateWatchPreferencePayloadFromType = import('../types').UpdateWatchPreferencePayload;
+
+  // Configuration for watchable content types and categories
+  const CONTENT_WATCH_CONFIG = {
+    documents: { displayName: 'Documents', categories: ['VA', 'VMS', 'ICCC', 'Analytic Manager', 'ITMS'] },
+    patches: { displayName: 'Patches', categories: ['VA', 'VMS', 'ICCC', 'Analytic Manager', 'ITMS'] },
+    links: { displayName: 'Links', categories: ['VA', 'VMS', 'ICCC', 'Analytic Manager', 'ITMS'] },
+    misc: { displayName: 'Miscellaneous', categories: null }, // No specific subcategories for misc
+  };
+  type ContentTypeKey = keyof typeof CONTENT_WATCH_CONFIG;
+
+  const handleWatchToggle = async (contentType: ContentTypeKey, category: string | undefined, currentlyWatching: boolean) => {
+    // isSavingWatchPreferences is now isLoadingContextWatchPreferences from context
+    // No need to manually set it here as updatePreference in context will handle its loading state.
+    await updatePreference(contentType, category ?? null, !currentlyWatching);
+    // The context will handle updating its own watchPreferences state,
+    // which will cause this component to re-render with the new state.
+    // Toasts for success/failure are handled by updatePreference in context or can be added here if specific messages are needed.
+  };
 
   const handleUsernameChangeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -267,6 +298,87 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7000
         )}
       </div>
 
+      {/* Watch Preferences Section */}
+      <div className="mb-8 p-6 bg-white dark:bg-gray-800 rounded-lg shadow">
+        <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-gray-100">Watch Preferences</h2>
+        <button
+          onClick={() => setIsWatchModalOpen(true)}
+          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+        >
+          Manage Watch Preferences
+        </button>
+        {/* Toggle rendering logic is now moved to the modal */}
+      </div>
+
+      {/* ... other profile sections ... */}
+
+      {/* The new Modal for Watch Preferences */}
+      {isWatchModalOpen && (
+        <Modal
+          isOpen={isWatchModalOpen}
+          onClose={() => setIsWatchModalOpen(false)}
+          title="Manage Watch Preferences"
+        >
+          {/* Modal content starts here, Modal.tsx will provide its own padding */}
+          {isLoadingContextWatchPreferences && (!contextWatchPreferences || contextWatchPreferences.length === 0) ? ( // Show loading only if there are no prefs yet
+            <p className="text-gray-700 dark:text-gray-300 text-center py-4">Loading watch preferences...</p>
+          ) : (
+            <div className="space-y-6"> {/* This div provides spacing between content type sections */}
+              {Object.entries(CONTENT_WATCH_CONFIG).map(([contentTypeKey, config]) => (
+                <div key={contentTypeKey}>
+                  <h3 className="text-lg font-medium text-gray-900 dark:text-gray-200 mb-2">{config.displayName}</h3>
+                  {config.categories ? (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                      {config.categories.map((category) => {
+                        const isCurrentlySelected = isWatching(contentTypeKey as ContentTypeKey, category);
+                        return (
+                          <button
+                            key={category}
+                            onClick={() => handleWatchToggle(contentTypeKey as ContentTypeKey, category, isCurrentlySelected)}
+                            className={`w-full flex items-center justify-center px-3 py-2 border text-sm font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-1
+                                          ${isCurrentlySelected
+                                            ? 'bg-green-600 hover:bg-green-700 text-white border-transparent focus:ring-green-500'
+                                            : 'bg-gray-200 hover:bg-gray-300 text-gray-700 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600 border-gray-300 dark:border-gray-500 focus:ring-indigo-500'
+                                          } transition-colors duration-150 ease-in-out`}
+                            disabled={isLoadingContextWatchPreferences}
+                          >
+                            {isCurrentlySelected ? <CheckCircle size={16} className="mr-2" /> : <PlusCircle size={16} className="mr-2" />}
+                            {isCurrentlySelected ? 'Watching' : 'Watch'} <span className="ml-1 font-normal hidden sm:inline">- {category}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    // For 'misc' or other types with no subcategories
+                    <button
+                      onClick={() => {
+                        const isCurrentlyWatchingMisc = isWatching(contentTypeKey as ContentTypeKey, undefined);
+                        handleWatchToggle(contentTypeKey as ContentTypeKey, undefined, isCurrentlyWatchingMisc);
+                      }}
+                      className={`w-auto flex items-center justify-center px-4 py-2 border text-sm font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-1
+                                    ${isWatching(contentTypeKey as ContentTypeKey, undefined)
+                                      ? 'bg-green-600 hover:bg-green-700 text-white border-transparent focus:ring-green-500'
+                                      : 'bg-gray-200 hover:bg-gray-300 text-gray-700 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600 border-gray-300 dark:border-gray-500 focus:ring-indigo-500'
+                                    } transition-colors duration-150 ease-in-out`}
+                      disabled={isLoadingContextWatchPreferences}
+                    >
+                      {isWatching(contentTypeKey as ContentTypeKey, undefined) ? <CheckCircle size={16} className="mr-2" /> : <PlusCircle size={16} className="mr-2" />}
+                      {isWatching(contentTypeKey as ContentTypeKey, undefined) ? 'Watching' : 'Watch General'}
+                    </button>
+                  )}
+                </div>
+              ))}
+              {isLoadingContextWatchPreferences && contextWatchPreferences && contextWatchPreferences.length > 0 && ( 
+                  // Show saving indicator only if we are already displaying preferences
+                  <div className="mt-4 flex items-center text-sm text-gray-600 dark:text-gray-300">
+                    <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-indigo-500 mr-2"></div>
+                    Saving preferences...
+                  </div>
+              )}
+            </div>
+          )}
+        </Modal>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         {/* Change Password Form */}

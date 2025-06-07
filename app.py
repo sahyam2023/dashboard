@@ -1831,6 +1831,10 @@ def register():
                 )
             db.commit() # Commit security answers
 
+            # Add default watch preferences
+            database.add_default_watch_preferences(get_db(), user_id)
+            db.commit() # Commit watch preferences
+
             # profile_picture_filename_to_assign will hold the final filename for the user
             profile_picture_filename_to_assign = profile_picture_filename_from_upload # None if JSON or no file in FormData
 
@@ -2294,6 +2298,92 @@ def update_dashboard_layout():
         db.rollback()
         app.logger.error(f"Unexpected error updating dashboard_layout_prefs for user {user_id}: {e}")
         return jsonify(msg="An unexpected server error occurred."), 500
+
+# --- User Watch Preferences Endpoints ---
+@app.route('/api/user/watch_preferences', methods=['GET'])
+@active_user_required
+def get_user_watch_preferences():
+    user_id = int(get_jwt_identity())
+    db = get_db()
+    try:
+        preferences_raw = database.get_watch_preferences(db, user_id)
+        # Convert Row objects to dicts and process timestamps
+        preferences = [convert_timestamps_to_ist_iso(dict(pref), ['created_at']) for pref in preferences_raw]
+        return jsonify(preferences), 200
+    except Exception as e:
+        app.logger.error(f"Error fetching watch preferences for user {user_id}: {e}", exc_info=True)
+        return jsonify(msg="An error occurred while fetching watch preferences."), 500
+
+@app.route('/api/user/watch_preferences', methods=['PUT'])
+@active_user_required
+def update_user_watch_preferences():
+    user_id = int(get_jwt_identity())
+    db = get_db()
+    data = request.get_json()
+
+    if not isinstance(data, list):
+        return jsonify(msg="Request body must be a list of watch preference objects."), 400
+
+    results = {"success": [], "failed": []}
+    allowed_content_types = ['documents', 'patches', 'links', 'misc'] # Define allowed types
+
+    for pref_data in data:
+        content_type = pref_data.get('content_type')
+        category = pref_data.get('category') # Can be None
+        watch = pref_data.get('watch')
+
+        if not content_type or content_type not in allowed_content_types:
+            results['failed'].append({'content_type': content_type, 'category': category, 'error': 'Invalid content_type'})
+            continue
+        if watch is None or not isinstance(watch, bool):
+            results['failed'].append({'content_type': content_type, 'category': category, 'error': 'Invalid watch value (must be true or false)'})
+            continue
+        
+        # Normalize category: store empty string as NULL in DB if that's the convention.
+        # Assuming database functions handle None for category appropriately.
+        # If category is an empty string from payload, and DB expects NULL for "general", adjust here.
+        # For now, pass as is. If category is optional, None is fine.
+
+        try:
+            if watch:
+                add_result = database.add_watch_preference(db, user_id, content_type, category)
+                if add_result is not None: # Success (newly added or already exists and handled gracefully)
+                    results['success'].append({'content_type': content_type, 'category': category, 'status': 'added/updated'})
+                else: # Failure from DB function (e.g. SQL error, or specific return for "already exists" if not graceful)
+                    results['failed'].append({'content_type': content_type, 'category': category, 'error': 'Failed to add preference in DB'})
+            else:
+                remove_result = database.remove_watch_preference(db, user_id, content_type, category)
+                if remove_result: # True if row was deleted
+                    results['success'].append({'content_type': content_type, 'category': category, 'status': 'removed'})
+                else: # False if no row found to delete or error
+                    results['failed'].append({'content_type': content_type, 'category': category, 'error': 'Failed to remove preference (not found or DB error)'})
+        except Exception as e:
+            app.logger.error(f"Error processing watch preference for user {user_id}, type {content_type}, cat {category}: {e}", exc_info=True)
+            results['failed'].append({'content_type': content_type, 'category': category, 'error': f'Server error: {str(e)}'})
+    
+    # Fetch updated preferences to return
+    updated_preferences_raw = database.get_watch_preferences(db, user_id)
+    updated_preferences = [convert_timestamps_to_ist_iso(dict(p), ['created_at']) for p in updated_preferences_raw]
+
+    log_audit_action(
+        action_type='UPDATE_WATCH_PREFERENCES',
+        target_table='user_watch_preferences', # General table
+        target_id=user_id, # User whose preferences were updated
+        details={'summary': f"{len(results['success'])} successful, {len(results['failed'])} failed operations."}
+    )
+    
+    if results['failed']:
+        return jsonify({
+            "message": "Some watch preferences could not be updated.",
+            "updated_preferences": updated_preferences,
+            "operation_results": results
+        }), 207 # Multi-Status
+    else:
+        return jsonify({
+            "message": "Watch preferences updated successfully.",
+            "updated_preferences": updated_preferences,
+            "operation_results": results
+        }), 200
 
 # --- Public GET Endpoints (Read-only data for dashboard) ---
 @app.route('/api/software', methods=['GET'])
@@ -3534,6 +3624,68 @@ def admin_add_document_with_url():
                 'software_id': new_doc_data.get('software_id')
             }
         )
+        # --- Notification Logic for admin_add_document_with_url ---
+        if new_doc_data and new_doc_data.get('id'):
+            try:
+                acting_user_id = int(get_jwt_identity())
+                acting_user_details = find_user_by_id(acting_user_id)
+                actor_username = acting_user_details['username'] if acting_user_details else "System"
+                
+                content_type = 'documents'
+                category = new_doc_data.get('doc_type') # doc_type is the category for documents
+                item_id = new_doc_data.get('id')
+
+                watchers = database.get_watching_users(get_db(), content_type, category)
+                app.logger.info(f"Watchers for {content_type} / {category}: {len(watchers)} users.")
+                for watcher in watchers:
+                    # Optional: Avoid self-notification if desired
+                    # if watcher['id'] == acting_user_id:
+                    #     continue
+                    notification_message = f"New document '{new_doc_data.get('doc_name')}' of type '{category}' posted by {actor_username}."
+                    database.create_notification(
+                        get_db(),
+                        user_id=watcher['id'],
+                        type='new_content_posted',
+                        message=notification_message,
+                        item_id=item_id,
+                        item_type='document',
+                        content_type=content_type,
+                        category=category
+                    )
+                if watchers: # Only commit if notifications were potentially created
+                    get_db().commit()
+
+                # New: Notifications for software category
+                doc_software_id = new_doc_data.get('software_id')
+                software_category_name = None
+                if doc_software_id:
+                    software_info = get_db().execute("SELECT name FROM software WHERE id = ?", (doc_software_id,)).fetchone()
+                    if software_info and software_info['name']:
+                        software_category_name = software_info['name']
+                
+                if software_category_name and software_category_name != category: # Avoid duplicate if doc_type is same as software name
+                    software_watchers = database.get_watching_users(get_db(), content_type, software_category_name)
+                    app.logger.info(f"Watchers for software category '{software_category_name}': {len(software_watchers)} users.")
+                    for sw_watcher in software_watchers:
+                        sw_notification_message = f"New document '{new_doc_data.get('doc_name')}' for software '{software_category_name}' posted by {actor_username}."
+                        database.create_notification(
+                            get_db(),
+                            user_id=sw_watcher['id'],
+                            type='new_content_posted',
+                            message=sw_notification_message,
+                            item_id=item_id,
+                            item_type='document',
+                            content_type=content_type,
+                            category=software_category_name
+                        )
+                    if software_watchers:
+                        get_db().commit()
+                elif software_category_name and software_category_name == category:
+                    app.logger.info(f"Skipping software-category notification for document ID {item_id} as software name '{software_category_name}' is same as doc_type '{category}'.")
+
+            except Exception as e_notify:
+                app.logger.error(f"Error creating notifications for new document (URL) ID {new_doc_data.get('id')}: {e_notify}")
+                # Do not fail the main operation if notification fails
     return response
 
 @app.route('/api/admin/documents/upload_file', methods=['POST'])
@@ -3543,6 +3695,7 @@ def admin_upload_document_file():
     # Original form data needs to be accessed here for logging before passing to helper
     software_id_val = request.form.get('software_id')
     doc_name_val = request.form.get('doc_name')
+    doc_type_val = request.form.get('doc_type') # Get doc_type for notification
 
     response = _admin_handle_file_upload_and_db_insert(
         table_name='documents',
@@ -3574,6 +3727,65 @@ def admin_upload_document_file():
                 'software_id': software_id_val # Use original form value
             }
         )
+        # --- Notification Logic for admin_upload_document_file ---
+        if new_doc_data and new_doc_data.get('id'):
+            try:
+                acting_user_id = int(get_jwt_identity())
+                acting_user_details = find_user_by_id(acting_user_id)
+                actor_username = acting_user_details['username'] if acting_user_details else "System"
+
+                content_type = 'documents'
+                # Use doc_type_val captured from the form for the category
+                category = doc_type_val if doc_type_val else new_doc_data.get('doc_type') # Fallback to response data if form val was empty
+                item_id = new_doc_data.get('id')
+                
+                watchers = database.get_watching_users(get_db(), content_type, category)
+                app.logger.info(f"Watchers for {content_type} / {category}: {len(watchers)} users.")
+                for watcher in watchers:
+                    notification_message = f"New document '{new_doc_data.get('doc_name')}' of type '{category}' uploaded by {actor_username}."
+                    database.create_notification(
+                        get_db(),
+                        user_id=watcher['id'],
+                        type='new_content_posted',
+                        message=notification_message,
+                        item_id=item_id,
+                        item_type='document',
+                        content_type=content_type,
+                        category=category
+                    )
+                if watchers:
+                    get_db().commit()
+
+                # New: Notifications for software category
+                doc_software_id_file = new_doc_data.get('software_id') # software_id is part of new_doc_data
+                software_category_name_file = None
+                if doc_software_id_file:
+                    software_info_file = get_db().execute("SELECT name FROM software WHERE id = ?", (doc_software_id_file,)).fetchone()
+                    if software_info_file and software_info_file['name']:
+                        software_category_name_file = software_info_file['name']
+                
+                if software_category_name_file and software_category_name_file != category:
+                    software_watchers_file = database.get_watching_users(get_db(), content_type, software_category_name_file)
+                    app.logger.info(f"Watchers for software category '{software_category_name_file}' (file upload): {len(software_watchers_file)} users.")
+                    for sw_watcher_file in software_watchers_file:
+                        sw_notification_message_file = f"New document '{new_doc_data.get('doc_name')}' for software '{software_category_name_file}' uploaded by {actor_username}."
+                        database.create_notification(
+                            get_db(),
+                            user_id=sw_watcher_file['id'],
+                            type='new_content_posted',
+                            message=sw_notification_message_file,
+                            item_id=item_id,
+                            item_type='document',
+                            content_type=content_type,
+                            category=software_category_name_file
+                        )
+                    if software_watchers_file:
+                        get_db().commit()
+                elif software_category_name_file and software_category_name_file == category:
+                    app.logger.info(f"Skipping software-category notification for document (file) ID {item_id} as software name '{software_category_name_file}' is same as doc_type '{category}'.")
+
+            except Exception as e_notify:
+                app.logger.error(f"Error creating notifications for new document (file) ID {new_doc_data.get('id')}: {e_notify}")
     return response
 
 # Similar endpoints for Patches
@@ -3715,6 +3927,49 @@ def admin_add_patch_with_url():
                                     db.rollback()
                                     app.logger.error(f"Error adding patch VMS compatibility for patch {new_patch_id}, VMS version {vms_ver_id_int}: {e_compat}")
                             db.commit() # Commit all successful compatibility entries
+        
+        # --- Notification Logic for admin_add_patch_with_url ---
+        if new_patch_data_json and new_patch_data_json.get('id'):
+            try:
+                acting_user_id = int(get_jwt_identity())
+                acting_user_details = find_user_by_id(acting_user_id)
+                actor_username = acting_user_details['username'] if acting_user_details else "System"
+
+                content_type = 'patches'
+                item_id = new_patch_data_json.get('id')
+                
+                # Determine category (software name)
+                patch_version_id_for_cat = new_patch_data_json.get('version_id')
+                category = None
+                if patch_version_id_for_cat:
+                    version_software_info = db.execute(
+                        "SELECT s.name FROM versions v JOIN software s ON v.software_id = s.id WHERE v.id = ?",
+                        (patch_version_id_for_cat,)
+                    ).fetchone()
+                    if version_software_info:
+                        category = version_software_info['name']
+
+                if category: # Only proceed if category could be determined
+                    watchers = database.get_watching_users(get_db(), content_type, category)
+                    app.logger.info(f"Watchers for {content_type} / {category}: {len(watchers)} users.")
+                    for watcher in watchers:
+                        notification_message = f"New patch '{new_patch_data_json.get('patch_name')}' for {category} posted by {actor_username}."
+                        database.create_notification(
+                            get_db(),
+                            user_id=watcher['id'],
+                            type='new_content_posted',
+                            message=notification_message,
+                            item_id=item_id,
+                            item_type='patch',
+                            content_type=content_type,
+                            category=category
+                        )
+                    if watchers:
+                        get_db().commit()
+                else:
+                    app.logger.warning(f"Could not determine category for new patch (URL) ID {item_id}. Skipping notifications.")
+            except Exception as e_notify:
+                app.logger.error(f"Error creating notifications for new patch (URL) ID {new_patch_data_json.get('id')}: {e_notify}")
     return response
 
 @app.route('/api/admin/patches/upload_file', methods=['POST'])
@@ -3838,6 +4093,49 @@ def admin_upload_patch_file():
                                     db.commit() # Commit all successful compatibility entries
                         except json.JSONDecodeError:
                             app.logger.error("Failed to parse compatible_vms_version_ids_json from form data.")
+        
+        # --- Notification Logic for admin_upload_patch_file ---
+        if new_patch_data_json and new_patch_data_json.get('id'):
+            try:
+                acting_user_id = int(get_jwt_identity())
+                acting_user_details = find_user_by_id(acting_user_id)
+                actor_username = acting_user_details['username'] if acting_user_details else "System"
+
+                content_type = 'patches'
+                item_id = new_patch_data_json.get('id')
+
+                # Determine category (software name)
+                # patch_version_id_for_compat_check is the version_id of the patch
+                category = None
+                if patch_version_id_for_compat_check:
+                    version_software_info = db.execute(
+                        "SELECT s.name FROM versions v JOIN software s ON v.software_id = s.id WHERE v.id = ?",
+                        (patch_version_id_for_compat_check,)
+                    ).fetchone()
+                    if version_software_info:
+                        category = version_software_info['name']
+                
+                if category:
+                    watchers = database.get_watching_users(get_db(), content_type, category)
+                    app.logger.info(f"Watchers for {content_type} / {category}: {len(watchers)} users.")
+                    for watcher in watchers:
+                        notification_message = f"New patch '{new_patch_data_json.get('patch_name')}' for {category} uploaded by {actor_username}."
+                        database.create_notification(
+                            get_db(),
+                            user_id=watcher['id'],
+                            type='new_content_posted',
+                            message=notification_message,
+                            item_id=item_id,
+                            item_type='patch',
+                            content_type=content_type,
+                            category=category
+                        )
+                    if watchers:
+                        get_db().commit()
+                else:
+                    app.logger.warning(f"Could not determine category for new patch (file) ID {item_id}. Skipping notifications.")
+            except Exception as e_notify:
+                app.logger.error(f"Error creating notifications for new patch (file) ID {new_patch_data_json.get('id')}: {e_notify}")
     return response
 
 
@@ -3923,6 +4221,68 @@ def admin_edit_document_url(document_id):
         else:
             app.logger.error(f"Failed to fetch document with ID {document_id} after edit_url.")
             return jsonify(msg="Document updated but failed to retrieve full details."), 500
+        
+        # --- Notification Logic for admin_edit_document_url ---
+        if updated_doc_row: # Check if update was successful and we have data
+            try:
+                acting_user_id = int(get_jwt_identity())
+                acting_user_details = find_user_by_id(acting_user_id)
+                actor_username = acting_user_details['username'] if acting_user_details else "System"
+
+                content_type = 'documents'
+                # Category is doc_type from the updated document data
+                category = processed_doc.get('doc_type') 
+                item_id = document_id # ID of the document that was edited
+
+                watchers = database.get_watching_users(get_db(), content_type, category)
+                app.logger.info(f"Watchers for edited {content_type} / {category}: {len(watchers)} users.")
+                for watcher in watchers:
+                    notification_message = f"Document '{processed_doc.get('doc_name')}' of type '{category}' was updated by {actor_username} (URL changed)."
+                    database.create_notification(
+                        get_db(),
+                        user_id=watcher['id'],
+                        type='content_updated', # Or a more specific type like 'document_url_updated'
+                        message=notification_message,
+                        item_id=item_id,
+                        item_type='document',
+                        content_type=content_type,
+                        category=category
+                    )
+                if watchers:
+                    get_db().commit()
+
+                # New: Notifications for software category
+                doc_software_id_edit_url = processed_doc.get('software_id')
+                software_category_name_edit_url = None
+                if doc_software_id_edit_url:
+                    software_info_edit_url = get_db().execute("SELECT name FROM software WHERE id = ?", (doc_software_id_edit_url,)).fetchone()
+                    if software_info_edit_url and software_info_edit_url['name']:
+                        software_category_name_edit_url = software_info_edit_url['name']
+                
+                if software_category_name_edit_url and software_category_name_edit_url != category:
+                    software_watchers_edit_url = database.get_watching_users(get_db(), content_type, software_category_name_edit_url)
+                    app.logger.info(f"Watchers for software category '{software_category_name_edit_url}' (edit URL): {len(software_watchers_edit_url)} users.")
+                    for sw_watcher_edit_url in software_watchers_edit_url:
+                        sw_notification_message_edit_url = f"Document '{processed_doc.get('doc_name')}' for software '{software_category_name_edit_url}' was updated by {actor_username} (URL changed)."
+                        database.create_notification(
+                            get_db(),
+                            user_id=sw_watcher_edit_url['id'],
+                            type='content_updated',
+                            message=sw_notification_message_edit_url,
+                            item_id=item_id,
+                            item_type='document',
+                            content_type=content_type,
+                            category=software_category_name_edit_url
+                        )
+                    if software_watchers_edit_url:
+                        get_db().commit()
+                elif software_category_name_edit_url and software_category_name_edit_url == category:
+                    app.logger.info(f"Skipping software-category notification for edited document (URL) ID {item_id} as software name '{software_category_name_edit_url}' is same as doc_type '{category}'.")
+
+            except Exception as e_notify_edit_url:
+                app.logger.error(f"Error creating notifications for edited document (URL) ID {document_id}: {e_notify_edit_url}")
+                # Do not fail the main operation
+
     except sqlite3.IntegrityError as e:
         db.rollback()
         app.logger.error(f"Admin edit document URL DB IntegrityError: {e}")
@@ -4049,6 +4409,70 @@ def admin_edit_document_file(document_id):
         else:
             app.logger.error(f"Failed to fetch document with ID {document_id} after edit_file.")
             return jsonify(msg="Document updated but failed to retrieve full details."), 500
+        
+        # --- Notification Logic for admin_edit_document_file ---
+        if updated_doc_row: # Check if update was successful and we have data
+            try:
+                acting_user_id = int(get_jwt_identity())
+                acting_user_details = find_user_by_id(acting_user_id)
+                actor_username = acting_user_details['username'] if acting_user_details else "System"
+
+                content_type = 'documents'
+                category = processed_doc.get('doc_type') # doc_type from updated data
+                item_id = document_id
+
+                watchers = database.get_watching_users(get_db(), content_type, category)
+                app.logger.info(f"Watchers for edited {content_type} / {category}: {len(watchers)} users.")
+                for watcher in watchers:
+                    update_type_message = "metadata updated"
+                    if new_file and new_file.filename != '': # new_file is from the scope of admin_edit_document_file
+                        update_type_message = "file replaced"
+                    
+                    notification_message = f"Document '{processed_doc.get('doc_name')}' of type '{category}' was updated by {actor_username} ({update_type_message})."
+                    database.create_notification(
+                        get_db(),
+                        user_id=watcher['id'],
+                        type='content_updated', # Or more specific like 'document_file_updated'
+                        message=notification_message,
+                        item_id=item_id,
+                        item_type='document',
+                        content_type=content_type,
+                        category=category
+                    )
+                if watchers:
+                    get_db().commit()
+
+                # New: Notifications for software category
+                doc_software_id_edit_file = processed_doc.get('software_id')
+                software_category_name_edit_file = None
+                if doc_software_id_edit_file:
+                    software_info_edit_file = get_db().execute("SELECT name FROM software WHERE id = ?", (doc_software_id_edit_file,)).fetchone()
+                    if software_info_edit_file and software_info_edit_file['name']:
+                        software_category_name_edit_file = software_info_edit_file['name']
+                
+                if software_category_name_edit_file and software_category_name_edit_file != category: # category is doc_type
+                    software_watchers_edit_file = database.get_watching_users(get_db(), content_type, software_category_name_edit_file)
+                    app.logger.info(f"Watchers for software category '{software_category_name_edit_file}' (edit file): {len(software_watchers_edit_file)} users.")
+                    for sw_watcher_edit_file in software_watchers_edit_file:
+                        sw_notification_message_edit_file = f"Document '{processed_doc.get('doc_name')}' for software '{software_category_name_edit_file}' was updated by {actor_username} ({update_type_message})."
+                        database.create_notification(
+                            get_db(),
+                            user_id=sw_watcher_edit_file['id'],
+                            type='content_updated',
+                            message=sw_notification_message_edit_file,
+                            item_id=item_id,
+                            item_type='document',
+                            content_type=content_type,
+                            category=software_category_name_edit_file
+                        )
+                    if software_watchers_edit_file:
+                        get_db().commit()
+                elif software_category_name_edit_file and software_category_name_edit_file == category:
+                    app.logger.info(f"Skipping software-category notification for edited document (file) ID {item_id} as software name '{software_category_name_edit_file}' is same as doc_type '{category}'.")
+            
+            except Exception as e_notify_edit_file:
+                app.logger.error(f"Error creating notifications for edited document (file) ID {document_id}: {e_notify_edit_file}")
+
     except sqlite3.IntegrityError as e:
         db.rollback()
         # If a new file was saved but DB failed, try to delete the newly saved file.
@@ -4220,6 +4644,46 @@ def admin_upload_link_file():
                                 db.commit()
                     except json.JSONDecodeError:
                         app.logger.error("Failed to parse compatible_vms_version_ids_json from form data for link (file upload).")
+        
+        # --- Notification Logic for admin_upload_link_file ---
+        if new_link_data and new_link_data.get('id'): # new_link_data is from the outer scope of the calling function
+            try:
+                acting_user_id = int(get_jwt_identity())
+                acting_user_details = find_user_by_id(acting_user_id)
+                actor_username = acting_user_details['username'] if acting_user_details else "System"
+
+                content_type = 'links'
+                item_id = new_link_data.get('id')
+
+                # Determine category (software name)
+                # software_id is resolved earlier in admin_upload_link_file
+                category = None
+                if software_id: 
+                    software_info_for_notify = db.execute("SELECT name FROM software WHERE id = ?", (software_id,)).fetchone()
+                    if software_info_for_notify:
+                        category = software_info_for_notify['name']
+                
+                if category:
+                    watchers = database.get_watching_users(get_db(), content_type, category)
+                    app.logger.info(f"Watchers for {content_type} / {category} (Link File Upload): {len(watchers)} users.")
+                    for watcher in watchers:
+                        notification_message = f"New link file '{new_link_data.get('title')}' for {category} uploaded by {actor_username}."
+                        database.create_notification(
+                            get_db(),
+                            user_id=watcher['id'],
+                            type='new_content_posted',
+                            message=notification_message,
+                            item_id=item_id,
+                            item_type='link', 
+                            content_type=content_type, 
+                            category=category
+                        )
+                    if watchers:
+                        get_db().commit()
+                else:
+                    app.logger.warning(f"Could not determine category for new link (file) ID {item_id}. Skipping notifications.")
+            except Exception as e_notify:
+                app.logger.error(f"Error creating notifications for new link (file) ID {new_link_data.get('id')}: {e_notify}")
     return response
 
 @app.route('/api/admin/patches/<int:patch_id>/edit_url', methods=['PUT'])
@@ -4399,6 +4863,49 @@ def admin_edit_patch_url(patch_id):
             # Or, we can add compatible_vms_versions to processed_item_dict manually here if needed.
             # This part is complex if we want to return the same full structure as get_all_patches_api.
             # A simpler approach: The frontend re-fetches the list or item if it needs updated compatibility.
+
+            # --- Notification Logic for admin_edit_patch_url ---
+            if processed_item_dict and processed_item_dict.get('id'):
+                try:
+                    acting_user_id = int(get_jwt_identity())
+                    acting_user_details = find_user_by_id(acting_user_id)
+                    actor_username = acting_user_details['username'] if acting_user_details else "System"
+
+                    content_type = 'patches'
+                    item_id = processed_item_dict.get('id')
+                    
+                    # Determine category (software name) from the potentially updated version
+                    category = None
+                    # final_version_id is the version_id used for the update
+                    if final_version_id: 
+                        version_software_info = db.execute(
+                            "SELECT s.name FROM versions v JOIN software s ON v.software_id = s.id WHERE v.id = ?",
+                            (final_version_id,) # Use the version ID that was set for the patch
+                        ).fetchone()
+                        if version_software_info:
+                            category = version_software_info['name']
+                    
+                    if category:
+                        watchers = database.get_watching_users(get_db(), content_type, category)
+                        app.logger.info(f"Watchers for edited {content_type} / {category}: {len(watchers)} users.")
+                        for watcher in watchers:
+                            notification_message = f"Patch '{processed_item_dict.get('patch_name')}' for {category} was updated by {actor_username} (URL changed)."
+                            database.create_notification(
+                                get_db(),
+                                user_id=watcher['id'],
+                                type='content_updated',
+                                message=notification_message,
+                                item_id=item_id,
+                                item_type='patch',
+                                content_type=content_type,
+                                category=category
+                            )
+                        if watchers:
+                            get_db().commit()
+                    else:
+                        app.logger.warning(f"Could not determine category for edited patch (URL) ID {item_id}. Skipping notifications.")
+                except Exception as e_notify:
+                    app.logger.error(f"Error creating notifications for edited patch (URL) ID {processed_item_dict.get('id')}: {e_notify}")
 
             return jsonify(processed_item_dict), 200
         else:
@@ -4592,6 +5099,52 @@ def admin_edit_patch_file(patch_id):
             app.logger.error(f"Failed to fetch patch with ID {patch_id} after edit_file.")
             return jsonify(msg="Patch updated but failed to retrieve full details."), 500
             
+            # --- Notification Logic for admin_edit_patch_file ---
+            if processed_item_dict and processed_item_dict.get('id'):
+                try:
+                    acting_user_id = int(get_jwt_identity())
+                    acting_user_details = find_user_by_id(acting_user_id)
+                    actor_username = acting_user_details['username'] if acting_user_details else "System"
+
+                    content_type = 'patches'
+                    item_id = processed_item_dict.get('id')
+
+                    # Determine category (software name) from the potentially updated version
+                    category = None
+                    # final_version_id is the version_id used for the update (from scope of admin_edit_patch_file)
+                    if final_version_id: 
+                        version_software_info = db.execute(
+                            "SELECT s.name FROM versions v JOIN software s ON v.software_id = s.id WHERE v.id = ?",
+                            (final_version_id,)
+                        ).fetchone()
+                        if version_software_info:
+                            category = version_software_info['name']
+
+                    if category:
+                        watchers = database.get_watching_users(get_db(), content_type, category)
+                        app.logger.info(f"Watchers for edited {content_type} / {category}: {len(watchers)} users.")
+                        for watcher in watchers:
+                            update_type_msg = "metadata updated"
+                            if new_physical_file and new_physical_file.filename != '': # new_physical_file from outer scope
+                                update_type_msg = "file replaced"
+                            notification_message = f"Patch '{processed_item_dict.get('patch_name')}' for {category} was updated by {actor_username} ({update_type_msg})."
+                            database.create_notification(
+                                get_db(),
+                                user_id=watcher['id'],
+                                type='content_updated',
+                                message=notification_message,
+                                item_id=item_id,
+                                item_type='link',
+                                content_type=content_type,
+                                category=category
+                            )
+                        if watchers:
+                            get_db().commit()
+                    else:
+                        app.logger.warning(f"Could not determine category for edited patch (file) ID {item_id}. Skipping notifications.")
+                except Exception as e_notify:
+                    app.logger.error(f"Error creating notifications for edited patch (file) ID {processed_item_dict.get('id')}: {e_notify}")
+
     except sqlite3.IntegrityError as e:
         db.rollback()
         if file_save_path and os.path.exists(file_save_path):
@@ -4854,6 +5407,47 @@ def admin_edit_link_url(link_id_from_url):
         else:
             app.logger.error(f"Failed to fetch link with ID {link_id_from_url} after edit_url.")
             return jsonify(msg="Link updated but failed to retrieve full details."), 500
+
+            # --- Notification Logic for admin_edit_link_url ---
+            if response_data_dict and response_data_dict.get('id'):
+                try:
+                    acting_user_id = int(get_jwt_identity())
+                    acting_user_details = find_user_by_id(acting_user_id)
+                    actor_username = acting_user_details['username'] if acting_user_details else "System"
+
+                    content_type = 'links'
+                    item_id = response_data_dict.get('id')
+
+                    # Determine category (software name) from the potentially updated software_id
+                    category = None
+                    # software_id_for_link is the software_id used for the update (from scope of admin_edit_link_url)
+                    if software_id_for_link: 
+                        software_info_notify = db.execute("SELECT name FROM software WHERE id = ?", (software_id_for_link,)).fetchone()
+                        if software_info_notify:
+                            category = software_info_notify['name']
+                    
+                    if category:
+                        watchers = database.get_watching_users(get_db(), content_type, category)
+                        app.logger.info(f"Watchers for edited {content_type} / {category} (Link URL Edit): {len(watchers)} users.")
+                        for watcher in watchers:
+                            notification_message = f"Link '{response_data_dict.get('title')}' for {category} was updated by {actor_username} (URL changed)."
+                            database.create_notification(
+                                get_db(),
+                                user_id=watcher['id'],
+                                type='content_updated',
+                                message=notification_message,
+                                item_id=item_id,
+                                item_type='link',
+                                content_type=content_type,
+                                category=category
+                            )
+                        if watchers:
+                            get_db().commit()
+                    else:
+                        app.logger.warning(f"Could not determine category for edited link (URL) ID {item_id}. Skipping notifications.")
+                except Exception as e_notify:
+                    app.logger.error(f"Error creating notifications for edited link (URL) ID {response_data_dict.get('id')}: {e_notify}")
+            
     except sqlite3.IntegrityError as e:
         db.rollback()
         return jsonify(msg=f"Database integrity error: {e}"), 409
@@ -5026,6 +5620,50 @@ def admin_edit_link_file(link_id_from_url):
                                     except Exception as e_lf_compat_gen: db.rollback(); app.logger.error(f"General error for link VMS compat (edit_file) L:{link_id_from_url} V:{vms_ver_id_int}: {e_lf_compat_gen}")
                                 db.commit()
                     except json.JSONDecodeError: app.logger.error("Failed to parse compatible_vms_version_ids_json from form for link (edit_file).")
+            
+            # --- Notification Logic for admin_edit_link_file ---
+            if processed_item_dict and processed_item_dict.get('id'):
+                try:
+                    acting_user_id = int(get_jwt_identity())
+                    acting_user_details = find_user_by_id(acting_user_id)
+                    actor_username = acting_user_details['username'] if acting_user_details else "System"
+
+                    content_type = 'links'
+                    item_id = processed_item_dict.get('id')
+
+                    # Determine category (software name) from the potentially updated software_id
+                    category = None
+                    # software_id_for_link is the software_id used for the update (from scope of admin_edit_link_file)
+                    if software_id_for_link: 
+                        software_info_notify = db.execute("SELECT name FROM software WHERE id = ?", (software_id_for_link,)).fetchone()
+                        if software_info_notify:
+                            category = software_info_notify['name']
+                    
+                    if category:
+                        watchers = database.get_watching_users(get_db(), content_type, category)
+                        app.logger.info(f"Watchers for edited {content_type} / {category} (Link File Edit): {len(watchers)} users.")
+                        for watcher in watchers:
+                            update_type_msg = "metadata updated"
+                            # new_physical_file is from the scope of admin_edit_link_file
+                            if new_physical_file and new_physical_file.filename != '': 
+                                update_type_msg = "file replaced"
+                            notification_message = f"Link '{processed_item_dict.get('title')}' for {category} was updated by {actor_username} ({update_type_msg})."
+                            database.create_notification(
+                                get_db(),
+                                user_id=watcher['id'],
+                                type='content_updated',
+                                message=notification_message,
+                                item_id=item_id,
+                                item_type=content_type,
+                                content_type=content_type,
+                                category=category
+                            )
+                        if watchers:
+                            get_db().commit()
+                    else:
+                        app.logger.warning(f"Could not determine category for edited link (file) ID {item_id}. Skipping notifications.")
+                except Exception as e_notify:
+                    app.logger.error(f"Error creating notifications for edited link (file) ID {processed_item_dict.get('id')}: {e_notify}")
             return jsonify(processed_item_dict), 200
         else:
             app.logger.error(f"Failed to fetch link with ID {link_id_from_url} after edit_file.")
@@ -5299,6 +5937,42 @@ def admin_edit_misc_file(file_id):
         else:
             app.logger.error(f"Failed to fetch misc_file with ID {file_id} after edit.")
             return jsonify(msg="Misc file updated but failed to retrieve full details."),500
+        
+        # --- Notification Logic for admin_edit_misc_file ---
+        if processed_file and processed_file.get('id'):
+            try:
+                acting_user_id = int(get_jwt_identity())
+                acting_user_details = find_user_by_id(acting_user_id)
+                actor_username = acting_user_details['username'] if acting_user_details else "System"
+
+                content_type = 'misc'
+                category = None # Category is NULL for misc files
+                item_id = processed_file.get('id')
+
+                # Determine display name for notification
+                display_name = processed_file.get('user_provided_title', processed_file.get('original_filename', 'N/A'))
+                update_description = "metadata updated"
+                if new_physical_file and new_physical_file.filename != '': # new_physical_file from outer scope
+                    update_description = "file replaced"
+
+                watchers = database.get_watching_users(get_db(), content_type, category) # Category is None
+                app.logger.info(f"Watchers for edited {content_type} (Misc File Edit): {len(watchers)} users.")
+                for watcher in watchers:
+                    notification_message = f"Miscellaneous file '{display_name}' was updated by {actor_username} ({update_description})."
+                    database.create_notification(
+                        get_db(),
+                        user_id=watcher['id'],
+                        type='content_updated',
+                        message=notification_message,
+                        item_id=item_id,
+                            item_type='link', 
+                        content_type=content_type,
+                        category=category # None
+                    )
+                if watchers:
+                    get_db().commit()
+            except Exception as e_notify:
+                app.logger.error(f"Error creating notifications for edited misc file ID {processed_file.get('id')}: {e_notify}")
 
     except sqlite3.IntegrityError as e: # e.g., unique constraint on (misc_category_id, user_provided_title) or (misc_category_id, original_filename)
         db.rollback()
@@ -5519,6 +6193,13 @@ def _admin_handle_large_file_db_insert(
 @jwt_required() 
 @admin_required
 def admin_upload_misc_file():
+    # Capture details for notification before calling the helper
+    misc_category_id_val = request.form.get('misc_category_id')
+    user_provided_title_val = request.form.get('user_provided_title')
+    original_filename_val = None # Will get this from the file object if title is empty
+    if 'file' in request.files and request.files['file'].filename:
+        original_filename_val = secure_filename(request.files['file'].filename)
+
     # This route now directly calls _admin_handle_file_upload_and_db_insert
     # The audit logging for 'CREATE_MISC_FILE' is handled within _admin_handle_file_upload_and_db_insert
     sql_query = """INSERT INTO misc_files (misc_category_id, user_id, user_provided_title, user_provided_description,
@@ -5529,13 +6210,51 @@ def admin_upload_misc_file():
                         'original_filename', 'stored_filename', 'download_link_or_url', 'file_type', 'file_size',
                         'created_by_user_id', 'updated_by_user_id')
 
-    return _admin_handle_file_upload_and_db_insert(
+    response = _admin_handle_file_upload_and_db_insert(
         table_name='misc_files', upload_folder_config_key='MISC_UPLOAD_FOLDER', server_path_prefix='/misc_uploads',
         metadata_fields=['misc_category_id', 'user_provided_title', 'user_provided_description'],
         required_form_fields=['misc_category_id', 'file'],
         sql_insert_query=sql_query,
         sql_params_tuple=sql_params_order
     )
+    # --- Notification Logic for admin_upload_misc_file ---
+    if response[1] == 201: # If item created successfully
+        new_misc_file_data = response[0].get_json()
+        if new_misc_file_data and new_misc_file_data.get('id'):
+            try:
+                acting_user_id = int(get_jwt_identity())
+                acting_user_details = find_user_by_id(acting_user_id)
+                actor_username = acting_user_details['username'] if acting_user_details else "System"
+
+                content_type = 'misc'
+                category = None # Category is NULL for misc files
+                item_id = new_misc_file_data.get('id')
+                
+                # Determine display name for notification (title or original filename)
+                display_name = user_provided_title_val if user_provided_title_val else original_filename_val
+                if not display_name: # Fallback if both somehow empty
+                     display_name = new_misc_file_data.get('user_provided_title', new_misc_file_data.get('original_filename', 'N/A'))
+
+
+                watchers = database.get_watching_users(get_db(), content_type, category) # Category is None
+                app.logger.info(f"Watchers for {content_type} (Misc File Upload): {len(watchers)} users.")
+                for watcher in watchers:
+                    notification_message = f"New miscellaneous file '{display_name}' uploaded by {actor_username}."
+                    database.create_notification(
+                        get_db(),
+                        user_id=watcher['id'],
+                        type='new_content_posted',
+                        message=notification_message,
+                        item_id=item_id,
+                        item_type='misc_file',
+                        content_type=content_type, 
+                        category=category # None
+                    )
+                if watchers:
+                    get_db().commit()
+            except Exception as e_notify:
+                app.logger.error(f"Error creating notifications for new misc file ID {new_misc_file_data.get('id')}: {e_notify}")
+    return response
 
 #ADMIN
 # app.py
@@ -5662,6 +6381,46 @@ def admin_add_link_with_url():
                                 db.rollback()
                                 app.logger.error(f"Error adding VMS compatibility for link {new_link_id} (add_with_url), VMS ver {vms_ver_id_int}: {e_compat_link_url}")
                         db.commit() # Commit all successful VMS compatibility entries for this link
+        
+        # --- Notification Logic for admin_add_link_with_url ---
+        if new_link_data_json and new_link_data_json.get('id'): # new_link_data_json is from the outer scope
+            try:
+                acting_user_id = int(get_jwt_identity())
+                acting_user_details = find_user_by_id(acting_user_id)
+                actor_username = acting_user_details['username'] if acting_user_details else "System"
+
+                content_type = 'links'
+                item_id = new_link_data_json.get('id')
+                
+                # Determine category (software name)
+                # software_id is from the scope of admin_add_link_with_url
+                category = None
+                if software_id: 
+                    software_info_for_notify = db.execute("SELECT name FROM software WHERE id = ?", (software_id,)).fetchone()
+                    if software_info_for_notify:
+                        category = software_info_for_notify['name']
+
+                if category:
+                    watchers = database.get_watching_users(get_db(), content_type, category)
+                    app.logger.info(f"Watchers for {content_type} / {category} (Link URL Add): {len(watchers)} users.")
+                    for watcher in watchers:
+                        notification_message = f"New link '{new_link_data_json.get('title')}' for {category} posted by {actor_username}."
+                        database.create_notification(
+                            get_db(),
+                            user_id=watcher['id'],
+                            type='new_content_posted',
+                            message=notification_message,
+                            item_id=item_id,
+                            item_type='link', 
+                            content_type=content_type, 
+                            category=category
+                        )
+                    if watchers:
+                        get_db().commit()
+                else:
+                    app.logger.warning(f"Could not determine category for new link (URL) ID {item_id}. Skipping notifications.")
+            except Exception as e_notify:
+                app.logger.error(f"Error creating notifications for new link (URL) ID {new_link_data_json.get('id')}: {e_notify}")
     return response
 
 # --- Software Version Management Endpoints (Admin) ---
@@ -7862,7 +8621,71 @@ def admin_upload_large_file():
                 },
                 user_id=current_user_id
             )
-            
+
+            # --- Notification logic for admin_upload_large_file ---
+            if new_item and new_item.get('id'):
+                try:
+                    acting_user_id = int(get_jwt_identity()) # Should be same as current_user_id
+                    acting_user_details = find_user_by_id(acting_user_id)
+                    actor_username = acting_user_details['username'] if acting_user_details else "System"
+                    
+                    db_item_type = item_type # This is 'document', 'patch', 'misc_file', 'link_file'
+                    resolved_content_type = None
+                    category_for_notification = None
+                    item_name_for_notification = new_item.get('name', original_filename) # Default to original_filename
+
+                    if db_item_type == 'document':
+                        resolved_content_type = 'documents'
+                        category_for_notification = new_item.get('doc_type')
+                        item_name_for_notification = new_item.get('doc_name', original_filename)
+                    elif db_item_type == 'patch':
+                        resolved_content_type = 'patches'
+                        item_name_for_notification = new_item.get('patch_name', original_filename)
+                        # Category for patches is software name, from version_id -> software_id -> software.name
+                        patch_version_id = new_item.get('version_id')
+                        if patch_version_id:
+                            ver_info = db.execute("SELECT s.name FROM versions v JOIN software s ON v.software_id = s.id WHERE v.id = ?", (patch_version_id,)).fetchone()
+                            if ver_info: category_for_notification = ver_info['name']
+                    elif db_item_type == 'link_file': # Represents an uploaded file for a "Link" entry
+                        resolved_content_type = 'links' # Notifications for 'links'
+                        item_name_for_notification = new_item.get('title', original_filename)
+                        # Category for links is software name
+                        link_software_id = new_item.get('software_id')
+                        if link_software_id:
+                            sw_info = db.execute("SELECT name FROM software WHERE id = ?", (link_software_id,)).fetchone()
+                            if sw_info: category_for_notification = sw_info['name']
+                    elif db_item_type == 'misc_file':
+                        resolved_content_type = 'misc'
+                        item_name_for_notification = new_item.get('user_provided_title', new_item.get('original_filename', original_filename))
+                        category_for_notification = None # Misc files have no specific category for watching
+
+                    if resolved_content_type and (category_for_notification is not None or resolved_content_type == 'misc'):
+                        watchers = database.get_watching_users(get_db(), resolved_content_type, category_for_notification)
+                        app.logger.info(f"Watchers for file upload {resolved_content_type} / {category_for_notification if category_for_notification else 'N/A'}: {len(watchers)} users.")
+                        for watcher in watchers:
+                            # Construct message carefully based on type
+                            msg_core = f"New {db_item_type.replace('_', ' ')} '{item_name_for_notification}'"
+                            if category_for_notification:
+                                msg_core += f" for {category_for_notification}"
+                            msg_core += f" (file) uploaded by {actor_username}."
+                            
+                            database.create_notification(
+                                get_db(),
+                                user_id=watcher['id'],
+                                type='new_content_posted',
+                                message=msg_core,
+                                item_id=new_item.get('id'),
+                                item_type=db_item_type, # e.g. 'document', 'patch', 'link_file', 'misc_file'
+                                content_type=resolved_content_type, # e.g. 'documents', 'patches', 'links', 'misc'
+                                category=category_for_notification
+                            )
+                        if watchers:
+                            get_db().commit()
+                    else:
+                        app.logger.warning(f"Could not determine content_type/category for large file notification (item_type: {db_item_type}, ID: {new_item.get('id')}). Skipping notifications.")
+                except Exception as e_notify_large:
+                    app.logger.error(f"Error creating notifications for large file upload (item_type: {item_type}, ID: {new_item.get('id') if new_item else 'N/A'}): {e_notify_large}")
+
             return jsonify(new_item), 201 # Return the newly created item from DB
 
         else:
@@ -8557,8 +9380,10 @@ def add_comment_to_item(item_type, item_id):
                         user_id=parent_comment_author_id,
                         type='reply',
                         message=f"{comment_author_username} replied to your comment on {item_type} '{item_name_for_notification}'.",
-                        item_id=comment_id, 
-                        item_type='comment' 
+                        item_id=comment_id,
+                        item_type='comment',
+                        content_type=None,
+                        category=None
                     )
                     app.logger.info(f"Reply notification created for user {parent_comment_author_id} for comment {comment_id}")
                 except Exception as e_notify_reply:
@@ -8583,8 +9408,10 @@ def add_comment_to_item(item_type, item_id):
                             user_id=mentioned_user['id'],
                             type='mention',
                             message=f"{comment_author_username} mentioned you in a comment on {item_type} '{item_name_for_notification}'.",
-                            item_id=comment_id, 
-                            item_type='comment'
+                            item_id=comment_id,
+                            item_type='comment',
+                            content_type=None,
+                            category=None
                         )
                         app.logger.info(f"Mention notification created for user {mentioned_user['id']} (username: {mentioned_username_match}) for comment {comment_id}")
                     except Exception as e_notify_mention:

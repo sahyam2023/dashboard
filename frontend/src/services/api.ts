@@ -36,6 +36,10 @@ const OFFLINE_MESSAGE = "Backend is unavailable. Please check your connection.";
 // For brevity, I'm showing User, DocumentType, Patch, Link, MiscFile as they are directly used in paginated responses.
 // Ensure Software, SoftwareVersion, AuthRequest, AuthResponse, etc., are also properly defined/imported.
 
+// WatchPreference types are now imported from '../types'
+import { WatchPreference, UpdateWatchPreferencePayload } from '../types';
+
+
 export interface User {
   id: number;
   username: string;
@@ -643,6 +647,52 @@ export async function saveUserDashboardLayout(layout: LayoutObject): Promise<{ m
     throw error; // Re-throw to be caught by the calling component
   }
 }
+
+// --- User Watch Preferences API Functions ---
+export async function fetchUserWatchPreferences(): Promise<WatchPreference[]> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/user/watch_preferences`, {
+      method: 'GET',
+      headers: {
+        ...getAuthHeader(),
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
+    });
+    return handleApiError(response, 'Failed to fetch user watch preferences');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error fetching user watch preferences:', error);
+    throw error;
+  }
+}
+
+export async function updateUserWatchPreferences(
+  payload: UpdateWatchPreferencePayload[]
+): Promise<{ message: string; updated_preferences: WatchPreference[] }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/user/watch_preferences`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeader(),
+      },
+      body: JSON.stringify(payload),
+    });
+    return handleApiError(response, 'Failed to update user watch preferences');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error updating user watch preferences:', error);
+    throw error;
+  }
+}
+// --- End User Watch Preferences API Functions ---
 
 // --- Super Admin Database Management Functions ---
 

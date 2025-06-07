@@ -63,7 +63,9 @@ CREATE TABLE IF NOT EXISTS users (
     password_reset_required BOOLEAN DEFAULT FALSE NOT NULL,
     dashboard_layout_prefs TEXT DEFAULT NULL,
     profile_picture_filename TEXT, 
-    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30'))
+    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
+    last_seen TIMESTAMP,
+    is_online BOOLEAN DEFAULT FALSE
 );
 CREATE INDEX IF NOT EXISTS idx_users_username ON users (username);
 CREATE INDEX IF NOT EXISTS idx_users_role ON users (role);

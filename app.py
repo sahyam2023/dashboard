@@ -2022,6 +2022,25 @@ def login():
             profile_picture_url=profile_picture_url # Added
         ), 200
     
+        # --- Real-time Online Status Update ---
+        try:
+            db = get_db()
+            db.execute(
+                "UPDATE users SET is_online = TRUE, last_seen = CURRENT_TIMESTAMP WHERE id = ?",
+                (user['id'],)
+            )
+            db.commit()
+            app.logger.info(f"User {user['id']} status set to online and last_seen updated.")
+            # Emit user_online event
+            # Consider emitting to a general 'online_users' room or specific rooms
+            # For now, emitting to a general event that clients can listen to.
+            # More advanced: Emit to rooms of active conversations involving this user.
+            socketio.emit('user_online', {'user_id': user['id']}, broadcast=True) # broadcast=True to all clients
+        except Exception as e_status:
+            app.logger.error(f"Error updating user online status for user {user['id']}: {e_status}")
+            # Do not fail login if status update fails.
+        # --- End Real-time Online Status Update ---
+
     # Log failed login attempt (bad username or password)
     # Need to determine if user exists to get target_id, or log without it if user not found
     target_id_for_failed_login = user['id'] if user else None
@@ -6641,6 +6660,61 @@ def admin_list_versions():
     except Exception as e:
         app.logger.error(f"Unexpected error in admin_list_versions: {e}", exc_info=True)
         return jsonify(error="Failed to retrieve software versions", details=str(e)), 500
+
+@app.route('/api/auth/logout', methods=['POST'])
+@active_user_required # Ensures only logged-in, active users can logout
+def logout():
+    current_user_id = int(get_jwt_identity())
+    jti = get_jwt()['jti'] # Get JWT ID
+    blocklist.add(jti) # Add token to blocklist
+
+    # --- Real-time Online Status Update ---
+    try:
+        db = get_db()
+        # Update user's online status and last_seen timestamp
+        # Using CURRENT_TIMESTAMP for SQLite to set the current UTC time
+        cursor = db.execute(
+            "UPDATE users SET is_online = FALSE, last_seen = CURRENT_TIMESTAMP WHERE id = ?",
+            (current_user_id,)
+        )
+        db.commit()
+
+        if cursor.rowcount > 0:
+            app.logger.info(f"User {current_user_id} status set to offline and last_seen updated.")
+            # Fetch the updated last_seen time to include in the event
+            # This requires another query. Alternatively, client can use its own timestamp.
+            # For accuracy, fetching from DB is better if precise last_seen is critical.
+            user_details_for_event = db.execute("SELECT last_seen FROM users WHERE id = ?", (current_user_id,)).fetchone()
+            last_seen_timestamp_iso = None
+            if user_details_for_event and user_details_for_event['last_seen']:
+                # Convert to ISO format, assuming it's stored as a string that can be parsed or directly used.
+                # If it's a naive string, parse and make aware (similar to convert_timestamps_to_ist_iso)
+                # For CURRENT_TIMESTAMP in SQLite, it's usually UTC.
+                try:
+                    naive_dt = datetime.strptime(user_details_for_event['last_seen'], '%Y-%m-%d %H:%M:%S')
+                    # Assuming CURRENT_TIMESTAMP in SQLite gives UTC. If it's local, adjust timezone.
+                    utc_dt = UTC.localize(naive_dt) # Make it timezone-aware (UTC)
+                    last_seen_timestamp_iso = utc_dt.isoformat()
+                except Exception as e_ts_conv:
+                    app.logger.error(f"Error converting last_seen for logout event (user {current_user_id}): {e_ts_conv}")
+                    last_seen_timestamp_iso = datetime.now(timezone.utc).isoformat() # Fallback
+
+            socketio.emit('user_offline', {'user_id': current_user_id, 'last_seen': last_seen_timestamp_iso}, broadcast=True)
+        else:
+            app.logger.warning(f"Logout: Failed to update online status for user {current_user_id} (user not found or no change).")
+
+    except Exception as e_status:
+        app.logger.error(f"Error updating user online status during logout for user {current_user_id}: {e_status}")
+        # Do not fail logout if status update fails.
+    # --- End Real-time Online Status Update ---
+
+    log_audit_action(
+        action_type='USER_LOGOUT',
+        target_table='users', # Or 'auth_tokens' if you had a table for JTIs
+        target_id=current_user_id, # User who logged out
+        details={'jti_blocklisted': jti}
+    )
+    return jsonify(msg="Logout successful, token revoked."), 200
     
 @app.route('/api/admin/versions/<int:version_id>', methods=['GET'])
 @jwt_required()
@@ -10009,6 +10083,56 @@ def start_new_conversation():
         # `create_conversation` returns a Row object. Convert to dict for jsonify.
         # Also, convert timestamps if necessary.
         conv_dict = convert_timestamps_to_ist_iso(dict(conversation), ['created_at'])
+
+        # --- Real-time Update for New Conversation ---
+        user1_id = conversation['user1_id']
+        user2_id = conversation['user2_id']
+
+        # Fetch conversation details for user1 (perspective of user1)
+        # get_user_conversations returns a list, we need to find the specific one.
+        # This is not the most efficient way if get_user_conversations is heavy.
+        # A more direct fetch might be better: get_conversation_details_for_user(db, conversation_id, user_id)
+
+        # Simplification: Assuming get_user_conversations is efficient enough for now,
+        # or that the frontend can handle a list and find the new one.
+        # A more targeted approach would be to construct the payload directly.
+
+        # Construct payload for user1
+        user1_conversations_raw = get_user_conversations(db, user1_id)
+        user1_conv_payload = None
+        for conv_raw in user1_conversations_raw:
+            if conv_raw['conversation_id'] == conversation['id']:
+                temp_conv_dict = convert_timestamps_to_ist_iso(dict(conv_raw), ['last_message_created_at'])
+                if temp_conv_dict.get('other_profile_picture'):
+                    temp_conv_dict['other_profile_picture_url'] = f"/profile_pictures/{temp_conv_dict['other_profile_picture']}"
+                else:
+                    temp_conv_dict['other_profile_picture_url'] = None
+                user1_conv_payload = temp_conv_dict
+                break
+
+        if user1_conv_payload:
+             # Emit to user1's room (assuming user-specific rooms like 'user_USERID')
+            socketio.emit('new_conversation_started', user1_conv_payload, room=f'user_{user1_id}')
+            app.logger.info(f"Emitted 'new_conversation_started' to user {user1_id} for conversation {conversation['id']}")
+
+        # Construct payload for user2
+        user2_conversations_raw = get_user_conversations(db, user2_id)
+        user2_conv_payload = None
+        for conv_raw in user2_conversations_raw:
+            if conv_raw['conversation_id'] == conversation['id']:
+                temp_conv_dict_u2 = convert_timestamps_to_ist_iso(dict(conv_raw), ['last_message_created_at'])
+                if temp_conv_dict_u2.get('other_profile_picture'):
+                    temp_conv_dict_u2['other_profile_picture_url'] = f"/profile_pictures/{temp_conv_dict_u2['other_profile_picture']}"
+                else:
+                    temp_conv_dict_u2['other_profile_picture_url'] = None
+                user2_conv_payload = temp_conv_dict_u2
+                break
+
+        if user2_conv_payload:
+            socketio.emit('new_conversation_started', user2_conv_payload, room=f'user_{user2_id}')
+            app.logger.info(f"Emitted 'new_conversation_started' to user {user2_id} for conversation {conversation['id']}")
+        # --- End Real-time Update ---
+
         return jsonify(conv_dict), 201 # 201 for new, or 200 if existing returned
     else:
         # This case might occur if create_conversation itself had an unhandled error,
@@ -10058,11 +10182,12 @@ def get_conversation_messages(conversation_id):
     # The client would typically see the change on the next fetch or via WebSocket.
     try:
         rows_updated = mark_messages_as_read(db, conversation_id, current_user_id)
-        app.logger.info(f"Marked {rows_updated} messages as read for user {current_user_id} in conversation {conversation_id}")
-        # No explicit commit needed here if mark_messages_as_read handles it.
+        db.commit() # Ensure changes from mark_messages_as_read are committed
+        app.logger.info(f"Marked {rows_updated} messages as read for user {current_user_id} in conversation {conversation_id} and committed.")
     except Exception as e_mark_read:
+        db.rollback() # Rollback if marking as read or committing fails
         app.logger.error(f"Error marking messages as read for conv {conversation_id}, user {current_user_id}: {e_mark_read}")
-        # Continue to fetch messages even if marking read fails
+        # Continue to fetch messages even if marking read fails, or return error depending on policy
 
     limit = request.args.get('limit', default=50, type=int)
     offset = request.args.get('offset', default=0, type=int)
@@ -10146,6 +10271,37 @@ def post_new_message(conversation_id):
 app.register_blueprint(chat_bp)
 # --- End Chat API Endpoints ---
 
+# --- API Endpoint for User Status ---
+@chat_bp.route('/user_status/<int:target_user_id>', methods=['GET'])
+@active_user_required # Ensure only authenticated users can request status
+def get_user_chat_status(target_user_id):
+    db = get_db()
+    user_status = db.execute(
+        "SELECT is_online, last_seen FROM users WHERE id = ?", (target_user_id,)
+    ).fetchone()
+
+    if not user_status:
+        return jsonify(msg="User not found."), 404
+
+    status_dict = dict(user_status)
+    # Convert last_seen to ISO format
+    if status_dict.get('last_seen'):
+        try:
+            # Assuming last_seen is stored as 'YYYY-MM-DD HH:MM:SS' and is UTC
+            naive_dt = datetime.strptime(status_dict['last_seen'], '%Y-%m-%d %H:%M:%S')
+            # If it's stored as IST (e.g. from CURRENT_TIMESTAMP with +05:30), then use IST.localize
+            # If it's from SQLite's CURRENT_TIMESTAMP (which is UTC), then use UTC.localize
+            # For consistency, let's assume it was stored as UTC if from CURRENT_TIMESTAMP.
+            aware_dt = UTC.localize(naive_dt)
+            status_dict['last_seen'] = aware_dt.isoformat()
+        except ValueError as e_ts_conv:
+            app.logger.error(f"Error converting last_seen for user_status endpoint (user {target_user_id}): {e_ts_conv}. Value: {status_dict['last_seen']}")
+            # If conversion fails, return the raw string or nullify it
+            # status_dict['last_seen'] = None # Or keep raw string: pass
+
+    return jsonify(status_dict), 200
+# --- End API Endpoint for User Status ---
+
 # --- SocketIO Event Handlers ---
 @socketio.on('connect')
 def handle_connect():
@@ -10168,6 +10324,23 @@ def handle_connect():
     # if user_id_str:
     #     user_sids.setdefault(user_id_str, set()).add(request.sid)
 
+    if user_id_str: # If user is authenticated
+        try:
+            user_id = int(user_id_str)
+            db = get_db()
+            db.execute(
+                "UPDATE users SET is_online = TRUE, last_seen = CURRENT_TIMESTAMP WHERE id = ?",
+                (user_id,)
+            )
+            db.commit()
+            app.logger.info(f"SocketIO connect: User {user_id} status set to online and last_seen updated.")
+            socketio.emit('user_online', {'user_id': user_id}, broadcast=True)
+        except ValueError:
+            app.logger.error(f"SocketIO connect: Invalid user ID format '{user_id_str}'.")
+        except Exception as e_status:
+            app.logger.error(f"SocketIO connect: Error updating online status for user {user_id_str}: {e_status}")
+            db.rollback() # Rollback on error
+
 @socketio.on('disconnect')
 def handle_disconnect():
     user_id_str = None
@@ -10183,82 +10356,200 @@ def handle_disconnect():
         #     user_sids[user_id_str].remove(request.sid)
         #     if not user_sids[user_id_str]: # Cleanup if set is empty
         #         del user_sids[user_id_str]
+
+        # --- Real-time Online Status Update on Disconnect ---
+        try:
+            user_id = int(user_id_str)
+            db = get_db()
+            # Update user's online status to FALSE and record last_seen
+            cursor = db.execute(
+                "UPDATE users SET is_online = FALSE, last_seen = CURRENT_TIMESTAMP WHERE id = ?",
+                (user_id,)
+            )
+            db.commit()
+
+            if cursor.rowcount > 0:
+                app.logger.info(f"SocketIO disconnect: User {user_id} status set to offline and last_seen updated.")
+                # Fetch the updated last_seen time
+                user_details_for_event = db.execute("SELECT last_seen FROM users WHERE id = ?", (user_id,)).fetchone()
+                last_seen_timestamp_iso = None
+                if user_details_for_event and user_details_for_event['last_seen']:
+                    try:
+                        naive_dt = datetime.strptime(user_details_for_event['last_seen'], '%Y-%m-%d %H:%M:%S')
+                        utc_dt = UTC.localize(naive_dt) # Assuming last_seen is stored as UTC
+                        last_seen_timestamp_iso = utc_dt.isoformat()
+                    except Exception as e_ts_conv:
+                        app.logger.error(f"Error converting last_seen for disconnect event (user {user_id}): {e_ts_conv}")
+                        last_seen_timestamp_iso = datetime.now(timezone.utc).isoformat() # Fallback
+
+                socketio.emit('user_offline', {'user_id': user_id, 'last_seen': last_seen_timestamp_iso}, broadcast=True)
+            else:
+                app.logger.warning(f"SocketIO disconnect: Failed to update online status for user {user_id} (user not found or no change needed).")
+        except ValueError:
+            app.logger.error(f"SocketIO disconnect: Invalid user ID format '{user_id_str}'.")
+        except Exception as e_status:
+            app.logger.error(f"SocketIO disconnect: Error updating online status for user {user_id_str}: {e_status}")
+            db.rollback() # Rollback on error
+        # --- End Real-time Online Status Update on Disconnect ---
     else:
         app.logger.info(f"SocketIO: Client disconnected (Anonymous), SID: {request.sid}")
 
 @socketio.on('join_conversation')
 def handle_join_conversation(data):
-    # This event needs robust authentication for production.
-    # Assuming client sends JWT with this event or connection was pre-authenticated.
     current_user_id_str = None
-    try:
-        # A common pattern is to have client send token with event, then verify it here.
-        # For simplicity, trying get_jwt_identity(), but this is unreliable for pure SocketIO events
-        # unless the connection itself was authenticated and context propagated.
-        # A more robust way: client sends token in `data`, then `_decode_jwt_from_request` or similar.
-        # For now, let's assume `get_jwt_identity` might work or we proceed with caution.
-        current_user_id_str = get_jwt_identity()
-        if not current_user_id_str:
-            # If no identity from JWT, check if token is in data (as a fallback)
-            token = data.get('token') # Expect client to send {'conversation_id': X, 'token': Y}
-            if token:
-                # This is a simplified check. In reality, you'd decode and verify the token.
-                # For this example, we'll assume if a token is passed, it's for a logged-in user.
-                # This is NOT secure for production without actual verification.
-                # decoded_token = decode_token(token) # Placeholder for actual JWT decoding
-                # current_user_id_str = decoded_token.get('sub') # 'sub' is standard claim for user ID
-                app.logger.warning("SocketIO 'join_conversation': Attempting to use token from event data. THIS IS INSECURE WITHOUT PROPER VERIFICATION.")
-                # For now, we can't actually verify it here without more JWT utils.
-                # So, this path is illustrative.
-                # If using this path, ensure proper JWT validation.
-                pass # Placeholder for proper token validation logic
-            else:
-                 app.logger.warning("SocketIO 'join_conversation': No JWT identity found and no token in event data. User cannot join room.")
-                 emit('join_error', {'conversation_id': data.get('conversation_id'), 'error': 'Authentication required to join room.'})
-                 return
+    token_from_event = data.get('token')
 
-    except Exception as e: # Catch errors during JWT identity fetching
-        app.logger.error(f"SocketIO 'join_conversation': Error getting JWT identity: {e}")
-        emit('join_error', {'conversation_id': data.get('conversation_id'), 'error': 'Authentication error.'})
-        return
+    if token_from_event:
+        try:
+            # Attempt to decode/verify token from event data
+            # This is a simplified representation. Replace with your actual JWT validation.
+            # For example, using PyJWT:
+            # decoded = jwt.decode(token_from_event, app.config['JWT_SECRET_KEY'], algorithms=["HS256"])
+            # current_user_id_str = decoded.get('sub') # 'sub' is the standard claim for identity
 
-    if not current_user_id_str: # Still no user ID after checks
-        app.logger.warning("SocketIO 'join_conversation': current_user_id_str is None after all checks.")
-        emit('join_error', {'conversation_id': data.get('conversation_id'), 'error': 'User identity could not be confirmed.'})
+            # Placeholder: Assuming direct identity from a "trusted" token for this example.
+            # In a real app, this MUST be a secure validation.
+            # For now, if a token is passed, we'll try to use its 'sub' if it were decoded.
+            # This requires a more complete JWT setup for SocketIO than currently shown.
+            # As a fallback for this example, we'll log and proceed cautiously.
+            app.logger.warning("SocketIO 'join_conversation': Attempting to use token from event data. THIS IS INSECURE WITHOUT PROPER JWT VERIFICATION.")
+            # To make this runnable without full JWT setup, we'll simulate getting identity if token exists.
+            # This is NOT how it should be in production.
+            # if token_from_event == "valid-simulated-token-for-user-X": # Example simulation
+            #    current_user_id_str = "X" # Simulate getting user ID
+            pass # Actual verification logic needed here
+        except Exception as e_token:
+            app.logger.error(f"SocketIO 'join_conversation': Error processing token from event data: {e_token}")
+            emit('join_error', {'conversation_id': data.get('conversation_id'), 'error': 'Invalid token.'})
+            return
+
+    if not current_user_id_str: # If token from event didn't yield an ID, try JWT identity from context
+        try:
+            current_user_id_str = get_jwt_identity()
+        except Exception as e_jwt:
+            app.logger.info(f"SocketIO 'join_conversation': Could not get JWT identity from context: {e_jwt}")
+            # Don't error out yet, might be anonymous or handled by event token
+
+    if not current_user_id_str:
+        app.logger.warning("SocketIO 'join_conversation': No user identity found (JWT context or event token).")
+        emit('join_error', {'conversation_id': data.get('conversation_id'), 'error': 'Authentication required.'})
         return
 
     try:
         current_user_id = int(current_user_id_str)
     except ValueError:
         app.logger.error(f"SocketIO 'join_conversation': Invalid user ID format '{current_user_id_str}'.")
-        emit('join_error', {'conversation_id': data.get('conversation_id'), 'error': 'Invalid user identity format.'})
+        emit('join_error', {'conversation_id': data.get('conversation_id'), 'error': 'Invalid user identity.'})
         return
 
-    conversation_id = data.get('conversation_id')
-    if not conversation_id:
+    conversation_id_str = data.get('conversation_id')
+    if not conversation_id_str:
         app.logger.warning("SocketIO 'join_conversation': conversation_id missing from event data.")
         emit('join_error', {'error': 'conversation_id is required.'})
         return
 
-    # Ensure conversation_id is string for room name if it comes as int
-    room_name = str(conversation_id)
+    try:
+        conversation_id = int(conversation_id_str)
+    except ValueError:
+        app.logger.warning(f"SocketIO 'join_conversation': Invalid conversation_id format '{conversation_id_str}'.")
+        emit('join_error', {'conversation_id': conversation_id_str, 'error': 'Invalid conversation_id format.'})
+        return
 
+    room_name = str(conversation_id) # Room name is string
     db = get_db()
-    conversation = get_conversation_by_id(db, int(conversation_id)) # DB function expects int
+    conversation = get_conversation_by_id(db, conversation_id) # DB expects int
 
     if not conversation:
         app.logger.warning(f"SocketIO 'join_conversation': User {current_user_id} tried to join non-existent conversation {conversation_id}.")
-        emit('join_error', {'conversation_id': conversation_id, 'error': 'Conversation not found.'})
+        emit('join_error', {'conversation_id': room_name, 'error': 'Conversation not found.'})
         return
 
     if current_user_id not in (conversation['user1_id'], conversation['user2_id']):
         app.logger.warning(f"SocketIO 'join_conversation': User {current_user_id} not authorized for conversation {conversation_id}.")
-        emit('join_error', {'conversation_id': conversation_id, 'error': 'Not authorized for this conversation.'})
+        emit('join_error', {'conversation_id': room_name, 'error': 'Not authorized for this conversation.'})
         return
 
-    join_room(room_name) # flask_socketio.join_room
-    app.logger.info(f"SocketIO: User {current_user_id} (SID: {request.sid}) joined room 'conversation_{room_name}'")
-    emit('joined_conversation_success', {'conversation_id': room_name}, room=request.sid) # Confirm to the user they joined
+    # Join user-specific room (for direct emits like new_conversation_started)
+    user_room_name = f'user_{current_user_id}'
+    join_room(user_room_name)
+    app.logger.info(f"SocketIO: User {current_user_id} (SID: {request.sid}) joined their user-specific room '{user_room_name}'")
+
+    # Join conversation-specific room
+    join_room(room_name)
+    app.logger.info(f"SocketIO: User {current_user_id} (SID: {request.sid}) joined conversation room 'conversation_{room_name}' (actual room name: '{room_name}')")
+    emit('joined_conversation_success', {'conversation_id': room_name}, room=request.sid)
+
+
+@socketio.on('mark_as_read')
+def handle_mark_as_read(data):
+    current_user_id_str = None
+    try:
+        # This is a placeholder for robust JWT authentication in SocketIO events.
+        # In a real app, you'd verify a token passed in `data` or from connection handshake.
+        current_user_id_str = get_jwt_identity()
+        if not current_user_id_str:
+            # Attempt to get token from data if not in established identity
+            # This part is illustrative and needs proper JWT validation if used.
+            # token = data.get('token')
+            # if token:
+            #     # decoded_token = decode_and_verify_jwt(token) # Placeholder
+            #     # current_user_id_str = decoded_token.get('sub')
+            #     app.logger.warning("SocketIO 'mark_as_read': Using token from event data. Needs proper validation.")
+            # else:
+            app.logger.warning("SocketIO 'mark_as_read': No JWT identity or token in event data.")
+            emit('mark_as_read_error', {'error': 'Authentication required.'})
+            return
+    except Exception as e:
+        app.logger.error(f"SocketIO 'mark_as_read': Error getting JWT identity: {e}")
+        emit('mark_as_read_error', {'error': 'Authentication error.'})
+        return
+
+    if not current_user_id_str: # Still no user ID
+        emit('mark_as_read_error', {'error': 'User identity could not be confirmed.'})
+        return
+
+    try:
+        current_user_id = int(current_user_id_str)
+    except ValueError:
+        app.logger.error(f"SocketIO 'mark_as_read': Invalid user ID format '{current_user_id_str}'.")
+        emit('mark_as_read_error', {'error': 'Invalid user identity format.'})
+        return
+
+    conversation_id = data.get('conversation_id')
+    if not conversation_id:
+        app.logger.warning("SocketIO 'mark_as_read': conversation_id missing from event data.")
+        emit('mark_as_read_error', {'error': 'conversation_id is required.'})
+        return
+
+    try:
+        conversation_id_int = int(conversation_id)
+    except ValueError:
+        app.logger.warning(f"SocketIO 'mark_as_read': Invalid conversation_id format '{conversation_id}'.")
+        emit('mark_as_read_error', {'error': 'Invalid conversation_id format.'})
+        return
+
+    db = get_db()
+    try:
+        rows_updated = mark_messages_as_read(db, conversation_id_int, current_user_id)
+        db.commit()
+        app.logger.info(f"SocketIO: Marked {rows_updated} messages as read for user {current_user_id} in conversation {conversation_id_int} and committed.")
+
+        # Emit an event back to the specific user (client) who sent this, using their SID
+        # The room for the conversation is str(conversation_id_int)
+        # We can also broadcast to the room if other clients of the same user need update,
+        # or just to this SID.
+        emit('unread_cleared', {'conversation_id': conversation_id_int, 'messages_marked_read': rows_updated}, room=request.sid)
+
+        # Additionally, you might want to notify other clients of this user if they are connected elsewhere
+        # This requires tracking SIDs per user_id. For simplicity, this example only emits to the requesting SID.
+        # If you have user-specific rooms (e.g., room=str(current_user_id)), you could emit there:
+        # socketio.emit('unread_count_updated', {'conversation_id': conversation_id_int, 'unread_count': 0}, room=str(current_user_id))
+
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"SocketIO 'mark_as_read': Error processing for conv {conversation_id_int}, user {current_user_id}: {e}")
+        emit('mark_as_read_error', {'conversation_id': conversation_id_int, 'error': 'Failed to mark messages as read.'})
+    # No explicit close_db(e) here as it's handled by teardown_appcontext
 
 # --- End SocketIO Event Handlers ---
 

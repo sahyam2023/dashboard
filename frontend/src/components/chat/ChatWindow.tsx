@@ -10,6 +10,8 @@ import { io, Socket } from 'socket.io-client'; // Import socket.io-client
 
 import * as api from '../../services/api'; // Import your API service
 import { useAuth } from '../../context/AuthContext'; // For token
+import Spinner from './Spinner'; // Import Spinner
+import { useNotification } from '../../context/NotificationContext'; // Import useNotification
 
 interface ChatWindowProps {
   selectedConversation: Conversation | null;
@@ -17,12 +19,19 @@ interface ChatWindowProps {
   socket: Socket | null;
 }
 
+interface OtherUserStatus {
+  is_online: boolean;
+  last_seen: string | null;
+}
+
 const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUserId, socket }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false); // For initial message load
   const [loadingOlder, setLoadingOlder] = useState(false); // For loading older messages
-  const [error, setError] = useState<string | null>(null);
+  // const [error, setError] = useState<string | null>(null); // Replaced by notification
   const [sending, setSending] = useState(false);
+  const { showNotification } = useNotification(); // Notification hook
+  const [otherUserStatus, setOtherUserStatus] = useState<OtherUserStatus | null>(null);
 
   // Pagination for messages
   const [currentPage, setCurrentPage] = useState(1);
@@ -52,7 +61,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
       setMessages(prevMessages => initialLoad ? newMessages : [...newMessages, ...prevMessages]);
       if(initialLoad) setCurrentPage(1); // Reset current page on initial load
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An unknown error occurred');
+      // setError(err instanceof Error ? err.message : 'An unknown error occurred');
+      showNotification(`Error loading messages: ${err instanceof Error ? err.message : 'Unknown error'}`, 'error');
     } finally {
       if (initialLoad) {
         setLoading(false);
@@ -82,8 +92,58 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
     // No specific socket cleanup for 'leave_conversation' here,
     // as joining a new room effectively changes context on server if rooms are exclusive per client session
     // or server handles disconnects.
+    setOtherUserStatus(null); // Reset status when conversation changes
   }, [selectedConversation, socket, loadMessages, tokenData?.token]);
 
+  useEffect(() => {
+    if (selectedConversation && socket && !loading && messages.length > 0) {
+      console.log(`ChatWindow: Emitting 'mark_as_read' for conversation ${selectedConversation.conversation_id}`);
+      socket.emit('mark_as_read', {
+        conversation_id: selectedConversation.conversation_id,
+        token: tokenData?.token
+      });
+    }
+  }, [selectedConversation, socket, loading, messages, tokenData?.token]);
+
+  // Fetch initial online status for the other user in the selected conversation
+  useEffect(() => {
+    if (selectedConversation?.other_user_id) {
+      api.getUserChatStatus(selectedConversation.other_user_id)
+        .then(status => setOtherUserStatus(status))
+        .catch(err => {
+          console.error("Failed to fetch other user status:", err);
+          showNotification(`Error fetching user status: ${err.message}`, 'error');
+          setOtherUserStatus(null); // Reset on error
+        });
+    }
+  }, [selectedConversation, showNotification]);
+
+  // Listen for real-time online/offline status updates for the other user
+  useEffect(() => {
+    if (!socket || !selectedConversation?.other_user_id) return;
+
+    const handleUserOnline = (data: { user_id: number }) => {
+      if (data.user_id === selectedConversation.other_user_id) {
+        setOtherUserStatus(prev => ({ ...prev, is_online: true, last_seen: null }));
+      }
+    };
+
+    const handleUserOffline = (data: { user_id: number; last_seen: string }) => {
+      if (data.user_id === selectedConversation.other_user_id) {
+        setOtherUserStatus(prev => ({ ...prev, is_online: false, last_seen: data.last_seen }));
+      }
+    };
+
+    socket.on('user_online', handleUserOnline);
+    socket.on('user_offline', handleUserOffline);
+    console.log(`ChatWindow: 'user_online'/'user_offline' listeners attached for user ${selectedConversation.other_user_id}.`);
+
+    return () => {
+      socket.off('user_online', handleUserOnline);
+      socket.off('user_offline', handleUserOffline);
+      console.log(`ChatWindow: 'user_online'/'user_offline' listeners detached for user ${selectedConversation.other_user_id}.`);
+    };
+  }, [socket, selectedConversation?.other_user_id]);
 
   useEffect(() => {
     if (!socket || !selectedConversation) return;
@@ -119,8 +179,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
       // const tempMessage: Message = { id: Date.now(), conversation_id: selectedConversation.conversation_id, sender_id: currentUserId, recipient_id: selectedConversation.other_user_id, content: messageText, created_at: new Date().toISOString(), is_read: false, sender_username: 'You' };
       // setMessages(prev => [...prev, tempMessage]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send message');
-      // TODO: Show error to user, maybe revert optimistic update if implemented
+      // setError(err instanceof Error ? err.message : 'Failed to send message');
+      showNotification(`Error sending message: ${err instanceof Error ? err.message : 'Unknown error'}`, 'error');
     } finally {
       setSending(false);
     }
@@ -152,15 +212,28 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
             alt={selectedConversation.other_username}
             className="w-8 h-8 sm:w-10 sm:h-10 rounded-full object-cover"
           />
-          <h2 className="text-base sm:text-lg font-semibold text-gray-800 dark:text-gray-100">
-            {selectedConversation.other_username}
-          </h2>
-          {/* Future: Add online status or other user actions here */}
+          <div className="flex flex-col">
+            <h2 className="text-base sm:text-lg font-semibold text-gray-800 dark:text-gray-100">
+              {selectedConversation.other_username}
+            </h2>
+            {otherUserStatus && (
+              <div className="flex items-center space-x-1">
+                <span className={`h-2 w-2 rounded-full ${otherUserStatus.is_online ? 'bg-green-500' : 'bg-gray-400'}`}></span>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  {otherUserStatus.is_online ? 'Online' : (otherUserStatus.last_seen ? `Last seen ${new Date(otherUserStatus.last_seen).toLocaleTimeString()}` : 'Offline')}
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
-      {loading && messages.length === 0 && <p className="p-4 text-center text-gray-500 dark:text-gray-400">Loading messages...</p>}
-      {error && <p className="p-4 text-center text-red-500 dark:text-red-400">Error: {error}</p>}
+      {loading && messages.length === 0 && (
+        <div className="flex-1 flex items-center justify-center">
+          <Spinner size="lg" />
+        </div>
+      )}
+      {/* {error && <p className="p-4 text-center text-red-500 dark:text-red-400">Error: {error}</p>} Replaced by toast */}
 
       {/* MessageList should be flex-1 to take up available space */}
       <MessageList

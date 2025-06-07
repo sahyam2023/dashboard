@@ -7,6 +7,8 @@ import { Conversation } from './types';
 import { Socket } from 'socket.io-client';
 import * as api from '../../services/api'; // Import your API service
 import { Message } from './types'; // Import Message type for socket payload
+import Spinner from './Spinner'; // Import Spinner
+import { useNotification } from '../../context/NotificationContext'; // Import useNotification
 
 interface ConversationListProps {
   onConversationSelect: (conversation: Conversation) => void;
@@ -15,28 +17,37 @@ interface ConversationListProps {
   selectedConversationId?: number | null; // To know which conversation is active
 }
 
+// Add is_online and last_seen to the Conversation type locally for frontend state
+// This might differ from the backend `types.ts` if not yet updated there.
+interface FrontendConversation extends Conversation {
+  other_user_is_online?: boolean;
+  other_user_last_seen?: string | null;
+}
+
 const ConversationList: React.FC<ConversationListProps> = ({ 
   onConversationSelect, 
   currentUserId, 
   socket,
   selectedConversationId 
 }) => {
-  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversations, setConversations] = useState<FrontendConversation[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // const [error, setError] = useState<string | null>(null); // Replaced by notification
+  const { showNotification } = useNotification(); // Notification hook
 
   // Placeholder fetchConversations function is removed, will use api.getUserConversations
   
   const loadConversations = useCallback(async () => {
     if (!currentUserId) return;
     setLoading(true);
-    setError(null);
+    // setError(null); // Not needed with notifications
     try {
       const data = await api.getUserConversations();
       // Backend already sorts by last_message_created_at
       setConversations(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An unknown error occurred');
+      // setError(err instanceof Error ? err.message : 'An unknown error occurred');
+      showNotification(`Error loading conversations: ${err instanceof Error ? err.message : 'Unknown error'}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -97,16 +108,60 @@ const ConversationList: React.FC<ConversationListProps> = ({
     };
     socket.on('messages_read', handleMessagesRead); // Assume 'messages_read' is emitted by client/server when read
 
+    const handleUnreadCleared = (data: { conversation_id: number; messages_marked_read: number }) => {
+      console.log('SocketIO: unread_cleared received in ConversationList', data);
+      if (data.conversation_id) {
+        setConversations(prevConvs =>
+          prevConvs.map(c =>
+            c.conversation_id === data.conversation_id ? { ...c, unread_messages_count: 0 } : c
+          )
+        );
+        // Optionally, re-sort if order might change due to unread count (though typically doesn't affect main sort order)
+      }
+    };
+    socket.on('unread_cleared', handleUnreadCleared);
+    console.log("ConversationList: 'unread_cleared' listener attached.");
+
+    const handleNewConversationStarted = (newConversation: Conversation) => {
+      console.log('SocketIO: new_conversation_started received in ConversationList', newConversation);
+      // Add to the beginning of the list and re-sort (though adding to beginning often implies newest)
+      setConversations(prevConvs => {
+        // Avoid adding duplicates if event is somehow received multiple times
+        if (prevConvs.find(c => c.conversation_id === newConversation.conversation_id)) {
+          return prevConvs;
+        }
+        const updatedConvs = [newConversation, ...prevConvs];
+        // Ensure sorting is still correct (backend sends sorted, but adding at front is usually fine)
+        // The main sort key is last_message_created_at, new convos might not have this or have it as conv.created_at
+        return updatedConvs.sort((a, b) =>
+          new Date(b.last_message_created_at || b.created_at || 0).getTime() -
+          new Date(a.last_message_created_at || a.created_at || 0).getTime()
+        );
+      });
+    };
+    socket.on('new_conversation_started', handleNewConversationStarted);
+    console.log("ConversationList: 'new_conversation_started' listener attached.");
+
     return () => {
       socket.off('new_message', handleNewMessage);
       socket.off('messages_read', handleMessagesRead);
-      console.log("ConversationList: 'new_message' and 'messages_read' listeners detached.");
+      socket.off('unread_cleared', handleUnreadCleared);
+      socket.off('new_conversation_started', handleNewConversationStarted);
+      socket.off('user_online', handleUserOnline);
+      socket.off('user_offline', handleUserOffline);
+      console.log("ConversationList: All event listeners detached.");
     };
   }, [socket, currentUserId, loadConversations, selectedConversationId]);
 
 
-  if (loading) return <p className="p-4 text-gray-500">Loading conversations...</p>;
-  if (error) return <p className="p-4 text-red-500 dark:text-red-400">Error loading conversations: {error}</p>;
+  if (loading) {
+    return (
+      <div className="flex-1 flex items-center justify-center h-full">
+        <Spinner size="lg" />
+      </div>
+    );
+  }
+  // Error display is handled by toast notifications
 
   return (
     // Removed border and rounded-lg from here as ChatMain's container will handle overall card look
@@ -135,15 +190,21 @@ const ConversationList: React.FC<ConversationListProps> = ({
                   alt={conv.other_username}
                   className="w-10 h-10 rounded-full object-cover flex-shrink-0"
                 />
-                {/* Future: Online status indicator
-                <span className="absolute bottom-0 right-0 block h-2.5 w-2.5 rounded-full bg-green-400 ring-2 ring-white dark:ring-gray-800"></span> 
-                */}
+                {/* Online status indicator */}
+                {conv.other_user_is_online !== undefined && (
+                  <span
+                    className={`absolute bottom-0 right-0 block h-2.5 w-2.5 rounded-full ring-2 ring-white dark:ring-gray-800
+                                ${conv.other_user_is_online ? 'bg-green-400' : 'bg-gray-400'}`}
+                  ></span>
+                )}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex justify-between items-center">
-                  <p className={`text-sm font-semibold truncate ${selectedConversationId === conv.conversation_id ? 'text-blue-700 dark:text-blue-300' : 'text-gray-800 dark:text-gray-100'}`}>
-                    {conv.other_username}
-                  </p>
+                  <div className="flex items-center space-x-1">
+                    <p className={`text-sm font-semibold truncate ${selectedConversationId === conv.conversation_id ? 'text-blue-700 dark:text-blue-300' : 'text-gray-800 dark:text-gray-100'}`}>
+                      {conv.other_username}
+                    </p>
+                  </div>
                   {conv.last_message_created_at && (
                     <p className={`text-xs whitespace-nowrap ${selectedConversationId === conv.conversation_id ? 'text-blue-500 dark:text-blue-400' : 'text-gray-400 dark:text-gray-500'}`}>
                       {new Date(conv.last_message_created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })}
@@ -158,11 +219,11 @@ const ConversationList: React.FC<ConversationListProps> = ({
                   {conv.unread_messages_count && conv.unread_messages_count > 0 && (
                     <span className="ml-2 bg-blue-500 text-white text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0">
                       {conv.unread_messages_count > 9 ? '9+' : conv.unread_messages_count}
-                    </span> // <--- This span needed to be closed
+                    </span>
                   )}
                 </div>
               </div>
-            </div> {/* <--- This div needed to be closed correctly at the end of the li content */}
+            </div>
           </li>
         ))}
       </ul>

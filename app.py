@@ -1831,6 +1831,10 @@ def register():
                 )
             db.commit() # Commit security answers
 
+            # Add default watch preferences
+            database.add_default_watch_preferences(get_db(), user_id)
+            db.commit() # Commit watch preferences
+
             # profile_picture_filename_to_assign will hold the final filename for the user
             profile_picture_filename_to_assign = profile_picture_filename_from_upload # None if JSON or no file in FormData
 
@@ -3649,7 +3653,36 @@ def admin_add_document_with_url():
                         category=category
                     )
                 if watchers: # Only commit if notifications were potentially created
-                    get_db().commit() 
+                    get_db().commit()
+
+                # New: Notifications for software category
+                doc_software_id = new_doc_data.get('software_id')
+                software_category_name = None
+                if doc_software_id:
+                    software_info = get_db().execute("SELECT name FROM software WHERE id = ?", (doc_software_id,)).fetchone()
+                    if software_info and software_info['name']:
+                        software_category_name = software_info['name']
+                
+                if software_category_name and software_category_name != category: # Avoid duplicate if doc_type is same as software name
+                    software_watchers = database.get_watching_users(get_db(), content_type, software_category_name)
+                    app.logger.info(f"Watchers for software category '{software_category_name}': {len(software_watchers)} users.")
+                    for sw_watcher in software_watchers:
+                        sw_notification_message = f"New document '{new_doc_data.get('doc_name')}' for software '{software_category_name}' posted by {actor_username}."
+                        database.create_notification(
+                            get_db(),
+                            user_id=sw_watcher['id'],
+                            type='new_content_posted',
+                            message=sw_notification_message,
+                            item_id=item_id,
+                            item_type=content_type,
+                            content_type=content_type, # 'documents'
+                            category=software_category_name
+                        )
+                    if software_watchers:
+                        get_db().commit()
+                elif software_category_name and software_category_name == category:
+                    app.logger.info(f"Skipping software-category notification for document ID {item_id} as software name '{software_category_name}' is same as doc_type '{category}'.")
+
             except Exception as e_notify:
                 app.logger.error(f"Error creating notifications for new document (URL) ID {new_doc_data.get('id')}: {e_notify}")
                 # Do not fail the main operation if notification fails
@@ -3722,6 +3755,35 @@ def admin_upload_document_file():
                     )
                 if watchers:
                     get_db().commit()
+
+                # New: Notifications for software category
+                doc_software_id_file = new_doc_data.get('software_id') # software_id is part of new_doc_data
+                software_category_name_file = None
+                if doc_software_id_file:
+                    software_info_file = get_db().execute("SELECT name FROM software WHERE id = ?", (doc_software_id_file,)).fetchone()
+                    if software_info_file and software_info_file['name']:
+                        software_category_name_file = software_info_file['name']
+                
+                if software_category_name_file and software_category_name_file != category:
+                    software_watchers_file = database.get_watching_users(get_db(), content_type, software_category_name_file)
+                    app.logger.info(f"Watchers for software category '{software_category_name_file}' (file upload): {len(software_watchers_file)} users.")
+                    for sw_watcher_file in software_watchers_file:
+                        sw_notification_message_file = f"New document '{new_doc_data.get('doc_name')}' for software '{software_category_name_file}' uploaded by {actor_username}."
+                        database.create_notification(
+                            get_db(),
+                            user_id=sw_watcher_file['id'],
+                            type='new_content_posted',
+                            message=sw_notification_message_file,
+                            item_id=item_id,
+                            item_type=content_type,
+                            content_type=content_type,
+                            category=software_category_name_file
+                        )
+                    if software_watchers_file:
+                        get_db().commit()
+                elif software_category_name_file and software_category_name_file == category:
+                    app.logger.info(f"Skipping software-category notification for document (file) ID {item_id} as software name '{software_category_name_file}' is same as doc_type '{category}'.")
+
             except Exception as e_notify:
                 app.logger.error(f"Error creating notifications for new document (file) ID {new_doc_data.get('id')}: {e_notify}")
     return response
@@ -4188,6 +4250,35 @@ def admin_edit_document_url(document_id):
                     )
                 if watchers:
                     get_db().commit()
+
+                # New: Notifications for software category
+                doc_software_id_edit_url = processed_doc.get('software_id')
+                software_category_name_edit_url = None
+                if doc_software_id_edit_url:
+                    software_info_edit_url = get_db().execute("SELECT name FROM software WHERE id = ?", (doc_software_id_edit_url,)).fetchone()
+                    if software_info_edit_url and software_info_edit_url['name']:
+                        software_category_name_edit_url = software_info_edit_url['name']
+                
+                if software_category_name_edit_url and software_category_name_edit_url != category:
+                    software_watchers_edit_url = database.get_watching_users(get_db(), content_type, software_category_name_edit_url)
+                    app.logger.info(f"Watchers for software category '{software_category_name_edit_url}' (edit URL): {len(software_watchers_edit_url)} users.")
+                    for sw_watcher_edit_url in software_watchers_edit_url:
+                        sw_notification_message_edit_url = f"Document '{processed_doc.get('doc_name')}' for software '{software_category_name_edit_url}' was updated by {actor_username} (URL changed)."
+                        database.create_notification(
+                            get_db(),
+                            user_id=sw_watcher_edit_url['id'],
+                            type='content_updated',
+                            message=sw_notification_message_edit_url,
+                            item_id=item_id,
+                            item_type=content_type,
+                            content_type=content_type,
+                            category=software_category_name_edit_url
+                        )
+                    if software_watchers_edit_url:
+                        get_db().commit()
+                elif software_category_name_edit_url and software_category_name_edit_url == category:
+                    app.logger.info(f"Skipping software-category notification for edited document (URL) ID {item_id} as software name '{software_category_name_edit_url}' is same as doc_type '{category}'.")
+
             except Exception as e_notify_edit_url:
                 app.logger.error(f"Error creating notifications for edited document (URL) ID {document_id}: {e_notify_edit_url}")
                 # Do not fail the main operation
@@ -4350,6 +4441,35 @@ def admin_edit_document_file(document_id):
                     )
                 if watchers:
                     get_db().commit()
+
+                # New: Notifications for software category
+                doc_software_id_edit_file = processed_doc.get('software_id')
+                software_category_name_edit_file = None
+                if doc_software_id_edit_file:
+                    software_info_edit_file = get_db().execute("SELECT name FROM software WHERE id = ?", (doc_software_id_edit_file,)).fetchone()
+                    if software_info_edit_file and software_info_edit_file['name']:
+                        software_category_name_edit_file = software_info_edit_file['name']
+                
+                if software_category_name_edit_file and software_category_name_edit_file != category: # category is doc_type
+                    software_watchers_edit_file = database.get_watching_users(get_db(), content_type, software_category_name_edit_file)
+                    app.logger.info(f"Watchers for software category '{software_category_name_edit_file}' (edit file): {len(software_watchers_edit_file)} users.")
+                    for sw_watcher_edit_file in software_watchers_edit_file:
+                        sw_notification_message_edit_file = f"Document '{processed_doc.get('doc_name')}' for software '{software_category_name_edit_file}' was updated by {actor_username} ({update_type_message})."
+                        database.create_notification(
+                            get_db(),
+                            user_id=sw_watcher_edit_file['id'],
+                            type='content_updated',
+                            message=sw_notification_message_edit_file,
+                            item_id=item_id,
+                            item_type=content_type,
+                            content_type=content_type,
+                            category=software_category_name_edit_file
+                        )
+                    if software_watchers_edit_file:
+                        get_db().commit()
+                elif software_category_name_edit_file and software_category_name_edit_file == category:
+                    app.logger.info(f"Skipping software-category notification for edited document (file) ID {item_id} as software name '{software_category_name_edit_file}' is same as doc_type '{category}'.")
+            
             except Exception as e_notify_edit_file:
                 app.logger.error(f"Error creating notifications for edited document (file) ID {document_id}: {e_notify_edit_file}")
 

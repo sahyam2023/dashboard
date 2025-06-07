@@ -295,6 +295,78 @@ def get_user_favorites(db, user_id, page, per_page, item_type_filter=None):
         print(f"Problematic Query: {query_sql}")
         return [], 0
 
+# --- User Watch Preference Management Functions ---
+
+def get_watch_preferences(db, user_id):
+    """Fetches all watch preferences for a user."""
+    try:
+        cursor = db.execute(
+            "SELECT id, user_id, content_type, category, created_at FROM user_watch_preferences WHERE user_id = ?",
+            (user_id,)
+        )
+        return cursor.fetchall() # List of Row objects
+    except sqlite3.Error as e:
+        print(f"DB_WATCH_PREFERENCES: Error fetching watch preferences for user {user_id}: {e}")
+        return []
+
+def add_watch_preference(db, user_id, content_type, category=None):
+    """Adds a new watch preference for a user."""
+    try:
+        cursor = db.execute(
+            "INSERT INTO user_watch_preferences (user_id, content_type, category) VALUES (?, ?, ?)",
+            (user_id, content_type, category)
+        )
+        db.commit()
+        return cursor.lastrowid
+    except sqlite3.IntegrityError:
+        print(f"DB_WATCH_PREFERENCES: User {user_id} already watching {content_type} with category '{category}'.")
+        # Optionally, fetch and return the existing preference ID
+        # For now, returning None as no new row was inserted.
+        return None
+    except sqlite3.Error as e:
+        print(f"DB_WATCH_PREFERENCES: Error adding watch preference for user {user_id}, content_type {content_type}, category '{category}': {e}")
+        return None
+
+def remove_watch_preference(db, user_id, content_type, category=None):
+    """Removes a watch preference for a user."""
+    try:
+        query = "DELETE FROM user_watch_preferences WHERE user_id = ? AND content_type = ?"
+        params = [user_id, content_type]
+        if category is not None:
+            query += " AND category = ?"
+            params.append(category)
+        else:
+            query += " AND category IS NULL"
+        
+        cursor = db.execute(query, tuple(params))
+        db.commit()
+        return cursor.rowcount > 0 # True if a row was deleted
+    except sqlite3.Error as e:
+        print(f"DB_WATCH_PREFERENCES: Error removing watch preference for user {user_id}, content_type {content_type}, category '{category}': {e}")
+        return False
+
+def get_watching_users(db, content_type, category=None):
+    """Fetches users watching a specific content type and category."""
+    try:
+        query = """
+            SELECT u.id, u.username, u.email, u.role
+            FROM users u
+            JOIN user_watch_preferences uwp ON u.id = uwp.user_id
+            WHERE uwp.content_type = ?
+        """
+        params = [content_type]
+        if category is not None:
+            query += " AND uwp.category = ?"
+            params.append(category)
+        else:
+            query += " AND uwp.category IS NULL"
+            
+        cursor = db.execute(query, tuple(params))
+        return cursor.fetchall() # List of Row objects
+    except sqlite3.Error as e:
+        print(f"DB_WATCH_PREFERENCES: Error fetching watching users for {content_type}, category '{category}': {e}")
+        return []
+
 # --- Comment Management Functions ---
 
 def add_comment(db, user_id, item_id, item_type, content, parent_comment_id=None):
@@ -493,15 +565,15 @@ def delete_comment_by_id(db, comment_id, user_id, role):
 
 # --- Notification Management Functions ---
 
-def create_notification(db, user_id, type, message, item_id=None, item_type=None):
+def create_notification(db, user_id, type, message, item_id=None, item_type=None, content_type=None, category=None):
     """Inserts a new notification into the notifications table."""
     try:
         cursor = db.execute(
             """
-            INSERT INTO notifications (user_id, type, message, item_id, item_type)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO notifications (user_id, type, message, item_id, item_type, content_type, category)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (user_id, type, message, item_id, item_type)
+            (user_id, type, message, item_id, item_type, content_type, category)
         )
         db.commit()
         return cursor.lastrowid
@@ -513,7 +585,7 @@ def get_unread_notifications(db, user_id, limit=None):
     """Fetches unread notifications for a user, optionally limited."""
     try:
         query = """
-            SELECT id, user_id, type, message, item_id, item_type, is_read, created_at, updated_at
+            SELECT id, user_id, type, message, item_id, item_type, content_type, category, is_read, created_at, updated_at
             FROM notifications
             WHERE user_id = ? AND is_read = FALSE
             ORDER BY created_at DESC
@@ -529,6 +601,7 @@ def get_unread_notifications(db, user_id, limit=None):
         enriched_notifications = []
         for row in notifications_rows:
             notification_dict = dict(row) # Convert row to dict
+            # Potentially enrich with content_type and category details if needed in the future
             enriched_notifications.append(_enrich_comment_notification(db, notification_dict))
             
         return enriched_notifications
@@ -604,7 +677,7 @@ def get_all_notifications(db, user_id, page, per_page):
         # Fetch items for the current page
         items_cursor = db.execute(
             """
-            SELECT id, user_id, type, message, item_id, item_type, is_read, created_at, updated_at
+            SELECT id, user_id, type, message, item_id, item_type, content_type, category, is_read, created_at, updated_at
             FROM notifications
             WHERE user_id = ?
             ORDER BY created_at DESC
@@ -685,7 +758,7 @@ def get_notification_by_id(db, notification_id):
     try:
         cursor = db.execute(
             """
-            SELECT id, user_id, type, message, item_id, item_type, is_read, created_at, updated_at
+            SELECT id, user_id, type, message, item_id, item_type, content_type, category, is_read, created_at, updated_at
             FROM notifications
             WHERE id = ?
             """,

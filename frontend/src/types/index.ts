@@ -289,7 +289,9 @@ export interface Notification {
   type: string; // e.g., 'mention', 'reply', 'new_file_document'
   message: string;
   item_id?: number | null; // ID of the related item (comment, document, etc.)
-  item_type?: string | null; // Type of the related item
+  item_type?: string | null; // Type of the related item (e.g. 'document', 'patch', 'comment')
+  content_type?: string; // Broader type for watch prefs, e.g. 'documents', 'patches', 'links', 'misc'
+  category?: string | null; // Category for content_type, e.g. 'VMS', 'Analytic Manager'
   is_read: boolean;
   created_at: string; // ISO date string, e.g., "2023-10-27T10:00:00Z"
   // Potentially add 'updated_at' if the backend sends it and it's useful
@@ -309,4 +311,19 @@ export interface PaginatedNotificationsResponse {
   total_notifications: number;
   total_pages: number;
   status_filter?: string; // To reflect the filter applied in the request
+}
+
+// --- User Watch Preference Types ---
+export interface WatchPreference {
+  id?: number; // Optional: ID from the database table, if needed on frontend
+  user_id?: number; // Optional: User ID, if needed on frontend
+  content_type: string; // e.g., 'documents', 'patches', 'links', 'misc'
+  category?: string | null; // e.g., 'VA', 'VMS', or null/undefined for general 'misc'
+  created_at?: string; // Optional: Timestamp, if needed on frontend
+}
+
+export interface UpdateWatchPreferencePayload {
+  content_type: string;
+  category?: string | null;
+  watch: boolean; // True to watch, false to unwatch
 }

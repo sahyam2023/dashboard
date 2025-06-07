@@ -36,6 +36,10 @@ const OFFLINE_MESSAGE = "Backend is unavailable. Please check your connection.";
 // For brevity, I'm showing User, DocumentType, Patch, Link, MiscFile as they are directly used in paginated responses.
 // Ensure Software, SoftwareVersion, AuthRequest, AuthResponse, etc., are also properly defined/imported.
 
+// WatchPreference types are now imported from '../types'
+import { WatchPreference, UpdateWatchPreferencePayload } from '../types';
+
+
 export interface User {
   id: number;
   username: string;

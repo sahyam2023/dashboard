@@ -2,14 +2,34 @@ import React, { useState, useEffect } from 'react';
 import { changePassword, updateEmail, uploadUserProfilePicture, updateUsername } from '../services/api'; // Added updateUsername
 import { useAuth } from '../context/AuthContext';
 import { Navigate } from 'react-router-dom';
-import { Camera } from 'lucide-react'; // For icon
-import { showSuccessToast, showErrorToast } from '../utils/toastUtils'; // showErrorToast was missing from imports
+import { Camera, PlusCircle, CheckCircle } from 'lucide-react'; // For icon
+import { showSuccessToast, showErrorToast } from '../utils/toastUtils'; 
+
+// Placeholder API functions (to be replaced by actual api.ts functions)
+const getUserWatchPreferences = async (): Promise<Array<{ content_type: string; category?: string }>> => {
+  console.log('API CALL: getUserWatchPreferences');
+  // Simulate API call
+  await new Promise(resolve => setTimeout(resolve, 500));
+  // Return mock data for now, or an empty array
+  // return [{ content_type: 'documents', category: 'VMS' }, { content_type: 'misc' }];
+  return [];
+};
+
+const updateUserWatchPreferences = async (preferences: Array<{ content_type: string; category?: string; watch: boolean }>): Promise<any> => {
+  console.log('API CALL: updateUserWatchPreferences with data:', preferences);
+  // Simulate API call
+  await new Promise(resolve => setTimeout(resolve, 500));
+  // Simulate success
+  return { message: 'Preferences updated successfully', updated_preferences: preferences.filter(p => p.watch).map(({ watch, ...rest}) => rest) }; 
+  // Simulate error:
+  // throw new Error("Failed to update preferences due to a network issue.");
+};
 
 
 const UserProfilePage: React.FC = () => {
   const auth = useAuth();
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7000';
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7000';
   // State for Profile Picture
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -39,6 +59,99 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7000
   const [usernameSuccess, setUsernameSuccess] = useState<string | null>(null);
   const [isUpdatingUsername, setIsUpdatingUsername] = useState(false);
 
+  // State for Watch Preferences
+  // Using imported types
+  type WatchPreferenceFromType = import('../types').WatchPreference;
+  // type UpdateWatchPreferencePayloadFromType = import('../types').UpdateWatchPreferencePayload;
+
+  const [watchPreferences, setWatchPreferences] = useState<WatchPreferenceFromType[]>([]);
+  const [isLoadingWatchPreferences, setIsLoadingWatchPreferences] = useState(true);
+  const [isSavingWatchPreferences, setIsSavingWatchPreferences] = useState(false);
+
+  // Configuration for watchable content types and categories
+  const CONTENT_WATCH_CONFIG = {
+    documents: { displayName: 'Documents', categories: ['VA', 'VMS', 'ICCC', 'Analytic Manager', 'ITMS'] },
+    patches: { displayName: 'Patches', categories: ['VA', 'VMS', 'ICCC', 'Analytic Manager', 'ITMS'] },
+    links: { displayName: 'Links', categories: ['VA', 'VMS', 'ICCC', 'Analytic Manager', 'ITMS'] },
+    misc: { displayName: 'Miscellaneous', categories: null }, // No specific subcategories for misc
+  };
+  type ContentTypeKey = keyof typeof CONTENT_WATCH_CONFIG;
+
+
+  useEffect(() => {
+    const fetchPreferences = async () => {
+      setIsLoadingWatchPreferences(true);
+      try {
+        const prefs = await getUserWatchPreferences();
+        setWatchPreferences(prefs);
+      } catch (error: any) {
+        showErrorToast(error.message || 'Failed to load watch preferences.');
+      } finally {
+        setIsLoadingWatchPreferences(false);
+      }
+    };
+    fetchPreferences();
+  }, []);
+
+  const handleWatchToggle = async (contentType: ContentTypeKey, category: string | undefined, currentlyWatching: boolean) => {
+    setIsSavingWatchPreferences(true);
+    const newStatus = !currentlyWatching;
+
+    // Optimistic UI update
+    let updatedPrefsOptimistic: WatchPreferenceFromType[];
+    if (newStatus) { // User wants to watch
+      updatedPrefsOptimistic = [...watchPreferences, { content_type: contentType, category }];
+    } else { // User wants to unwatch
+      updatedPrefsOptimistic = watchPreferences.filter(
+        p => !(p.content_type === contentType && p.category === category)
+      );
+    }
+    setWatchPreferences(updatedPrefsOptimistic);
+
+    // Prepare payload for the API - send all intended preferences
+    // The API expects a list of { content_type, category, watch: true/false }
+    // For this specific toggle, we find the item in the original list or add it, then set its 'watch' status.
+    // A simpler approach for the API might be to just send the *changed* preference.
+    // However, the requirement states "payload should represent the full desired state ... or the specific change".
+    // Let's send only the changed preference for now, assuming the backend can handle it or we refine later.
+    // Based on the problem description, the backend expects a list of preferences to set.
+    // So, we construct the full list of preferences with their new watch status.
+    
+    const allPossiblePreferencesPayload: { content_type: string; category?: string; watch: boolean }[] = Object.entries(CONTENT_WATCH_CONFIG).flatMap(([ctKey, conf]) => {
+      if (conf.categories) {
+        return conf.categories.map(cat => ({
+          content_type: ctKey as ContentTypeKey,
+          category: cat,
+          watch: updatedPrefsOptimistic.some(p => p.content_type === ctKey && p.category === cat)
+        }));
+      } else {
+        // For 'misc' or types with no categories, category should be undefined (not null).
+        return [{
+          content_type: ctKey as ContentTypeKey,
+          // Do not include category if it's undefined
+          watch: updatedPrefsOptimistic.some(p => p.content_type === ctKey && !p.category)
+        }];
+      }
+    });
+    
+    try {
+      // Ensure the response from updateUserWatchPreferences matches what setWatchPreferences expects,
+      // or adapt it. WatchPreferenceFromType expects category to be optional string or null.
+      const apiResponse = await updateUserWatchPreferences(allPossiblePreferencesPayload);
+      
+      // Assuming apiResponse.updated_preferences is Array<{ content_type: string; category?: string | null }>
+      // If the API returns category as empty string for nulls, it needs normalization here if WatchPreferenceFromType expects null/undefined.
+      // For now, assume backend returns category as string or null, which is compatible.
+      setWatchPreferences(apiResponse.updated_preferences || updatedPrefsOptimistic);
+      showSuccessToast(apiResponse.message || 'Watch preferences updated.');
+    } catch (error: any) {
+      showErrorToast(error.message || 'Failed to update watch preferences.');
+      // Revert optimistic update on error
+      setWatchPreferences(watchPreferences); // Revert to original state before this toggle
+    } finally {
+      setIsSavingWatchPreferences(false);
+    }
+  };
 
   const handleUsernameChangeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -263,6 +376,69 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7000
               )}
               Upload New Picture
             </button>
+          </div>
+        )}
+      </div>
+
+      {/* Watch Preferences Section */}
+      <div className="mb-8 p-6 bg-white dark:bg-gray-800 rounded-lg shadow">
+        <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-gray-100">Watch Preferences</h2>
+        {isLoadingWatchPreferences ? (
+          <p className="text-gray-700 dark:text-gray-300">Loading watch preferences...</p>
+        ) : (
+          <div className="space-y-6">
+            {Object.entries(CONTENT_WATCH_CONFIG).map(([contentTypeKey, config]) => (
+              <div key={contentTypeKey}>
+                <h3 className="text-lg font-medium text-gray-900 dark:text-gray-200 mb-2">{config.displayName}</h3>
+                {config.categories ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                    {config.categories.map((category) => {
+                      const isWatching = watchPreferences.some(
+                        (p) => p.content_type === contentTypeKey && p.category === category
+                      );
+                      return (
+                        <button
+                          key={category}
+                          onClick={() => handleWatchToggle(contentTypeKey as ContentTypeKey, category, isWatching)}
+                          className={`w-full flex items-center justify-center px-3 py-2 border text-sm font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-1
+                                        ${isWatching
+                                          ? 'bg-green-600 hover:bg-green-700 text-white border-transparent focus:ring-green-500'
+                                          : 'bg-gray-200 hover:bg-gray-300 text-gray-700 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600 border-gray-300 dark:border-gray-500 focus:ring-indigo-500'
+                                        } transition-colors duration-150 ease-in-out`}
+                          disabled={isSavingWatchPreferences}
+                        >
+                          {isWatching ? <CheckCircle size={16} className="mr-2" /> : <PlusCircle size={16} className="mr-2" />}
+                          {isWatching ? 'Watching' : 'Watch'} <span className="ml-1 font-normal hidden sm:inline">- {category}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  // For 'misc' or other types with no subcategories
+                  <button
+                    onClick={() => {
+                      const isCurrentlyWatchingMisc = watchPreferences.some(p => p.content_type === contentTypeKey && !p.category);
+                      handleWatchToggle(contentTypeKey as ContentTypeKey, undefined, isCurrentlyWatchingMisc);
+                    }}
+                    className={`w-auto flex items-center justify-center px-4 py-2 border text-sm font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-1
+                                  ${watchPreferences.some(p => p.content_type === contentTypeKey && !p.category)
+                                    ? 'bg-green-600 hover:bg-green-700 text-white border-transparent focus:ring-green-500'
+                                    : 'bg-gray-200 hover:bg-gray-300 text-gray-700 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600 border-gray-300 dark:border-gray-500 focus:ring-indigo-500'
+                                  } transition-colors duration-150 ease-in-out`}
+                    disabled={isSavingWatchPreferences}
+                  >
+                    {watchPreferences.some(p => p.content_type === contentTypeKey && !p.category) ? <CheckCircle size={16} className="mr-2" /> : <PlusCircle size={16} className="mr-2" />}
+                    {watchPreferences.some(p => p.content_type === contentTypeKey && !p.category) ? 'Watching' : 'Watch General'}
+                  </button>
+                )}
+              </div>
+            ))}
+             {isSavingWatchPreferences && (
+                <div className="mt-4 flex items-center text-sm text-gray-600 dark:text-gray-300">
+                  <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-indigo-500 mr-2"></div>
+                  Saving preferences...
+                </div>
+              )}
           </div>
         )}
       </div>

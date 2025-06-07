@@ -82,6 +82,8 @@ export interface Patch {
   favorite_id?: number;
   is_downloadable?: boolean;
   comment_count?: number;
+  compatible_vms_versions?: string[]; // Or string, if backend sends comma-separated
+  // software_name is already part of the Patch interface from backend JOIN
 }
 
 // --- Link Types ---
@@ -112,6 +114,8 @@ export interface Link {
   favorite_id?: number;
   is_downloadable?: boolean;
   comment_count?: number;
+  compatible_vms_versions?: string[]; // Added for VMS/VA compatibility
+  // software_name is already available
   // category?: string; // Removed as it's not in the current backend schema for links
 }
 
@@ -175,6 +179,7 @@ export interface AddPatchPayloadFlexible extends BasePayloadWithFlexibleVersion 
   release_date?: string; // YYYY-MM-DD string
   download_link?: string; // For URL mode (required if inputMode is URL)
   patch_by_developer?: string | null; // Added
+  compatible_vms_version_ids?: string[]; // Added for VMS/VA software
   // software_id is inherited.
   // version_id OR typed_version_string must lead to a valid version (enforced by form/backend).
 }
@@ -184,6 +189,7 @@ export type EditPatchPayloadFlexible = Partial<AddPatchPayloadFlexible>;
 export interface AddLinkPayloadFlexible extends BasePayloadWithFlexibleVersion {
   title: string;
   url?: string; // For URL mode (required if inputMode is URL and not file upload)
+  compatible_vms_version_ids?: string[]; // Added for VMS/VA software
   // software_id is inherited.
   // version_id OR typed_version_string must lead to a valid version (enforced by form/backend as version is mandatory for links).
 }

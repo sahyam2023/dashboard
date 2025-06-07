@@ -301,11 +301,31 @@ const LinksView: React.FC = () => {
   const columns: ColumnDef<LinkType>[] = [
     { key: 'title', header: 'Title', sortable: true }, { key: 'software_name', header: 'Software', sortable: true },
     { key: 'version_name', header: 'Version', sortable: true, render: l => l.version_name || 'N/A' },
+    {
+      key: 'compatible_vms_versions',
+      header: 'VMS Compatibility',
+      sortable: true,
+      render: (link: LinkType) => {
+        const isRelevantSoftware = link.software_name === 'VMS' || link.software_name === 'VA';
+        if (isRelevantSoftware) {
+          if (link.compatible_vms_versions && link.compatible_vms_versions.length > 0) {
+            if (Array.isArray(link.compatible_vms_versions)) {
+              return link.compatible_vms_versions.join(', ');
+            }
+            if (typeof link.compatible_vms_versions === 'string') {
+                return link.compatible_vms_versions;
+            }
+            return 'N/A';
+          }
+          return 'N/A';
+        }
+        return '-';
+      }
+    },
     { key: 'description', header: 'Description', render: l => <span className="text-sm text-gray-600 block max-w-xs truncate" title={l.description || ''}>{l.description || '-'}</span> },
     {
-      // THIS IS THE PART TO CHANGE
       key: 'url',
-      header: 'Link', // Changed from 'URL/FILE' to 'Link' for consistency with PatchesView
+      header: 'Link',
       render: (l: LinkType) => {
         const isEffectivelyDownloadable = l.is_external_link || l.is_downloadable !== false;
 

@@ -23,7 +23,7 @@ const UserList: React.FC<UserListProps> = ({ onUserSelect }) => {
     setError(null);
     try {
       // Use the imported api.getUsers function
-      const data: ChatPaginatedUsersResponse = await api.getUsers(page, usersPerPage, search);
+      const data: PaginatedUsersResponse = await api.getUsers(page, usersPerPage, search);
       setUsers(data.users);
       setCurrentPage(data.page);
       setTotalPages(data.total_pages);

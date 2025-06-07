@@ -1,8 +1,8 @@
 // frontend/src/components/chat/ConversationList.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react'; // <--- ADD useCallback here
 import { Conversation } from './types';
 // Placeholder for an API service
-// import { fetchConversations } from '../../services/api';
+// import { fetchConversations } from '../../services/api'; 
 
 import { Socket } from 'socket.io-client';
 import * as api from '../../services/api'; // Import your API service
@@ -15,18 +15,18 @@ interface ConversationListProps {
   selectedConversationId?: number | null; // To know which conversation is active
 }
 
-const ConversationList: React.FC<ConversationListProps> = ({
-  onConversationSelect,
-  currentUserId,
+const ConversationList: React.FC<ConversationListProps> = ({ 
+  onConversationSelect, 
+  currentUserId, 
   socket,
-  selectedConversationId
+  selectedConversationId 
 }) => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Placeholder fetchConversations function is removed, will use api.getUserConversations
-
+  
   const loadConversations = useCallback(async () => {
     if (!currentUserId) return;
     setLoading(true);
@@ -40,11 +40,11 @@ const ConversationList: React.FC<ConversationListProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [currentUserId]);
-
+  }, [currentUserId]); // Dependency array for useCallback
+  
   useEffect(() => {
     loadConversations();
-  }, [loadConversations]);
+  }, [loadConversations]); // Dependency array for useEffect
 
   useEffect(() => {
     if (!socket || !currentUserId) return;
@@ -54,10 +54,10 @@ const ConversationList: React.FC<ConversationListProps> = ({
       setConversations(prevConvs => {
         const updatedConvs = prevConvs.map(conv => {
           if (conv.conversation_id === newMessage.conversation_id) {
-            const newUnreadCount =
-              (newMessage.sender_id !== currentUserId && conv.conversation_id !== selectedConversationId)
-              ? (conv.unread_messages_count || 0) + 1
-              : (conv.conversation_id === selectedConversationId ? 0 : (conv.unread_messages_count || 0) );
+            const newUnreadCount = 
+              (newMessage.sender_id !== currentUserId && conv.conversation_id !== selectedConversationId) 
+              ? (conv.unread_messages_count || 0) + 1 
+              : (conv.conversation_id === selectedConversationId ? 0 : (conv.unread_messages_count || 0) ); 
               // If current user is viewing this convo, unread becomes 0 (or handled by markAsRead)
 
             return {
@@ -71,12 +71,12 @@ const ConversationList: React.FC<ConversationListProps> = ({
           return conv;
         });
         // Sort again after update
-        return updatedConvs.sort((a, b) =>
+        return updatedConvs.sort((a, b) => 
           new Date(b.last_message_created_at || 0).getTime() - new Date(a.last_message_created_at || 0).getTime()
         );
       });
       // Alternative: Refetch all conversations for simplicity if granular update is too complex
-      // loadConversations();
+      // loadConversations(); 
     };
 
     socket.on('new_message', handleNewMessage);
@@ -88,8 +88,8 @@ const ConversationList: React.FC<ConversationListProps> = ({
     // For now, this is a simple example.
     const handleMessagesRead = (data: { conversationId: number }) => {
         if (data.conversationId) {
-            setConversations(prevConvs =>
-                prevConvs.map(c =>
+            setConversations(prevConvs => 
+                prevConvs.map(c => 
                     c.conversation_id === data.conversationId ? { ...c, unread_messages_count: 0 } : c
                 )
             );
@@ -110,10 +110,10 @@ const ConversationList: React.FC<ConversationListProps> = ({
 
   return (
     // Removed border and rounded-lg from here as ChatMain's container will handle overall card look
-    <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-800">
+    <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-800"> 
       {/* Header is now part of ChatMain, so ConversationList is just the list part */}
       {/* <h2 className="text-xl font-semibold p-4 border-b dark:border-gray-700">Conversations</h2> */}
-
+      
       {conversations.length === 0 && !loading && (
         <p className="p-4 text-center text-gray-500 dark:text-gray-400">No conversations yet. Start a new one!</p>
       )}
@@ -123,8 +123,8 @@ const ConversationList: React.FC<ConversationListProps> = ({
             key={conv.conversation_id}
             onClick={() => onConversationSelect(conv)}
             className={`p-3 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition-colors duration-150 ease-in-out ${
-              selectedConversationId === conv.conversation_id
-                ? 'bg-blue-100 dark:bg-blue-800'
+              selectedConversationId === conv.conversation_id 
+                ? 'bg-blue-100 dark:bg-blue-800' 
                 : 'bg-gray-50 dark:bg-gray-800'
             }`}
           >
@@ -136,7 +136,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
                   className="w-10 h-10 rounded-full object-cover flex-shrink-0"
                 />
                 {/* Future: Online status indicator
-                <span className="absolute bottom-0 right-0 block h-2.5 w-2.5 rounded-full bg-green-400 ring-2 ring-white dark:ring-gray-800"></span>
+                <span className="absolute bottom-0 right-0 block h-2.5 w-2.5 rounded-full bg-green-400 ring-2 ring-white dark:ring-gray-800"></span> 
                 */}
               </div>
               <div className="flex-1 min-w-0">
@@ -158,9 +158,11 @@ const ConversationList: React.FC<ConversationListProps> = ({
                   {conv.unread_messages_count && conv.unread_messages_count > 0 && (
                     <span className="ml-2 bg-blue-500 text-white text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0">
                       {conv.unread_messages_count > 9 ? '9+' : conv.unread_messages_count}
+                    </span> // <--- This span needed to be closed
+                  )}
                 </div>
               </div>
-            </div>
+            </div> {/* <--- This div needed to be closed correctly at the end of the li content */}
           </li>
         ))}
       </ul>

@@ -60,8 +60,6 @@ CREATE TABLE IF NOT EXISTS software (
 );
 CREATE INDEX IF NOT EXISTS idx_software_name ON software (name);
 
-INSERT INTO software (name, description) VALUES ('VA', 'Vulnerability Analysis');
-
 CREATE TABLE IF NOT EXISTS versions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     software_id INTEGER NOT NULL,

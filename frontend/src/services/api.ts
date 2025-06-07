@@ -2505,6 +2505,34 @@ export async function confirmDatabaseReset(payload: DatabaseResetConfirmPayload)
 }
 // --- End Super Admin Database Reset Functions ---
 
+// --- Announcement API ---
+export interface CreateAnnouncementResponse {
+  msg: string;
+  announcement_id: number;
+}
+
+export const createAnnouncement = async (message: string): Promise<CreateAnnouncementResponse> => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/superadmin/announcements/create`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeader()
+      },
+      body: JSON.stringify({ message: message }),
+    });
+    return handleApiError(response, 'Failed to create announcement');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error creating announcement:', error);
+    throw error;
+  }
+};
+// --- End Announcement API ---
+
 // --- Large File Upload (Chunked) ---
 
 function generateUUID() { // Public Domain/MIT

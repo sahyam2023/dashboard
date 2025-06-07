@@ -17,7 +17,8 @@ import {
   fetchDocuments, // To get list of documents
   PaginatedDocumentsResponse,
   startDatabaseReset,
-  confirmDatabaseReset
+  confirmDatabaseReset,
+  createAnnouncement // Import the new function
 } from '../services/api';
 import { FilePermission, FilePermissionUpdatePayload, UpdateUserFilePermissionsResponse, Document as DocumentType } from '../types';
 
@@ -103,6 +104,11 @@ const SuperAdminDashboard: React.FC = () => {
   const [resetFeedback, setResetFeedback] = useState<{type: 'success' | 'error', message: string} | null>(null); // For feedback on main page
 
   const [firstSuperAdminId, setFirstSuperAdminId] = useState<number | null>(null);
+
+  // State for Announcements
+  const [announcementMessage, setAnnouncementMessage] = useState<string>('');
+  const [isSendingAnnouncement, setIsSendingAnnouncement] = useState<boolean>(false);
+  const [announcementFeedback, setAnnouncementFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
 
   // --- State for File Permissions Management ---
@@ -632,6 +638,31 @@ const SuperAdminDashboard: React.FC = () => {
   };
   // --- End Database Reset Handlers ---
 
+  // --- Announcement Handler ---
+  const handleSendAnnouncement = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsSendingAnnouncement(true);
+    setAnnouncementFeedback(null);
+
+    if (!announcementMessage.trim()) {
+      setAnnouncementFeedback({ type: 'error', message: 'Announcement message cannot be empty.' });
+      setIsSendingAnnouncement(false);
+      return;
+    }
+
+    try {
+      const response = await createAnnouncement(announcementMessage.trim());
+      setAnnouncementFeedback({ type: 'success', message: response.msg || 'Announcement sent successfully!' });
+      setAnnouncementMessage(''); // Clear the textarea
+    } catch (err: any) {
+      const errorMsg = err.response?.data?.msg || err.message || 'Failed to send announcement.';
+      setAnnouncementFeedback({ type: 'error', message: errorMsg });
+    } finally {
+      setIsSendingAnnouncement(false);
+    }
+  };
+  // --- End Announcement Handler ---
+
   const columns: ColumnDef<User>[] = [
     { key: 'username', header: 'Username', sortable: true },
     { key: 'email', header: 'Email', sortable: true, render: (user) => user.email || 'N/A' },
@@ -873,6 +904,50 @@ const SuperAdminDashboard: React.FC = () => {
         >
           {isBackupLoading ? <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white"></div> : 'Create Backup'}
         </button>
+      </section>
+
+      {/* Send Announcement Section */}
+      <section className="bg-white dark:bg-gray-800 shadow-xl rounded-xl p-6 md:p-8">
+        <h2 className="text-xl font-semibold mb-6 text-gray-800 dark:text-gray-100">Send Announcement</h2>
+
+        {announcementFeedback && (
+          <div className={`p-3 mb-4 rounded-md text-sm ${announcementFeedback.type === 'success' ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 border border-green-200 dark:border-green-700' : 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 border border-red-200 dark:border-red-700'}`}>
+            {announcementFeedback.message}
+          </div>
+        )}
+
+        <form onSubmit={handleSendAnnouncement} className="space-y-4">
+          <div>
+            <label htmlFor="announcementMessage" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Announcement Message
+            </label>
+            <textarea
+              id="announcementMessage"
+              rows={4}
+              value={announcementMessage}
+              onChange={(e) => {
+                setAnnouncementMessage(e.target.value);
+                if (announcementFeedback) setAnnouncementFeedback(null);
+              }}
+              className="block w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
+              required
+              disabled={isSendingAnnouncement}
+            />
+          </div>
+          <div className="pt-2">
+            <button
+              type="submit"
+              disabled={isSendingAnnouncement || !announcementMessage.trim()}
+              className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-60 transition-colors"
+            >
+              {isSendingAnnouncement ? (
+                <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white"></div>
+              ) : (
+                'Send Announcement'
+              )}
+            </button>
+          </div>
+        </form>
       </section>
 
       {/* Database Restore Section */}

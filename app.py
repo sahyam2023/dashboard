@@ -7253,6 +7253,81 @@ def change_global_password():
         # or if it's part of a larger transaction (not the case here).
         return jsonify(msg="Failed to update global password due to a server error."), 500
 
+# --- Superadmin Announcement Creation ---
+@app.route('/api/superadmin/announcements/create', methods=['POST'])
+@jwt_required()
+@super_admin_required
+def create_announcement():
+    db = get_db()
+    current_user_id = get_jwt_identity() # This is a string, convert to int if storing as int
+    try:
+        superadmin_user_id = int(current_user_id)
+    except ValueError:
+        app.logger.error(f"Create announcement: Invalid user ID format in JWT: {current_user_id}")
+        return jsonify(msg="Invalid user identity in token."), 400
+
+    data = request.get_json()
+    if not data:
+        return jsonify(msg="Missing JSON data"), 400
+
+    announcement_message = data.get('message')
+    if not announcement_message or not isinstance(announcement_message, str) or not announcement_message.strip():
+        return jsonify(msg="Announcement message (non-empty string) is required."), 400
+
+    announcement_message = announcement_message.strip()
+
+    try:
+        # Insert the announcement
+        cursor = db.execute(
+            "INSERT INTO announcements (message, created_by_user_id) VALUES (?, ?)",
+            (announcement_message, superadmin_user_id)
+        )
+        new_announcement_id = cursor.lastrowid
+
+        # Fetch all active user IDs to create notifications
+        active_users_cursor = db.execute("SELECT id FROM users WHERE is_active = TRUE")
+        active_user_ids = [row['id'] for row in active_users_cursor.fetchall()]
+
+        notification_type = 'announcement' # Consistent type for these notifications
+        # The message for the notification can be the announcement message itself, or a summary
+        notification_message_for_users = announcement_message # Using full message
+
+        for user_id_to_notify in active_user_ids:
+            # Ensure create_notification is called correctly
+            # def create_notification(db, user_id, type, message, item_id=None, item_type=None, content_type=None, category=None):
+            database.create_notification(
+                db, # Pass the database connection
+                user_id=user_id_to_notify,
+                type=notification_type,
+                message=notification_message_for_users,
+                item_id=new_announcement_id,
+                item_type='announcement' # Refers to the item type of item_id (announcements table)
+                # content_type and category are not strictly needed for 'announcement' type notifications
+                # unless you want to categorize announcements further, which is not in the current scope.
+            )
+
+        # Log the audit action
+        log_audit_action(
+            action_type='CREATE_ANNOUNCEMENT',
+            target_table='announcements',
+            target_id=new_announcement_id,
+            details={'message_length': len(announcement_message)} # Log length instead of full message for brevity
+            # user_id (superadmin_user_id) and username will be picked up by log_audit_action
+        )
+
+        db.commit()
+        return jsonify(msg="Announcement created successfully", announcement_id=new_announcement_id), 201
+
+    except sqlite3.IntegrityError as e:
+        db.rollback()
+        app.logger.error(f"Create announcement DB IntegrityError: {e}")
+        # This might happen if there's a constraint violation, though unlikely for this simple table.
+        return jsonify(msg=f"Database integrity error: {e}"), 409
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"Create announcement General Exception: {e}", exc_info=True)
+        return jsonify(msg=f"An unexpected server error occurred: {e}"), 500
+
 # --- Database Reset Start Endpoint (Super Admin) ---
 @app.route('/api/superadmin/database/reset/start', methods=['POST'])
 @jwt_required()

@@ -36,6 +36,7 @@ import database # Your database.py helper
 from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
 from waitress import serve
+from flask_socketio import SocketIO, join_room, leave_room, emit
 
 # --- Helper function for PyInstaller ---
 def get_application_path():
@@ -130,13 +131,35 @@ CORS(app, resources={
             "http://localhost:7000",
             "http://127.0.0.1:7000",
             "http://192.168.3.40:7000",
-            "http://192.168.3.129:7000"
+            "http://192.168.3.129:7000",
+            "http://192.168.1.100:7000" # Example: Added another common private IP
+        ]
+    },
+    r"/socket.io/*": { # Socket.IO also needs CORS configuration
+        "origins": [
+            "http://localhost:5173",
+            "http://localhost:7000",
+            "http://127.0.0.1:7000",
+            "http://192.168.3.40:7000",
+            "http://192.168.3.129:7000",
+            "http://192.168.1.100:7000" # Ensure frontend URL is listed
         ]
     }
 },
 supports_credentials=True,
 allow_headers=["Content-Type", "Authorization", "Cache-Control", "Pragma"],
 methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
+
+# Initialize SocketIO
+# Using "*" for cors_allowed_origins for SocketIO is common in development.
+# For production, list specific frontend origins.
+# The existing CORS setup for /api/* will be respected by Flask routes.
+# SocketIO needs its own CORS config if requests originate from different domains/ports.
+socketio_cors_origins = [
+    "http://localhost:5173", "http://localhost:7000", "http://127.0.0.1:7000",
+    "http://192.168.3.40:7000", "http://192.168.3.129:7000", "http://192.168.1.100:7000"
+]
+socketio = SocketIO(app, cors_allowed_origins=socketio_cors_origins, async_mode='threading') # async_mode='threading' for waitress
 
 # App Configuration
 app.config['DATABASE'] = os.path.join(INSTANCE_FOLDER_PATH, 'software_dashboard.db') # DB in instance folder
@@ -186,6 +209,14 @@ UTC = pytz.utc # Added UTC for clarity in conversion if needed
 
 # --- Token Blocklist ---
 blocklist = set()
+
+# --- Import database functions for chat ---
+from database import (
+    create_conversation, send_message, get_messages,
+    get_user_conversations, get_conversation_by_users,
+    mark_messages_as_read, get_conversation_by_id, get_message_by_id
+)
+from flask import Blueprint
 
 @jwt.token_in_blocklist_loader
 def check_if_token_in_blocklist(jwt_header, jwt_payload):
@@ -9894,9 +9925,353 @@ if __name__ == '__main__':
     replicate_default_files_if_bundled()
     # --- End replication call ---
 
+# --- Chat API Endpoints ---
+chat_bp = Blueprint('chat_api', __name__, url_prefix='/api')
+
+@chat_bp.route('/users', methods=['GET'])
+@active_user_required
+def list_chat_users():
+    db = get_db()
+    page = request.args.get('page', default=1, type=int)
+    per_page = request.args.get('per_page', default=20, type=int) # Adjusted default
+    search_term = request.args.get('search', default=None, type=str)
+
+    if page <= 0: page = 1
+    if per_page <= 0: per_page = 20
+    if per_page > 100: per_page = 100
+
+    query_params = []
+    base_user_query = "SELECT id, username, profile_picture_filename FROM users WHERE is_active = TRUE"
+    count_query = "SELECT COUNT(id) as count FROM users WHERE is_active = TRUE"
+
+    if search_term:
+        base_user_query += " AND LOWER(username) LIKE ?"
+        count_query += " AND LOWER(username) LIKE ?"
+        query_params.append(f"%{search_term.lower()}%")
+
+    try:
+        total_users_cursor = db.execute(count_query, tuple(query_params))
+        total_users = total_users_cursor.fetchone()['count']
+    except Exception as e:
+        app.logger.error(f"Error fetching total chat user count: {e}")
+        return jsonify(msg="Error fetching user count."), 500
+
+    total_pages = math.ceil(total_users / per_page) if total_users > 0 else 1
+    offset = (page - 1) * per_page
+    if page > total_pages and total_users > 0:
+        page = total_pages # Adjust page if out of bounds
+        offset = (page - 1) * per_page
+
+    base_user_query += " ORDER BY username ASC LIMIT ? OFFSET ?"
+    query_params.extend([per_page, offset])
+
+    users_cursor = db.execute(base_user_query, tuple(query_params))
+    users_list = []
+    for row in users_cursor.fetchall():
+        user_dict = dict(row)
+        if user_dict['profile_picture_filename']:
+            user_dict['profile_picture_url'] = f"/profile_pictures/{user_dict['profile_picture_filename']}"
+        else:
+            user_dict['profile_picture_url'] = None # Or a default avatar URL
+        users_list.append(user_dict)
+
+    return jsonify({
+        "users": users_list,
+        "page": page,
+        "per_page": per_page,
+        "total_users": total_users,
+        "total_pages": total_pages
+    })
+
+@chat_bp.route('/conversations', methods=['POST'])
+@active_user_required
+def start_new_conversation():
+    current_user_id = int(get_jwt_identity())
+    data = request.get_json()
+    if not data or 'user2_id' not in data:
+        return jsonify(msg="user2_id is required to start a conversation."), 400
+
+    user2_id = data['user2_id']
+    if not isinstance(user2_id, int):
+        return jsonify(msg="user2_id must be an integer."), 400
+
+    if current_user_id == user2_id:
+        return jsonify(msg="Cannot start a conversation with yourself."), 400
+
+    db = get_db()
+    # Check if user2_id exists and is active
+    user2 = find_user_by_id(user2_id)
+    if not user2 or not user2['is_active']:
+        return jsonify(msg="The other user does not exist or is inactive."), 404
+
+    conversation = create_conversation(db, current_user_id, user2_id)
+    if conversation:
+        # `create_conversation` returns a Row object. Convert to dict for jsonify.
+        # Also, convert timestamps if necessary.
+        conv_dict = convert_timestamps_to_ist_iso(dict(conversation), ['created_at'])
+        return jsonify(conv_dict), 201 # 201 for new, or 200 if existing returned
+    else:
+        # This case might occur if create_conversation itself had an unhandled error,
+        # or if the DB integrity check (user1_id < user2_id) failed unexpectedly.
+        app.logger.error(f"Failed to create or retrieve conversation between {current_user_id} and {user2_id}")
+        return jsonify(msg="Failed to create or retrieve conversation."), 500
+
+@chat_bp.route('/conversations', methods=['GET'])
+@active_user_required
+def get_my_conversations():
+    current_user_id = int(get_jwt_identity())
+    db = get_db()
+    conversations_raw = get_user_conversations(db, current_user_id)
+
+    conversations_processed = []
+    for conv_row in conversations_raw:
+        conv_dict = dict(conv_row)
+        # Convert relevant timestamps. 'last_message_created_at' is the primary one from get_user_conversations.
+        # The 'created_at' of the conversation itself might also be present in some contexts but not directly from this function.
+        conv_dict = convert_timestamps_to_ist_iso(conv_dict, ['last_message_created_at'])
+
+        # Construct profile picture URL for the other user
+        if conv_dict.get('other_profile_picture'):
+            conv_dict['other_profile_picture_url'] = f"/profile_pictures/{conv_dict['other_profile_picture']}"
+        else:
+            conv_dict['other_profile_picture_url'] = None # Or default avatar
+        conversations_processed.append(conv_dict)
+
+    return jsonify(conversations_processed), 200
+
+@chat_bp.route('/conversations/<int:conversation_id>/messages', methods=['GET'])
+@active_user_required
+def get_conversation_messages(conversation_id):
+    current_user_id = int(get_jwt_identity())
+    db = get_db()
+
+    # First, verify the current user is part of this conversation
+    conversation = get_conversation_by_id(db, conversation_id)
+    if not conversation:
+        return jsonify(msg="Conversation not found."), 404
+    if current_user_id not in (conversation['user1_id'], conversation['user2_id']):
+        return jsonify(msg="You are not authorized to view this conversation."), 403
+
+    # Mark messages as read for the current user in this conversation
+    # This should happen before fetching messages if we want the fetch to reflect the read status update.
+    # However, get_messages itself doesn't currently re-fetch based on read status change within the same call.
+    # The client would typically see the change on the next fetch or via WebSocket.
+    try:
+        rows_updated = mark_messages_as_read(db, conversation_id, current_user_id)
+        app.logger.info(f"Marked {rows_updated} messages as read for user {current_user_id} in conversation {conversation_id}")
+        # No explicit commit needed here if mark_messages_as_read handles it.
+    except Exception as e_mark_read:
+        app.logger.error(f"Error marking messages as read for conv {conversation_id}, user {current_user_id}: {e_mark_read}")
+        # Continue to fetch messages even if marking read fails
+
+    limit = request.args.get('limit', default=50, type=int)
+    offset = request.args.get('offset', default=0, type=int)
+    if limit <=0 : limit = 50
+    if limit > 200: limit = 200 # Max limit for messages per page
+    if offset < 0: offset = 0
+
+    messages_raw = get_messages(db, conversation_id, limit, offset)
+    messages_processed = [convert_timestamps_to_ist_iso(dict(msg), ['created_at']) for msg in messages_raw]
+
+    # TODO: Add total message count for pagination if needed by client.
+    # Requires a separate count query in get_messages or here.
+
+    return jsonify(messages_processed), 200
+
+@chat_bp.route('/conversations/<int:conversation_id>/messages', methods=['POST'])
+@active_user_required
+def post_new_message(conversation_id):
+    current_user_id = int(get_jwt_identity())
+    db = get_db()
+
+    conversation = get_conversation_by_id(db, conversation_id)
+    if not conversation:
+        return jsonify(msg="Conversation not found."), 404
+    if current_user_id not in (conversation['user1_id'], conversation['user2_id']):
+        return jsonify(msg="You are not authorized to send messages in this conversation."), 403
+
+    data = request.get_json()
+    if not data or 'content' not in data or not data['content'].strip():
+        return jsonify(msg="Message content is required and cannot be empty."), 400
+
+    content = data['content'].strip()
+
+    # Determine recipient_id
+    recipient_id = None
+    if current_user_id == conversation['user1_id']:
+        recipient_id = conversation['user2_id']
+    else:
+        recipient_id = conversation['user1_id']
+
+    # Check if recipient is active (optional, but good for UX)
+    recipient_user = find_user_by_id(recipient_id)
+    if not recipient_user or not recipient_user['is_active']:
+        # Depending on policy, either block sending or allow but notify sender.
+        # For now, let's allow sending, but this is a design choice.
+        app.logger.warning(f"Sending message from {current_user_id} to inactive user {recipient_id} in conversation {conversation_id}.")
+        # return jsonify(msg="Cannot send message: The recipient is inactive."), 400
+
+
+    new_message = send_message(db, conversation_id, current_user_id, recipient_id, content)
+    if new_message:
+        # `send_message` returns a Row object. Convert to dict for jsonify.
+        # Also, convert timestamps if necessary.
+        message_dict_for_api_response = convert_timestamps_to_ist_iso(dict(new_message), ['created_at'])
+
+        # Add sender_username and recipient_username if not already in new_message from send_message
+        # (assuming get_message_by_id used by send_message doesn't join users table)
+        sender_user_details = find_user_by_id(current_user_id)
+        recipient_user_details = find_user_by_id(recipient_id)
+
+        if 'sender_username' not in message_dict_for_api_response:
+            message_dict_for_api_response['sender_username'] = sender_user_details['username'] if sender_user_details else 'Unknown'
+        if 'recipient_username' not in message_dict_for_api_response:
+            message_dict_for_api_response['recipient_username'] = recipient_user_details['username'] if recipient_user_details else 'Unknown'
+
+        # Prepare data for SocketIO emission (can be same as API response or tailored)
+        message_data_for_socket = message_dict_for_api_response.copy()
+        # Add profile picture URLs to socket message if available
+        message_data_for_socket['sender_profile_picture_url'] = f"/profile_pictures/{sender_user_details['profile_picture_filename']}" if sender_user_details and sender_user_details['profile_picture_filename'] else None
+
+        # Emit the new message to the conversation room
+        # The socketio object should be accessible here if initialized in the global scope of app.py
+        socketio.emit('new_message', message_data_for_socket, room=str(conversation_id))
+        app.logger.info(f"Emitted 'new_message' to room 'conversation_{conversation_id}'")
+
+        return jsonify(message_dict_for_api_response), 201
+    else:
+        app.logger.error(f"Failed to send message in conversation {conversation_id} from user {current_user_id}")
+        return jsonify(msg="Failed to send message."), 500
+
+app.register_blueprint(chat_bp)
+# --- End Chat API Endpoints ---
+
+# --- SocketIO Event Handlers ---
+@socketio.on('connect')
+def handle_connect():
+    # Authentication for SocketIO connection can be complex with JWTs.
+    # For now, we log connection. For protected events, we'll verify identity.
+    # Client should send token on connection or with events if strict auth is needed for all socket events.
+    user_id_str = None
+    try:
+        # This might not work out-of-the-box if JWT isn't passed/set up for SocketIO context
+        # verify_jwt_in_request(optional=True) # This is for Flask request context, not SocketIO event context
+        user_id_str = get_jwt_identity() # Attempt to get identity if already established by an HTTP request
+    except Exception as e:
+        app.logger.info(f"SocketIO connect: Could not get JWT identity on connect event: {e}")
+
+    if user_id_str:
+        app.logger.info(f"SocketIO: Client connected (User ID: {user_id_str}), SID: {request.sid}")
+    else:
+        app.logger.info(f"SocketIO: Client connected (Anonymous), SID: {request.sid}")
+    # Example: Storing SIDs per user for direct messaging later (requires more setup)
+    # if user_id_str:
+    #     user_sids.setdefault(user_id_str, set()).add(request.sid)
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    user_id_str = None
+    try:
+        user_id_str = get_jwt_identity()
+    except Exception as e:
+        app.logger.info(f"SocketIO disconnect: Could not get JWT identity on disconnect event: {e}")
+
+    if user_id_str:
+        app.logger.info(f"SocketIO: Client disconnected (User ID: {user_id_str}), SID: {request.sid}")
+        # Example: Removing SID from user's set
+        # if user_id_str in user_sids and request.sid in user_sids[user_id_str]:
+        #     user_sids[user_id_str].remove(request.sid)
+        #     if not user_sids[user_id_str]: # Cleanup if set is empty
+        #         del user_sids[user_id_str]
+    else:
+        app.logger.info(f"SocketIO: Client disconnected (Anonymous), SID: {request.sid}")
+
+@socketio.on('join_conversation')
+def handle_join_conversation(data):
+    # This event needs robust authentication for production.
+    # Assuming client sends JWT with this event or connection was pre-authenticated.
+    current_user_id_str = None
+    try:
+        # A common pattern is to have client send token with event, then verify it here.
+        # For simplicity, trying get_jwt_identity(), but this is unreliable for pure SocketIO events
+        # unless the connection itself was authenticated and context propagated.
+        # A more robust way: client sends token in `data`, then `_decode_jwt_from_request` or similar.
+        # For now, let's assume `get_jwt_identity` might work or we proceed with caution.
+        current_user_id_str = get_jwt_identity()
+        if not current_user_id_str:
+            # If no identity from JWT, check if token is in data (as a fallback)
+            token = data.get('token') # Expect client to send {'conversation_id': X, 'token': Y}
+            if token:
+                # This is a simplified check. In reality, you'd decode and verify the token.
+                # For this example, we'll assume if a token is passed, it's for a logged-in user.
+                # This is NOT secure for production without actual verification.
+                # decoded_token = decode_token(token) # Placeholder for actual JWT decoding
+                # current_user_id_str = decoded_token.get('sub') # 'sub' is standard claim for user ID
+                app.logger.warning("SocketIO 'join_conversation': Attempting to use token from event data. THIS IS INSECURE WITHOUT PROPER VERIFICATION.")
+                # For now, we can't actually verify it here without more JWT utils.
+                # So, this path is illustrative.
+                # If using this path, ensure proper JWT validation.
+                pass # Placeholder for proper token validation logic
+            else:
+                 app.logger.warning("SocketIO 'join_conversation': No JWT identity found and no token in event data. User cannot join room.")
+                 emit('join_error', {'conversation_id': data.get('conversation_id'), 'error': 'Authentication required to join room.'})
+                 return
+
+    except Exception as e: # Catch errors during JWT identity fetching
+        app.logger.error(f"SocketIO 'join_conversation': Error getting JWT identity: {e}")
+        emit('join_error', {'conversation_id': data.get('conversation_id'), 'error': 'Authentication error.'})
+        return
+
+    if not current_user_id_str: # Still no user ID after checks
+        app.logger.warning("SocketIO 'join_conversation': current_user_id_str is None after all checks.")
+        emit('join_error', {'conversation_id': data.get('conversation_id'), 'error': 'User identity could not be confirmed.'})
+        return
+
+    try:
+        current_user_id = int(current_user_id_str)
+    except ValueError:
+        app.logger.error(f"SocketIO 'join_conversation': Invalid user ID format '{current_user_id_str}'.")
+        emit('join_error', {'conversation_id': data.get('conversation_id'), 'error': 'Invalid user identity format.'})
+        return
+
+    conversation_id = data.get('conversation_id')
+    if not conversation_id:
+        app.logger.warning("SocketIO 'join_conversation': conversation_id missing from event data.")
+        emit('join_error', {'error': 'conversation_id is required.'})
+        return
+
+    # Ensure conversation_id is string for room name if it comes as int
+    room_name = str(conversation_id)
+
+    db = get_db()
+    conversation = get_conversation_by_id(db, int(conversation_id)) # DB function expects int
+
+    if not conversation:
+        app.logger.warning(f"SocketIO 'join_conversation': User {current_user_id} tried to join non-existent conversation {conversation_id}.")
+        emit('join_error', {'conversation_id': conversation_id, 'error': 'Conversation not found.'})
+        return
+
+    if current_user_id not in (conversation['user1_id'], conversation['user2_id']):
+        app.logger.warning(f"SocketIO 'join_conversation': User {current_user_id} not authorized for conversation {conversation_id}.")
+        emit('join_error', {'conversation_id': conversation_id, 'error': 'Not authorized for this conversation.'})
+        return
+
+    join_room(room_name) # flask_socketio.join_room
+    app.logger.info(f"SocketIO: User {current_user_id} (SID: {request.sid}) joined room 'conversation_{room_name}'")
+    emit('joined_conversation_success', {'conversation_id': room_name}, room=request.sid) # Confirm to the user they joined
+
+# --- End SocketIO Event Handlers ---
+
+
     try:
         flask_port = int(os.environ.get('FLASK_RUN_PORT', 7000))
-        serve(app, host='0.0.0.0', port=flask_port)
+        # When using Flask-SocketIO with Waitress or Gunicorn,
+        # you serve the `socketio` object instead of the `app` object directly if those servers
+        # don't have native Socket.IO support (Waitress doesn't, Gunicorn needs eventlet/gevent worker).
+        # However, initializing SocketIO with SocketIO(app) wraps the app.
+        # So, serving `app` with Waitress should work if `async_mode` is compatible (e.g. 'threading').
+        app.logger.info(f"Starting Waitress server on port {flask_port} for Flask app with SocketIO...")
+        serve(app, host='0.0.0.0', port=flask_port) # Waitress should serve the Flask app, SocketIO is integrated.
     except (KeyboardInterrupt, SystemExit):
         app.logger.info("Flask application shutting down...")
     # Removed explicit scheduler shutdown from here as it's handled by atexit

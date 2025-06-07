@@ -423,6 +423,117 @@ export async function fetchSoftware(): Promise<Software[]> {
   }
 }
 
+// --- Chat API Functions ---
+// Assuming types like User, Conversation, Message, PaginatedUsersResponse are imported from '../components/chat/types'
+// If not, they should be imported or defined here.
+// For this example, let's assume they are available from:
+import {
+  User as ChatUser, // Alias to avoid conflict with User interface already in this file
+  Conversation as ChatConversation,
+  Message as ChatMessage,
+  PaginatedUsersResponse as ChatPaginatedUsersResponse
+} from '../components/chat/types';
+
+
+export async function getUsers(page: number, per_page: number, search?: string): Promise<ChatPaginatedUsersResponse> {
+  try {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      per_page: per_page.toString(),
+    });
+    if (search) {
+      params.append('search', search);
+    }
+    const response = await fetch(`${API_BASE_URL}/api/users?${params.toString()}`, {
+      method: 'GET',
+      headers: { ...getAuthHeader(), 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+    });
+    return handleApiError(response, 'Failed to fetch users');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error fetching users:', error);
+    throw error;
+  }
+}
+
+export async function createConversation(user2_id: number): Promise<ChatConversation> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/conversations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ user2_id }),
+    });
+    return handleApiError(response, 'Failed to create or get conversation');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error creating/getting conversation:', error);
+    throw error;
+  }
+}
+
+export async function getUserConversations(): Promise<ChatConversation[]> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/conversations`, {
+      method: 'GET',
+      headers: { ...getAuthHeader(), 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+    });
+    return handleApiError(response, 'Failed to fetch user conversations');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error fetching user conversations:', error);
+    throw error;
+  }
+}
+
+export async function getMessages(conversation_id: number, limit: number, offset: number): Promise<ChatMessage[]> {
+  try {
+    const params = new URLSearchParams({
+      limit: limit.toString(),
+      offset: offset.toString(),
+    });
+    const response = await fetch(`${API_BASE_URL}/api/conversations/${conversation_id}/messages?${params.toString()}`, {
+      method: 'GET',
+      headers: { ...getAuthHeader(), 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+    });
+    return handleApiError(response, `Failed to fetch messages for conversation ${conversation_id}`);
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error(`Error fetching messages for conversation ${conversation_id}:`, error);
+    throw error;
+  }
+}
+
+export async function sendMessage(conversation_id: number, content: string): Promise<ChatMessage> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/conversations/${conversation_id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ content }),
+    });
+    return handleApiError(response, `Failed to send message to conversation ${conversation_id}`);
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error(`Error sending message to conversation ${conversation_id}:`, error);
+    throw error;
+  }
+}
+// --- End Chat API Functions ---
+
 // --- Super Admin File Permission Management Functions ---
 
 export async function getUserFilePermissions(userId: number): Promise<FilePermission[]> {

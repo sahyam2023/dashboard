@@ -803,3 +803,204 @@ def get_notification_by_id(db, notification_id):
     except sqlite3.Error as e:
         print(f"DB_NOTIFICATIONS: Error fetching notification by ID {notification_id}: {e}")
         return None
+
+# --- Conversation and Message Functions ---
+
+def get_conversation_by_users(db, user1_id: int, user2_id: int) -> sqlite3.Row | None:
+    """Retrieves a conversation between two specific users, ensuring user1_id < user2_id."""
+    if user1_id == user2_id:
+        print("DB_CONVERSATIONS: Users cannot have a conversation with themselves.")
+        return None
+    # Ensure user1_id is always the smaller one for consistent querying
+    if user1_id > user2_id:
+        user1_id, user2_id = user2_id, user1_id
+
+    try:
+        cursor = db.execute(
+            "SELECT id, user1_id, user2_id, created_at FROM conversations WHERE user1_id = ? AND user2_id = ?",
+            (user1_id, user2_id)
+        )
+        return cursor.fetchone()
+    except sqlite3.Error as e:
+        print(f"DB_CONVERSATIONS: Error fetching conversation between user {user1_id} and {user2_id}: {e}")
+        return None
+
+def create_conversation(db, user1_id: int, user2_id: int) -> sqlite3.Row | None:
+    """
+    Ensures user1_id < user2_id before inserting.
+    Checks if a conversation already exists. If so, returns the existing conversation.
+    If not, creates a new conversation and returns it.
+    """
+    if user1_id == user2_id:
+        print("DB_CONVERSATIONS: Cannot create a conversation with oneself.")
+        # Or raise an error, depending on how app layer wants to handle this.
+        return None
+
+    # Ensure user1_id is always the smaller one to match CHECK constraint and simplify lookups
+    u1, u2 = (user1_id, user2_id) if user1_id < user2_id else (user2_id, user1_id)
+
+    existing_conversation = get_conversation_by_users(db, u1, u2)
+    if existing_conversation:
+        return existing_conversation
+
+    try:
+        cursor = db.execute(
+            "INSERT INTO conversations (user1_id, user2_id) VALUES (?, ?)",
+            (u1, u2)
+        )
+        db.commit()
+        new_conversation_id = cursor.lastrowid
+        # Fetch the newly created conversation to return it as a Row object
+        return get_conversation_by_id(db, new_conversation_id)
+    except sqlite3.IntegrityError as e:
+        # This could happen if another request created the conversation simultaneously,
+        # or if the CHECK constraint (user1_id < user2_id) fails, though we handle order above.
+        print(f"DB_CONVERSATIONS: IntegrityError creating conversation between {u1} and {u2}: {e}. It might already exist.")
+        # Attempt to fetch again, in case of race condition.
+        return get_conversation_by_users(db, u1, u2)
+    except sqlite3.Error as e:
+        print(f"DB_CONVERSATIONS: Error creating conversation between {u1} and {u2}: {e}")
+        return None
+
+def get_conversation_by_id(db, conversation_id: int) -> sqlite3.Row | None:
+    """Retrieves a conversation by its ID."""
+    try:
+        cursor = db.execute(
+            "SELECT id, user1_id, user2_id, created_at FROM conversations WHERE id = ?",
+            (conversation_id,)
+        )
+        return cursor.fetchone()
+    except sqlite3.Error as e:
+        print(f"DB_CONVERSATIONS: Error fetching conversation by ID {conversation_id}: {e}")
+        return None
+
+def send_message(db, conversation_id: int, sender_id: int, recipient_id: int, content: str) -> sqlite3.Row | None:
+    """Inserts a new message into the messages table and returns the newly created message."""
+    try:
+        cursor = db.execute(
+            "INSERT INTO messages (conversation_id, sender_id, recipient_id, content) VALUES (?, ?, ?, ?)",
+            (conversation_id, sender_id, recipient_id, content)
+        )
+        db.commit()
+        new_message_id = cursor.lastrowid
+        # Fetch the newly created message
+        return get_message_by_id(db, new_message_id)
+    except sqlite3.Error as e:
+        print(f"DB_MESSAGES: Error sending message in conversation {conversation_id} from user {sender_id} to {recipient_id}: {e}")
+        return None
+
+def get_message_by_id(db, message_id: int) -> sqlite3.Row | None:
+    """Retrieves a message by its ID."""
+    try:
+        cursor = db.execute(
+            "SELECT id, conversation_id, sender_id, recipient_id, content, created_at, is_read FROM messages WHERE id = ?",
+            (message_id,)
+        )
+        return cursor.fetchone()
+    except sqlite3.Error as e:
+        print(f"DB_MESSAGES: Error fetching message by ID {message_id}: {e}")
+        return None
+
+def get_messages(db, conversation_id: int, limit: int = 50, offset: int = 0) -> list[sqlite3.Row]:
+    """
+    Retrieves messages for a given conversation, ordered by created_at (descending).
+    Implements pagination using limit and offset.
+    """
+    try:
+        cursor = db.execute(
+            """
+            SELECT m.id, m.conversation_id, m.sender_id, s_sender.username as sender_username,
+                   m.recipient_id, s_recipient.username as recipient_username, m.content, m.created_at, m.is_read
+            FROM messages m
+            JOIN users s_sender ON m.sender_id = s_sender.id
+            JOIN users s_recipient ON m.recipient_id = s_recipient.id
+            WHERE m.conversation_id = ?
+            ORDER BY m.created_at DESC
+            LIMIT ? OFFSET ?
+            """,
+            (conversation_id, limit, offset)
+        )
+        return cursor.fetchall()
+    except sqlite3.Error as e:
+        print(f"DB_MESSAGES: Error fetching messages for conversation {conversation_id}: {e}")
+        return []
+
+def get_user_conversations(db, user_id: int) -> list[sqlite3.Row]:
+    """
+    Retrieves all conversations for a given user.
+    Joins with the users table to get the other participant's username and profile picture.
+    Orders conversations by the created_at of the most recent message in each conversation (descending).
+    """
+    try:
+        cursor = db.execute(
+            """
+            SELECT
+                c.id as conversation_id,
+                c.user1_id,
+                c.user2_id,
+                CASE
+                    WHEN c.user1_id = :user_id THEN u2.username
+                    ELSE u1.username
+                END as other_username,
+                CASE
+                    WHEN c.user1_id = :user_id THEN u2.profile_picture_filename
+                    ELSE u1.profile_picture_filename
+                END as other_profile_picture,
+                CASE
+                    WHEN c.user1_id = :user_id THEN u2.id
+                    ELSE u1.id
+                END as other_user_id,
+                lm.last_message_content,
+                lm.last_message_created_at,
+                lm.last_message_sender_id,
+                (SELECT COUNT(*) FROM messages m_unread
+                 WHERE m_unread.conversation_id = c.id
+                 AND m_unread.recipient_id = :user_id
+                 AND m_unread.is_read = FALSE) as unread_messages_count
+            FROM conversations c
+            JOIN users u1 ON c.user1_id = u1.id
+            JOIN users u2 ON c.user2_id = u2.id
+            LEFT JOIN (
+                SELECT
+                    m.conversation_id,
+                    m.content as last_message_content,
+                    m.created_at as last_message_created_at,
+                    m.sender_id as last_message_sender_id
+                FROM messages m
+                INNER JOIN (
+                    SELECT conversation_id, MAX(created_at) as max_created_at
+                    FROM messages
+                    GROUP BY conversation_id
+                ) mm ON m.conversation_id = mm.conversation_id AND m.created_at = mm.max_created_at
+            ) lm ON c.id = lm.conversation_id
+            WHERE c.user1_id = :user_id OR c.user2_id = :user_id
+            ORDER BY lm.last_message_created_at DESC, c.created_at DESC
+            """,
+            {"user_id": user_id}
+        )
+        return cursor.fetchall()
+    except sqlite3.Error as e:
+        print(f"DB_CONVERSATIONS: Error fetching conversations for user {user_id}: {e}")
+        return []
+
+def mark_messages_as_read(db, conversation_id: int, user_id: int) -> int:
+    """
+    Marks messages in a conversation as read for a specific user where they are the recipient.
+    Returns the number of messages marked as read.
+    """
+    try:
+        cursor = db.execute(
+            """
+            UPDATE messages
+            SET is_read = TRUE
+            WHERE conversation_id = ?
+              AND recipient_id = ?
+              AND is_read = FALSE
+            """,
+            (conversation_id, user_id)
+        )
+        db.commit()
+        return cursor.rowcount
+    except sqlite3.Error as e:
+        print(f"DB_MESSAGES: Error marking messages as read for conversation {conversation_id}, user {user_id}: {e}")
+        return 0

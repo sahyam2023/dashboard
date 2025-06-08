@@ -61,29 +61,51 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // 
   const handleUserSelect = async (selectedUser: User) => {
     if (!currentUserId) {
       console.error("Current user not set, cannot start conversation.");
+      showToastNotification("Error: Current user not identified.", "error");
       return;
     }
     if (selectedUser.id === currentUserId) {
+      showToastNotification("You cannot start a conversation with yourself.", "info");
       console.log("Cannot start a conversation with yourself.");
       return;
     }
-    try {
-      const conversation = await api.createConversation(selectedUser.id);
-      setSelectedConversation(conversation);
-      setCurrentView('chat');
-      // TODO: Consider how ConversationList should refresh or be updated.
-      // For now, it fetches on its own mount/currentUserId change.
-      // A more reactive way would be to update a shared state or trigger a refetch.
-    } catch (error) {
-      console.error('Failed to start conversation:', error);
-      // TODO: Show error to user via toast or message
-    }
+
+    // Construct a provisional Conversation object
+    const provisionalConversation: Conversation = {
+      conversation_id: null, // Key change: This is now null
+      user1_id: currentUserId, // Assuming currentUserId is user1
+      user2_id: selectedUser.id,
+      other_user_id: selectedUser.id,
+      other_username: selectedUser.username,
+      // Ensure selectedUser.profile_picture_url is available.
+      // The User type in ./types might need 'profile_picture_url?: string | null;'
+      // And UserList must provide this from its API call.
+      other_profile_picture_url: selectedUser.profile_picture_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(selectedUser.username)}&background=random&color=fff`,
+      last_message_content: null,
+      last_message_created_at: null,
+      last_message_sender_id: null,
+      unread_messages_count: 0,
+      created_at: new Date().toISOString(), // Provisional creation time
+      // other_profile_picture is the filename, other_profile_picture_url is the full URL
+      // Assuming User type provides profile_picture_url. If it only provides filename, construct URL.
+      // For now, directly using selectedUser.profile_picture_url.
+      // This implies UserList fetches users with their profile_picture_url.
+      other_profile_picture: selectedUser.profile_picture_filename || null, // Add filename if available
+    };
+
+    setSelectedConversation(provisionalConversation);
+    setCurrentView('chat');
+    // No API call to createConversation here anymore.
+    // ConversationList will refresh on its own or via refreshKey if needed for other scenarios.
+  };
+
+  const handleNewConversationStarted = (conversation: Conversation) => {
+    setSelectedConversation(conversation);
+    // Optionally, trigger a refresh of the conversation list if it doesn't pick up the new one automatically
+    setConversationListRefreshKey(prevKey => prevKey + 1);
   };
 
   const handleConversationSelect = (conversation: Conversation) => {
-    // If selection mode is on, clicking a conversation should not open it,
-    // but rather toggle its selection state. This behavior is handled in ConversationList.
-    // If selection mode is OFF, then it proceeds to open the chat.
     if (!selectionMode) {
       setSelectedConversation(conversation);
       setCurrentView('chat');
@@ -273,6 +295,7 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // 
             socket={socket} // Pass the socket instance
             socketConnected={socketConnected} // Pass socketConnected status
             onGoBack={handleBackToList} // Pass the callback function
+            onNewConversationStarted={handleNewConversationStarted} // Pass the new callback
           />
         ) : (
           <div className="flex-1 flex items-center justify-center h-full bg-gray-50 dark:bg-gray-800">

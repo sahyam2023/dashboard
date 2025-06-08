@@ -27,7 +27,9 @@ const Layout: React.FC = () => {
 
       newSocket.on('connect', () => {
         setSocketConnected(true);
-        console.log('Layout.tsx: Socket connected. SID:', newSocket.id);
+        // console.log('Layout.tsx: Socket connected. SID:', newSocket.id);
+        newSocket.emit('join_user_channel');
+        // console.log('Layout.tsx: Emitted "join_user_channel" to server.'); // <<< ADD THIS LINE
       });
 
       newSocket.on('disconnect', (reason) => {

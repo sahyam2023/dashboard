@@ -39,27 +39,32 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggleChat, socket, sock
   const [unreadChatCount, setUnreadChatCount] = useState(0);
 
   useEffect(() => {
-    // Example logging (optional, but good for debugging)
-    console.log('Sidebar useEffect [socket]: Socket instance:', socket, 'Connected status prop:', socketConnected);
+  console.log('Sidebar useEffect [socket, socketConnected]: Socket instance:', socket, 'Connected status prop:', socketConnected);
 
-    if (socket) {
+  if (socket && socketConnected) {
       const handleUnreadChatCount = (data: { count: number }) => {
         console.log('Sidebar: unread_chat_count event received, Data:', data);
         setUnreadChatCount(data.count);
       };
 
-      console.log("Sidebar: Attaching 'unread_chat_count' listener due to socket instance change.");
+    console.log("Sidebar: Socket connected. Attaching 'unread_chat_count' listener.");
       socket.on('unread_chat_count', handleUnreadChatCount);
 
       return () => {
-        console.log("Sidebar: Detaching 'unread_chat_count' listener due to socket instance change or unmount.");
+      console.log("Sidebar: Cleaning up 'unread_chat_count' listener.");
         socket.off('unread_chat_count', handleUnreadChatCount);
       };
     } else {
-      console.log('Sidebar: Socket instance is null. Resetting unread count.');
+    console.log('Sidebar: Socket is null or not connected. Resetting unread count and ensuring no listener is active.');
       setUnreadChatCount(0);
+    // If socket object exists but is not connected, and if listeners might persist,
+    // explicitly turn them off. However, the structure ensures a new listener is added
+    // only when connected, and the old one (from a previous connected state) would be
+    // cleaned up by the previous return function. So, just resetting count here is likely sufficient.
+    // If there was a scenario where `socket` exists but `socketConnected` becomes false,
+    // the cleanup from the *previous* effect (when it was true) should handle `socket.off`.
     }
-  }, [socket]); // Only 'socket' is in the dependency array.
+}, [socket, socketConnected]); // Added socketConnected to dependency array
 
   const navItems: NavItemConfig[] = [
     {

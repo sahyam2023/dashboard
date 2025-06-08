@@ -2037,7 +2037,7 @@ def login():
             )
             db.commit()
             app.logger.info(f"User {user['id']} status set to online and last_seen updated.")
-            socketio.emit('user_online', {'user_id': user['id']}, broadcast=True)
+            socketio.emit('user_online', {'user_id': user['id']})
         except Exception as e_status:
             app.logger.error(f"Error updating user online status for user {user['id']}: {e_status}")
         # --- End Real-time Online Status Update ---
@@ -10504,7 +10504,7 @@ def handle_connect(auth=None): # Add auth parameter, default to None for robustn
             )
             db.commit()
             app.logger.info(f"SocketIO connect: User {user_id_for_connect} status set to online and last_seen updated.")
-            socketio.emit('user_online', {'user_id': user_id_for_connect}, broadcast=True)
+            socketio.emit('user_online', {'user_id': user_id_for_connect})
             # Emit unread chat count on connect
             emit_unread_chat_count(user_id_for_connect)
             # Emit online users count
@@ -10547,7 +10547,7 @@ def handle_disconnect():
                         app.logger.error(f"Error converting last_seen for disconnect event (user {user_id_for_disconnect}): {e_ts_conv}")
                         last_seen_timestamp_iso = datetime.now(timezone.utc).isoformat() # Fallback
                 
-                socketio.emit('user_offline', {'user_id': user_id_for_disconnect, 'last_seen': last_seen_timestamp_iso}, broadcast=True)
+                socketio.emit('user_offline', {'user_id': user_id_for_disconnect, 'last_seen': last_seen_timestamp_iso})
                 # Emit online users count
                 emit_online_users_count()
             else:
@@ -10724,6 +10724,21 @@ def handle_mark_as_read(data):
         emit('mark_as_read_error', {'conversation_id': conversation_id_int, 'error': 'Failed to mark messages as read.'})
     # No explicit close_db(e) here as it's handled by teardown_appcontext
 
+@socketio.on('join_user_channel')
+def handle_join_user_channel(data=None): # data might not be needed if using SID
+    app.logger.info("SOCKETIO DEBUG: 'join_user_channel' event handler invoked.") # <<< ADD THIS LINE
+    user_id = sid_to_user.get(request.sid)
+    if user_id:
+        room_name = f'user_{user_id}'
+        join_room(room_name)
+        app.logger.info(f"SocketIO: User {user_id} (SID: {request.sid}) joined their user-specific room '{room_name}' via 'join_user_channel' event.")
+        # Optionally, re-emit unread count now that they've joined the room
+        emit_unread_chat_count(user_id) # This function already logs
+    else:
+        app.logger.warning(f"SocketIO 'join_user_channel': Could not find user_id for SID {request.sid}. User not joined to user-specific room.")
+        # Emit an error back to the client if desired, though the client might not expect a response for this.
+        # emit('join_user_channel_error', {'error': 'User not authenticated or SID not found.'}, room=request.sid)
+
 # --- Helper Functions ---
 def emit_unread_chat_count(user_id: int):
     """Helper function to get and emit unread chat count for a user."""
@@ -10740,7 +10755,7 @@ def emit_online_users_count():
     try:
         db = get_db()
         count = get_online_users_count(db)
-        socketio.emit("online_users_count", {"count": count}, broadcast=True) # Added broadcast=True
+        socketio.emit("online_users_count", {"count": count})
         app.logger.info(f"APP_SOCKET: Emitted online_users_count {count} to all clients.")
     except Exception as e:
         app.logger.error(f"APP_SOCKET: Error emitting online_users_count: {e}")

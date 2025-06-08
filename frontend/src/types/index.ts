@@ -116,7 +116,7 @@ export interface Link {
   comment_count?: number;
   compatible_vms_versions?: string[]; // Added for VMS/VA compatibility
   // software_name is already available
-  // category?: string; // Removed as it's not in the current backend schema for links
+  category?: string; // Removed as it's not in the current backend schema for links
 }
 
 

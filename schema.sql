@@ -405,6 +405,9 @@ CREATE TABLE IF NOT EXISTS messages (
     content TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     is_read BOOLEAN DEFAULT FALSE,
+    file_name TEXT,          -- Original name of the file
+    file_url TEXT,           -- Path/URL to access the file
+    file_type TEXT,          -- Type of file (e.g., 'image', 'video', 'pdf', 'binary')
     FOREIGN KEY (conversation_id) REFERENCES conversations (id) ON DELETE CASCADE,
     FOREIGN KEY (sender_id) REFERENCES users (id) ON DELETE CASCADE,
     FOREIGN KEY (recipient_id) REFERENCES users (id) ON DELETE CASCADE

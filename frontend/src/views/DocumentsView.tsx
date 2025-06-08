@@ -27,6 +27,7 @@ import ConfirmationModal from '../components/shared/ConfirmationModal';
 import Modal from '../components/shared/Modal';
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils';
 import CommentSection from '../components/comments/CommentSection';
+import ExpandableText from '../components/shared/ExpandableText';
 
 interface OutletContextType {
   searchTerm: string;
@@ -429,7 +430,17 @@ useEffect(() => {
   const columns: ColumnDef<DocumentType>[] = [
     { key: 'doc_name', header: 'Name', sortable: true }, { key: 'doc_type', header: 'Type', sortable: true },
     { key: 'software_name', header: 'Software', sortable: true },
-    { key: 'description', header: 'Description', render: (d: DocumentType) => <span className="text-sm text-gray-600 block max-w-xs truncate" title={d.description||''}>{d.description||'-'}</span> },
+    {
+      key: 'description',
+      header: 'Description',
+      render: (d: DocumentType) => (
+        <ExpandableText
+          text={d.description}
+          charLimit={100} // You can adjust this character limit
+          // The default className in ExpandableText already includes max-w-xs and text styling
+        />
+      )
+    },
     { 
       key: 'download_link', 
       header: 'Download', 

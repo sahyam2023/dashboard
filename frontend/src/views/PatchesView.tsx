@@ -29,6 +29,7 @@ import Fuse from 'fuse.js';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
 import Modal from '../components/shared/Modal';
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils';
+import ExpandableText from '../components/shared/ExpandableText';
 
 interface OutletContextType {
   searchTerm: string;
@@ -407,7 +408,16 @@ const PatchesView: React.FC = () => {
         return <div className="text-center">{content}</div>;
       }
     },
-    { key: 'description', header: 'Description', render: p => <span className="text-sm text-gray-600 block max-w-xs truncate" title={p.description || ''}>{p.description || '-'}</span> },
+    {
+      key: 'description',
+      header: 'Description',
+      render: (p: PatchType) => (
+        <ExpandableText
+          text={p.description}
+          charLimit={100} // Consistent character limit
+        />
+      )
+    },
     { key: 'release_date', header: 'Release Date', sortable: true, render: (item: PatchType) => formatDateDisplay(item.release_date) }, // Stays the same
     {
       key: 'download_link',

@@ -19,6 +19,7 @@ import ConfirmationModal from '../components/shared/ConfirmationModal';
 import Modal from '../components/shared/Modal';
 import { PlusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Link as LinkIconLucide, Download, Move, AlertTriangle, MessageSquare } from 'lucide-react'; // Added MessageSquare
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils';
+import ExpandableText from '../components/shared/ExpandableText';
 
 interface OutletContextType {
   searchTerm: string;
@@ -327,7 +328,16 @@ const LinksView: React.FC = () => {
         return <div className="text-center">{content}</div>;
       }
     },
-    { key: 'description', header: 'Description', render: l => <span className="text-sm text-gray-600 block max-w-xs truncate" title={l.description || ''}>{l.description || '-'}</span> },
+    {
+      key: 'description',
+      header: 'Description',
+      render: (l: LinkType) => (
+        <ExpandableText
+          text={l.description}
+          charLimit={100} // Consistent character limit
+        />
+      )
+    },
     {
       key: 'url',
       header: 'Link',

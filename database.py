@@ -1032,3 +1032,23 @@ def get_online_users_count(db) -> int:
     except sqlite3.Error as e:
         print(f"DB_USERS: Error getting online users count: {e}")
         return 0
+
+def clear_messages_for_user_in_conversation(db, conversation_id: int, user_id: int) -> int:
+    """
+    Clears all messages for a given conversation_id.
+    The user_id parameter is included for API consistency but not used in the
+    current two-sided message deletion logic for this specific conversation.
+    Returns the number of messages deleted.
+    """
+    try:
+        cursor = db.execute(
+            "DELETE FROM messages WHERE conversation_id = ?",
+            (conversation_id,)
+        )
+        db.commit()
+        print(f"DB_MESSAGES: Cleared {cursor.rowcount} messages for conversation_id {conversation_id} (requested by user_id {user_id}).")
+        return cursor.rowcount
+    except sqlite3.Error as e:
+        print(f"DB_MESSAGES: Error clearing messages for conversation_id {conversation_id} (requested by user_id {user_id}): {e}")
+        # Consider rolling back if part of a larger transaction, though commit is here.
+        return 0

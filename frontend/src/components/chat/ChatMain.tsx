@@ -1,14 +1,15 @@
 // frontend/src/components/chat/ChatMain.tsx
-import React, { useState, useEffect} from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { User, Conversation } from './types';
 import UserList from './UserList';
 import ConversationList from './ConversationList';
 import ChatWindow from './ChatWindow';
-// import { io, Socket } from 'socket.io-client'; // Socket is now a prop
-import { Socket } from 'socket.io-client'; // Still need Socket type
+import { Socket } from 'socket.io-client';
 
-import { useAuth } from '../../context/AuthContext'; // Import useAuth
-import * as api from '../../services/api'; // Import your API service
+import { useAuth } from '../../context/AuthContext';
+import * as api from '../../services/api';
+import ConfirmationModal from '../shared/ConfirmationModal';
+import { useNotification } from '../../context/NotificationContext'; // Import useNotification
 
 interface ChatMainProps {
   socket: Socket | null; 
@@ -20,6 +21,13 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // 
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const { user } = useAuth(); // Get user from AuthContext (tokenData not needed here directly for socket)
   const currentUserId = user?.id || null;
+
+  const [selectionMode, setSelectionMode] = useState<boolean>(false);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [showClearConfirmModal, setShowClearConfirmModal] = useState<boolean>(false);
+  const { showToastNotification } = useNotification(); // For toast notifications
+  const [conversationListRefreshKey, setConversationListRefreshKey] = useState<number>(0); // Added state for refresh key
+
   // authToken is not directly used here anymore as socket is initialized by parent
 
   // const [socket, setSocket] = useState<Socket | null>(null); // Socket is now a prop
@@ -53,9 +61,87 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // 
   };
 
   const handleConversationSelect = (conversation: Conversation) => {
-    setSelectedConversation(conversation);
-    setCurrentView('chat');
+    // If selection mode is on, clicking a conversation should not open it,
+    // but rather toggle its selection state. This behavior is handled in ConversationList.
+    // If selection mode is OFF, then it proceeds to open the chat.
+    if (!selectionMode) {
+      setSelectedConversation(conversation);
+      setCurrentView('chat');
+    }
   };
+
+  const handleToggleSelectionMode = () => {
+    setSelectionMode(prevMode => {
+      if (prevMode) { // Turning off selection mode
+        setSelectedIds(new Set());
+      }
+      return !prevMode;
+    });
+  };
+
+  const handleInitiateClearSelected = () => {
+    if (selectedIds.size > 0) {
+      setShowClearConfirmModal(true);
+    } else {
+      console.log("No conversations selected to clear.");
+    }
+  };
+
+  const confirmClearSelected = async () => {
+    if (selectedIds.size === 0) {
+      showToastNotification("No conversations selected to clear.", "info");
+      setShowClearConfirmModal(false);
+      return;
+    }
+
+    try {
+      // Convert Set to Array for the API call
+      const idsToClear = Array.from(selectedIds);
+      await api.clearBatchConversations(idsToClear);
+
+      // On successful API response:
+      // This part needs access to the full conversations list to filter it.
+      // Assuming ConversationList manages its own state, we can't directly update it here.
+      // For now, we'll log a message and rely on a potential future refetch or event.
+      // A more robust solution would involve lifting conversation state or using a global state manager.
+      // console.log(`Successfully cleared ${idsToClear.length} conversations. ConversationList will need to refresh.`);
+      setConversationListRefreshKey(prevKey => prevKey + 1); // Trigger refresh in ConversationList
+
+      // If selectedConversation was one of those cleared, reset it.
+      if (selectedConversation && selectedIds.has(selectedConversation.conversation_id)) {
+        setSelectedConversation(null);
+        // Optionally, switch view back to conversation list if a chat was open
+        // setCurrentView('conversations');
+      }
+
+      showToastNotification(`${selectedIds.size} conversation(s) cleared successfully.`, "success");
+      setSelectedIds(new Set());
+      setSelectionMode(false);
+    } catch (error: any) {
+      console.error("Failed to clear conversations:", error);
+      const errorMessage = error.response?.data?.message || error.message || "Failed to clear conversations. Please try again.";
+      showToastNotification(errorMessage, "error");
+      // Keep selection mode and selected IDs for retry
+    } finally {
+      setShowClearConfirmModal(false);
+    }
+  };
+
+  const cancelClearSelected = () => {
+    setShowClearConfirmModal(false);
+  };
+
+  const handleToggleConversationSelection = useCallback((conversationId: number) => {
+    setSelectedIds(prevIds => {
+      const newIds = new Set(prevIds);
+      if (newIds.has(conversationId)) {
+        newIds.delete(conversationId);
+      } else {
+        newIds.add(conversationId);
+      }
+      return newIds;
+    });
+  }, []);
 
   const handleBackToList = () => {
     setSelectedConversation(null);
@@ -92,31 +178,66 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // 
           </>
         ) : (
           <>
-            <div className="p-3 border-b flex justify-between items-center">
-              <h1 className="text-xl font-bold">My Chats</h1>
-              <button
-                onClick={handleStartNewChat}
-                title="Start new chat"
-                className="p-2 rounded-full hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-400"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                </svg>
-              </button>
+            <div className="p-3 border-b dark:border-gray-700">
+              <div className="flex justify-between items-center mb-2">
+                <h1 className="text-xl font-bold">My Chats</h1>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={handleToggleSelectionMode}
+                    title={selectionMode ? "Cancel Selection" : "Select Conversations"}
+                    className="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {/* Icon can change based on selectionMode */}
+                    {selectionMode ? (
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7V3m0 14V3m0 14H6m3 0h6" />
+                      </svg>
+                    )}
+                  </button>
+                  <button
+                    onClick={handleStartNewChat}
+                    title="Start new chat"
+                    className="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              {selectionMode && selectedIds.size > 0 && (
+                <div className="mt-2">
+                  <button
+                    onClick={handleInitiateClearSelected}
+                    className="w-full px-3 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800"
+                  >
+                    Clear Selected ({selectedIds.size})
+                  </button>
+                </div>
+              )}
             </div>
             <ConversationList
               onConversationSelect={handleConversationSelect}
               currentUserId={currentUserId}
               socket={socket} // Pass socket
               selectedConversationId={selectedConversation?.conversation_id} // Pass selected ID
+              selectionModeEnabled={selectionMode}
+              selectedConversationIds={selectedIds}
+              onToggleSelection={handleToggleConversationSelection}
+              refreshKey={conversationListRefreshKey} // Pass refresh key
             />
           </>
         )}
       </div>
 
       {/* Main Chat Area */}
-      <div className={`flex-1 flex flex-col ${(currentView === 'chat' && selectedConversation) ? 'flex' : 'hidden md:flex'}`}>
-        {selectedConversation && currentView === 'chat' ? (
+      {/* Adjusted md:flex to ensure it shows up correctly when a chat is selected */}
+      <div className={`flex-1 flex flex-col ${ (currentView === 'chat' && selectedConversation && !selectionMode) ? 'flex' : 'hidden md:flex'}`}>
+        {selectedConversation && currentView === 'chat' && !selectionMode ? (
           <ChatWindow
             selectedConversation={selectedConversation}
             currentUserId={currentUserId}
@@ -126,14 +247,29 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // 
           />
         ) : (
           <div className="flex-1 flex items-center justify-center h-full bg-gray-50 dark:bg-gray-800">
-            {currentView !== 'users' && (
+            {currentView !== 'users' && !selectionMode && ( // Added !selectionMode here
               <p className="text-gray-400 dark:text-gray-300 text-lg">
                 Select a conversation or start a new chat.
               </p>
             )}
+            {selectionMode && ( // Message to show when selection mode is active
+                 <p className="text-gray-400 dark:text-gray-300 text-lg p-4 text-center">
+                    Selection mode active. Choose conversations from the list. <br/> Click "Cancel Selection" to exit selection mode.
+                 </p>
+            )}
           </div>
         )}
       </div>
+      <ConfirmationModal
+        isOpen={showClearConfirmModal}
+        title="Clear Selected Conversations?"
+        message={`Are you sure you want to clear the selected ${selectedIds.size} conversation(s)? This action will only clear your side of the conversation and cannot be undone.`}
+        confirmText="Clear"
+        cancelText="Cancel"
+        onConfirm={confirmClearSelected}
+        onCancel={cancelClearSelected}
+        confirmButtonVariant="danger"
+      />
     </div>
   );
 };

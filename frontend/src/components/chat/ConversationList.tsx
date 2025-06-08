@@ -16,6 +16,10 @@ interface ConversationListProps {
   currentUserId: number | null;
   socket: Socket | null; // Pass socket instance
   selectedConversationId?: number | null; // To know which conversation is active
+  selectionModeEnabled: boolean;
+  onToggleSelection: (conversationId: number) => void;
+  selectedConversationIds: Set<number>;
+  refreshKey?: number; // Added refreshKey prop
 }
 
 // Add is_online and last_seen to the Conversation type locally for frontend state
@@ -25,11 +29,15 @@ interface FrontendConversation extends Conversation {
   other_user_last_seen?: string | null;
 }
 
-const ConversationList: React.FC<ConversationListProps> = ({ 
-  onConversationSelect, 
-  currentUserId, 
+const ConversationList: React.FC<ConversationListProps> = ({
+  onConversationSelect,
+  currentUserId,
   socket,
-  selectedConversationId 
+  selectedConversationId,
+  selectionModeEnabled,
+  onToggleSelection,
+  selectedConversationIds,
+  refreshKey, // Destructure refreshKey
 }) => {
   const [conversations, setConversations] = useState<FrontendConversation[]>([]);
   const [loading, setLoading] = useState(false);
@@ -59,7 +67,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
   
   useEffect(() => {
     loadConversations();
-  }, [loadConversations]);
+  }, [loadConversations, refreshKey]); // Added refreshKey to dependency array
 
   // Handler for user_online event
   const handleUserOnline = useCallback((data: { user_id: number }) => {
@@ -202,17 +210,38 @@ const ConversationList: React.FC<ConversationListProps> = ({
         <p className="p-4 text-center text-gray-500 dark:text-gray-400">No conversations yet. Start a new one!</p>
       )}
       <ul className="divide-y divide-gray-200 dark:divide-gray-700 flex-1 overflow-y-auto">
-        {conversations.map((conv) => (
-          <li
-            key={conv.conversation_id}
-            onClick={() => onConversationSelect(conv)}
-            className={`p-3 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition-colors duration-150 ease-in-out ${
-              selectedConversationId === conv.conversation_id 
-                ? 'bg-blue-100 dark:bg-blue-800' 
-                : 'bg-gray-50 dark:bg-gray-800'
-            }`}
-          >
-            <div className="flex items-center space-x-3">
+        {conversations.map((conv) => {
+          const isSelected = selectedConversationIds.has(conv.conversation_id);
+          return (
+            <li
+              key={conv.conversation_id}
+              onClick={() => {
+                if (selectionModeEnabled) {
+                  onToggleSelection(conv.conversation_id);
+                } else {
+                  onConversationSelect(conv);
+                }
+              }}
+              className={`p-3 flex items-center space-x-3 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition-colors duration-150 ease-in-out ${
+                selectionModeEnabled && isSelected
+                  ? 'bg-green-100 dark:bg-green-800' // Style for selected items in selection mode
+                  : selectedConversationId === conv.conversation_id
+                  ? 'bg-blue-100 dark:bg-blue-800' // Style for active (opened) conversation
+                  : 'bg-gray-50 dark:bg-gray-800'
+              }`}
+            >
+              {selectionModeEnabled && (
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={(e) => {
+                    // Prevent onClick on li from firing as well if we only want checkbox to toggle
+                    e.stopPropagation();
+                    onToggleSelection(conv.conversation_id);
+                  }}
+                  className="form-checkbox h-5 w-5 text-blue-600 rounded border-gray-300 dark:border-gray-600 focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 dark:bg-gray-700"
+                />
+              )}
               <div className="relative">
                 <img
                   src={conv.other_profile_picture_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(conv.other_username)}&background=random&size=40&color=fff`}
@@ -230,31 +259,49 @@ const ConversationList: React.FC<ConversationListProps> = ({
               <div className="flex-1 min-w-0">
                 <div className="flex justify-between items-center">
                   <div className="flex items-center space-x-1">
-                    <p className={`text-sm font-semibold truncate ${selectedConversationId === conv.conversation_id ? 'text-blue-700 dark:text-blue-300' : 'text-gray-800 dark:text-gray-100'}`}>
+                    <p className={`text-sm font-semibold truncate ${
+                      selectionModeEnabled && isSelected
+                        ? 'text-green-700 dark:text-green-300'
+                        : selectedConversationId === conv.conversation_id
+                        ? 'text-blue-700 dark:text-blue-300'
+                        : 'text-gray-800 dark:text-gray-100'
+                    }`}>
                       {conv.other_username}
                     </p>
                   </div>
                   {conv.last_message_created_at && (
-                    <p className={`text-xs whitespace-nowrap ml-2 ${selectedConversationId === conv.conversation_id ? 'text-blue-500 dark:text-blue-400' : 'text-gray-400 dark:text-gray-500'}`}>
+                    <p className={`text-xs whitespace-nowrap ml-2 ${
+                      selectionModeEnabled && isSelected
+                        ? 'text-green-500 dark:text-green-400'
+                        : selectedConversationId === conv.conversation_id
+                        ? 'text-blue-500 dark:text-blue-400'
+                        : 'text-gray-400 dark:text-gray-500'
+                    }`}>
                       {formatToISTLocaleString(conv.last_message_created_at)}
                     </p>
                   )}
                 </div>
                 <div className="flex justify-between items-center mt-1">
-                  <p className={`text-xs truncate ${selectedConversationId === conv.conversation_id ? 'text-gray-600 dark:text-gray-300' : 'text-gray-500 dark:text-gray-400'}`}>
+                  <p className={`text-xs truncate ${
+                    selectionModeEnabled && isSelected
+                      ? 'text-gray-700 dark:text-gray-300'
+                      : selectedConversationId === conv.conversation_id
+                      ? 'text-gray-600 dark:text-gray-300'
+                      : 'text-gray-500 dark:text-gray-400'
+                  }`}>
                     {conv.last_message_sender_id === currentUserId ? <span className="font-medium">You: </span> : ''}
                     {conv.last_message_content || <span className="italic">No messages yet</span>}
                   </p>
-                  {conv.unread_messages_count && conv.unread_messages_count > 0 && (
+                  {conv.unread_messages_count && conv.unread_messages_count > 0 && !(selectionModeEnabled && isSelected) && (
                     <span className="ml-2 bg-blue-500 text-white text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0">
                       {conv.unread_messages_count > 9 ? '9+' : conv.unread_messages_count}
                     </span>
                   )}
                 </div>
               </div>
-            </div>
-          </li>
-        ))}
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

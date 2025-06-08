@@ -1,8 +1,10 @@
 import React from 'react';
-import { Comment as CommentType } from '../../services/api';
+import { Comment as CommentType, createConversation } from '../../services/api'; // Import createConversation
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { MessageSquare, Edit3, Trash2, CornerDownRight } from 'lucide-react';
 import { formatToISTLocaleString } from '../../utils'; // Updated import
+// It's good practice to import the type for the conversation if available
+// import { Conversation as ChatConversation } from '../chat/types'; // Assuming path
 
 interface CommentProps {
   comment: CommentType;
@@ -33,7 +35,43 @@ const Comment: React.FC<CommentProps> = ({ comment, onEdit, onDelete, onReply, c
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center">
           <MessageSquare className="w-5 h-5 text-gray-500 dark:text-gray-400 mr-2" />
-          <span className="font-semibold text-gray-800 dark:text-gray-200">{comment.username}</span>
+          <button
+            onClick={async () => {
+              if (currentUserId && currentUserId !== comment.user_id) {
+                if (window.confirm(`Start a chat with ${comment.username}?`)) {
+                  try {
+                    // console.log(`Attempting to create conversation with user ID: ${comment.user_id}`);
+                    const conversation = await createConversation(comment.user_id);
+                    console.log('Conversation created/retrieved:', conversation);
+                    // Attempt to navigate to the chat page for this conversation
+                    // This assumes a routing setup like /chat/:conversationId
+                    // If using react-router, useNavigate hook would be preferred here.
+                    if (conversation && conversation.conversation_id) {
+                       window.location.href = `/chat/${conversation.conversation_id}`;
+                    } else {
+                        console.error('Conversation created but conversation_id is missing.', conversation);
+                        alert('Could not navigate to chat: Conversation ID missing.');
+                    }
+                  } catch (error) {
+                    console.error('Failed to create conversation:', error);
+                    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';
+                    alert(`Could not start chat: ${errorMessage}`);
+                  }
+                }
+              } else if (currentUserId === comment.user_id) {
+                console.log('User clicked on their own name. No action taken.');
+                // Optionally, inform the user they can't chat with themselves, though it might be obvious.
+                // alert("You cannot start a chat with yourself.");
+              } else {
+                console.log('Current user ID not available, cannot start chat.');
+                // alert("You must be logged in to start a chat.");
+              }
+            }}
+            className="font-semibold text-blue-600 dark:text-blue-400 hover:underline focus:outline-none cursor-pointer"
+            aria-label={`Start chat with ${comment.username}`}
+          >
+            {comment.username}
+          </button>
           <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">{formattedTimestamp()}</span>
         </div>
         <div className="flex items-center space-x-2">

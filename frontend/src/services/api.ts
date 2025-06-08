@@ -458,7 +458,8 @@ export async function fetchChatImageBlob(fileUrl: string): Promise<Blob> {
 // For this example, let's assume they are available from:
 import {
   User as ChatUser, // Alias to avoid conflict with User interface already in this file
-  Conversation as ChatConversation,
+  Conversation as ChatConversation, // This is the full conversation type
+  // NewConversationResponse, // Removed as per previous subtask; type no longer exists
   Message as ChatMessage,
   PaginatedUsersResponse as ChatPaginatedUsersResponse
 } from '../components/chat/types';
@@ -495,7 +496,19 @@ export async function createConversation(user2_id: number): Promise<ChatConversa
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       body: JSON.stringify({ user2_id }),
     });
-    return handleApiError(response, 'Failed to create or get conversation');
+    
+    // The backend for this route returns an object with 'id', 'user1_id', 'user2_id', 'created_at'.
+    // We need to map 'id' to 'conversation_id' to match the ChatConversation type.
+    const backendResponse = await handleApiError(response, 'Failed to create or get conversation');
+
+    if (backendResponse && typeof backendResponse.id !== 'undefined') {
+      backendResponse.conversation_id = backendResponse.id;
+      delete backendResponse.id; // Remove original 'id' to align with ChatConversation type
+    }
+    // The backendResponse might not have all fields of ChatConversation (e.g. other_username, last_message_content).
+    // However, it now has conversation_id and the core fields.
+    // Components using this must be aware of what fields are actually populated by this specific API call.
+    return backendResponse as ChatConversation;
   } catch (error: any) {
     if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
       setGlobalOfflineStatus(true);

@@ -274,7 +274,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       setSending(false);
     }
   };
-
+  
   const handleLoadOlder = () => {
     if (selectedConversation && typeof selectedConversation.conversation_id === 'number' && hasMoreMessages && !loadingOlder) {
       const nextPage = currentPage + 1;
@@ -294,7 +294,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   // Determine if the header should show provisional state or actual data
   const headerUsername = selectedConversation.other_username || "New Chat";
   const headerProfilePic = selectedConversation.other_profile_picture_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(headerUsername)}&background=random&size=40&color=fff`;
-
 
   return (
     <div className="flex flex-col h-full bg-white dark:bg-gray-800 shadow-md">
@@ -328,35 +327,48 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         </div>
       </header>
 
-      {loading && messages.length === 0 && selectedConversation.conversation_id !== null && (
-        <div className="flex-1 flex items-center justify-center">
-          <Spinner size="lg" />
-        </div>
-      )}
-
-      {selectedConversation.conversation_id === null && messages.length === 0 && !loading && (
-        <div className="flex-1 flex items-center justify-center p-4">
+      {/* Content Area - This div should be flex-1 to take available space */}
+      <div className="flex-1 overflow-y-auto">
+        {loading && messages.length === 0 && selectedConversation.conversation_id !== null && (
+          <div className="flex-1 flex items-center justify-center">
+            <Spinner size="lg" />
+          </div>
+        )}
+        {selectedConversation.conversation_id === null && messages.length === 0 && !loading && (
+          <div className="flex-1 flex items-center justify-center p-4">
             <p className="text-gray-400 dark:text-gray-300 text-md text-center">
-                Type your first message to start the conversation with {headerUsername}.
+              Type your first message to start the conversation with {headerUsername}.
             </p>
-        </div>
+          </div>
+        )}
+        {messages.length > 0 && (
+          <MessageList
+            key={selectedConversation.conversation_id ?? 'provisional-' + selectedConversation.other_user_id}
+            messages={messages}
+            currentUserId={currentUserId}
+            onLoadOlderMessages={handleLoadOlder}
+            hasMoreOlderMessages={hasMoreMessages} 
+            isLoadingOlder={loadingOlder}
+          />
+        )}
+        {/* Placeholder for empty, non-provisional, non-loading chat */}
+        {!loading && messages.length === 0 && selectedConversation.conversation_id !== null && (
+           <div className="flex-1 flex items-center justify-center p-4">
+              <p className="text-gray-400 dark:text-gray-300 text-md text-center">
+                  No messages yet in this conversation. Send a message to get started!
+              </p>
+          </div>
+        )}
+      </div>
+
+      {/* Input Area - Should always be visible if a conversation is selected */}
+      {selectedConversation && (
+        <ChatInput
+          onSendMessage={handleSendMessage}
+          onSendFile={handleSendFile}
+          disabled={sending || !socket || !socketConnected}
+        />
       )}
-
-      {messages.length > 0 && (
-        <MessageList
-          key={selectedConversation.conversation_id ?? 'provisional'} // Use a key for provisional state
-          messages={messages}
-          currentUserId={currentUserId}
-          onLoadOlderMessages={handleLoadOlder}
-        hasMoreOlderMessages={hasMoreMessages}
-        isLoadingOlder={loadingOlder}
-      />
-
-      <ChatInput
-        onSendMessage={handleSendMessage}
-        onSendFile={handleSendFile}
-        disabled={sending || !socket || !socketConnected}
-      />
     </div>
   );
 };

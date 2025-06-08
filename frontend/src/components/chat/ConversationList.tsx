@@ -211,11 +211,11 @@ const ConversationList: React.FC<ConversationListProps> = ({
       )}
       <ul className="divide-y divide-gray-200 dark:divide-gray-700 flex-1 overflow-y-auto">
         {conversations.map((conv) => {
-          const isSelected = selectedConversationIds.has(conv.conversation_id);
+          const isSelected = typeof conv.conversation_id === 'number' ? selectedConversationIds.has(conv.conversation_id) : false;
           return (
-            <li key={conv.conversation_id} className="flex items-center"> 
+            <li key={conv.conversation_id ?? `provisional-${conv.other_user_id}`} className="flex items-center">
               <label
-                htmlFor={`checkbox-${conv.conversation_id}`}
+                htmlFor={`checkbox-${conv.conversation_id ?? conv.other_user_id}`}
                 className={`w-full p-3 flex items-center space-x-3 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-150 ease-in-out ${
                   selectionModeEnabled ? 'cursor-pointer' : ''
                 } ${
@@ -236,16 +236,18 @@ const ConversationList: React.FC<ConversationListProps> = ({
                   // No need to call onToggleSelection here directly from the label's onClick.
                 }}
               >
-                {selectionModeEnabled && (
+                {selectionModeEnabled && typeof conv.conversation_id === 'number' && (
                   <input
                     type="checkbox"
-                    id={`checkbox-${conv.conversation_id}`}
-                    checked={isSelected}
+                    id={`checkbox-${conv.conversation_id}`} // Use actual ID for checkbox
+                    checked={isSelected} // isSelected already handles null id case
                     onChange={() => {
-                      // No stopPropagation needed if label handles it well
-                      onToggleSelection(conv.conversation_id);
+                      // Guard is already here due to outer conditional, but being explicit for safety
+                      if (typeof conv.conversation_id === 'number') {
+                        onToggleSelection(conv.conversation_id);
+                      }
                     }}
-                    // Stop propagation here if clicking checkbox directly should not trigger label's onClick
+                    onClick={(e) => e.stopPropagation()} // Prevent label's onClick when checkbox is directly clicked
                     // This might be necessary if the label's onClick has other side effects
                     // For now, let's assume direct checkbox click is fine.
                     // onClick={(e) => e.stopPropagation()} 

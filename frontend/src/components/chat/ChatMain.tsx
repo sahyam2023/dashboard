@@ -98,11 +98,11 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // 
     // No API call to createConversation here anymore.
     // ConversationList will refresh on its own or via refreshKey if needed for other scenarios.
   };
-
+  
   const handleNewConversationStarted = (conversation: Conversation) => {
     setSelectedConversation(conversation);
     // Optionally, trigger a refresh of the conversation list if it doesn't pick up the new one automatically
-    setConversationListRefreshKey(prevKey => prevKey + 1);
+    setConversationListRefreshKey(prevKey => prevKey + 1); 
   };
 
   const handleConversationSelect = (conversation: Conversation) => {
@@ -150,7 +150,7 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // 
       setConversationListRefreshKey(prevKey => prevKey + 1); // Trigger refresh in ConversationList
       
       // If selectedConversation was one of those cleared, reset it.
-      if (selectedConversation && selectedIds.has(selectedConversation.conversation_id)) {
+      if (selectedConversation && typeof selectedConversation.conversation_id === 'number' && selectedIds.has(selectedConversation.conversation_id)) {
         setSelectedConversation(null);
         // Optionally, switch view back to conversation list if a chat was open
         // setCurrentView('conversations'); 

@@ -909,7 +909,7 @@ def send_message(db, conversation_id: int, sender_id: int, recipient_id: int, co
         # Fetch the newly created message
         return get_message_by_id(db, new_message_id)
     except sqlite3.Error as e:
-        print(f"DB_MESSAGES: Error sending message in conversation {conversation_id} from user {sender_id} to {recipient_id}: {e}")
+        # print(f"DB_MESSAGES: Error sending message in conversation {conversation_id} from user {sender_id} to {recipient_id}: {e}")
         return None
 
 def get_message_by_id(db, message_id: int) -> 'sqlite3.Row | None':
@@ -921,7 +921,7 @@ def get_message_by_id(db, message_id: int) -> 'sqlite3.Row | None':
         )
         return cursor.fetchone()
     except sqlite3.Error as e:
-        print(f"DB_MESSAGES: Error fetching message by ID {message_id}: {e}")
+        # print(f"DB_MESSAGES: Error fetching message by ID {message_id}: {e}")
         return None
 
 def get_messages(db, conversation_id: int, limit: int = 50, offset: int = 0) -> list['sqlite3.Row']:
@@ -946,7 +946,7 @@ def get_messages(db, conversation_id: int, limit: int = 50, offset: int = 0) -> 
         )
         return cursor.fetchall()
     except sqlite3.Error as e:
-        print(f"DB_MESSAGES: Error fetching messages for conversation {conversation_id}: {e}")
+        # print(f"DB_MESSAGES: Error fetching messages for conversation {conversation_id}: {e}")
         return []
 
 def get_user_conversations(db, user_id: int) -> list['sqlite3.Row']:
@@ -1026,7 +1026,7 @@ def mark_messages_as_read(db, conversation_id: int, user_id: int) -> int:
         db.commit()
         return cursor.rowcount
     except sqlite3.Error as e:
-        print(f"DB_MESSAGES: Error marking messages as read for conversation {conversation_id}, user {user_id}: {e}")
+        # print(f"DB_MESSAGES: Error marking messages as read for conversation {conversation_id}, user {user_id}: {e}")
         # Optionally, rollback if the commit within the try block is the only one for this logical operation.
         # However, if db is part of a larger transaction managed by the caller, rollback might be handled there.
         # For now, just printing and returning 0 as per original subsequent function.
@@ -1042,7 +1042,7 @@ def get_total_unread_messages(db, user_id: int) -> int:
         ).fetchone()[0]
         return count
     except sqlite3.Error as e:
-        print(f"DB_MESSAGES: Error getting total unread messages for user {user_id}: {e}")
+        # print(f"DB_MESSAGES: Error getting total unread messages for user {user_id}: {e}")
         return 0
 
 
@@ -1068,9 +1068,9 @@ def clear_messages_for_user_in_conversation(db, conversation_id: int, user_id: i
             (conversation_id,)
         )
         db.commit()
-        print(f"DB_MESSAGES: Cleared {cursor.rowcount} messages for conversation_id {conversation_id} (requested by user_id {user_id}).")
+        # print(f"DB_MESSAGES: Cleared {cursor.rowcount} messages for conversation_id {conversation_id} (requested by user_id {user_id}).")
         return cursor.rowcount
     except sqlite3.Error as e:
-        print(f"DB_MESSAGES: Error clearing messages for conversation_id {conversation_id} (requested by user_id {user_id}): {e}")
+        # print(f"DB_MESSAGES: Error clearing messages for conversation_id {conversation_id} (requested by user_id {user_id}): {e}")
         # Consider rolling back if part of a larger transaction, though commit is here.
         return 0

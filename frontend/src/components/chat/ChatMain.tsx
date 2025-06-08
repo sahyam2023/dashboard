@@ -221,17 +221,17 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // 
         ) : (
           <>
             <div className="p-3 border-b dark:border-gray-700">
+              {/* Online Users Count Display - NEW POSITION */}
+              {currentView === 'conversations' && onlineUsersCount !== null && onlineUsersCount > 0 && !selectionMode && (
+                <div className="flex items-center text-sm text-gray-600 dark:text-gray-400 mb-2"> {/* Note class changes */}
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                  </svg>
+                  {onlineUsersCount} Online
+                </div>
+              )}
               <div className="flex justify-between items-center mb-2">
                 <h1 className="text-xl font-bold">My Chats</h1>
-                {/* Online Users Count Display */}
-                {currentView === 'conversations' && onlineUsersCount !== null && onlineUsersCount > 0 && !selectionMode && (
-                  <div className="flex items-center text-sm text-gray-600 dark:text-gray-400 ml-auto mr-2"> {/* Added mr-2 for spacing */}
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                    </svg>
-                    {onlineUsersCount} Online
-                  </div>
-                )}
                 <div className="flex items-center space-x-2">
                   <button
                     onClick={handleToggleSelectionMode}
@@ -260,7 +260,7 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // 
                   </button>
                 </div>
               </div>
-              {currentView === 'conversations' && selectionMode && selectedIds.size > 0 && (
+              {(currentView === 'conversations' || currentView === 'chat') && selectionMode && selectedIds.size > 0 && (
                 <div className="mt-2">
                   <button
                     onClick={handleInitiateClearSelected}

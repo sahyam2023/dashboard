@@ -3,21 +3,22 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Conversation, Message } from './types';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
-import { io, Socket } from 'socket.io-client'; // Import socket.io-client
-
-// Placeholder for an API service
-// import { fetchMessages, sendMessage as sendMessageAPI } from '../../services/api';
-
+import { Socket } from 'socket.io-client'; // Import socket.io-client
 import * as api from '../../services/api'; // Import your API service
 import { useAuth } from '../../context/AuthContext'; // For token
 import Spinner from './Spinner'; // Import Spinner
 import { useNotification } from '../../context/NotificationContext'; // Import useNotification
 import { formatToISTLocaleString } from '../../utils/dateUtils'; // Import the utility
 
+import { ArrowLeft } from 'lucide-react'; // Import an icon
+
 interface ChatWindowProps {
   selectedConversation: Conversation | null;
-  currentUserId: number | null; // Will be passed from ChatMain
+  currentUserId: number | null;
   socket: Socket | null;
+  onGoBack: () => void;
+  socketConnected?: boolean;
+  onNewConversationStarted: (conversation: Conversation) => void; // Added new prop
 }
 
 interface OtherUserStatus {
@@ -25,14 +26,21 @@ interface OtherUserStatus {
   last_seen: string | null;
 }
 
-const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUserId, socket }) => {
+const ChatWindow: React.FC<ChatWindowProps> = ({
+  selectedConversation,
+  currentUserId,
+  socket,
+  socketConnected,
+  onGoBack,
+  onNewConversationStarted, // Destructure new prop
+}) => {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [loading, setLoading] = useState(false); // For initial message load
-  const [loadingOlder, setLoadingOlder] = useState(false); // For loading older messages
+  const [loading, setLoading] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [sending, setSending] = useState(false);
-  const { showToastNotification } = useNotification(); // Corrected to showToastNotification
+  const { showToastNotification } = useNotification();
   const [otherUserStatus, setOtherUserStatus] = useState<OtherUserStatus | null>(null);
-  const selectedConversationRef = useRef<Conversation | null>(null); // Ref for selectedConversation
+  const selectedConversationRef = useRef<Conversation | null>(null);
 
   // Pagination for messages
   const [currentPage, setCurrentPage] = useState(1);
@@ -60,7 +68,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
         setHasMoreMessages(false);
       }
       setMessages(prevMessages => initialLoad ? newMessages : [...newMessages, ...prevMessages]);
-      if(initialLoad) setCurrentPage(1); // Reset current page on initial load
+      if (initialLoad) setCurrentPage(1); // Reset current page on initial load
     } catch (err: any) { // Explicitly type err
       showToastNotification(`Error loading messages: ${err.message || 'Unknown error'}`, 'error');
     } finally {
@@ -70,30 +78,29 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
         setLoadingOlder(false);
       }
     }
-  }, [messagesPerPage, showToastNotification]); // Added showToastNotification to dependencies
+  }, [messagesPerPage, showToastNotification]);
 
   useEffect(() => {
+    selectedConversationRef.current = selectedConversation; // Update ref for listeners
+
     if (selectedConversation && typeof selectedConversation.conversation_id === 'number') {
       setMessages([]);
       setHasMoreMessages(true);
-      setCurrentPage(1); // Reset page to 1 for new conversation
+      setCurrentPage(1);
       loadMessages(selectedConversation.conversation_id, 1, true);
 
-      if (socket && tokenData?.token) {
+      if (socket && socketConnected && tokenData?.token) {
         console.log(`ChatWindow: Emitting 'join_conversation' for ${selectedConversation.conversation_id}`);
         socket.emit('join_conversation', {
           conversation_id: selectedConversation.conversation_id,
-          token: tokenData.token // Send token for authentication
+          token: tokenData.token,
         });
       }
 
-      // Fetch initial online status for the new selected conversation's other user
-      // This part is moved inside the `if` block as it depends on selectedConversation.other_user_id
       if (selectedConversation.other_user_id) {
         const fetchStatus = async () => {
           try {
-            console.log(`ChatWindow: Fetching status for user ${selectedConversation.other_user_id}`);
-            const statusData = await api.getUserChatStatus(selectedConversation.other_user_id);
+            const statusData = await api.getUserChatStatus(selectedConversation.other_user_id as number); // Cast as number
             setOtherUserStatus(statusData);
           } catch (err: any) {
             console.error("Failed to fetch user status:", err);
@@ -103,40 +110,49 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
         };
         fetchStatus();
       } else {
-        // If other_user_id is not available (though it should be for a valid conversation)
         setOtherUserStatus(null);
       }
-
+    } else if (selectedConversation && selectedConversation.conversation_id === null) {
+      // This is a provisional conversation, don't load messages from API yet.
+      setMessages([]);
+      setHasMoreMessages(false); // No messages from API to load yet
+      setCurrentPage(1);
+      // Fetch status for the other user in the provisional conversation
+      if (selectedConversation.other_user_id) {
+        const fetchStatus = async () => {
+          try {
+            const statusData = await api.getUserChatStatus(selectedConversation.other_user_id as number); // Cast as number
+            setOtherUserStatus(statusData);
+          } catch (err: any) {
+            console.error("Failed to fetch user status for provisional chat:", err);
+            setOtherUserStatus(null); // Still set to null on error
+          }
+        };
+        fetchStatus();
+      } else {
+        setOtherUserStatus(null);
+      }
     } else {
       setMessages([]);
-      // Reset other relevant states if necessary
-      setHasMoreMessages(false); // No messages to load if no conversation
-      setCurrentPage(1); // Reset page
-      setOtherUserStatus(null); // Reset user status
-      // If there are other states that depend on a selected conversation, reset them here
-      // For example, if you had a state for 'typing indicator', reset it.
+      setHasMoreMessages(false);
+      setCurrentPage(1);
+      setOtherUserStatus(null);
     }
-
-    // No specific socket cleanup for 'leave_conversation' here,
-    // as joining a new room effectively changes context on server if rooms are exclusive per client session
-    // or server handles disconnects.
-    selectedConversationRef.current = selectedConversation; // Update ref, this can stay outside the main `if`
-
-  }, [selectedConversation, socket, loadMessages, tokenData?.token, showToastNotification]);
+  }, [selectedConversation, socket, socketConnected, loadMessages, tokenData?.token, showToastNotification]);
 
   useEffect(() => {
-    if (selectedConversation && socket && !loading && messages.length > 0) {
+    if (selectedConversation && typeof selectedConversation.conversation_id === 'number' && socket && socketConnected && !loading && messages.length > 0) {
       console.log(`ChatWindow: Emitting 'mark_as_read' for conversation ${selectedConversation.conversation_id}`);
-      socket.emit('mark_as_read', { 
+      socket.emit('mark_as_read', {
         conversation_id: selectedConversation.conversation_id,
-        token: tokenData?.token 
+        token: tokenData?.token
       });
     }
-  }, [selectedConversation, socket, loading, messages, tokenData?.token]);
+  }, [selectedConversation, socket, socketConnected, loading, messages, tokenData?.token]);
 
   // Listen for real-time online/offline status updates
   useEffect(() => {
-    if (!socket) return;
+    if (!socket || !socketConnected) return;
 
     const handleUserOnline = (data: { user_id: number }) => {
       console.log("ChatWindow: user_online event", data, "current other_user_id:", selectedConversationRef.current?.other_user_id);
@@ -161,10 +177,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
       socket.off('user_offline', handleUserOffline);
       console.log(`ChatWindow: 'user_online'/'user_offline' listeners detached.`);
     };
-  }, [socket]); // Depends only on socket, selectedConversationRef is used to check current relevance
+  }, [socket, socketConnected]); // Depends only on socket, selectedConversationRef is used to check current relevance
 
   useEffect(() => {
-    if (!socket || !selectedConversation) return;
+    if (!socket || !socketConnected || !selectedConversation) return;
 
     const handleNewMessage = (newMessage: Message) => {
       console.log('SocketIO: new_message received in ChatWindow', newMessage);
@@ -182,7 +198,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
       socket.off('new_message', handleNewMessage);
       console.log(`ChatWindow: 'new_message' listener detached for conv ${selectedConversation.conversation_id}.`);
     };
-  }, [socket, selectedConversation]); // Rerun when selectedConversation changes to listen to correct new_message
+  }, [socket, socketConnected, selectedConversation]); // Rerun when selectedConversation changes to listen to correct new_message
 
   // Removed getFileType as file type is now determined by backend.
   // const getFileType = (fileType: string): Message['file_type'] => { ... };
@@ -191,9 +207,22 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
     if (!selectedConversation || !currentUserId || !messageText.trim()) return;
     setSending(true);
     try {
-      // Text message: content is messageText, fileUrl, fileName, fileType are undefined
-      await api.sendMessage(selectedConversation.conversation_id, messageText.trim());
-      // Optimistic update is handled by socket event from backend
+      if (selectedConversation.conversation_id === null) {
+        // This is a new conversation
+        if (!selectedConversation.other_user_id) {
+            showToastNotification("Error: Recipient user ID is missing for new conversation.", "error");
+            setSending(false);
+            return;
+        }
+        const returnedConversation = await api.startConversationAndSendMessage(
+          selectedConversation.other_user_id, // This must be a number
+          messageText.trim()
+        );
+        onNewConversationStarted(returnedConversation); // Update parent state
+      } else {
+        // Existing conversation
+        await api.sendMessage(selectedConversation.conversation_id, messageText.trim());
+      }
     } catch (err: any) {
       showToastNotification(`Error sending message: ${err.message || 'Unknown error'}`, 'error');
     } finally {
@@ -207,28 +236,37 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
     showToastNotification(`Uploading ${file.name}...`, 'info');
 
     try {
-      // Step 1: Upload the file
-      const uploadResponse = await api.uploadChatFile(file, selectedConversation.conversation_id);
+      if (selectedConversation.conversation_id === null) {
+        // New conversation: use startConversationAndSendMessage with file
+        if (!selectedConversation.other_user_id) {
+            showToastNotification("Error: Recipient user ID is missing for new conversation.", "error");
+            setSending(false);
+            return;
+        }
+        // Re-adjusting to current api.ts: upload first, then call startConversationAndSendMessage with URLs
+        const uploadResponse = await api.uploadChatFile(file, selectedConversation.other_user_id as number); // Temporarily pass other_user_id for upload path
+        showToastNotification(`${file.name} uploaded. Starting conversation...`, 'info');
+        const returnedConversation = await api.startConversationAndSendMessage(
+            selectedConversation.other_user_id as number,
+            file.name, // Content of the message (e.g., filename)
+            uploadResponse.file_url,
+            uploadResponse.file_name,
+            uploadResponse.file_type
+        );
+        onNewConversationStarted(returnedConversation);
 
-      console.log('File uploaded, API response:', uploadResponse); // Use app.logger if available, else console.log
-      showToastNotification(`${file.name} uploaded. Sending message...`, 'info');
-
-      // Step 2: Send the message with file details from uploadResponse
-      // The 'content' for a file message could be the filename, or empty if the UI handles it.
-      // Using original file.name as content for now, as backend might expect content.
-      await api.sendMessage(
-        selectedConversation.conversation_id,
-        file.name, // Content of the message (e.g., filename)
-        uploadResponse.file_url,
-        uploadResponse.file_name, // This is the original_filename from backend response
-        uploadResponse.file_type
-      );
-      // Message is considered sent. UI will update via socket 'new_message' event.
-      // No optimistic UI update here to rely on backend + socket for consistency.
-      // If immediate feedback is desired, a temporary local message could be added,
-      // then replaced/confirmed by the socket event (matching by a temporary ID).
-      // For now, we assume the socket event will follow shortly.
-
+      } else {
+        // Existing conversation
+        const uploadResponse = await api.uploadChatFile(file, selectedConversation.conversation_id);
+        showToastNotification(`${file.name} uploaded. Sending message...`, 'info');
+        await api.sendMessage(
+          selectedConversation.conversation_id,
+          file.name,
+          uploadResponse.file_url,
+          uploadResponse.file_name,
+          uploadResponse.file_type
+        );
+      }
     } catch (err: any) {
       console.error("Error in handleSendFile:", err);
       showToastNotification(`Error sending file ${file.name}: ${err.message || 'Unknown error'}`, 'error');
@@ -236,12 +274,12 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
       setSending(false);
     }
   };
-
+  
   const handleLoadOlder = () => {
-    if (selectedConversation && hasMoreMessages && !loadingOlder) { // Check loadingOlder
-        const nextPage = currentPage + 1;
-        loadMessages(selectedConversation.conversation_id, nextPage, false); // initialLoad = false
-        setCurrentPage(nextPage); // Update current page state
+    if (selectedConversation && typeof selectedConversation.conversation_id === 'number' && hasMoreMessages && !loadingOlder) {
+      const nextPage = currentPage + 1;
+      loadMessages(selectedConversation.conversation_id, nextPage, false); // initialLoad = false
+      setCurrentPage(nextPage); // Update current page state
     }
   };
 
@@ -253,19 +291,29 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
     );
   }
 
+  // Determine if the header should show provisional state or actual data
+  const headerUsername = selectedConversation.other_username || "New Chat";
+  const headerProfilePic = selectedConversation.other_profile_picture_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(headerUsername)}&background=random&size=40&color=fff`;
+
   return (
-    // Use h-full and flex-col to make ChatWindow fill its container from ChatMain
     <div className="flex flex-col h-full bg-white dark:bg-gray-800 shadow-md">
-      <header className="p-3 sm:p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700"> {/* Slight bg change for header */}
-        <div className="flex items-center space-x-3">
+      <header className="p-3 sm:p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700 flex items-center justify-between">
+        <div className="flex items-center space-x-2 sm:space-x-3">
+          <button
+            onClick={onGoBack}
+            className="p-1.5 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            aria-label="Go back to conversation list"
+          >
+            <ArrowLeft size={20} className="sm:w-5 sm:h-5" />
+          </button>
           <img
-            src={selectedConversation.other_profile_picture_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(selectedConversation.other_username)}&background=random&size=40&color=fff`}
-            alt={selectedConversation.other_username}
+            src={headerProfilePic}
+            alt={headerUsername}
             className="w-8 h-8 sm:w-10 sm:h-10 rounded-full object-cover"
           />
           <div className="flex flex-col">
-            <h2 className="text-base sm:text-lg font-semibold text-gray-800 dark:text-gray-100">
-              {selectedConversation.other_username}
+            <h2 className="text-base sm:text-lg font-semibold text-gray-800 dark:text-gray-100 truncate">
+              {headerUsername}
             </h2>
             {otherUserStatus && (
               <div className="flex items-center space-x-1">
@@ -279,27 +327,48 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
         </div>
       </header>
 
-      {loading && messages.length === 0 && (
-        <div className="flex-1 flex items-center justify-center">
-          <Spinner size="lg" />
-        </div>
+      {/* Content Area - This div should be flex-1 to take available space */}
+      <div className="flex-1 overflow-y-auto">
+        {loading && messages.length === 0 && selectedConversation.conversation_id !== null && (
+          <div className="flex-1 flex items-center justify-center">
+            <Spinner size="lg" />
+          </div>
+        )}
+        {selectedConversation.conversation_id === null && messages.length === 0 && !loading && (
+          <div className="flex-1 flex items-center justify-center p-4">
+            <p className="text-gray-400 dark:text-gray-300 text-md text-center">
+              Type your first message to start the conversation with {headerUsername}.
+            </p>
+          </div>
+        )}
+        {messages.length > 0 && (
+          <MessageList
+            key={selectedConversation.conversation_id ?? 'provisional-' + selectedConversation.other_user_id}
+            messages={messages}
+            currentUserId={currentUserId}
+            onLoadOlderMessages={handleLoadOlder}
+            hasMoreOlderMessages={hasMoreMessages} 
+            isLoadingOlder={loadingOlder}
+          />
+        )}
+        {/* Placeholder for empty, non-provisional, non-loading chat */}
+        {!loading && messages.length === 0 && selectedConversation.conversation_id !== null && (
+           <div className="flex-1 flex items-center justify-center p-4">
+              <p className="text-gray-400 dark:text-gray-300 text-md text-center">
+                  No messages yet in this conversation. Send a message to get started!
+              </p>
+          </div>
+        )}
+      </div>
+
+      {/* Input Area - Should always be visible if a conversation is selected */}
+      {selectedConversation && (
+        <ChatInput
+          onSendMessage={handleSendMessage}
+          onSendFile={handleSendFile}
+          disabled={sending || !socket || !socketConnected}
+        />
       )}
-      {/* {error && <p className="p-4 text-center text-red-500 dark:text-red-400">Error: {error}</p>} Replaced by toast */}
-
-      {/* MessageList should be flex-1 to take up available space */}
-      <MessageList
-        messages={messages} // ensure this is the correctly ordered list (oldest at top)
-        currentUserId={currentUserId}
-        onLoadOlderMessages={handleLoadOlder}
-        hasMoreOlderMessages={hasMoreMessages}
-        isLoadingOlder={loadingOlder}
-      />
-
-      <ChatInput
-        onSendMessage={handleSendMessage}
-        onSendFile={handleSendFile}
-        disabled={sending || !socket?.connected}
-      />
     </div>
   );
 };

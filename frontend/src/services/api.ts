@@ -596,6 +596,43 @@ export async function sendMessage(
     throw error;
   }
 }
+
+// Add the new function here:
+export async function startConversationAndSendMessage(
+  recipientUserId: number,
+  content: string,
+  fileUrl?: string,
+  fileName?: string,
+  fileType?: string
+): Promise<ChatConversation> { // Assuming backend returns the full conversation object
+  try {
+    const payload: any = {
+      recipient_id: recipientUserId,
+      content: content
+    };
+    if (fileUrl && fileName && fileType) {
+      payload.file_url = fileUrl;
+      payload.file_name = fileName;
+      payload.file_type = fileType;
+    }
+
+    const response = await fetch(`${API_BASE_URL}/api/chat/conversations/start_and_send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify(payload),
+    });
+    // Assuming handleApiError will parse the JSON response and return it as ChatConversation
+    // The backend should return the full conversation object, potentially including the first message as 'last_message'
+    return handleApiError(response, 'Failed to start conversation and send message');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error(`Error starting conversation with user ${recipientUserId}:`, error);
+    throw error;
+  }
+}
 // --- End Chat API Functions ---
 
 // --- Super Admin File Permission Management Functions ---
@@ -2707,6 +2744,43 @@ export const createAnnouncement = async (message: string): Promise<CreateAnnounc
   }
 };
 // --- End Announcement API ---
+
+// --- Chat Batch Clear API Function ---
+export interface ClearBatchConversationsResultDetails {
+  conversation_id: number;
+  status: string; // e.g., "cleared", "skipped", "error"
+  messages_deleted: number;
+  files_deleted: number;
+  error?: string | null;
+}
+export interface ClearBatchConversationsResponse {
+  status: string; // "success" or "failed"
+  details?: ClearBatchConversationsResultDetails[];
+  message?: string; // Overall message, especially on failure
+  msg?: string; // Alternative for message, ensure consistency with handleApiError
+}
+
+export async function clearBatchConversations(conversationIds: number[]): Promise<ClearBatchConversationsResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/chat/conversations/clear-batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ conversation_ids: conversationIds }),
+    });
+    // The handleApiError will throw for non-OK responses.
+    // The expected success response (200 OK) will be parsed here.
+    return handleApiError(response, 'Failed to clear batch conversations');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error clearing batch conversations:', error);
+    // Re-throw to be caught by the calling component, which will handle UI updates (e.g., toast)
+    throw error;
+  }
+}
+// --- End Chat Batch Clear API Function ---
 
 export const getUserChatStatus = async (userId: number): Promise<{ is_online: boolean; last_seen: string | null }> => {
   try {

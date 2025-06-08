@@ -25,21 +25,18 @@ export interface Message {
 }
 
 export interface Conversation {
-  conversation_id: number; // Matches 'id' from conversations table, aliased in get_user_conversations
+  conversation_id: number | null; // Allow null
   user1_id: number;
   user2_id: number;
-  created_at: string; // ISO string date for conversation creation
-
-  // Fields from get_user_conversations
   other_user_id: number;
   other_username: string;
-  other_profile_picture?: string | null; // Filename
-  other_profile_picture_url?: string | null; // Constructed URL
-
-  last_message_content?: string | null;
-  last_message_created_at?: string | null; // ISO string date
-  last_message_sender_id?: number | null;
-  unread_messages_count?: number;
+  other_profile_picture_url: string | null;
+  other_profile_picture?: string | null; // Optional: filename
+  last_message_content: string | null;
+  last_message_created_at: string | null; // ISO string
+  last_message_sender_id: number | null;
+  unread_messages_count: number;
+  created_at: string | null; // ISO string, allow null for provisional
 }
 
 // For API responses that include pagination

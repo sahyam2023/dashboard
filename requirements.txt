@@ -9,7 +9,7 @@ Flask-SQLAlchemy
 Werkzeug
 APScheduler
 click
-waitress
+eventlet
 thefuzz
 python-Levenshtein
 flask-socketio

@@ -215,7 +215,7 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
       setIsVmsOrVaSoftware(isCurrentSoftwareVmsOrVa); // Set based on patchToEdit's software
 
       const defaultValues: Partial<PatchFormData> = {
-        selectedSoftwareId: patchToEdit.software_id.toString(),
+        selectedSoftwareId: (watchedSoftwareId && watchedSoftwareId !== patchToEdit.software_id.toString()) ? watchedSoftwareId : patchToEdit.software_id.toString(),
         patchName: patchToEdit.patch_name,
         releaseDate: patchToEdit.release_date ? patchToEdit.release_date.split('T')[0] : '',
         description: patchToEdit.description || '',
@@ -232,19 +232,24 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
       };
 
       // Version pre-filling logic
-      if (patchToEdit.version_id && patchToEdit.software_id.toString() === watchedSoftwareId && versionsList.length > 0) {
-        const existingVersionInList = versionsList.find(v => v.id === patchToEdit.version_id);
-        if (existingVersionInList) {
-          defaultValues.selectedVersionId = patchToEdit.version_id.toString();
-          defaultValues.typedVersionString = patchToEdit.version_number; // Keep showing original version string
-        } else {
-          defaultValues.selectedVersionId = CREATE_NEW_VERSION_SENTINEL;
-          defaultValues.typedVersionString = patchToEdit.version_number;
+      if (watchedSoftwareId === patchToEdit.software_id.toString()) {
+        // Only prefill version details if the software context is still the original one
+        if (patchToEdit.version_id && versionsList.length > 0) { // versionsList here is for the original software
+            const existingVersionInList = versionsList.find(v => v.id === patchToEdit.version_id);
+            if (existingVersionInList) {
+                defaultValues.selectedVersionId = patchToEdit.version_id.toString();
+                // defaultValues.typedVersionString = patchToEdit.version_number; // Keep original if version selected
+            } else {
+                defaultValues.selectedVersionId = CREATE_NEW_VERSION_SENTINEL;
+                defaultValues.typedVersionString = patchToEdit.version_number;
+            }
+        } else if (patchToEdit.version_number) { // No version_id, but there was a version_name
+            defaultValues.selectedVersionId = CREATE_NEW_VERSION_SENTINEL;
+            defaultValues.typedVersionString = patchToEdit.version_number;
         }
-      } else if (patchToEdit.version_number) {
-        defaultValues.selectedVersionId = CREATE_NEW_VERSION_SENTINEL;
-        defaultValues.typedVersionString = patchToEdit.version_number;
       }
+      // If watchedSoftwareId is different, selectedVersionId and typedVersionString would have been
+      // cleared by the other useEffect, and they won't be set here, which is correct.
       
       reset(defaultValues);
 

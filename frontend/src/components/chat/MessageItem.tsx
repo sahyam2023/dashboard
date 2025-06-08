@@ -68,7 +68,7 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, currentUserId }) => 
               <img
                 src={imageSrc} // Use blob URL for display
                 alt={message.file_name || 'Image attachment'}
-                className="max-w-full h-auto rounded-lg object-contain max-h-64 sm:max-h-80"
+                className="max-w-md md:max-w-lg h-auto rounded-lg object-contain max-h-96"
               />
             </a>
           );

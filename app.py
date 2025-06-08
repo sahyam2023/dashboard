@@ -1,3 +1,5 @@
+import eventlet
+eventlet.monkey_patch()
 #app.py
 
 import os
@@ -16,6 +18,9 @@ from functools import wraps
 # import cProfile # Removed
 # import pstats # Removed
 # import io # Removed
+# import eventlet # Moved to top
+import eventlet.wsgi # Keeping this here as per instruction
+# eventlet.monkey_patch() # Moved to top
 import random
 import shutil # Added for file replication
 import sys # Added for PyInstaller path handling
@@ -37,7 +42,7 @@ from tempfile import NamedTemporaryFile
 import database # Your database.py helper
 from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
-from waitress import serve
+# from waitress import serve # Removed Waitress
 from flask_socketio import SocketIO, join_room, leave_room, emit
 
 # --- Helper function for PyInstaller ---
@@ -162,7 +167,7 @@ socketio_cors_origins = [
     "http://localhost:5173", "http://localhost:7000", "http://127.0.0.1:7000",
     "http://192.168.3.40:7000", "http://192.168.3.129:7000", "http://192.168.1.100:7000"
 ]
-socketio = SocketIO(app, cors_allowed_origins=socketio_cors_origins, async_mode='threading') # async_mode='threading' for waitress
+socketio = SocketIO(app, cors_allowed_origins=socketio_cors_origins, async_mode='eventlet') # Changed async_mode to eventlet
 
 # App Configuration
 app.config['DATABASE'] = os.path.join(INSTANCE_FOLDER_PATH, 'software_dashboard.db') # DB in instance folder
@@ -220,7 +225,8 @@ import flask_jwt_extended.exceptions # For specific JWT exceptions
 from database import (
     create_conversation, send_message, get_messages,
     get_user_conversations, get_conversation_by_users,
-    mark_messages_as_read, get_conversation_by_id, get_message_by_id
+    mark_messages_as_read, get_conversation_by_id, get_message_by_id,
+    get_total_unread_messages, get_online_users_count,
 )
 from flask import Blueprint
 
@@ -2036,7 +2042,7 @@ def login():
             )
             db.commit()
             app.logger.info(f"User {user['id']} status set to online and last_seen updated.")
-            socketio.emit('user_online', {'user_id': user['id']}, broadcast=True)
+            socketio.emit('user_online', {'user_id': user['id']})
         except Exception as e_status:
             app.logger.error(f"Error updating user online status for user {user['id']}: {e_status}")
         # --- End Real-time Online Status Update ---
@@ -6721,6 +6727,8 @@ def logout():
         target_id=current_user_id, # User who logged out
         details={'jti_blocklisted': jti}
     )
+    # Emit online users count after successful logout and status update
+    emit_online_users_count()
     return jsonify(msg="Logout successful, token revoked."), 200
     
 @app.route('/api/admin/versions/<int:version_id>', methods=['GET'])
@@ -9945,6 +9953,210 @@ def clear_all_user_notifications_api():
 # --- Chat API Endpoints ---
 chat_bp = Blueprint('chat_api', __name__, url_prefix='/api/chat')
 
+
+# --- Chat Batch Clear Endpoint ---
+@chat_bp.route('/conversations/clear-batch', methods=['POST'])
+@active_user_required
+def clear_batch_conversations():
+    current_user_id = int(get_jwt_identity())
+    db = get_db()
+
+    data = request.get_json()
+    if not data or 'conversation_ids' not in data:
+        return jsonify(msg="Missing 'conversation_ids' in request payload."), 400
+
+    conversation_ids_to_clear = data.get('conversation_ids')
+    if not isinstance(conversation_ids_to_clear, list) or not all(isinstance(cid, int) for cid in conversation_ids_to_clear):
+        return jsonify(msg="'conversation_ids' must be a list of integers."), 400
+
+    if not conversation_ids_to_clear:
+        return jsonify(msg="No conversation IDs provided to clear."), 400
+
+    overall_success = True
+    # This list will hold results for conversations that were attempted (i.e., user is a member)
+    processed_conversation_details = []
+
+    try:
+        db.execute("BEGIN")  # Start transaction
+
+        for conv_id in conversation_ids_to_clear:
+            # Initialize result for each conversation for detailed feedback
+            current_conv_result = {
+                "conversation_id": conv_id,
+                "status": "skipped_authorization",  # Default status
+                "messages_deleted": 0,
+                "files_deleted": 0,
+                "error_details": None  # For specific errors like file not deleted
+            }
+
+            # Verify User Membership
+            conversation = database.get_conversation_by_id(db, conv_id)
+            if not conversation:
+                current_conv_result["error_details"] = "Conversation not found."
+                # overall_success remains true, but this specific one is skipped, not a batch-halting error
+                app.logger.warning(f"User {current_user_id} attempted to clear non-existent conversation {conv_id}.")
+                processed_conversation_details.append(current_conv_result)
+                continue
+
+            if current_user_id not in (conversation['user1_id'], conversation['user2_id']):
+                current_conv_result["error_details"] = "User not authorized for this conversation."
+                # overall_success remains true, specific one skipped
+                log_audit_action(
+                    action_type='CLEAR_CONVERSATION_AUTH_FAILED',
+                    target_table='conversations', target_id=conv_id, user_id=current_user_id,
+                    details={'reason': 'User not part of conversation'}
+                )
+                app.logger.warning(f"User {current_user_id} unauthorized attempt to clear conversation {conv_id}.")
+                processed_conversation_details.append(current_conv_result)
+                continue
+            
+            # If authorized, change status from default "skipped_authorization"
+            current_conv_result["status"] = "processing"
+            app.logger.info(f"Processing clear for conversation_id: {conv_id}")
+
+            # 2. Fetch User's Files
+            user_files_to_delete = []
+            try:
+                user_files_cursor = db.execute(
+                    "SELECT file_name FROM messages WHERE conversation_id = ? AND file_name IS NOT NULL",
+                    (conv_id,)
+                )
+                user_files_to_delete = [row['file_name'] for row in user_files_cursor.fetchall()]
+            except Exception as e_fetch_files:
+                app.logger.error(f"Error fetching files for conv {conv_id}, user {current_user_id}: {e_fetch_files}", exc_info=True)
+                current_conv_result["status"] = "error_fetching_files"
+                current_conv_result["error_details"] = f"Error fetching file list: {str(e_fetch_files)}"
+                overall_success = False  # This is a DB error, should halt the batch
+                processed_conversation_details.append(current_conv_result)
+                continue  # Skip to next conversation_id, but batch will be rolled back
+
+            # 3. Attempt User's File Deletion
+            all_files_successfully_deleted_for_conv = True  # For this specific conversation
+            files_deleted_this_conversation = 0
+            conversation_upload_path = os.path.join(app.config['CHAT_UPLOAD_FOLDER'], str(conv_id))
+            app.logger.info(f"Constructed conversation_upload_path: '{conversation_upload_path}' for conv_id: {conv_id}")
+            
+            if user_files_to_delete:  # Only proceed if there are files to delete (fetched for the whole conversation)
+                if not os.path.exists(conversation_upload_path):
+                    app.logger.warning(f"Upload path {conversation_upload_path} not found for conversation {conv_id}, but files {user_files_to_delete} were expected (for entire conversation).")
+                    # Consider all files "successfully deleted" if the folder doesn't exist.
+                else:
+                    for file_name_from_db in user_files_to_delete: # file_name_from_db is now the unique name
+                        app.logger.info(f"Raw file_name from DB (should be unique name): '{file_name_from_db}' for conv_id: {conv_id}")
+                        if not file_name_from_db:
+                            app.logger.warning(f"Empty file_name found in DB for conv_id: {conv_id}. Skipping.") # Changed to warning
+                            continue
+                        
+                        file_path_to_delete = os.path.join(conversation_upload_path, file_name_from_db)
+                        app.logger.info(f"Constructed file_path_to_delete: '{file_path_to_delete}' for conv_id: {conv_id}")
+                        path_exists = os.path.exists(file_path_to_delete)
+                        app.logger.info(f"os.path.exists(file_path_to_delete) result: {path_exists} for '{file_path_to_delete}'")
+
+                        if path_exists:
+                            try:
+                                app.logger.info(f"Attempting os.remove for: '{file_path_to_delete}'")
+                                os.remove(file_path_to_delete)
+                                files_deleted_this_conversation += 1
+                                app.logger.info(f"User {current_user_id} (initiator) caused deletion of file '{file_path_to_delete}' from conversation {conv_id}.")
+                            except OSError as e_remove:
+                                app.logger.error(f"CRITICAL: Failed to delete file '{file_path_to_delete}' (conversation {conv_id}): {e_remove}", exc_info=True)
+                                all_files_successfully_deleted_for_conv = False # Mark failure for this conversation
+                                overall_success = False  # Critical: A file system delete error
+                                current_conv_result["error_details"] = (current_conv_result.get("error_details") or "") + f"Failed to delete file {file_name_from_db}; "
+                                # No break here, attempt to delete other files for this conversation
+                        else:
+                            app.logger.warning(f"File '{file_name_from_db}' listed in DB for conversation {conv_id}, but not found at '{file_path_to_delete}'. Considered 'deleted'.")
+            
+            current_conv_result["files_deleted"] = files_deleted_this_conversation
+
+            # 4. Attempt Message Deletion (Conditional on all files for the conversation being handled)
+            messages_deleted_this_conversation = 0
+            if all_files_successfully_deleted_for_conv: # Check if all files for *this conversation* were handled
+                try:
+                    # This function needs to be adjusted or replaced if it only clears for *current_user_id*.
+                    # For now, assuming it clears all messages in the conversation if the user is authorized.
+                    # If clear_messages_for_user_in_conversation only soft-deletes or hides for one user,
+                    # then a new function like `database.clear_all_messages_in_conversation(db, conv_id)` would be needed.
+                    # Sticking to the existing function name as per the prompt's context, but noting this potential issue.
+                    messages_deleted_this_conversation = database.clear_messages_for_user_in_conversation(db, conv_id, current_user_id)
+                    # To truly clear for all, it might be:
+                    # messages_deleted_this_conversation = database.clear_all_messages_in_conversation(db, conv_id)
+                    app.logger.info(f"Cleared {messages_deleted_this_conversation} messages for conv {conv_id} by initiating user {current_user_id}.")
+                except Exception as e_msg_delete:
+                    app.logger.error(f"Error clearing messages for conv {conv_id} (initiated by user {current_user_id}): {e_msg_delete}", exc_info=True)
+                    current_conv_result["status"] = "error_message_deletion"
+                    current_conv_result["error_details"] = (current_conv_result.get("error_details") or "") + f"Message deletion error: {str(e_msg_delete)}; "
+                    overall_success = False  # DB error during message deletion
+            else:
+                # Messages not deleted due to prior file deletion failure for this conversation
+                current_conv_result["status"] = "file_deletion_failed_messages_skipped"
+                current_conv_result["error_details"] = (current_conv_result.get("error_details") or "") + "Messages not cleared due to file deletion failure for this conversation; "
+                # overall_success is already False because all_files_successfully_deleted_for_conv was false
+            
+            current_conv_result["messages_deleted"] = messages_deleted_this_conversation
+
+            # 5. Attempt Conversation Folder Deletion (Conditional Cleanup - if all files in folder are gone)
+            if all_files_successfully_deleted_for_conv: # Only try to cleanup folder if all files in it were processed
+                app.logger.info(f"Checking conversation folder for deletion: '{conversation_upload_path}' for conv_id: {conv_id}")
+                folder_exists = os.path.exists(conversation_upload_path)
+                app.logger.info(f"os.path.exists(conversation_upload_path) result: {folder_exists} for '{conversation_upload_path}'")
+                if folder_exists:
+                    folder_content = os.listdir(conversation_upload_path)
+                    app.logger.info(f"os.listdir(conversation_upload_path) result: {folder_content} for '{conversation_upload_path}'")
+                    if not folder_content:
+                        try:
+                            app.logger.info(f"Attempting shutil.rmtree for empty folder: '{conversation_upload_path}'")
+                            shutil.rmtree(conversation_upload_path)
+                            app.logger.info(f"Removed empty conversation upload folder: {conversation_upload_path} for conv {conv_id}.")
+                        except OSError as e_rmdir:
+                            app.logger.error(f"Error removing empty conversation folder '{conversation_upload_path}' for conv {conv_id}: {e_rmdir}", exc_info=True)
+                            # This specific error does not set overall_success to False.
+                else:
+                    app.logger.info(f"Conversation folder '{conversation_upload_path}' does not exist, skipping rmtree for conv_id: {conv_id}")
+            
+            # 6. Update conversation_result['status']
+            if current_conv_result["status"] == "processing":  # If no specific errors set status above
+                if all_files_successfully_deleted_for_conv:
+                    current_conv_result["status"] = "cleared"
+                else:
+                    current_conv_result["status"] = "file_deletion_errors_occurred"
+
+            processed_conversation_details.append(current_conv_result)
+            # Log individual success if applicable (even if overall batch might fail later)
+            if current_conv_result["status"] == "cleared":
+                log_audit_action(
+                    action_type='CLEAR_CONVERSATION_SUCCESS', # Reflects successful clearing for this conversation
+                    target_table='conversations', target_id=conv_id, user_id=current_user_id,
+                    details={
+                        'messages_deleted': messages_deleted_this_conversation,
+                        'files_deleted_from_conversation': files_deleted_this_conversation, # Renamed for clarity
+                        'batch_operation': True,
+                        'final_status_for_conv': current_conv_result["status"]
+                    }
+                )
+            # If overall_success is false, this individual "success" will be rolled back.
+
+        if overall_success:
+            db.commit()
+            app.logger.info(f"User {current_user_id} successfully batch cleared conversations. Details: {processed_conversation_details}")
+            return jsonify({"status": "success", "details": processed_conversation_details}), 200
+        else:
+            db.rollback()
+            app.logger.warning(f"User {current_user_id} batch clear conversations had critical failures. Rolling back. Details: {processed_conversation_details}")
+            return jsonify({"status": "failed", "message": "One or more critical operations failed during batch clear. All changes have been rolled back.", "details": processed_conversation_details}), 400
+
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"Major exception during batch clear for user {current_user_id}, conversations {conversation_ids_to_clear}: {e}", exc_info=True)
+        # Construct details for any conversations that were being processed before the major exception
+        # This might be redundant if the loop already appended to processed_conversation_details
+        final_details_on_exception = processed_conversation_details
+        if not final_details_on_exception:  # If exception happened before loop or very early
+            final_details_on_exception = [{"conversation_id": cid, "status": "error_unexpected", "error_details": str(e)} for cid in conversation_ids_to_clear]
+        
+        return jsonify(msg=f"An unexpected server error occurred: {str(e)}", details=final_details_on_exception), 500
+    # --- End Chat Batch Clear Endpoint ---
+
 @chat_bp.route('/users', methods=['GET'])
 @active_user_required
 def list_chat_users():
@@ -10271,6 +10483,9 @@ def post_new_message(conversation_id):
         socketio.emit('new_message', message_data_for_socket, room=str(conversation_id)) 
         app.logger.info(f"Emitted 'new_message' to room 'conversation_{conversation_id}'")
 
+        # Emit unread chat count for the recipient
+        emit_unread_chat_count(recipient_id)
+
         return jsonify(message_dict_for_api_response), 201
     else:
         app.logger.error(f"Failed to send message in conversation {conversation_id} from user {current_user_id}")
@@ -10301,7 +10516,7 @@ def get_user_chat_status(target_user_id):
 
 # --- Chat File Upload Route ---
 @chat_bp.route('/upload_file', methods=['POST'])
-@active_user_required
+@active_user_required # Ensures user is logged in and active
 def upload_chat_file():
     current_user_id = int(get_jwt_identity())
     db = get_db()
@@ -10313,40 +10528,60 @@ def upload_chat_file():
     if file.filename == '':
         return jsonify(msg="No file selected for uploading."), 400
 
-    conversation_id_str = request.form.get('conversation_id')
-    if not conversation_id_str:
-        return jsonify(msg="conversation_id is required."), 400
+    # This is the ID passed from the frontend. It could be an actual conversation_id
+    # or (for a new chat) the other_user_id.
+    id_from_form_str = request.form.get('conversation_id')
+    if not id_from_form_str:
+        return jsonify(msg="conversation_id (or recipient_id for new chats) is required in form data."), 400
 
     try:
-        conversation_id = int(conversation_id_str)
+        id_from_form = int(id_from_form_str)
     except ValueError:
-        return jsonify(msg="Invalid conversation_id format."), 400
+        return jsonify(msg="Invalid conversation_id/recipient_id format. Must be an integer."), 400
 
-    # Verify user is part of the conversation
-    conversation = get_conversation_by_id(db, conversation_id)
-    if not conversation:
-        return jsonify(msg="Conversation not found."), 404
-    if current_user_id not in (conversation['user1_id'], conversation['user2_id']):
-        return jsonify(msg="You are not authorized to upload files to this conversation."), 403
+    path_segment_id_for_folder = None
+    is_provisional_upload = False
 
-    if file and allowed_file(file.filename): # Use existing allowed_file or a chat-specific one
+    # Try to fetch as an existing conversation
+    conversation = get_conversation_by_id(db, id_from_form)
+
+    if conversation:
+        # It's an existing conversation
+        if current_user_id not in (conversation['user1_id'], conversation['user2_id']):
+            return jsonify(msg="You are not authorized to upload files to this conversation."), 403
+        path_segment_id_for_folder = id_from_form # Use the actual conversation_id for the path
+        app.logger.info(f"Chat file upload: Existing conversation {path_segment_id_for_folder}. User {current_user_id} authorized.")
+    else:
+        # Conversation not found, assume id_from_form is a recipient_id for a new chat
+        is_provisional_upload = True
+        recipient_id_for_provisional = id_from_form
+
+        # Validate the recipient_id
+        recipient_user = find_user_by_id(recipient_id_for_provisional)
+        if not recipient_user or not recipient_user['is_active']:
+            return jsonify(msg="Recipient user for provisional chat not found or is inactive."), 404
+        if current_user_id == recipient_id_for_provisional:
+             return jsonify(msg="Cannot use self as recipient_id for provisional chat file upload."), 400
+
+        path_segment_id_for_folder = recipient_id_for_provisional # Use recipient_id for the path
+        app.logger.info(f"Chat file upload: Provisional chat. User {current_user_id} uploading for recipient {path_segment_id_for_folder}.")
+
+
+    if file and allowed_file(file.filename):
         original_filename = secure_filename(file.filename)
         file_extension = original_filename.rsplit('.', 1)[1].lower() if '.' in original_filename else ''
-
-        # Generate a unique filename
         unique_filename = f"{uuid.uuid4().hex[:12]}_{original_filename}"
 
-        # Create conversation-specific upload directory if it doesn't exist
-        conversation_upload_path = os.path.join(app.config['CHAT_UPLOAD_FOLDER'], str(conversation_id))
-        if not os.path.exists(conversation_upload_path):
-            os.makedirs(conversation_upload_path, exist_ok=True)
+        # Path uses path_segment_id_for_folder (either actual conv_id or recipient_id)
+        conversation_specific_upload_path = os.path.join(app.config['CHAT_UPLOAD_FOLDER'], str(path_segment_id_for_folder))
+        if not os.path.exists(conversation_specific_upload_path):
+            os.makedirs(conversation_specific_upload_path, exist_ok=True)
 
-        file_save_path = os.path.join(conversation_upload_path, unique_filename)
+        file_save_path = os.path.join(conversation_specific_upload_path, unique_filename)
 
         try:
             file.save(file_save_path)
 
-            # Determine file_type based on MIME type (similar to ChatWindow's getFileType)
             mime_type = file.mimetype
             file_type_category = 'binary' # Default
             if mime_type:
@@ -10359,37 +10594,36 @@ def upload_chat_file():
                 elif mime_type.startswith('application/') and ('doc' in mime_type or 'word' in mime_type or 'sheet' in mime_type or 'excel' in mime_type or 'powerpoint' in mime_type):
                     file_type_category = 'doc'
 
-            file_url_to_return = f"/files/chat_uploads/{conversation_id}/{unique_filename}"
+            # The URL returned will use the path_segment_id_for_folder
+            file_url_to_return = f"/files/chat_uploads/{path_segment_id_for_folder}/{unique_filename}"
 
             log_audit_action(
-                action_type='CHAT_FILE_UPLOAD',
-                target_table='messages', # Or a dedicated chat_files table if you make one
-                target_id=conversation_id, # Log against conversation for now
+                action_type='CHAT_FILE_UPLOADED_TO_PATH', # More specific audit log
+                target_table='chat_files_virtual', # Virtual table name for logging
+                target_id=path_segment_id_for_folder, # Log against the folder ID used
                 details={
                     'filename': original_filename,
                     'stored_as': unique_filename,
-                    'conversation_id': conversation_id,
-                    'file_type': file_type_category,
+                    'path_segment_id': path_segment_id_for_folder,
+                    'is_provisional': is_provisional_upload,
+                    'file_type_category': file_type_category,
                     'file_url': file_url_to_return
                 }
             )
 
             return jsonify({
                 "message": "File uploaded successfully",
-                "file_url": file_url_to_return,
-                "file_name": original_filename,
+                "file_url": file_url_to_return, # This URL is now based on recipient_id if provisional
+                "file_name": original_filename, # Original name for display
                 "file_type": file_type_category,
-                "file_extension": file_extension # Optional: useful for client-side icon display
+                "file_extension": file_extension
             }), 201
 
         except Exception as e:
             app.logger.error(f"Error saving chat file {original_filename} to {file_save_path}: {e}")
-            # Attempt to clean up partially saved file if error occurs
             if os.path.exists(file_save_path):
-                try:
-                    os.remove(file_save_path)
-                except Exception as e_clean:
-                    app.logger.error(f"Error cleaning up partially saved chat file {file_save_path}: {e_clean}")
+                try: os.remove(file_save_path)
+                except Exception as e_clean: app.logger.error(f"Error cleaning up partially saved chat file {file_save_path}: {e_clean}")
             return jsonify(msg="Error saving uploaded file."), 500
     else:
         return jsonify(msg="File type not allowed."), 400
@@ -10434,6 +10668,143 @@ def serve_chat_file(conversation_id, filename):
         return jsonify(msg="File not found on server."), 404
         
     return send_from_directory(directory_path, filename, as_attachment=False)
+
+@chat_bp.route('/conversations/start_and_send', methods=['POST'])
+@active_user_required
+def start_conversation_and_send_message():
+    current_user_id = int(get_jwt_identity())
+    db = get_db()
+
+    data = request.get_json()
+    if not data:
+        return jsonify(msg="Missing JSON data"), 400
+
+    recipient_id = data.get('recipient_id')
+    content = data.get('content', '').strip() # Default to empty if not present
+    file_name = data.get('file_name')
+    file_url = data.get('file_url')
+    file_type = data.get('file_type')
+
+    if not recipient_id or not isinstance(recipient_id, int):
+        return jsonify(msg="recipient_id (integer) is required."), 400
+
+    if not content and not file_url: # Must have content or a file
+        return jsonify(msg="Message content or a file is required."), 400
+
+    if file_url and (not file_name or not file_type):
+        return jsonify(msg="file_name and file_type are required when file_url is provided."), 400
+
+    if current_user_id == recipient_id:
+        return jsonify(msg="Cannot start a conversation with yourself."), 400
+
+    recipient_user = find_user_by_id(recipient_id) # find_user_by_id is globally available
+    if not recipient_user or not recipient_user['is_active']:
+        return jsonify(msg="Recipient user not found or is inactive."), 404
+
+    # 1. Create or get conversation
+    conversation_row = create_conversation(db, current_user_id, recipient_id)
+    if not conversation_row:
+        app.logger.error(f"Failed to create/get conversation between {current_user_id} and {recipient_id}")
+        return jsonify(msg="Failed to create or get conversation."), 500
+
+    actual_conversation_id = conversation_row['id']
+
+    # 2. Send the message
+    new_message_row = send_message(db, actual_conversation_id, current_user_id, recipient_id, content, file_name, file_url, file_type)
+    if not new_message_row:
+        app.logger.error(f"Failed to send message in new/existing conversation {actual_conversation_id}")
+        return jsonify(msg="Failed to send message."), 500
+
+    # 3. Prepare the conversation object to return
+    user_conversations_raw = get_user_conversations(db, current_user_id)
+    updated_conversation_to_return = None
+    for conv_raw in user_conversations_raw:
+        if conv_raw['conversation_id'] == actual_conversation_id:
+            conv_dict = dict(conv_raw)
+            last_msg_ts_str = conv_dict.get('last_message_created_at')
+            if isinstance(last_msg_ts_str, str) and last_msg_ts_str:
+                try:
+                    naive_dt = None
+                    try: naive_dt = datetime.strptime(last_msg_ts_str, '%Y-%m-%d %H:%M:%S.%f')
+                    except ValueError: naive_dt = datetime.strptime(last_msg_ts_str, '%Y-%m-%d %H:%M:%S')
+                    if naive_dt:
+                        utc_aware_dt = UTC.localize(naive_dt)
+                        ist_aware_dt = utc_aware_dt.astimezone(IST)
+                        conv_dict['last_message_created_at'] = ist_aware_dt.isoformat()
+                except Exception as e_ts_conv:
+                     app.logger.error(f"Timestamp conversion error for start_and_send (conv {actual_conversation_id}): {e_ts_conv}")
+
+            if conv_dict.get('other_profile_picture'):
+                conv_dict['other_profile_picture_url'] = f"/profile_pictures/{conv_dict['other_profile_picture']}"
+            else:
+                conv_dict['other_profile_picture_url'] = None
+            updated_conversation_to_return = conv_dict
+            break
+
+    if not updated_conversation_to_return:
+        app.logger.error(f"Could not find conversation {actual_conversation_id} in user's list after sending first message.")
+        updated_conversation_to_return = dict(conversation_row) # Fallback to basic info
+
+    # 4. Emit WebSocket events
+    message_dict_for_socket = dict(new_message_row)
+    created_at_socket_str = message_dict_for_socket.get('created_at')
+    if isinstance(created_at_socket_str, str) and created_at_socket_str:
+        try:
+            naive_dt_socket = None
+            try: naive_dt_socket = datetime.strptime(created_at_socket_str, '%Y-%m-%d %H:%M:%S.%f')
+            except ValueError: naive_dt_socket = datetime.strptime(created_at_socket_str, '%Y-%m-%d %H:%M:%S')
+            if naive_dt_socket:
+                utc_aware_dt_socket = UTC.localize(naive_dt_socket)
+                ist_aware_dt_socket = utc_aware_dt_socket.astimezone(IST)
+                message_dict_for_socket['created_at'] = ist_aware_dt_socket.isoformat()
+        except Exception as e_ts_sock:
+            app.logger.error(f"Timestamp conversion error for socket message (conv {actual_conversation_id}): {e_ts_sock}")
+
+
+    sender_user_details_socket = find_user_by_id(current_user_id)
+    if sender_user_details_socket and sender_user_details_socket['profile_picture_filename']:
+        message_dict_for_socket['sender_profile_picture_url'] = f"/profile_pictures/{sender_user_details_socket['profile_picture_filename']}"
+    else:
+        message_dict_for_socket['sender_profile_picture_url'] = None
+
+    if 'sender_username' not in message_dict_for_socket and sender_user_details_socket:
+        message_dict_for_socket['sender_username'] = sender_user_details_socket['username']
+
+    socketio.emit('new_message', message_dict_for_socket, room=str(actual_conversation_id))
+    app.logger.info(f"Emitted 'new_message' to room 'conversation_{actual_conversation_id}' for start_and_send.")
+
+    emit_unread_chat_count(recipient_id) # emit_unread_chat_count is globally available
+
+    if updated_conversation_to_return:
+        socketio.emit('new_conversation_started', updated_conversation_to_return, room=f'user_{current_user_id}')
+
+        recipient_conversations_raw = get_user_conversations(db, recipient_id)
+        recipient_conversation_payload = None
+        for conv_raw_recipient in recipient_conversations_raw:
+            if conv_raw_recipient['conversation_id'] == actual_conversation_id:
+                rcp_conv_dict = dict(conv_raw_recipient)
+                last_msg_ts_rcp = rcp_conv_dict.get('last_message_created_at')
+                if isinstance(last_msg_ts_rcp, str) and last_msg_ts_rcp:
+                    try:
+                        naive_dt_rcp = None
+                        try: naive_dt_rcp = datetime.strptime(last_msg_ts_rcp, '%Y-%m-%d %H:%M:%S.%f')
+                        except ValueError: naive_dt_rcp = datetime.strptime(last_msg_ts_rcp, '%Y-%m-%d %H:%M:%S')
+                        if naive_dt_rcp:
+                            utc_aware_dt_rcp = UTC.localize(naive_dt_rcp)
+                            ist_aware_dt_rcp = utc_aware_dt_rcp.astimezone(IST)
+                            rcp_conv_dict['last_message_created_at'] = ist_aware_dt_rcp.isoformat()
+                    except Exception as e_ts_rcp:
+                        app.logger.error(f"Timestamp conversion error for start_and_send (recipient, conv {actual_conversation_id}): {e_ts_rcp}")
+
+                if rcp_conv_dict.get('other_profile_picture'):
+                    rcp_conv_dict['other_profile_picture_url'] = f"/profile_pictures/{rcp_conv_dict['other_profile_picture']}"
+                else: rcp_conv_dict['other_profile_picture_url'] = None
+                recipient_conversation_payload = rcp_conv_dict
+                break
+        if recipient_conversation_payload:
+            socketio.emit('new_conversation_started', recipient_conversation_payload, room=f'user_{recipient_id}')
+
+    return jsonify(updated_conversation_to_return), 201
 
 app.register_blueprint(chat_bp)
 # --- End Chat API Endpoints ---
@@ -10498,9 +10869,13 @@ def handle_connect(auth=None): # Add auth parameter, default to None for robustn
             )
             db.commit()
             app.logger.info(f"SocketIO connect: User {user_id_for_connect} status set to online and last_seen updated.")
-            socketio.emit('user_online', {'user_id': user_id_for_connect}, broadcast=True)
+            socketio.emit('user_online', {'user_id': user_id_for_connect})
+            # Emit unread chat count on connect
+            emit_unread_chat_count(user_id_for_connect)
+            # Emit online users count
+            emit_online_users_count()
         except Exception as e_status:
-            app.logger.error(f"SocketIO connect: Error updating online status for user {user_id_for_connect}: {e_status}")
+            app.logger.error(f"SocketIO connect: Error updating online status or emitting counts for user {user_id_for_connect}: {e_status}")
             # Ensure rollback if db connection was initiated by get_db()
             if 'db' in locals() and db: db.rollback() 
     else:
@@ -10538,10 +10913,12 @@ def handle_disconnect():
                         last_seen_timestamp_iso = datetime.now(timezone.utc).isoformat() # Fallback
                 
                 socketio.emit('user_offline', {'user_id': user_id_for_disconnect, 'last_seen': last_seen_timestamp_iso})
+                # Emit online users count
+                emit_online_users_count()
             else:
                 app.logger.warning(f"SocketIO disconnect: Failed to update online status for user {user_id_for_disconnect} (user not found or no change needed).")
         except Exception as e_status:
-            app.logger.error(f"SocketIO disconnect: Error updating online status for user {user_id_for_disconnect}: {e_status}")
+            app.logger.error(f"SocketIO disconnect: Error updating online status or emitting online users count for user {user_id_for_disconnect}: {e_status}")
             if 'db' in locals() and db: db.rollback() # Rollback on error
     else:
         # This means the SID was not found in our mapping, so either it was an anonymous connection
@@ -10697,7 +11074,10 @@ def handle_mark_as_read(data):
         # We can also broadcast to the room if other clients of the same user need update,
         # or just to this SID.
         emit('unread_cleared', {'conversation_id': conversation_id_int, 'messages_marked_read': rows_updated}, room=request.sid)
-        
+
+        # Emit unread chat count after marking messages as read
+        emit_unread_chat_count(current_user_id)
+
         # Additionally, you might want to notify other clients of this user if they are connected elsewhere
         # This requires tracking SIDs per user_id. For simplicity, this example only emits to the requesting SID.
         # If you have user-specific rooms (e.g., room=str(current_user_id)), you could emit there:
@@ -10709,7 +11089,56 @@ def handle_mark_as_read(data):
         emit('mark_as_read_error', {'conversation_id': conversation_id_int, 'error': 'Failed to mark messages as read.'})
     # No explicit close_db(e) here as it's handled by teardown_appcontext
 
+@socketio.on('join_user_channel')
+def handle_join_user_channel(data=None): # data might not be needed if using SID
+    app.logger.info("SOCKETIO DEBUG: 'join_user_channel' event handler invoked.") # <<< ADD THIS LINE
+    user_id = sid_to_user.get(request.sid)
+    if user_id:
+        room_name = f'user_{user_id}'
+        join_room(room_name)
+        app.logger.info(f"SocketIO: User {user_id} (SID: {request.sid}) joined their user-specific room '{room_name}' via 'join_user_channel' event.")
+        # Optionally, re-emit unread count now that they've joined the room
+        emit_unread_chat_count(user_id) # This function already logs
+    else:
+        app.logger.warning(f"SocketIO 'join_user_channel': Could not find user_id for SID {request.sid}. User not joined to user-specific room.")
+        # Emit an error back to the client if desired, though the client might not expect a response for this.
+        # emit('join_user_channel_error', {'error': 'User not authenticated or SID not found.'}, room=request.sid)
+
+# --- Helper Functions ---
+def emit_unread_chat_count(user_id: int):
+    """Helper function to get and emit unread chat count for a user."""
+    try:
+        db = get_db()
+        count = get_total_unread_messages(db, user_id)
+        socketio.emit("unread_chat_count", {"count": count}, room=f"user_{user_id}")
+        app.logger.info(f"CHAT_SOCKET: Emitted unread_chat_count {count} for user {user_id}")
+    except Exception as e:
+        app.logger.error(f"CHAT_SOCKET: Error emitting unread_chat_count for user {user_id}: {e}")
+
+def emit_online_users_count():
+    """Helper function to get and emit the total number of online users."""
+    try:
+        db = get_db()
+        count = get_online_users_count(db)
+        socketio.emit("online_users_count", {"count": count})
+        app.logger.info(f"APP_SOCKET: Emitted online_users_count {count} to all clients.")
+    except Exception as e:
+        app.logger.error(f"APP_SOCKET: Error emitting online_users_count: {e}")
+
 # --- End SocketIO Event Handlers ---
+
+# --- Custom Silent Logger for Eventlet ---
+class SilentLogger:
+    def write(self, *args, **kwargs):
+        # Log to Flask's logger if needed, or do nothing
+        # app.logger.debug(f"Eventlet log: {args}") # Optional: for debugging eventlet output
+        pass
+
+    def flush(self):
+        # No-op
+        pass
+# --- End Custom Silent Logger ---
+
 @app.route('/assets/<path:filename>')
 def serve_spa_assets(filename):
     return send_from_directory(os.path.join(app.static_folder, 'assets'), filename)
@@ -10784,8 +11213,12 @@ if __name__ == '__main__':
         # don't have native Socket.IO support (Waitress doesn't, Gunicorn needs eventlet/gevent worker).
         # However, initializing SocketIO with SocketIO(app) wraps the app.
         # So, serving `app` with Waitress should work if `async_mode` is compatible (e.g. 'threading').
-        app.logger.info(f"Starting Waitress server on port {flask_port} for Flask app with SocketIO...")
-        serve(app, host='0.0.0.0', port=flask_port) # Waitress should serve the Flask app, SocketIO is integrated.
+        # app.logger.info(f"Starting Waitress server on port {flask_port} for Flask app with SocketIO...") # Removed Waitress log
+        # serve(app, host='0.0.0.0', port=flask_port) # Waitress should serve the Flask app, SocketIO is integrated. # Removed Waitress serve
+        app.logger.info(f"Starting Eventlet server on port {flask_port} for Flask app with SocketIO...")
+        # Use the app instance with eventlet, as SocketIO is already integrated with app
+        silent_logger = SilentLogger()
+        eventlet.wsgi.server(eventlet.listen(('0.0.0.0', flask_port)), app, log=silent_logger)
     except (KeyboardInterrupt, SystemExit):
         app.logger.info("Flask application shutting down...")
     # Removed explicit scheduler shutdown from here as it's handled by atexit

@@ -1,5 +1,5 @@
 // src/components/Sidebar.tsx
-import React from 'react';
+import React, { useState, useEffect } from 'react'; // Import React hooks
 import { NavLink } from 'react-router-dom'; // useLocation is not strictly needed here anymore unless for other logic
 import {
   FileText,
@@ -14,10 +14,13 @@ import {
   // UserPlus as RegisterIcon 
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext'; 
+import { Socket } from 'socket.io-client'; // Import Socket type
 
 interface SidebarProps {
   collapsed: boolean;
   onToggleChat?: () => void; // Optional: if chat toggle is directly in sidebar
+  socket: Socket | null; 
+  socketConnected?: boolean; // Add socketConnected prop
 }
 
 interface NavItemConfig {
@@ -30,9 +33,38 @@ interface NavItemConfig {
   action?: () => void; // For items that trigger actions instead of navigation
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggleChat }) => {
+const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggleChat, socket, socketConnected }) => {
   const { user, isAuthenticated } = useAuth(); // Updated to use user object
   type RoleType = 'admin' | 'super_admin' | 'user';
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
+
+  useEffect(() => {
+  // console.log('Sidebar useEffect [socket, socketConnected]: Socket instance:', socket, 'Connected status prop:', socketConnected);
+
+  if (socket && socketConnected) {
+      const handleUnreadChatCount = (data: { count: number }) => {
+        // console.log('Sidebar: unread_chat_count event received, Data:', data);
+        setUnreadChatCount(data.count);
+      };
+
+    // console.log("Sidebar: Socket connected. Attaching 'unread_chat_count' listener.");
+      socket.on('unread_chat_count', handleUnreadChatCount);
+
+      return () => {
+      // console.log("Sidebar: Cleaning up 'unread_chat_count' listener.");
+        socket.off('unread_chat_count', handleUnreadChatCount);
+      };
+    } else {
+    // console.log('Sidebar: Socket is null or not connected. Resetting unread count and ensuring no listener is active.');
+      setUnreadChatCount(0);
+    // If socket object exists but is not connected, and if listeners might persist,
+    // explicitly turn them off. However, the structure ensures a new listener is added
+    // only when connected, and the old one (from a previous connected state) would be
+    // cleaned up by the previous return function. So, just resetting count here is likely sufficient.
+    // If there was a scenario where `socket` exists but `socketConnected` becomes false,
+    // the cleanup from the *previous* effect (when it was true) should handle `socket.off`.
+    }
+}, [socket, socketConnected]); // Added socketConnected to dependency array
 
   const navItems: NavItemConfig[] = [
     {
@@ -70,7 +102,21 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggleChat }) => {
     {
       path: '#chat', // Placeholder path, action will be handled
       label: 'Chat',
-      icon: (isCollapsed) => <ChatIcon size={isCollapsed ? 24 : 20} />,
+      icon: (isCollapsed) => (
+        <div className="relative">
+          <ChatIcon size={isCollapsed ? 24 : 20} />
+          {unreadChatCount > 0 && (
+            <span
+              className={`absolute -top-1 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-xs font-bold flex items-center justify-center border-2 border-lime-500 ${ // Temporary border
+                isCollapsed ? 'transform scale-90 -translate-y-0.5' : '' // Slightly adjust badge when collapsed
+              }`}
+              style={{ lineHeight: '1' }}
+            >
+              {unreadChatCount > 99 ? '99+' : unreadChatCount}
+            </span>
+          )}
+        </div>
+      ),
       requiresAuth: true, // Assuming chat is for authenticated users
       action: onToggleChat,
     },

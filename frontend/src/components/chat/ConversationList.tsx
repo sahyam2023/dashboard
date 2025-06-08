@@ -213,92 +213,105 @@ const ConversationList: React.FC<ConversationListProps> = ({
         {conversations.map((conv) => {
           const isSelected = selectedConversationIds.has(conv.conversation_id);
           return (
-            <li
-              key={conv.conversation_id}
-              onClick={() => {
-                if (selectionModeEnabled) {
-                  onToggleSelection(conv.conversation_id);
-                } else {
-                  onConversationSelect(conv);
-                }
-              }}
-              className={`p-3 flex items-center space-x-3 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition-colors duration-150 ease-in-out ${
-                selectionModeEnabled && isSelected
-                  ? 'bg-green-100 dark:bg-green-800' // Style for selected items in selection mode
-                  : selectedConversationId === conv.conversation_id
-                  ? 'bg-blue-100 dark:bg-blue-800' // Style for active (opened) conversation
-                  : 'bg-gray-50 dark:bg-gray-800'
-              }`}
-            >
-              {selectionModeEnabled && (
-                <input
-                  type="checkbox"
-                  checked={isSelected}
-                  onChange={(e) => {
-                    // Prevent onClick on li from firing as well if we only want checkbox to toggle
-                    e.stopPropagation();
-                    onToggleSelection(conv.conversation_id);
-                  }}
-                  className="form-checkbox h-5 w-5 text-blue-600 rounded border-gray-300 dark:border-gray-600 focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 dark:bg-gray-700"
-                />
-              )}
-              <div className="relative">
-                <img
-                  src={conv.other_profile_picture_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(conv.other_username)}&background=random&size=40&color=fff`}
-                  alt={conv.other_username}
-                  className="w-10 h-10 rounded-full object-cover flex-shrink-0"
-                />
-                {/* Online status indicator */}
-                {conv.other_user_is_online !== undefined && (
-                  <span
-                    className={`absolute bottom-0 right-0 block h-2.5 w-2.5 rounded-full ring-2 ring-white dark:ring-gray-800
-                                ${conv.other_user_is_online ? 'bg-green-400' : 'bg-gray-400'}`}
-                  ></span>
+            <li key={conv.conversation_id} className="flex items-center"> 
+              <label
+                htmlFor={`checkbox-${conv.conversation_id}`}
+                className={`w-full p-3 flex items-center space-x-3 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-150 ease-in-out ${
+                  selectionModeEnabled ? 'cursor-pointer' : ''
+                } ${
+                  selectionModeEnabled && isSelected
+                    ? 'bg-green-100 dark:bg-green-800' // Style for selected items in selection mode
+                    : selectedConversationId === conv.conversation_id
+                    ? 'bg-blue-100 dark:bg-blue-800' // Style for active (opened) conversation
+                    : 'bg-gray-50 dark:bg-gray-800'
+                }`}
+                // The onClick for opening the conversation when not in selection mode
+                // can be placed here on the label.
+                onClick={(e) => {
+                  if (!selectionModeEnabled) {
+                    onConversationSelect(conv);
+                  }
+                  // If selectionModeEnabled, the label's click will toggle the checkbox,
+                  // which in turn calls onToggleSelection via its onChange.
+                  // No need to call onToggleSelection here directly from the label's onClick.
+                }}
+              >
+                {selectionModeEnabled && (
+                  <input
+                    type="checkbox"
+                    id={`checkbox-${conv.conversation_id}`}
+                    checked={isSelected}
+                    onChange={() => {
+                      // No stopPropagation needed if label handles it well
+                      onToggleSelection(conv.conversation_id);
+                    }}
+                    // Stop propagation here if clicking checkbox directly should not trigger label's onClick
+                    // This might be necessary if the label's onClick has other side effects
+                    // For now, let's assume direct checkbox click is fine.
+                    // onClick={(e) => e.stopPropagation()} 
+                    className="form-checkbox h-5 w-5 text-blue-600 rounded border-gray-300 dark:border-gray-600 focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 dark:bg-gray-700"
+                  />
                 )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center space-x-1">
-                    <p className={`text-sm font-semibold truncate ${
-                      selectionModeEnabled && isSelected
-                        ? 'text-green-700 dark:text-green-300'
-                        : selectedConversationId === conv.conversation_id
-                        ? 'text-blue-700 dark:text-blue-300'
-                        : 'text-gray-800 dark:text-gray-100'
-                    }`}>
-                      {conv.other_username}
-                    </p>
+                {/* Conversation Info Container - This part remains clickable for opening chat when not in selection mode */}
+                {/* The label wrapping this makes the whole area part of the "for" attribute */}
+                <div className="relative"> {/* This div and its children are now part of the label */}
+                  <img
+                    src={conv.other_profile_picture_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(conv.other_username)}&background=random&size=40&color=fff`}
+                    alt={conv.other_username}
+                    className="w-10 h-10 rounded-full object-cover flex-shrink-0"
+                  />
+                  {/* Online status indicator */}
+                  {conv.other_user_is_online !== undefined && (
+                    <span
+                      className={`absolute bottom-0 right-0 block h-2.5 w-2.5 rounded-full ring-2 ring-white dark:ring-gray-800
+                                  ${conv.other_user_is_online ? 'bg-green-400' : 'bg-gray-400'}`}
+                    ></span>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex justify-between items-center">
+                    <div className="flex items-center space-x-1">
+                      <p className={`text-sm font-semibold truncate ${
+                        selectionModeEnabled && isSelected 
+                          ? 'text-green-700 dark:text-green-300' 
+                          : selectedConversationId === conv.conversation_id 
+                          ? 'text-blue-700 dark:text-blue-300' 
+                          : 'text-gray-800 dark:text-gray-100'
+                      }`}>
+                        {conv.other_username}
+                      </p>
+                    </div>
+                    {conv.last_message_created_at && (
+                      <p className={`text-xs whitespace-nowrap ml-2 ${
+                        selectionModeEnabled && isSelected
+                          ? 'text-green-500 dark:text-green-400'
+                          : selectedConversationId === conv.conversation_id 
+                          ? 'text-blue-500 dark:text-blue-400' 
+                          : 'text-gray-400 dark:text-gray-500'
+                      }`}>
+                        {formatToISTLocaleString(conv.last_message_created_at)}
+                      </p>
+                    )}
                   </div>
-                  {conv.last_message_created_at && (
-                    <p className={`text-xs whitespace-nowrap ml-2 ${
+                  <div className="flex justify-between items-center mt-1">
+                    <p className={`text-xs truncate ${
                       selectionModeEnabled && isSelected
-                        ? 'text-green-500 dark:text-green-400'
-                        : selectedConversationId === conv.conversation_id
-                        ? 'text-blue-500 dark:text-blue-400'
-                        : 'text-gray-400 dark:text-gray-500'
+                        ? 'text-gray-700 dark:text-gray-300'
+                        : selectedConversationId === conv.conversation_id 
+                        ? 'text-gray-600 dark:text-gray-300' 
+                        : 'text-gray-500 dark:text-gray-400'
                     }`}>
-                      {formatToISTLocaleString(conv.last_message_created_at)}
+                      {conv.last_message_sender_id === currentUserId ? <span className="font-medium">You: </span> : ''}
+                      {conv.last_message_content || <span className="italic">No messages yet</span>}
                     </p>
-                  )}
+                    {conv.unread_messages_count && conv.unread_messages_count > 0 && !(selectionModeEnabled && isSelected) && (
+                      <span className="ml-2 bg-blue-500 text-white text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0">
+                        {conv.unread_messages_count > 9 ? '9+' : conv.unread_messages_count}
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <div className="flex justify-between items-center mt-1">
-                  <p className={`text-xs truncate ${
-                    selectionModeEnabled && isSelected
-                      ? 'text-gray-700 dark:text-gray-300'
-                      : selectedConversationId === conv.conversation_id
-                      ? 'text-gray-600 dark:text-gray-300'
-                      : 'text-gray-500 dark:text-gray-400'
-                  }`}>
-                    {conv.last_message_sender_id === currentUserId ? <span className="font-medium">You: </span> : ''}
-                    {conv.last_message_content || <span className="italic">No messages yet</span>}
-                  </p>
-                  {conv.unread_messages_count && conv.unread_messages_count > 0 && !(selectionModeEnabled && isSelected) && (
-                    <span className="ml-2 bg-blue-500 text-white text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0">
-                      {conv.unread_messages_count > 9 ? '9+' : conv.unread_messages_count}
-                    </span>
-                  )}
-                </div>
-              </div>
+              </label>
             </li>
           );
         })}

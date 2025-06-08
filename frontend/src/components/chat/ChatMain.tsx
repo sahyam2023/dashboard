@@ -69,11 +69,11 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // 
       setCurrentView('chat');
     }
   };
-
+  
   const handleToggleSelectionMode = () => {
     setSelectionMode(prevMode => {
       if (prevMode) { // Turning off selection mode
-        setSelectedIds(new Set());
+        setSelectedIds(new Set()); 
       }
       return !prevMode;
     });
@@ -106,12 +106,12 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // 
       // A more robust solution would involve lifting conversation state or using a global state manager.
       // console.log(`Successfully cleared ${idsToClear.length} conversations. ConversationList will need to refresh.`);
       setConversationListRefreshKey(prevKey => prevKey + 1); // Trigger refresh in ConversationList
-
+      
       // If selectedConversation was one of those cleared, reset it.
       if (selectedConversation && selectedIds.has(selectedConversation.conversation_id)) {
         setSelectedConversation(null);
         // Optionally, switch view back to conversation list if a chat was open
-        // setCurrentView('conversations');
+        // setCurrentView('conversations'); 
       }
 
       showToastNotification(`${selectedIds.size} conversation(s) cleared successfully.`, "success");
@@ -237,7 +237,7 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // 
       {/* Main Chat Area */}
       {/* Adjusted md:flex to ensure it shows up correctly when a chat is selected */}
       <div className={`flex-1 flex flex-col ${ (currentView === 'chat' && selectedConversation && !selectionMode) ? 'flex' : 'hidden md:flex'}`}>
-        {selectedConversation && currentView === 'chat' && !selectionMode ? (
+        {selectedConversation && currentView === 'chat' && !selectionMode ? ( 
           <ChatWindow
             selectedConversation={selectedConversation}
             currentUserId={currentUserId}
@@ -264,8 +264,8 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // 
         isOpen={showClearConfirmModal}
         title="Clear Selected Conversations?"
         message={`Are you sure you want to clear the selected ${selectedIds.size} conversation(s)? This action will only clear your side of the conversation and cannot be undone.`}
-        confirmText="Clear"
-        cancelText="Cancel"
+        confirmButtonText="Clear"
+        cancelButtonText="Cancel"
         onConfirm={confirmClearSelected}
         onCancel={cancelClearSelected}
         confirmButtonVariant="danger"

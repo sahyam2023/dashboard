@@ -10274,6 +10274,9 @@ def post_new_message(conversation_id):
         socketio.emit('new_message', message_data_for_socket, room=str(conversation_id)) 
         app.logger.info(f"Emitted 'new_message' to room 'conversation_{conversation_id}'")
 
+        # Emit unread chat count for the recipient
+        emit_unread_chat_count(recipient_id)
+
         return jsonify(message_dict_for_api_response), 201
     else:
         app.logger.error(f"Failed to send message in conversation {conversation_id} from user {current_user_id}")
@@ -10544,7 +10547,7 @@ def handle_disconnect():
                         app.logger.error(f"Error converting last_seen for disconnect event (user {user_id_for_disconnect}): {e_ts_conv}")
                         last_seen_timestamp_iso = datetime.now(timezone.utc).isoformat() # Fallback
                 
-                socketio.emit('user_offline', {'user_id': user_id_for_disconnect, 'last_seen': last_seen_timestamp_iso})
+                socketio.emit('user_offline', {'user_id': user_id_for_disconnect, 'last_seen': last_seen_timestamp_iso}, broadcast=True)
                 # Emit online users count
                 emit_online_users_count()
             else:
@@ -10706,7 +10709,7 @@ def handle_mark_as_read(data):
         # We can also broadcast to the room if other clients of the same user need update,
         # or just to this SID.
         emit('unread_cleared', {'conversation_id': conversation_id_int, 'messages_marked_read': rows_updated}, room=request.sid)
-        
+
         # Emit unread chat count after marking messages as read
         emit_unread_chat_count(current_user_id)
 
@@ -10737,7 +10740,7 @@ def emit_online_users_count():
     try:
         db = get_db()
         count = get_online_users_count(db)
-        socketio.emit("online_users_count", {"count": count}) # Broadcast to all
+        socketio.emit("online_users_count", {"count": count}, broadcast=True) # Added broadcast=True
         app.logger.info(f"APP_SOCKET: Emitted online_users_count {count} to all clients.")
     except Exception as e:
         app.logger.error(f"APP_SOCKET: Error emitting online_users_count: {e}")

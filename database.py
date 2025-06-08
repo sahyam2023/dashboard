@@ -145,7 +145,7 @@ def remove_favorite(db, user_id, item_id, item_type):
         print(f"DB_FAVORITES: Error removing favorite for user {user_id}, item {item_id}, type {item_type}: {e}")
         return False
 
-def get_favorite_status(db, user_id, item_id, item_type):
+def get_favorite_status(db, user_id, item_id, item_type) -> 'sqlite3.Row | None':
     """Checks if a specific item is favorited by the user."""
     try:
         cursor = db.execute(
@@ -279,7 +279,7 @@ def get_user_favorites(db, user_id, page, per_page, item_type_filter=None):
     try:
         # Fetch items
         cursor = db.execute(query_sql, {"user_id": user_id, "limit": per_page, "offset": offset})
-        items = cursor.fetchall() # List of Row objects
+        items = cursor.fetchall() # List of 'sqlite3.Row' objects
 
         # Fetch total count
         cursor = db.execute(count_sql, {"user_id": user_id})
@@ -298,7 +298,7 @@ def get_user_favorites(db, user_id, page, per_page, item_type_filter=None):
 
 # --- User Watch Preference Functions ---
 
-def get_watch_preferences(db, user_id: int) -> list[sqlite3.Row]:
+def get_watch_preferences(db, user_id: int) -> list['sqlite3.Row']: # Already updated, no change needed
     """Fetches all watch preferences for a given user."""
     try:
         cursor = db.execute(
@@ -310,7 +310,7 @@ def get_watch_preferences(db, user_id: int) -> list[sqlite3.Row]:
             """,
             (user_id,)
         )
-        return cursor.fetchall() # Returns a list of sqlite3.Row objects
+        return cursor.fetchall() # Returns a list of 'sqlite3.Row' objects
     except sqlite3.Error as e:
         # Consider logging the error to app.logger if available, or print for now
         print(f"DB_WATCH_PREFS: Error fetching watch preferences for user {user_id}: {e}")
@@ -476,8 +476,8 @@ def _build_comment_hierarchy(all_comments_list: list) -> list:
     Each comment dictionary in the input list should have 'id', 'parent_comment_id',
     and will have a 'replies' list added/populated.
     """
-    comment_map = {}
-    top_level_comments = []
+    comment_map = {} # type: ignore
+    top_level_comments = [] # type: ignore
 
     # Initialize each comment with an empty 'replies' list and map them by ID
     for comment in all_comments_list:
@@ -509,7 +509,7 @@ def get_comment_by_id(db, comment_id):
             (comment_id,)
         )
         comment = cursor.fetchone()
-        return comment # Returns sqlite3.Row or None
+        return comment # Returns 'sqlite3.Row | None'
     except sqlite3.Error as e:
         print(f"DB_COMMENTS: Error fetching comment by ID {comment_id}: {e}")
         return None
@@ -575,7 +575,7 @@ def delete_comment_by_id(db, comment_id, user_id, role):
 
 # --- Notification Management Functions ---
 
-def get_watching_users(db, content_type: str, category: str = None) -> list[sqlite3.Row]:
+def get_watching_users(db, content_type: str, category: str = None) -> list['sqlite3.Row']:
     """
     Retrieves users who are watching a specific content_type and category.
     If category is None, it looks for preferences where category IS NULL.
@@ -799,14 +799,14 @@ def get_notification_by_id(db, notification_id):
             """,
             (notification_id,)
         )
-        return cursor.fetchone() # Returns sqlite3.Row or None
+        return cursor.fetchone() # Returns 'sqlite3.Row | None'
     except sqlite3.Error as e:
         print(f"DB_NOTIFICATIONS: Error fetching notification by ID {notification_id}: {e}")
         return None
 
 # --- Conversation and Message Functions ---
 
-def get_conversation_by_users(db, user1_id: int, user2_id: int) -> sqlite3.Row | None:
+def get_conversation_by_users(db, user1_id: int, user2_id: int) -> 'sqlite3.Row | None':
     """Retrieves a conversation between two specific users, ensuring user1_id < user2_id."""
     if user1_id == user2_id:
         print("DB_CONVERSATIONS: Users cannot have a conversation with themselves.")
@@ -825,7 +825,7 @@ def get_conversation_by_users(db, user1_id: int, user2_id: int) -> sqlite3.Row |
         print(f"DB_CONVERSATIONS: Error fetching conversation between user {user1_id} and {user2_id}: {e}")
         return None
 
-def create_conversation(db, user1_id: int, user2_id: int) -> sqlite3.Row | None:
+def create_conversation(db, user1_id: int, user2_id: int) -> 'sqlite3.Row | None': # Already updated
     """
     Ensures user1_id < user2_id before inserting.
     Checks if a conversation already exists. If so, returns the existing conversation.
@@ -862,7 +862,7 @@ def create_conversation(db, user1_id: int, user2_id: int) -> sqlite3.Row | None:
         print(f"DB_CONVERSATIONS: Error creating conversation between {u1} and {u2}: {e}")
         return None
 
-def get_conversation_by_id(db, conversation_id: int) -> sqlite3.Row | None:
+def get_conversation_by_id(db, conversation_id: int) -> 'sqlite3.Row | None':
     """Retrieves a conversation by its ID."""
     try:
         cursor = db.execute(
@@ -874,7 +874,7 @@ def get_conversation_by_id(db, conversation_id: int) -> sqlite3.Row | None:
         print(f"DB_CONVERSATIONS: Error fetching conversation by ID {conversation_id}: {e}")
         return None
 
-def send_message(db, conversation_id: int, sender_id: int, recipient_id: int, content: str, file_name: str = None, file_url: str = None, file_type: str = None) -> sqlite3.Row | None:
+def send_message(db, conversation_id: int, sender_id: int, recipient_id: int, content: str, file_name: str = None, file_url: str = None, file_type: str = None) -> 'sqlite3.Row | None':
     """Inserts a new message into the messages table and returns the newly created message."""
     try:
         cursor = db.execute(
@@ -890,7 +890,7 @@ def send_message(db, conversation_id: int, sender_id: int, recipient_id: int, co
         print(f"DB_MESSAGES: Error sending message in conversation {conversation_id} from user {sender_id} to {recipient_id}: {e}")
         return None
 
-def get_message_by_id(db, message_id: int) -> sqlite3.Row | None:
+def get_message_by_id(db, message_id: int) -> 'sqlite3.Row | None':
     """Retrieves a message by its ID."""
     try:
         cursor = db.execute(
@@ -902,7 +902,7 @@ def get_message_by_id(db, message_id: int) -> sqlite3.Row | None:
         print(f"DB_MESSAGES: Error fetching message by ID {message_id}: {e}")
         return None
 
-def get_messages(db, conversation_id: int, limit: int = 50, offset: int = 0) -> list[sqlite3.Row]:
+def get_messages(db, conversation_id: int, limit: int = 50, offset: int = 0) -> list['sqlite3.Row']:
     """
     Retrieves messages for a given conversation, ordered by created_at (descending).
     Implements pagination using limit and offset.
@@ -927,7 +927,7 @@ def get_messages(db, conversation_id: int, limit: int = 50, offset: int = 0) -> 
         print(f"DB_MESSAGES: Error fetching messages for conversation {conversation_id}: {e}")
         return []
 
-def get_user_conversations(db, user_id: int) -> list[sqlite3.Row]:
+def get_user_conversations(db, user_id: int) -> list['sqlite3.Row']:
     """
     Retrieves all conversations for a given user.
     Joins with the users table to get the other participant's username and profile picture.
@@ -1003,17 +1003,24 @@ def mark_messages_as_read(db, conversation_id: int, user_id: int) -> int:
         )
         db.commit()
         return cursor.rowcount
+    except sqlite3.Error as e:
+        print(f"DB_MESSAGES: Error marking messages as read for conversation {conversation_id}, user {user_id}: {e}")
+        # Optionally, rollback if the commit within the try block is the only one for this logical operation.
+        # However, if db is part of a larger transaction managed by the caller, rollback might be handled there.
+        # For now, just printing and returning 0 as per original subsequent function.
+        return 0
 
 
 def get_total_unread_messages(db, user_id: int) -> int:
     """Gets the total number of unread messages for a user."""
-    count = db.execute(
-        "SELECT COUNT(*) FROM messages WHERE recipient_id = ? AND is_read = FALSE",
-        (user_id,),
-    ).fetchone()[0]
-    return count
+    try:
+        count = db.execute(
+            "SELECT COUNT(*) FROM messages WHERE recipient_id = ? AND is_read = FALSE",
+            (user_id,),
+        ).fetchone()[0]
+        return count
     except sqlite3.Error as e:
-        print(f"DB_MESSAGES: Error marking messages as read for conversation {conversation_id}, user {user_id}: {e}")
+        print(f"DB_MESSAGES: Error getting total unread messages for user {user_id}: {e}")
         return 0
 
 

@@ -45,7 +45,7 @@ export function formatToISTLocaleString(isoTimestamp: string): string {
   }
 
   try {
-    console.log('Incoming isoTimestamp for formatToISTLocaleString:', isoTimestamp); // Debugging line
+    // console.log('Incoming isoTimestamp for formatToISTLocaleString:', isoTimestamp); // Debugging line
 
     const date = new Date(isoTimestamp); // Parses ISO 8601 strings (e.g., "YYYY-MM-DDTHH:MM:SSZ" for UTC)
     if (isNaN(date.getTime())) { // Check if date is valid
@@ -67,7 +67,7 @@ export function formatToISTLocaleString(isoTimestamp: string): string {
     };
 
     const formattedString = date.toLocaleString('en-IN', options);
-    console.log('Formatted string from formatToISTLocaleString:', formattedString); // Debugging line
+    // console.log('Formatted string from formatToISTLocaleString:', formattedString); // Debugging line
     return formattedString;
   } catch (error) {
     console.error('Error formatting timestamp to IST locale string:', isoTimestamp, error);
@@ -85,7 +85,7 @@ export function formatTimeToIST(isoTimestamp: string | null | undefined): string
   }
 
   try {
-    console.log('Incoming isoTimestamp for formatTimeToIST:', isoTimestamp); // Debugging line
+    // console.log('Incoming isoTimestamp for formatTimeToIST:', isoTimestamp); // Debugging line
 
     const date = new Date(isoTimestamp);
     if (isNaN(date.getTime())) { // Check if date is valid
@@ -103,7 +103,7 @@ export function formatTimeToIST(isoTimestamp: string | null | undefined): string
     };
 
     const formattedString = date.toLocaleTimeString('en-IN', options);
-    console.log('Formatted string from formatTimeToIST:', formattedString); // Debugging line
+    // console.log('Formatted string from formatTimeToIST:', formattedString); // Debugging line
     return formattedString; // e.g., "10:00 AM"
   } catch (error) {
     console.error('Error formatting timestamp to IST time string:', isoTimestamp, error);

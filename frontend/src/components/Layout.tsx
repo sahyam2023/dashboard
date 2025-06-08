@@ -16,6 +16,7 @@ const Layout: React.FC = () => {
   const [isChatOpen, setIsChatOpen] = useState(false); // State for chat modal
   const { user, tokenData } = useAuth(); // Get user and tokenData from AuthContext
   const [socket, setSocket] = useState<Socket | null>(null); // Socket state
+  const [socketConnected, setSocketConnected] = useState(false); // New state for socket connection status
 
   useEffect(() => {
     if (user && tokenData?.token) {
@@ -25,14 +26,17 @@ const Layout: React.FC = () => {
       setSocket(newSocket);
 
       newSocket.on('connect', () => {
-        console.log('Socket.IO connected in Layout:', newSocket.id);
+        setSocketConnected(true);
+        console.log('Layout.tsx: Socket connected. SID:', newSocket.id);
       });
 
       newSocket.on('disconnect', (reason) => {
-        console.log('Socket.IO disconnected in Layout. Reason:', reason);
+        setSocketConnected(false);
+        console.log('Layout.tsx: Socket disconnected. Reason:', reason);
       });
 
       newSocket.on('connect_error', (error) => {
+        setSocketConnected(false); // Also set to false on connection error
         console.error('Socket.IO connection error in Layout:', error);
       });
 
@@ -42,16 +46,18 @@ const Layout: React.FC = () => {
           newSocket.disconnect();
         }
         setSocket(null);
+        setSocketConnected(false);
       };
     } else {
       // If user logs out or token becomes unavailable, disconnect and clear socket
       if (socket && socket.connected) {
         console.log('Socket.IO disconnecting in Layout due to user logout/token removal.');
-        socket.disconnect();
+        socket.disconnect(); // This will trigger the 'disconnect' event above, setting socketConnected to false
       }
-      setSocket(null);
+      setSocket(null); // Explicitly set socket to null
+      setSocketConnected(false); // Explicitly set connected status to false
     }
-  }, [user, tokenData]);
+  }, [user, tokenData]); // Removed 'socket' from dependency array as it's managed within this effect
 
   const toggleSidebar = () => {
     setSidebarCollapsed(prev => !prev);
@@ -75,7 +81,7 @@ const Layout: React.FC = () => {
         // Consider adding a chat toggle button to Header as well or instead of Sidebar
       />
       <div className="flex flex-1 overflow-hidden relative"> {/* Added relative for modal positioning context */}
-        <Sidebar collapsed={sidebarCollapsed} onToggleChat={toggleChatModal} socket={socket} />
+        <Sidebar collapsed={sidebarCollapsed} onToggleChat={toggleChatModal} socket={socket} socketConnected={socketConnected} />
         <main 
           className={`flex-1 p-6 overflow-auto transition-all duration-300 ease-in-out ${
             sidebarCollapsed ? 'ml-20' : 'ml-64' // Adjust based on actual sidebar width
@@ -94,7 +100,7 @@ const Layout: React.FC = () => {
             onClick={toggleChatModal} // Close on overlay click
           >
             <div
-              className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-full max-w-6xl h-[calc(100vh-80px)] sm:h-[calc(100vh-100px)] md:max-h-[700px] lg:max-h-[800px] flex flex-col overflow-hidden" // Adjusted height constraints
+              className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-11/12 max-w-7xl h-[90vh] sm:h-[90vh] md:max-h-[750px] lg:max-h-[850px] flex flex-col overflow-hidden" // Updated size classes
               onClick={(e) => e.stopPropagation()} // Prevent modal close when clicking inside modal
             >
               <div className="flex justify-between items-center p-3 sm:p-4 border-b border-gray-200 dark:border-gray-700">
@@ -112,7 +118,7 @@ const Layout: React.FC = () => {
               {/* Pass currentUserId which ChatMain expects as MOCK_CURRENT_USER_ID for now */}
               {/* ChatMain internally uses a MOCK_CURRENT_USER_ID, which is fine for now */}
               {/* We pass user.id to ChatMain if it's adapted to take it as a prop later */}
-              <ChatMain socket={socket} /> {/* Pass socket to ChatMain */}
+              <ChatMain socket={socket} socketConnected={socketConnected} /> {/* Pass socket and socketConnected to ChatMain */}
             </div>
           </div>
         )}

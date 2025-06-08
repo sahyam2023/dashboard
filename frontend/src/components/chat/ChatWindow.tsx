@@ -14,10 +14,14 @@ import Spinner from './Spinner'; // Import Spinner
 import { useNotification } from '../../context/NotificationContext'; // Import useNotification
 import { formatToISTLocaleString } from '../../utils/dateUtils'; // Import the utility
 
+import { ArrowLeft } from 'lucide-react'; // Import an icon
+
 interface ChatWindowProps {
   selectedConversation: Conversation | null;
   currentUserId: number | null; // Will be passed from ChatMain
   socket: Socket | null;
+  onGoBack: () => void;
+  socketConnected?: boolean;
 }
 
 interface OtherUserStatus {
@@ -25,7 +29,7 @@ interface OtherUserStatus {
   last_seen: string | null;
 }
 
-const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUserId, socket }) => {
+const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUserId, socket, socketConnected, onGoBack }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false); // For initial message load
   const [loadingOlder, setLoadingOlder] = useState(false); // For loading older messages
@@ -34,6 +38,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
   const [otherUserStatus, setOtherUserStatus] = useState<OtherUserStatus | null>(null);
   const [onlineUsersCount, setOnlineUsersCount] = useState<number | null>(null); // State for online users count
   const selectedConversationRef = useRef<Conversation | null>(null); // Ref for selectedConversation
+  // const { onGoBack } = props; // onGoBack is now directly destructured
+
+  // Log state before return
+  console.log('ChatWindow render: onlineUsersCount state:', onlineUsersCount);
 
   // Pagination for messages
   const [currentPage, setCurrentPage] = useState(1);
@@ -166,25 +174,24 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
 
   // Listen for online_users_count
   useEffect(() => {
-    if (socket) {
+    console.log('ChatWindow: online_users_count listener effect. Socket:', socket, 'Connected:', socketConnected);
+    if (socket && socketConnected) {
       const handleOnlineUsersCount = (data: { count: number }) => {
-        console.log('ChatWindow: Received online_users_count', data);
+        console.log('ChatWindow: Socket event "online_users_count" received:', data);
         setOnlineUsersCount(data.count);
       };
       socket.on('online_users_count', handleOnlineUsersCount);
       console.log("ChatWindow: 'online_users_count' listener attached.");
-
-      // Optional: Emit an event to request initial count if backend supports it
-      // socket.emit('request_initial_online_users_count');
 
       return () => {
         socket.off('online_users_count', handleOnlineUsersCount);
         console.log("ChatWindow: 'online_users_count' listener detached.");
       };
     } else {
-      setOnlineUsersCount(null); // Reset if socket is not available
+      setOnlineUsersCount(null); // Reset if socket is not available or connected
+      console.log('ChatWindow: online_users_count listener - socket not available or not connected.');
     }
-  }, [socket]);
+  }, [socket, socketConnected]);
 
   useEffect(() => {
     if (!socket || !selectedConversation) return;
@@ -279,15 +286,22 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
   return (
     // Use h-full and flex-col to make ChatWindow fill its container from ChatMain
     <div className="flex flex-col h-full bg-white dark:bg-gray-800 shadow-md">
-      <header className="p-3 sm:p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700"> {/* Slight bg change for header */}
-        <div className="flex items-center space-x-3">
+      <header className="p-3 sm:p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700 flex items-center justify-between">
+        <div className="flex items-center space-x-2 sm:space-x-3">
+          <button
+            onClick={onGoBack} // Use the onGoBack prop
+            className="p-1.5 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            aria-label="Go back to conversation list"
+          >
+            <ArrowLeft size={20} className="sm:w-5 sm:h-5" />
+          </button>
           <img
             src={selectedConversation.other_profile_picture_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(selectedConversation.other_username)}&background=random&size=40&color=fff`}
             alt={selectedConversation.other_username}
             className="w-8 h-8 sm:w-10 sm:h-10 rounded-full object-cover"
           />
           <div className="flex flex-col">
-            <h2 className="text-base sm:text-lg font-semibold text-gray-800 dark:text-gray-100">
+            <h2 className="text-base sm:text-lg font-semibold text-gray-800 dark:text-gray-100 truncate">
               {selectedConversation.other_username}
             </h2>
             {otherUserStatus && (
@@ -300,8 +314,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
             )}
           </div>
         </div>
+        {/* Online users count - keep it to the right or integrate differently if needed */}
         {onlineUsersCount !== null && (
-          <div className="text-xs text-gray-600 dark:text-gray-300 ml-auto pr-2">
+          <div className="text-red-500 text-2xl border border-green-500 p-1 pr-2 hidden sm:block"> {/* Prominent styling + padding */}
             Online Users: {onlineUsersCount}
           </div>
         )}

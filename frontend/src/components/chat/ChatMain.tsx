@@ -11,10 +11,11 @@ import { useAuth } from '../../context/AuthContext'; // Import useAuth
 import * as api from '../../services/api'; // Import your API service
 
 interface ChatMainProps {
-  socket: Socket | null; // Add socket as a prop
+  socket: Socket | null; 
+  socketConnected?: boolean; // Add socketConnected prop
 }
 
-const ChatMain: React.FC<ChatMainProps> = ({ socket }) => { // Destructure socket prop
+const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // Destructure props
   const [currentView, setCurrentView] = useState<'conversations' | 'users' | 'chat'>('conversations');
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const { user } = useAuth(); // Get user from AuthContext (tokenData not needed here directly for socket)
@@ -60,6 +61,11 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket }) => { // Destructure socke
     setSelectedConversation(null);
     setCurrentView('conversations');
   };
+
+  // const handleDeselectConversation = () => { // Not needed, handleBackToList does the job
+  //   setSelectedConversation(null);
+  //   // setCurrentView might also need to be 'conversations' or similar
+  // };
 
   const handleStartNewChat = () => {
     setCurrentView('users');
@@ -115,6 +121,8 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket }) => { // Destructure socke
             selectedConversation={selectedConversation}
             currentUserId={currentUserId}
             socket={socket} // Pass the socket instance
+            socketConnected={socketConnected} // Pass socketConnected status
+            onGoBack={handleBackToList} // Pass the callback function
           />
         ) : (
           <div className="flex-1 flex items-center justify-center h-full bg-gray-50 dark:bg-gray-800">

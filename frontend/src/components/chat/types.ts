@@ -13,9 +13,12 @@ export interface Message {
   conversation_id: number;
   sender_id: number;
   recipient_id: number;
-  content: string;
+  content: string; // Will store filename if it's a file message, or text content
   created_at: string; // ISO string date
   is_read: boolean;
+  file_name?: string | null; // Original name of the uploaded file
+  file_url?: string | null;
+  file_type?: 'image' | 'video' | 'audio' | 'pdf' | 'archive' | 'doc' | 'binary' | null; // Broad categories
   sender_username?: string; // Usually joined in backend
   recipient_username?: string; // Usually joined in backend
   sender_profile_picture_url?: string | null; // Added for SocketIO message data

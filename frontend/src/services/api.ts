@@ -515,12 +515,47 @@ export async function getMessages(conversation_id: number, limit: number, offset
   }
 }
 
-export async function sendMessage(conversation_id: number, content: string): Promise<ChatMessage> {
+export async function uploadChatFile(file: File, conversationId: number): Promise<{ file_url: string; file_name: string; file_type: string, file_extension?: string }> {
   try {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('conversation_id', conversationId.toString());
+
+    const response = await fetch(`${API_BASE_URL}/api/chat/upload_file`, {
+      method: 'POST',
+      headers: { ...getAuthHeader() }, // Content-Type is set automatically for FormData
+      body: formData,
+    });
+    return handleApiError(response, 'Failed to upload chat file');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error uploading chat file:', error);
+    throw error;
+  }
+}
+
+export async function sendMessage(
+  conversation_id: number,
+  content: string,
+  file_url?: string,
+  file_name?: string,
+  file_type?: string
+): Promise<ChatMessage> {
+  try {
+    const payload: any = { content };
+    if (file_url && file_name && file_type) {
+      payload.file_url = file_url;
+      payload.file_name = file_name;
+      payload.file_type = file_type;
+    }
+
     const response = await fetch(`${API_BASE_URL}/api/chat/conversations/${conversation_id}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify(payload),
     });
     return handleApiError(response, `Failed to send message to conversation ${conversation_id}`);
   } catch (error: any) {

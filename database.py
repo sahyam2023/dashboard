@@ -874,12 +874,13 @@ def get_conversation_by_id(db, conversation_id: int) -> sqlite3.Row | None:
         print(f"DB_CONVERSATIONS: Error fetching conversation by ID {conversation_id}: {e}")
         return None
 
-def send_message(db, conversation_id: int, sender_id: int, recipient_id: int, content: str) -> sqlite3.Row | None:
+def send_message(db, conversation_id: int, sender_id: int, recipient_id: int, content: str, file_name: str = None, file_url: str = None, file_type: str = None) -> sqlite3.Row | None:
     """Inserts a new message into the messages table and returns the newly created message."""
     try:
         cursor = db.execute(
-            "INSERT INTO messages (conversation_id, sender_id, recipient_id, content) VALUES (?, ?, ?, ?)",
-            (conversation_id, sender_id, recipient_id, content)
+            """INSERT INTO messages (conversation_id, sender_id, recipient_id, content, file_name, file_url, file_type)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (conversation_id, sender_id, recipient_id, content, file_name, file_url, file_type)
         )
         db.commit()
         new_message_id = cursor.lastrowid
@@ -893,7 +894,7 @@ def get_message_by_id(db, message_id: int) -> sqlite3.Row | None:
     """Retrieves a message by its ID."""
     try:
         cursor = db.execute(
-            "SELECT id, conversation_id, sender_id, recipient_id, content, created_at, is_read FROM messages WHERE id = ?",
+            "SELECT id, conversation_id, sender_id, recipient_id, content, created_at, is_read, file_name, file_url, file_type FROM messages WHERE id = ?",
             (message_id,)
         )
         return cursor.fetchone()
@@ -910,7 +911,8 @@ def get_messages(db, conversation_id: int, limit: int = 50, offset: int = 0) -> 
         cursor = db.execute(
             """
             SELECT m.id, m.conversation_id, m.sender_id, s_sender.username as sender_username,
-                   m.recipient_id, s_recipient.username as recipient_username, m.content, m.created_at, m.is_read
+                   m.recipient_id, s_recipient.username as recipient_username, m.content, m.created_at, m.is_read,
+                   m.file_name, m.file_url, m.file_type
             FROM messages m
             JOIN users s_sender ON m.sender_id = s_sender.id
             JOIN users s_recipient ON m.recipient_id = s_recipient.id

@@ -87,12 +87,13 @@ LINK_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'official_uploads', 'lin
 MISC_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'misc_uploads')
 PROFILE_PICTURES_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'profile_pictures') # Added
 DEFAULT_PROFILE_PICTURES_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'default_profile_pictures') # New
+CHAT_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'chat_uploads') # Added for chat file attachments
 # STATIC_FOLDER is defined above based on frozen status
 
 
 # Ensure all upload folders exist
 TMP_LARGE_UPLOADS_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'tmp_large_uploads') # For large file chunks
-for folder in [BACKUP_DIR, DOC_UPLOAD_FOLDER, PATCH_UPLOAD_FOLDER, LINK_UPLOAD_FOLDER, MISC_UPLOAD_FOLDER, PROFILE_PICTURES_UPLOAD_FOLDER, DEFAULT_PROFILE_PICTURES_FOLDER, TMP_LARGE_UPLOADS_FOLDER]: # Added PROFILE_PICTURES_UPLOAD_FOLDER and DEFAULT_PROFILE_PICTURES_FOLDER and BACKUP_DIR
+for folder in [BACKUP_DIR, DOC_UPLOAD_FOLDER, PATCH_UPLOAD_FOLDER, LINK_UPLOAD_FOLDER, MISC_UPLOAD_FOLDER, PROFILE_PICTURES_UPLOAD_FOLDER, DEFAULT_PROFILE_PICTURES_FOLDER, TMP_LARGE_UPLOADS_FOLDER, CHAT_UPLOAD_FOLDER]: # Added CHAT_UPLOAD_FOLDER
     if not os.path.exists(folder):
         os.makedirs(folder, exist_ok=True) # exist_ok=True is helpful
 
@@ -201,6 +202,7 @@ app.config['LINK_UPLOAD_FOLDER'] = LINK_UPLOAD_FOLDER
 app.config['MISC_UPLOAD_FOLDER'] = MISC_UPLOAD_FOLDER
 app.config['PROFILE_PICTURES_UPLOAD_FOLDER'] = PROFILE_PICTURES_UPLOAD_FOLDER # Added
 app.config['DEFAULT_PROFILE_PICTURES_FOLDER'] = DEFAULT_PROFILE_PICTURES_FOLDER # New
+app.config['CHAT_UPLOAD_FOLDER'] = CHAT_UPLOAD_FOLDER # Added for chat
 app.config['INSTANCE_FOLDER_PATH'] = INSTANCE_FOLDER_PATH # Added for DB backup
 app.config['TMP_LARGE_UPLOADS_FOLDER'] = TMP_LARGE_UPLOADS_FOLDER # For large file chunks
 
@@ -10156,10 +10158,25 @@ def post_new_message(conversation_id):
         return jsonify(msg="You are not authorized to send messages in this conversation."), 403
 
     data = request.get_json()
-    if not data or 'content' not in data or not data['content'].strip():
-        return jsonify(msg="Message content is required and cannot be empty."), 400
+    if not data:
+        return jsonify(msg="Missing JSON data"), 400
 
-    content = data['content'].strip()
+    content = data.get('content', '').strip() # Default to empty string if not present
+    file_name = data.get('file_name')
+    file_url = data.get('file_url')
+    file_type = data.get('file_type')
+
+    if not content and not file_url: # Must have content or a file
+        return jsonify(msg="Message content or a file is required."), 400
+
+    if file_url and (not file_name or not file_type):
+        return jsonify(msg="file_name and file_type are required when file_url is provided."), 400
+
+    # Basic validation for file_type if provided
+    allowed_file_types = ['image', 'video', 'audio', 'pdf', 'archive', 'doc', 'binary']
+    if file_type and file_type not in allowed_file_types:
+        return jsonify(msg=f"Invalid file_type. Allowed types are: {', '.join(allowed_file_types)}"), 400
+
 
     # Determine recipient_id
     recipient_id = None
@@ -10171,16 +10188,10 @@ def post_new_message(conversation_id):
     # Check if recipient is active (optional, but good for UX)
     recipient_user = find_user_by_id(recipient_id)
     if not recipient_user or not recipient_user['is_active']:
-        # Depending on policy, either block sending or allow but notify sender.
-        # For now, let's allow sending, but this is a design choice.
         app.logger.warning(f"Sending message from {current_user_id} to inactive user {recipient_id} in conversation {conversation_id}.")
-        # return jsonify(msg="Cannot send message: The recipient is inactive."), 400
 
-
-    new_message = send_message(db, conversation_id, current_user_id, recipient_id, content)
+    new_message = send_message(db, conversation_id, current_user_id, recipient_id, content, file_name, file_url, file_type)
     if new_message:
-        # `send_message` returns a Row object. Convert to dict for jsonify.
-        # Also, convert timestamps if necessary.
         message_dict_for_api_response = convert_timestamps_to_ist_iso(dict(new_message), ['created_at'])
 
         # Add sender_username and recipient_username if not already in new_message from send_message
@@ -10223,19 +10234,155 @@ def get_user_chat_status(target_user_id):
     # Convert last_seen to ISO format
     if status_dict.get('last_seen'):
         try:
-            # Assuming last_seen is stored as 'YYYY-MM-DD HH:MM:SS' and is UTC
             naive_dt = datetime.strptime(status_dict['last_seen'], '%Y-%m-%d %H:%M:%S')
-            # If it's stored as IST (e.g. from CURRENT_TIMESTAMP with +05:30), then use IST.localize
-            # If it's from SQLite's CURRENT_TIMESTAMP (which is UTC), then use UTC.localize
-            # For consistency, let's assume it was stored as UTC if from CURRENT_TIMESTAMP.
             aware_dt = UTC.localize(naive_dt) 
             status_dict['last_seen'] = aware_dt.isoformat()
         except ValueError as e_ts_conv:
             app.logger.error(f"Error converting last_seen for user_status endpoint (user {target_user_id}): {e_ts_conv}. Value: {status_dict['last_seen']}")
-            # If conversion fails, return the raw string or nullify it
-            # status_dict['last_seen'] = None # Or keep raw string: pass
     
     return jsonify(status_dict), 200
+
+# --- Chat File Upload Route ---
+@chat_bp.route('/upload_file', methods=['POST'])
+@active_user_required
+def upload_chat_file():
+    current_user_id = int(get_jwt_identity())
+    db = get_db()
+
+    if 'file' not in request.files:
+        return jsonify(msg="No file part in the request."), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify(msg="No file selected for uploading."), 400
+
+    conversation_id_str = request.form.get('conversation_id')
+    if not conversation_id_str:
+        return jsonify(msg="conversation_id is required."), 400
+
+    try:
+        conversation_id = int(conversation_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid conversation_id format."), 400
+
+    # Verify user is part of the conversation
+    conversation = get_conversation_by_id(db, conversation_id)
+    if not conversation:
+        return jsonify(msg="Conversation not found."), 404
+    if current_user_id not in (conversation['user1_id'], conversation['user2_id']):
+        return jsonify(msg="You are not authorized to upload files to this conversation."), 403
+
+    if file and allowed_file(file.filename): # Use existing allowed_file or a chat-specific one
+        original_filename = secure_filename(file.filename)
+        file_extension = original_filename.rsplit('.', 1)[1].lower() if '.' in original_filename else ''
+
+        # Generate a unique filename
+        unique_filename = f"{uuid.uuid4().hex[:12]}_{original_filename}"
+
+        # Create conversation-specific upload directory if it doesn't exist
+        conversation_upload_path = os.path.join(app.config['CHAT_UPLOAD_FOLDER'], str(conversation_id))
+        if not os.path.exists(conversation_upload_path):
+            os.makedirs(conversation_upload_path, exist_ok=True)
+
+        file_save_path = os.path.join(conversation_upload_path, unique_filename)
+
+        try:
+            file.save(file_save_path)
+
+            # Determine file_type based on MIME type (similar to ChatWindow's getFileType)
+            mime_type = file.mimetype
+            file_type_category = 'binary' # Default
+            if mime_type:
+                if mime_type.startswith('image/'): file_type_category = 'image'
+                elif mime_type.startswith('video/'): file_type_category = 'video'
+                elif mime_type.startswith('audio/'): file_type_category = 'audio'
+                elif mime_type == 'application/pdf': file_type_category = 'pdf'
+                elif mime_type.startswith('application/') and ('zip' in mime_type or 'compressed' in mime_type or 'archive' in mime_type):
+                    file_type_category = 'archive'
+                elif mime_type.startswith('application/') and ('doc' in mime_type or 'word' in mime_type or 'sheet' in mime_type or 'excel' in mime_type or 'powerpoint' in mime_type):
+                    file_type_category = 'doc'
+
+            file_url_to_return = f"/files/chat_uploads/{conversation_id}/{unique_filename}"
+
+            log_audit_action(
+                action_type='CHAT_FILE_UPLOAD',
+                target_table='messages', # Or a dedicated chat_files table if you make one
+                target_id=conversation_id, # Log against conversation for now
+                details={
+                    'filename': original_filename,
+                    'stored_as': unique_filename,
+                    'conversation_id': conversation_id,
+                    'file_type': file_type_category,
+                    'file_url': file_url_to_return
+                }
+            )
+
+            return jsonify({
+                "message": "File uploaded successfully",
+                "file_url": file_url_to_return,
+                "file_name": original_filename,
+                "file_type": file_type_category,
+                "file_extension": file_extension # Optional: useful for client-side icon display
+            }), 201
+
+        except Exception as e:
+            app.logger.error(f"Error saving chat file {original_filename} to {file_save_path}: {e}")
+            # Attempt to clean up partially saved file if error occurs
+            if os.path.exists(file_save_path):
+                try:
+                    os.remove(file_save_path)
+                except Exception as e_clean:
+                    app.logger.error(f"Error cleaning up partially saved chat file {file_save_path}: {e_clean}")
+            return jsonify(msg="Error saving uploaded file."), 500
+    else:
+        return jsonify(msg="File type not allowed."), 400
+
+# --- Chat File Serving Route ---
+@app.route('/files/chat_uploads/<int:conversation_id>/<path:filename>')
+@active_user_required # Ensures user is logged in
+def serve_chat_file(conversation_id, filename):
+    current_user_id = int(get_jwt_identity())
+    db = get_db()
+
+    # Verify user is part of the conversation
+    conversation = get_conversation_by_id(db, conversation_id)
+    if not conversation:
+        return jsonify(msg="Conversation not found."), 404
+    if current_user_id not in (conversation['user1_id'], conversation['user2_id']):
+        # Log this attempt, as it's a potential unauthorized access
+        log_audit_action(
+            action_type='CHAT_FILE_ACCESS_DENIED',
+            target_table='messages', # Or chat_files if you have one
+            target_id=conversation_id, # Or a specific message/file ID if known
+            details={
+                'filename': filename,
+                'conversation_id': conversation_id,
+                'reason': 'User not part of conversation'
+            }
+        )
+        return jsonify(msg="You are not authorized to access files from this conversation."), 403
+
+    # Log download activity (optional, but good for tracking)
+    # Note: _log_download_activity might need adjustment if it expects item_type like 'document', 'patch'
+    # For chat, you might create a simplified logger or adapt the existing one.
+    # For now, skipping direct call to _log_download_activity to avoid complexity.
+    log_audit_action(
+        action_type='CHAT_FILE_DOWNLOAD_ATTEMPT', # Or 'CHAT_FILE_DOWNLOAD_SUCCESS' if logged after send_from_directory
+        target_table='messages', # Or chat_files
+        target_id=conversation_id, # Or specific message/file ID
+        details={'filename': filename, 'conversation_id': conversation_id}
+    )
+
+    directory_path = os.path.join(app.config['CHAT_UPLOAD_FOLDER'], str(conversation_id))
+
+    # Security: Basic check to prevent path traversal, though send_from_directory handles it well.
+    if ".." in filename or filename.startswith("/"):
+        return jsonify(msg="Invalid filename."), 400
+
+    if not os.path.exists(os.path.join(directory_path, filename)):
+        return jsonify(msg="File not found on server."), 404
+
+    return send_from_directory(directory_path, filename, as_attachment=False) # as_attachment=False for inline display if browser supports
 
 app.register_blueprint(chat_bp)
 # --- End Chat API Endpoints ---

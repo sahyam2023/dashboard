@@ -172,21 +172,54 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
     };
   }, [socket, selectedConversation]); // Rerun when selectedConversation changes to listen to correct new_message
 
+  // Removed getFileType as file type is now determined by backend.
+  // const getFileType = (fileType: string): Message['file_type'] => { ... };
 
   const handleSendMessage = async (messageText: string) => {
-    if (!selectedConversation || !currentUserId) return;
+    if (!selectedConversation || !currentUserId || !messageText.trim()) return;
     setSending(true);
     try {
-      // API call saves to DB & triggers socket event from backend
-      await api.sendMessage(selectedConversation.conversation_id, messageText);
-      // Optimistic update can be done here, but relying on socket event for consistency
-      // If socket event is slightly delayed, UI might feel less responsive.
-      // Example of optimistic update (commented out):
-      // const tempMessage: Message = { id: Date.now(), conversation_id: selectedConversation.conversation_id, sender_id: currentUserId, recipient_id: selectedConversation.other_user_id, content: messageText, created_at: new Date().toISOString(), is_read: false, sender_username: 'You' };
-      // setMessages(prev => [...prev, tempMessage]);
-    } catch (err: any) { // Explicitly type err
-      // setError(err instanceof Error ? err.message : 'Failed to send message');
+      // Text message: content is messageText, fileUrl, fileName, fileType are undefined
+      await api.sendMessage(selectedConversation.conversation_id, messageText.trim());
+      // Optimistic update is handled by socket event from backend
+    } catch (err: any) {
       showToastNotification(`Error sending message: ${err.message || 'Unknown error'}`, 'error');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleSendFile = async (file: File) => {
+    if (!selectedConversation || !currentUserId) return;
+    setSending(true);
+    showToastNotification(`Uploading ${file.name}...`, 'info');
+
+    try {
+      // Step 1: Upload the file
+      const uploadResponse = await api.uploadChatFile(file, selectedConversation.conversation_id);
+
+      app.logger.info('File uploaded, API response:', uploadResponse); // Use app.logger if available, else console.log
+      showToastNotification(`${file.name} uploaded. Sending message...`, 'info');
+
+      // Step 2: Send the message with file details from uploadResponse
+      // The 'content' for a file message could be the filename, or empty if the UI handles it.
+      // Using original file.name as content for now, as backend might expect content.
+      await api.sendMessage(
+        selectedConversation.conversation_id,
+        file.name, // Content of the message (e.g., filename)
+        uploadResponse.file_url,
+        uploadResponse.file_name, // This is the original_filename from backend response
+        uploadResponse.file_type
+      );
+      // Message is considered sent. UI will update via socket 'new_message' event.
+      // No optimistic UI update here to rely on backend + socket for consistency.
+      // If immediate feedback is desired, a temporary local message could be added,
+      // then replaced/confirmed by the socket event (matching by a temporary ID).
+      // For now, we assume the socket event will follow shortly.
+
+    } catch (err: any) {
+      console.error("Error in handleSendFile:", err);
+      showToastNotification(`Error sending file ${file.name}: ${err.message || 'Unknown error'}`, 'error');
     } finally {
       setSending(false);
     }
@@ -250,7 +283,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
         isLoadingOlder={loadingOlder}
       />
 
-      <ChatInput onSendMessage={handleSendMessage} disabled={sending || !socket?.connected} />
+      <ChatInput
+        onSendMessage={handleSendMessage}
+        onSendFile={handleSendFile}
+        disabled={sending || !socket?.connected}
+      />
     </div>
   );
 };

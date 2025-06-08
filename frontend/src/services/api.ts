@@ -2644,6 +2644,23 @@ export const createAnnouncement = async (message: string): Promise<CreateAnnounc
 };
 // --- End Announcement API ---
 
+export const getUserChatStatus = async (userId: number): Promise<{ is_online: boolean; last_seen: string | null }> => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/chat/user_status/${userId}`, {
+      method: 'GET',
+      headers: { ...getAuthHeader(), 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+    });
+    return handleApiError(response, `Failed to fetch chat status for user ${userId}`);
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error(`Error fetching chat status for user ${userId}:`, error);
+    throw error;
+  }
+};
+
 // --- Large File Upload (Chunked) ---
 
 function generateUUID() { // Public Domain/MIT

@@ -21,6 +21,17 @@ interface NotificationContextType {
   markAllAsRead: () => Promise<void>;
   clearAll: () => Promise<void>;
   clearNotificationsState: () => void; // Function to clear local notification state
+  // Added for toast-style notifications
+  showToastNotification: (message: string, type: ToastNotificationType) => void; 
+}
+
+// Type for generic toast notifications
+export type ToastNotificationType = 'success' | 'error' | 'info' | 'warning';
+
+interface ToastNotification {
+  id: number;
+  message: string;
+  type: ToastNotificationType;
 }
 
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
@@ -43,6 +54,9 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<Error | null>(null);
   const { isAuthenticated } = useAuth();
+
+  // State for toast-style notifications
+  const [toastNotifications, setToastNotifications] = useState<ToastNotification[]>([]);
 
   const POLLING_INTERVAL = 60000; // 60 seconds
 
@@ -153,10 +167,30 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
     setIsLoading(false);
   };
 
+  // Function to show a toast-style notification
+  const showToastNotification = (message: string, type: ToastNotificationType) => {
+    const newToastNotification = {
+      id: Date.now(), // Simple ID generation
+      message,
+      type,
+    };
+    setToastNotifications(prev => [...prev, newToastNotification]);
+    // Auto-remove notification after some time
+    setTimeout(() => {
+      removeToastNotification(newToastNotification.id);
+    }, 5000); // Remove after 5 seconds
+  };
+
+  const removeToastNotification = (id: number) => {
+    setToastNotifications(prev =>
+      prev.filter(notification => notification.id !== id)
+    );
+  };
+
   return (
     <NotificationContext.Provider
       value={{
-        notifications,
+        notifications, // For persistent notifications
         unreadCount,
         isLoading,
         error,
@@ -166,9 +200,27 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
         markAllAsRead,
         clearAll,
         clearNotificationsState,
+        showToastNotification, // For toast-style notifications
       }}
     >
       {children}
+      {/* Conceptual: Rendering toast notifications */}
+      {/* This part would typically be a separate component that consumes toastNotifications state */}
+      <div className="fixed bottom-4 right-4 z-50 space-y-2">
+        {toastNotifications.map(toast => (
+          <div
+            key={toast.id}
+            className={`p-4 rounded-md shadow-lg text-white ${
+              toast.type === 'success' ? 'bg-green-500' :
+              toast.type === 'error' ? 'bg-red-500' :
+              toast.type === 'warning' ? 'bg-yellow-500' : 'bg-blue-500' // info
+            }`}
+            onClick={() => removeToastNotification(toast.id)} // Allow dismissing by click
+          >
+            {toast.message}
+          </div>
+        ))}
+      </div>
     </NotificationContext.Provider>
   );
 };

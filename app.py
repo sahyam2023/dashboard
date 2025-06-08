@@ -6678,7 +6678,7 @@ def logout():
             (current_user_id,)
         )
         db.commit()
-
+        
         if cursor.rowcount > 0:
             app.logger.info(f"User {current_user_id} status set to offline and last_seen updated.")
             # Fetch the updated last_seen time to include in the event
@@ -9933,71 +9933,7 @@ def clear_all_user_notifications_api():
         app.logger.error(f"Error clearing all notifications for user {user_id}: {e}", exc_info=True)
         return jsonify(msg="An error occurred while clearing all notifications."), 500
     
-@app.route('/assets/<path:filename>')
-def serve_spa_assets(filename):
-    return send_from_directory(os.path.join(app.static_folder, 'assets'), filename)
 
-# This is the catch-all for your SPA's client-side routes
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-def serve_spa_catch_all(path): # Renamed function to ensure no endpoint conflicts
-    # This function now serves index.html for any path not caught above (assets or API routes)
-    # It needs to correctly find index.html within app.static_folder (frontend/dist/index.html)
-    return send_from_directory(app.static_folder, 'index.html')
-
-# --- Backup and Scheduler Functions ---
-
-
-
-
-if __name__ == '__main__':
-    db_path = app.config.get('DATABASE')
-    if not db_path:
-        app.logger.error("ERROR: DATABASE configuration not found in app.config. Cannot initialize DB.")
-    else:
-        db_dir = os.path.dirname(db_path)
-        if db_dir and not os.path.exists(db_dir):
-            try:
-                os.makedirs(db_dir, exist_ok=True)
-                app.logger.info(f"Created instance directory: {db_dir}")
-            except OSError as e:
-                app.logger.error(f"Error creating instance directory {db_dir}: {e}")
-        
-        if not os.path.exists(db_path):
-            app.logger.info(f"Database file not found at {db_path}. Initializing database schema...")
-            try:
-                database.init_db(db_path) 
-                app.logger.info(f"Database schema initialized successfully at {db_path}.")
-            except Exception as e:
-                app.logger.error(f"An error occurred during database schema initialization: {e}")
-        else:
-            app.logger.info(f"Database file already exists at {db_path}. Skipping schema initialization.")
-
-        if os.path.exists(db_path):
-            with app.app_context(): # Create an app context for get_db()
-                 temp_conn_main = None
-                 try:
-                    # Use get_db() within context to ensure proper handling if it uses 'g'
-                    temp_conn_main = get_db() 
-                    _initialize_global_password(temp_conn_main)
-                 except sqlite3.OperationalError as e_op:
-                     app.logger.error(f"SQLite OperationalError during global password initialization in __main__: {e_op}")
-                 except Exception as e_global_pw:
-                     app.logger.error(f"Error during global password initialization in __main__: {e_global_pw}")
-                 # No explicit close needed for g.db here, teardown_appcontext handles it.
-        else: 
-            app.logger.warning(f"Skipping global password initialization as database file {db_path} was not successfully created/initialized.")
-
-    # Initialize scheduler and backups AFTER DB setup
-    initialize_scheduler_and_backups(app)
-
-    # Note: Scheduler and backup checks are now initialized by initialize_scheduler_and_backups(app)
-    # called after app creation and configuration.
-
-    # --- Replicate default files if running as a bundle ---
-    # This needs to be called after INSTANCE_FOLDER_PATH and DEFAULT_PROFILE_PICTURES_FOLDER are defined.
-    replicate_default_files_if_bundled()
-    # --- End replication call ---
 
 # --- Chat API Endpoints ---
 chat_bp = Blueprint('chat_api', __name__, url_prefix='/api')
@@ -10092,7 +10028,7 @@ def start_new_conversation():
         # get_user_conversations returns a list, we need to find the specific one.
         # This is not the most efficient way if get_user_conversations is heavy.
         # A more direct fetch might be better: get_conversation_details_for_user(db, conversation_id, user_id)
-
+        
         # Simplification: Assuming get_user_conversations is efficient enough for now,
         # or that the frontend can handle a list and find the new one.
         # A more targeted approach would be to construct the payload directly.
@@ -10109,7 +10045,7 @@ def start_new_conversation():
                     temp_conv_dict['other_profile_picture_url'] = None
                 user1_conv_payload = temp_conv_dict
                 break
-
+        
         if user1_conv_payload:
              # Emit to user1's room (assuming user-specific rooms like 'user_USERID')
             socketio.emit('new_conversation_started', user1_conv_payload, room=f'user_{user1_id}')
@@ -10268,10 +10204,6 @@ def post_new_message(conversation_id):
         app.logger.error(f"Failed to send message in conversation {conversation_id} from user {current_user_id}")
         return jsonify(msg="Failed to send message."), 500
 
-app.register_blueprint(chat_bp)
-# --- End Chat API Endpoints ---
-
-# --- API Endpoint for User Status ---
 @chat_bp.route('/user_status/<int:target_user_id>', methods=['GET'])
 @active_user_required # Ensure only authenticated users can request status
 def get_user_chat_status(target_user_id):
@@ -10292,15 +10224,17 @@ def get_user_chat_status(target_user_id):
             # If it's stored as IST (e.g. from CURRENT_TIMESTAMP with +05:30), then use IST.localize
             # If it's from SQLite's CURRENT_TIMESTAMP (which is UTC), then use UTC.localize
             # For consistency, let's assume it was stored as UTC if from CURRENT_TIMESTAMP.
-            aware_dt = UTC.localize(naive_dt)
+            aware_dt = UTC.localize(naive_dt) 
             status_dict['last_seen'] = aware_dt.isoformat()
         except ValueError as e_ts_conv:
             app.logger.error(f"Error converting last_seen for user_status endpoint (user {target_user_id}): {e_ts_conv}. Value: {status_dict['last_seen']}")
             # If conversion fails, return the raw string or nullify it
             # status_dict['last_seen'] = None # Or keep raw string: pass
-
+    
     return jsonify(status_dict), 200
-# --- End API Endpoint for User Status ---
+
+app.register_blueprint(chat_bp)
+# --- End Chat API Endpoints ---
 
 # --- SocketIO Event Handlers ---
 @socketio.on('connect')
@@ -10356,7 +10290,7 @@ def handle_disconnect():
         #     user_sids[user_id_str].remove(request.sid)
         #     if not user_sids[user_id_str]: # Cleanup if set is empty
         #         del user_sids[user_id_str]
-
+        
         # --- Real-time Online Status Update on Disconnect ---
         try:
             user_id = int(user_id_str)
@@ -10381,7 +10315,7 @@ def handle_disconnect():
                     except Exception as e_ts_conv:
                         app.logger.error(f"Error converting last_seen for disconnect event (user {user_id}): {e_ts_conv}")
                         last_seen_timestamp_iso = datetime.now(timezone.utc).isoformat() # Fallback
-
+                
                 socketio.emit('user_offline', {'user_id': user_id, 'last_seen': last_seen_timestamp_iso}, broadcast=True)
             else:
                 app.logger.warning(f"SocketIO disconnect: Failed to update online status for user {user_id} (user not found or no change needed).")
@@ -10406,7 +10340,7 @@ def handle_join_conversation(data):
             # For example, using PyJWT:
             # decoded = jwt.decode(token_from_event, app.config['JWT_SECRET_KEY'], algorithms=["HS256"])
             # current_user_id_str = decoded.get('sub') # 'sub' is the standard claim for identity
-
+            
             # Placeholder: Assuming direct identity from a "trusted" token for this example.
             # In a real app, this MUST be a secure validation.
             # For now, if a token is passed, we'll try to use its 'sub' if it were decoded.
@@ -10422,7 +10356,7 @@ def handle_join_conversation(data):
             app.logger.error(f"SocketIO 'join_conversation': Error processing token from event data: {e_token}")
             emit('join_error', {'conversation_id': data.get('conversation_id'), 'error': 'Invalid token.'})
             return
-
+    
     if not current_user_id_str: # If token from event didn't yield an ID, try JWT identity from context
         try:
             current_user_id_str = get_jwt_identity()
@@ -10447,7 +10381,7 @@ def handle_join_conversation(data):
         app.logger.warning("SocketIO 'join_conversation': conversation_id missing from event data.")
         emit('join_error', {'error': 'conversation_id is required.'})
         return
-
+    
     try:
         conversation_id = int(conversation_id_str)
     except ValueError:
@@ -10486,11 +10420,11 @@ def handle_mark_as_read(data):
     try:
         # This is a placeholder for robust JWT authentication in SocketIO events.
         # In a real app, you'd verify a token passed in `data` or from connection handshake.
-        current_user_id_str = get_jwt_identity()
+        current_user_id_str = get_jwt_identity() 
         if not current_user_id_str:
             # Attempt to get token from data if not in established identity
             # This part is illustrative and needs proper JWT validation if used.
-            # token = data.get('token')
+            # token = data.get('token') 
             # if token:
             #     # decoded_token = decode_and_verify_jwt(token) # Placeholder
             #     # current_user_id_str = decoded_token.get('sub')
@@ -10507,7 +10441,7 @@ def handle_mark_as_read(data):
     if not current_user_id_str: # Still no user ID
         emit('mark_as_read_error', {'error': 'User identity could not be confirmed.'})
         return
-
+        
     try:
         current_user_id = int(current_user_id_str)
     except ValueError:
@@ -10527,19 +10461,19 @@ def handle_mark_as_read(data):
         app.logger.warning(f"SocketIO 'mark_as_read': Invalid conversation_id format '{conversation_id}'.")
         emit('mark_as_read_error', {'error': 'Invalid conversation_id format.'})
         return
-
+        
     db = get_db()
     try:
         rows_updated = mark_messages_as_read(db, conversation_id_int, current_user_id)
         db.commit()
         app.logger.info(f"SocketIO: Marked {rows_updated} messages as read for user {current_user_id} in conversation {conversation_id_int} and committed.")
-
+        
         # Emit an event back to the specific user (client) who sent this, using their SID
         # The room for the conversation is str(conversation_id_int)
         # We can also broadcast to the room if other clients of the same user need update,
         # or just to this SID.
         emit('unread_cleared', {'conversation_id': conversation_id_int, 'messages_marked_read': rows_updated}, room=request.sid)
-
+        
         # Additionally, you might want to notify other clients of this user if they are connected elsewhere
         # This requires tracking SIDs per user_id. For simplicity, this example only emits to the requesting SID.
         # If you have user-specific rooms (e.g., room=str(current_user_id)), you could emit there:
@@ -10552,6 +10486,71 @@ def handle_mark_as_read(data):
     # No explicit close_db(e) here as it's handled by teardown_appcontext
 
 # --- End SocketIO Event Handlers ---
+@app.route('/assets/<path:filename>')
+def serve_spa_assets(filename):
+    return send_from_directory(os.path.join(app.static_folder, 'assets'), filename)
+
+# This is the catch-all for your SPA's client-side routes
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve_spa_catch_all(path): # Renamed function to ensure no endpoint conflicts
+    # This function now serves index.html for any path not caught above (assets or API routes)
+    # It needs to correctly find index.html within app.static_folder (frontend/dist/index.html)
+    return send_from_directory(app.static_folder, 'index.html')
+
+# --- Backup and Scheduler Functions ---
+
+
+
+
+if __name__ == '__main__':
+    db_path = app.config.get('DATABASE')
+    if not db_path:
+        app.logger.error("ERROR: DATABASE configuration not found in app.config. Cannot initialize DB.")
+    else:
+        db_dir = os.path.dirname(db_path)
+        if db_dir and not os.path.exists(db_dir):
+            try:
+                os.makedirs(db_dir, exist_ok=True)
+                app.logger.info(f"Created instance directory: {db_dir}")
+            except OSError as e:
+                app.logger.error(f"Error creating instance directory {db_dir}: {e}")
+        
+        if not os.path.exists(db_path):
+            app.logger.info(f"Database file not found at {db_path}. Initializing database schema...")
+            try:
+                database.init_db(db_path) 
+                app.logger.info(f"Database schema initialized successfully at {db_path}.")
+            except Exception as e:
+                app.logger.error(f"An error occurred during database schema initialization: {e}")
+        else:
+            app.logger.info(f"Database file already exists at {db_path}. Skipping schema initialization.")
+
+        if os.path.exists(db_path):
+            with app.app_context(): # Create an app context for get_db()
+                 temp_conn_main = None
+                 try:
+                    # Use get_db() within context to ensure proper handling if it uses 'g'
+                    temp_conn_main = get_db() 
+                    _initialize_global_password(temp_conn_main)
+                 except sqlite3.OperationalError as e_op:
+                     app.logger.error(f"SQLite OperationalError during global password initialization in __main__: {e_op}")
+                 except Exception as e_global_pw:
+                     app.logger.error(f"Error during global password initialization in __main__: {e_global_pw}")
+                 # No explicit close needed for g.db here, teardown_appcontext handles it.
+        else: 
+            app.logger.warning(f"Skipping global password initialization as database file {db_path} was not successfully created/initialized.")
+
+    # Initialize scheduler and backups AFTER DB setup
+    initialize_scheduler_and_backups(app)
+
+    # Note: Scheduler and backup checks are now initialized by initialize_scheduler_and_backups(app)
+    # called after app creation and configuration.
+
+    # --- Replicate default files if running as a bundle ---
+    # This needs to be called after INSTANCE_FOLDER_PATH and DEFAULT_PROFILE_PICTURES_FOLDER are defined.
+    replicate_default_files_if_bundled()
+    # --- End replication call ---
 
 
     try:

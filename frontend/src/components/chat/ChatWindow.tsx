@@ -28,10 +28,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false); // For initial message load
   const [loadingOlder, setLoadingOlder] = useState(false); // For loading older messages
-  // const [error, setError] = useState<string | null>(null); // Replaced by notification
   const [sending, setSending] = useState(false);
-  const { showNotification } = useNotification(); // Notification hook
+  const { showToastNotification } = useNotification(); // Corrected to showToastNotification
   const [otherUserStatus, setOtherUserStatus] = useState<OtherUserStatus | null>(null);
+  const selectedConversationRef = useRef<Conversation | null>(null); // Ref for selectedConversation
 
   // Pagination for messages
   const [currentPage, setCurrentPage] = useState(1);
@@ -48,7 +48,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
     } else {
       setLoadingOlder(true);
     }
-    setError(null);
+    // setError(null); // Removed as error state is removed
     try {
       const fetchedMessages = await api.getMessages(conversationId, messagesPerPage, (page - 1) * messagesPerPage);
 
@@ -60,9 +60,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
       }
       setMessages(prevMessages => initialLoad ? newMessages : [...newMessages, ...prevMessages]);
       if(initialLoad) setCurrentPage(1); // Reset current page on initial load
-    } catch (err) {
-      // setError(err instanceof Error ? err.message : 'An unknown error occurred');
-      showNotification(`Error loading messages: ${err instanceof Error ? err.message : 'Unknown error'}`, 'error');
+    } catch (err: any) { // Explicitly type err
+      showToastNotification(`Error loading messages: ${err.message || 'Unknown error'}`, 'error');
     } finally {
       if (initialLoad) {
         setLoading(false);
@@ -70,7 +69,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
         setLoadingOlder(false);
       }
     }
-  }, [messagesPerPage]);
+  }, [messagesPerPage, showToastNotification]); // Added showToastNotification to dependencies
 
   useEffect(() => {
     if (selectedConversation) {
@@ -93,57 +92,64 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
     // as joining a new room effectively changes context on server if rooms are exclusive per client session
     // or server handles disconnects.
     setOtherUserStatus(null); // Reset status when conversation changes
-  }, [selectedConversation, socket, loadMessages, tokenData?.token]);
+    selectedConversationRef.current = selectedConversation; // Update ref
+
+    // Fetch initial online status for the new selected conversation's other user
+    if (selectedConversation?.other_user_id) {
+      const fetchStatus = async () => {
+        try {
+          console.log(`ChatWindow: Fetching status for user ${selectedConversation.other_user_id}`);
+          const statusData = await api.getUserChatStatus(selectedConversation.other_user_id);
+          setOtherUserStatus(statusData);
+        } catch (err: any) {
+          console.error("Failed to fetch user status:", err);
+          showToastNotification(err.message || 'Failed to load user status', 'error');
+          setOtherUserStatus(null);
+        }
+      };
+      fetchStatus();
+    }
+
+  }, [selectedConversation, socket, loadMessages, tokenData?.token, showToastNotification]);
 
   useEffect(() => {
     if (selectedConversation && socket && !loading && messages.length > 0) {
       console.log(`ChatWindow: Emitting 'mark_as_read' for conversation ${selectedConversation.conversation_id}`);
-      socket.emit('mark_as_read', {
+      socket.emit('mark_as_read', { 
         conversation_id: selectedConversation.conversation_id,
-        token: tokenData?.token
+        token: tokenData?.token 
       });
     }
   }, [selectedConversation, socket, loading, messages, tokenData?.token]);
 
-  // Fetch initial online status for the other user in the selected conversation
+  // Listen for real-time online/offline status updates
   useEffect(() => {
-    if (selectedConversation?.other_user_id) {
-      api.getUserChatStatus(selectedConversation.other_user_id)
-        .then(status => setOtherUserStatus(status))
-        .catch(err => {
-          console.error("Failed to fetch other user status:", err);
-          showNotification(`Error fetching user status: ${err.message}`, 'error');
-          setOtherUserStatus(null); // Reset on error
-        });
-    }
-  }, [selectedConversation, showNotification]);
-
-  // Listen for real-time online/offline status updates for the other user
-  useEffect(() => {
-    if (!socket || !selectedConversation?.other_user_id) return;
+    if (!socket) return;
 
     const handleUserOnline = (data: { user_id: number }) => {
-      if (data.user_id === selectedConversation.other_user_id) {
-        setOtherUserStatus(prev => ({ ...prev, is_online: true, last_seen: null }));
+      console.log("ChatWindow: user_online event", data, "current other_user_id:", selectedConversationRef.current?.other_user_id);
+      if (data.user_id === selectedConversationRef.current?.other_user_id) {
+        setOtherUserStatus(prevStatus => ({ ...prevStatus, is_online: true, last_seen: null }));
       }
     };
 
     const handleUserOffline = (data: { user_id: number; last_seen: string }) => {
-      if (data.user_id === selectedConversation.other_user_id) {
-        setOtherUserStatus(prev => ({ ...prev, is_online: false, last_seen: data.last_seen }));
+      console.log("ChatWindow: user_offline event", data, "current other_user_id:", selectedConversationRef.current?.other_user_id);
+      if (data.user_id === selectedConversationRef.current?.other_user_id) {
+        setOtherUserStatus(prevStatus => ({ ...prevStatus, is_online: false, last_seen: data.last_seen }));
       }
     };
 
     socket.on('user_online', handleUserOnline);
     socket.on('user_offline', handleUserOffline);
-    console.log(`ChatWindow: 'user_online'/'user_offline' listeners attached for user ${selectedConversation.other_user_id}.`);
+    console.log(`ChatWindow: 'user_online'/'user_offline' listeners attached globally.`);
 
     return () => {
       socket.off('user_online', handleUserOnline);
       socket.off('user_offline', handleUserOffline);
-      console.log(`ChatWindow: 'user_online'/'user_offline' listeners detached for user ${selectedConversation.other_user_id}.`);
+      console.log(`ChatWindow: 'user_online'/'user_offline' listeners detached.`);
     };
-  }, [socket, selectedConversation?.other_user_id]);
+  }, [socket]); // Depends only on socket, selectedConversationRef is used to check current relevance
 
   useEffect(() => {
     if (!socket || !selectedConversation) return;
@@ -178,9 +184,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
       // Example of optimistic update (commented out):
       // const tempMessage: Message = { id: Date.now(), conversation_id: selectedConversation.conversation_id, sender_id: currentUserId, recipient_id: selectedConversation.other_user_id, content: messageText, created_at: new Date().toISOString(), is_read: false, sender_username: 'You' };
       // setMessages(prev => [...prev, tempMessage]);
-    } catch (err) {
+    } catch (err: any) { // Explicitly type err
       // setError(err instanceof Error ? err.message : 'Failed to send message');
-      showNotification(`Error sending message: ${err instanceof Error ? err.message : 'Unknown error'}`, 'error');
+      showToastNotification(`Error sending message: ${err.message || 'Unknown error'}`, 'error');
     } finally {
       setSending(false);
     }

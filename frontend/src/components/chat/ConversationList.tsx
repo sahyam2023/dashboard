@@ -32,30 +32,53 @@ const ConversationList: React.FC<ConversationListProps> = ({
 }) => {
   const [conversations, setConversations] = useState<FrontendConversation[]>([]);
   const [loading, setLoading] = useState(false);
-  // const [error, setError] = useState<string | null>(null); // Replaced by notification
-  const { showNotification } = useNotification(); // Notification hook
+  const { showToastNotification } = useNotification(); // Corrected to use showToastNotification
 
   // Placeholder fetchConversations function is removed, will use api.getUserConversations
   
   const loadConversations = useCallback(async () => {
     if (!currentUserId) return;
     setLoading(true);
-    // setError(null); // Not needed with notifications
     try {
-      const data = await api.getUserConversations();
-      // Backend already sorts by last_message_created_at
-      setConversations(data);
-    } catch (err) {
-      // setError(err instanceof Error ? err.message : 'An unknown error occurred');
-      showNotification(`Error loading conversations: ${err instanceof Error ? err.message : 'Unknown error'}`, 'error');
+      const data: Conversation[] = await api.getUserConversations(); // Ensure 'data' is typed as Conversation[]
+      const frontendConversations: FrontendConversation[] = data.map(
+        (conv: Conversation): FrontendConversation => ({ // Explicitly type 'conv' and the return type of map
+          ...conv,
+          // other_user_is_online and other_user_last_seen will be implicitly undefined
+          // if not part of the 'conv' object, which is fine for optional fields in FrontendConversation.
+        })
+      );
+      setConversations(frontendConversations);
+    } catch (err: any) {
+      showToastNotification(`Error loading conversations: ${err.message || 'Unknown error'}`, 'error');
     } finally {
       setLoading(false);
     }
-  }, [currentUserId]); // Dependency array for useCallback
+  }, [currentUserId, showToastNotification]); 
   
   useEffect(() => {
     loadConversations();
-  }, [loadConversations]); // Dependency array for useEffect
+  }, [loadConversations]);
+
+  // Handler for user_online event
+  const handleUserOnline = useCallback((data: { user_id: number }) => {
+    console.log('SocketIO: user_online event received in ConversationList', data);
+    setConversations(prevConvs =>
+      prevConvs.map(conv =>
+        conv.other_user_id === data.user_id ? { ...conv, other_user_is_online: true, other_user_last_seen: null } : conv
+      )
+    );
+  }, []);
+
+  // Handler for user_offline event
+  const handleUserOffline = useCallback((data: { user_id: number; last_seen: string }) => {
+    console.log('SocketIO: user_offline event received in ConversationList', data);
+    setConversations(prevConvs =>
+      prevConvs.map(conv =>
+        conv.other_user_id === data.user_id ? { ...conv, other_user_is_online: false, other_user_last_seen: data.last_seen } : conv
+      )
+    );
+  }, []);
 
   useEffect(() => {
     if (!socket || !currentUserId) return;
@@ -142,6 +165,11 @@ const ConversationList: React.FC<ConversationListProps> = ({
     socket.on('new_conversation_started', handleNewConversationStarted);
     console.log("ConversationList: 'new_conversation_started' listener attached.");
 
+    // Listeners for global online/offline events
+    socket.on('user_online', handleUserOnline);
+    socket.on('user_offline', handleUserOffline);
+    console.log("ConversationList: 'user_online' and 'user_offline' listeners attached.");
+
     return () => {
       socket.off('new_message', handleNewMessage);
       socket.off('messages_read', handleMessagesRead);
@@ -151,7 +179,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
       socket.off('user_offline', handleUserOffline);
       console.log("ConversationList: All event listeners detached.");
     };
-  }, [socket, currentUserId, loadConversations, selectedConversationId]);
+  }, [socket, currentUserId, loadConversations, selectedConversationId, handleUserOnline, handleUserOffline]); // Added new handlers to dependency array
 
 
   if (loading) {

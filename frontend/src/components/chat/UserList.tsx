@@ -13,8 +13,7 @@ const UserList: React.FC<UserListProps> = ({ onUserSelect }) => {
   const [users, setUsers] = useState<User[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
-  // const [error, setError] = useState<string | null>(null); // Replaced by notification
-  const { showNotification } = useNotification(); // Notification hook
+  const { showToastNotification } = useNotification(); // Changed to showToastNotification
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const usersPerPage = 20; // Define how many users per page
@@ -30,13 +29,12 @@ const UserList: React.FC<UserListProps> = ({ onUserSelect }) => {
       setUsers(data.users);
       setCurrentPage(data.page);
       setTotalPages(data.total_pages);
-    } catch (err) {
-      // setError(err instanceof Error ? err.message : 'An unknown error occurred fetching users');
-      showNotification(`Error fetching users: ${err instanceof Error ? err.message : 'Unknown error'}`, 'error');
+    } catch (err: any) { // Added type for err
+      showToastNotification(`Error fetching users: ${err.message || 'Unknown error'}`, 'error');
     } finally {
       setLoading(false);
     }
-  }, [usersPerPage]); // usersPerPage is a dependency if it can change, otherwise not strictly needed if constant
+  }, [usersPerPage, showToastNotification]); // Added showToastNotification to dependencies
 
   useEffect(() => {
     // Load users when component mounts or when searchTerm changes

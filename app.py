@@ -10761,6 +10761,137 @@ def emit_online_users_count():
         app.logger.error(f"APP_SOCKET: Error emitting online_users_count: {e}")
 
 # --- End SocketIO Event Handlers ---
+
+# --- Chat Batch Clear Endpoint ---
+@chat_bp.route('/conversations/clear-batch', methods=['POST'])
+@active_user_required
+def clear_batch_conversations():
+    current_user_id = int(get_jwt_identity())
+    db = get_db()
+
+    data = request.get_json()
+    if not data or 'conversation_ids' not in data:
+        return jsonify(msg="Missing 'conversation_ids' in request payload."), 400
+
+    conversation_ids_to_clear = data.get('conversation_ids')
+    if not isinstance(conversation_ids_to_clear, list) or not all(isinstance(cid, int) for cid in conversation_ids_to_clear):
+        return jsonify(msg="'conversation_ids' must be a list of integers."), 400
+
+    if not conversation_ids_to_clear:
+        return jsonify(msg="No conversation IDs provided to clear."), 400
+
+    results = []
+    overall_success = True
+
+    try:
+        db.execute("BEGIN") # Start transaction
+
+        for conv_id in conversation_ids_to_clear:
+            conversation_result = {
+                "conversation_id": conv_id,
+                "status": "skipped",
+                "messages_deleted": 0,
+                "files_deleted": 0,
+                "error": None
+            }
+
+            # Verify User Membership
+            conversation = database.get_conversation_by_id(db, conv_id)
+            if not conversation:
+                conversation_result["error"] = "Conversation not found."
+                results.append(conversation_result)
+                overall_success = False
+                app.logger.warning(f"User {current_user_id} attempted to clear non-existent conversation {conv_id}.")
+                continue
+
+            if current_user_id not in (conversation['user1_id'], conversation['user2_id']):
+                conversation_result["error"] = "User not authorized for this conversation."
+                results.append(conversation_result)
+                overall_success = False
+                log_audit_action(
+                    action_type='CLEAR_CONVERSATION_AUTH_FAILED',
+                    target_table='conversations', target_id=conv_id, user_id=current_user_id,
+                    details={'reason': 'User not part of conversation'}
+                )
+                app.logger.warning(f"User {current_user_id} unauthorized attempt to clear conversation {conv_id}.")
+                continue
+
+            # File Deletion (One-Sided for Files)
+            files_deleted_count_for_conv = 0
+            try:
+                user_files_cursor = db.execute(
+                    "SELECT file_name FROM messages WHERE conversation_id = ? AND sender_id = ? AND file_name IS NOT NULL",
+                    (conv_id, current_user_id)
+                )
+                user_files_to_delete = [row['file_name'] for row in user_files_cursor.fetchall()]
+
+                conversation_upload_path = os.path.join(app.config['CHAT_UPLOAD_FOLDER'], str(conv_id))
+
+                if os.path.exists(conversation_upload_path) and user_files_to_delete:
+                    for file_name_to_delete in user_files_to_delete:
+                        if not file_name_to_delete: continue # Skip if filename is somehow null/empty
+                        file_path_to_delete = os.path.join(conversation_upload_path, file_name_to_delete)
+                        if os.path.exists(file_path_to_delete):
+                            try:
+                                os.remove(file_path_to_delete)
+                                files_deleted_count_for_conv += 1
+                                app.logger.info(f"User {current_user_id} deleted file '{file_path_to_delete}' from conversation {conv_id}.")
+                            except OSError as e_remove:
+                                app.logger.error(f"Error deleting file '{file_path_to_delete}' for user {current_user_id}, conv {conv_id}: {e_remove}")
+                                # Optionally, set overall_success to False or add specific file error to result
+                        else:
+                            app.logger.warning(f"File '{file_name_to_delete}' listed in DB for user {current_user_id}, conv {conv_id}, but not found at '{file_path_to_delete}'.")
+
+                # Check if conversation-specific upload folder is empty
+                if os.path.exists(conversation_upload_path) and not os.listdir(conversation_upload_path):
+                    try:
+                        shutil.rmtree(conversation_upload_path)
+                        app.logger.info(f"Removed empty conversation upload folder: {conversation_upload_path}")
+                    except OSError as e_rmdir:
+                        app.logger.error(f"Error removing empty conversation folder '{conversation_upload_path}': {e_rmdir}")
+
+                conversation_result["files_deleted"] = files_deleted_count_for_conv
+            except Exception as e_file_delete:
+                app.logger.error(f"Error during file deletion for conv {conv_id}, user {current_user_id}: {e_file_delete}", exc_info=True)
+                conversation_result["error"] = f"File deletion error: {str(e_file_delete)}"
+                # overall_success = False # Decide if file deletion error should fail the whole batch for this conv
+
+            # Message Deletion (Two-Sided for Messages for this specific conversation)
+            # The user_id param in clear_messages_for_user_in_conversation is for logging/consistency,
+            # the deletion logic itself is based on conversation_id only.
+            messages_deleted_count = database.clear_messages_for_user_in_conversation(db, conv_id, current_user_id)
+            conversation_result["messages_deleted"] = messages_deleted_count
+
+            conversation_result["status"] = "cleared"
+            results.append(conversation_result)
+            log_audit_action(
+                action_type='CLEAR_CONVERSATION_SUCCESS',
+                target_table='conversations', target_id=conv_id, user_id=current_user_id,
+                details={
+                    'messages_deleted': messages_deleted_count,
+                    'user_files_deleted': files_deleted_count_for_conv,
+                    'batch_operation': True
+                }
+            )
+
+        if overall_success:
+            db.commit()
+            app.logger.info(f"User {current_user_id} successfully cleared conversations: {conversation_ids_to_clear}. Results: {results}")
+            return jsonify({"status": "success", "details": results}), 200
+        else:
+            db.rollback()
+            app.logger.warning(f"User {current_user_id} batch clear conversations had failures. Rolling back. Requested: {conversation_ids_to_clear}. Results: {results}")
+            # Determine appropriate status code based on failures. 207 Multi-Status if some succeeded before a failure that caused rollback.
+            # If all failed or were skipped, 400 or specific error might be better.
+            # For now, if overall_success is false, it implies a rollback of the entire batch.
+            return jsonify({"status": "failed", "message": "One or more conversations could not be cleared or accessed.", "details": results}), 400 # Or 207 if partial commit was possible
+
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"Major exception during batch clear for user {current_user_id}, conversations {conversation_ids_to_clear}: {e}", exc_info=True)
+        return jsonify(msg=f"An unexpected server error occurred: {str(e)}"), 500
+# --- End Chat Batch Clear Endpoint ---
+
 @app.route('/assets/<path:filename>')
 def serve_spa_assets(filename):
     return send_from_directory(os.path.join(app.static_folder, 'assets'), filename)

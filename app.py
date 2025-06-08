@@ -1965,10 +1965,14 @@ def register():
 @app.route('/api/auth/login', methods=['POST'])
 def login():
     data = request.get_json()
-    if not data: return jsonify(msg="Missing JSON data"), 400
+    if not data:
+        return jsonify(msg="Missing JSON data"), 400
+
     username, password = data.get('username'), data.get('password')
 
-    if not username or not password: return jsonify(msg="Missing username or password"), 400
+    if not username or not password:
+        return jsonify(msg="Missing username or password"), 400
+
     user = find_user_by_username(username)
     if user and bcrypt.check_password_hash(user['password_hash'], password):
         if not user['is_active']:
@@ -1976,8 +1980,8 @@ def login():
                 action_type='USER_LOGIN_FAILED_INACTIVE',
                 target_table='users',
                 target_id=user['id'],
-                user_id=user['id'], 
-                username=user['username'], 
+                user_id=user['id'],
+                username=user['username'],
                 details={'reason': 'Account deactivated'}
             )
             return jsonify(msg="Account deactivated."), 403
@@ -1993,16 +1997,20 @@ def login():
                     username=user['username'],
                     details={'reason': 'Maintenance mode active'}
                 )
-                return jsonify({"msg": "System is currently undergoing maintenance. Only super administrators can log in at this time.", "maintenance_mode_active": True}), 503
-        
-        access_token = create_access_token(identity=str(user['id'])) 
+                return jsonify({
+                    "msg": "System is currently undergoing maintenance. Only super administrators can log in at this time.",
+                    "maintenance_mode_active": True
+                }), 503
+
+        access_token = create_access_token(identity=str(user['id']))
         log_audit_action(
             action_type='USER_LOGIN',
             target_table='users',
             target_id=user['id'],
-            user_id=user['id'], # Explicitly pass logged-in user's ID
-            username=user['username'] # Explicitly pass logged-in user's username
+            user_id=user['id'],
+            username=user['username']
         )
+
         # Include password_reset_required flag in the response
         raw_password_reset_flag = None
         raw_password_reset_flag_type = None
@@ -2014,21 +2022,12 @@ def login():
         password_reset_required = user['password_reset_required'] if 'password_reset_required' in user.keys() and user['password_reset_required'] is not None else False
         app.logger.debug(f"[Login Debug] Calculated password_reset_required for JSON response: {password_reset_required}")
         app.logger.debug(f"[Login Debug] Type of calculated password_reset_required for JSON response: {type(password_reset_required).__name__}")
-        
+
         profile_picture_url = None
         if user['profile_picture_filename']:
             profile_picture_url = f"/profile_pictures/{user['profile_picture_filename']}"
 
-        return jsonify(
-            access_token=access_token, 
-            username=user['username'], 
-            role=user['role'],
-            user_id=user['id'], 
-            password_reset_required=password_reset_required,
-            profile_picture_url=profile_picture_url # Added
-        ), 200
-    
-        # --- Real-time Online Status Update ---
+        # --- Real-time Online Status Update (moved before return) ---
         try:
             db = get_db()
             db.execute(
@@ -2037,27 +2036,29 @@ def login():
             )
             db.commit()
             app.logger.info(f"User {user['id']} status set to online and last_seen updated.")
-            # Emit user_online event
-            # Consider emitting to a general 'online_users' room or specific rooms
-            # For now, emitting to a general event that clients can listen to.
-            # More advanced: Emit to rooms of active conversations involving this user.
-            socketio.emit('user_online', {'user_id': user['id']}, broadcast=True) # broadcast=True to all clients
+            socketio.emit('user_online', {'user_id': user['id']}, broadcast=True)
         except Exception as e_status:
             app.logger.error(f"Error updating user online status for user {user['id']}: {e_status}")
-            # Do not fail login if status update fails.
         # --- End Real-time Online Status Update ---
 
+        return jsonify(
+            access_token=access_token,
+            username=user['username'],
+            role=user['role'],
+            user_id=user['id'],
+            password_reset_required=password_reset_required,
+            profile_picture_url=profile_picture_url
+        ), 200
+
     # Log failed login attempt (bad username or password)
-    # Need to determine if user exists to get target_id, or log without it if user not found
     target_id_for_failed_login = user['id'] if user else None
-    username_for_failed_login = username # Log the username that was attempted
+    username_for_failed_login = username
 
     log_audit_action(
         action_type='USER_LOGIN_FAILED',
         target_table='users',
-        target_id=target_id_for_failed_login, # Will be None if username doesn't exist
-        username=username_for_failed_login, # Log the attempted username as the "actor" in this context
-                                            # or could be None if we don't want to identify non-existent users
+        target_id=target_id_for_failed_login,
+        username=username_for_failed_login,
         details={'reason': 'Bad username or password', 'provided_username': username}
     )
     return jsonify(msg="Bad username or password"), 401

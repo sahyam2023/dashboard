@@ -1,6 +1,6 @@
 // frontend/src/components/chat/ChatMain.tsx
-import React, { useState, useEffect, useCallback } from 'react';
-import { User, Conversation, Message, PaginatedUsersResponse } from './types';
+import React, { useState, useEffect} from 'react';
+import { User, Conversation } from './types';
 import UserList from './UserList';
 import ConversationList from './ConversationList';
 import ChatWindow from './ChatWindow';

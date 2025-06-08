@@ -198,7 +198,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
       // Step 1: Upload the file
       const uploadResponse = await api.uploadChatFile(file, selectedConversation.conversation_id);
 
-      app.logger.info('File uploaded, API response:', uploadResponse); // Use app.logger if available, else console.log
+      console.log('File uploaded, API response:', uploadResponse); // Use app.logger if available, else console.log
       showToastNotification(`${file.name} uploaded. Sending message...`, 'info');
 
       // Step 2: Send the message with file details from uploadResponse

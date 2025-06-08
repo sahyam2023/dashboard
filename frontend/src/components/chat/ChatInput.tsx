@@ -10,7 +10,7 @@ interface ChatInputProps {
   disabled?: boolean;
 }
 
-const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, disabled = false }) => {
+const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, onSendFile, disabled = false }) => {
   const [message, setMessage] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -72,7 +72,7 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, disabled = false }
             emojiStyle={EmojiStyle.NATIVE}
             lazyLoadEmojis={true}
             // Ensure picker width fits if needed, or use default
-            // width="350px"
+            // width="350px" 
             // height="450px"
           />
         </div>

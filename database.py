@@ -1034,15 +1034,23 @@ def mark_messages_as_read(db, conversation_id: int, user_id: int) -> int:
 
 
 def get_total_unread_messages(db, user_id: int) -> int:
-    """Gets the total number of unread messages for a user."""
+    """Gets the total number of unread messages for a user from active senders."""
     try:
+        # The users table should have an 'is_active' column (boolean or integer 0/1)
+        # Ensure 'u.is_active = TRUE' or 'u.is_active = 1' matches your schema.
         count = db.execute(
-            "SELECT COUNT(*) FROM messages WHERE recipient_id = ? AND is_read = FALSE",
+            """
+            SELECT COUNT(m.id)
+            FROM messages m
+            JOIN users u ON m.sender_id = u.id
+            WHERE m.recipient_id = ? AND m.is_read = FALSE AND u.is_active = TRUE
+            """,
             (user_id,),
         ).fetchone()[0]
         return count
     except sqlite3.Error as e:
-        # print(f"DB_MESSAGES: Error getting total unread messages for user {user_id}: {e}")
+        # Consider logging the error to app.logger if available
+        print(f"DB_MESSAGES: Error getting total unread messages for user {user_id}: {e}")
         return 0
 
 

@@ -1003,6 +1003,25 @@ def mark_messages_as_read(db, conversation_id: int, user_id: int) -> int:
         )
         db.commit()
         return cursor.rowcount
+
+
+def get_total_unread_messages(db, user_id: int) -> int:
+    """Gets the total number of unread messages for a user."""
+    count = db.execute(
+        "SELECT COUNT(*) FROM messages WHERE recipient_id = ? AND is_read = FALSE",
+        (user_id,),
+    ).fetchone()[0]
+    return count
     except sqlite3.Error as e:
         print(f"DB_MESSAGES: Error marking messages as read for conversation {conversation_id}, user {user_id}: {e}")
+        return 0
+
+
+def get_online_users_count(db) -> int:
+    """Gets the total number of online users."""
+    try:
+        count = db.execute("SELECT COUNT(*) FROM users WHERE is_online = TRUE").fetchone()[0]
+        return count
+    except sqlite3.Error as e:
+        print(f"DB_USERS: Error getting online users count: {e}")
         return 0

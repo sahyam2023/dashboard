@@ -32,6 +32,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
   const [sending, setSending] = useState(false);
   const { showToastNotification } = useNotification(); // Corrected to showToastNotification
   const [otherUserStatus, setOtherUserStatus] = useState<OtherUserStatus | null>(null);
+  const [onlineUsersCount, setOnlineUsersCount] = useState<number | null>(null); // State for online users count
   const selectedConversationRef = useRef<Conversation | null>(null); // Ref for selectedConversation
 
   // Pagination for messages
@@ -163,6 +164,28 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
     };
   }, [socket]); // Depends only on socket, selectedConversationRef is used to check current relevance
 
+  // Listen for online_users_count
+  useEffect(() => {
+    if (socket) {
+      const handleOnlineUsersCount = (data: { count: number }) => {
+        console.log('ChatWindow: Received online_users_count', data);
+        setOnlineUsersCount(data.count);
+      };
+      socket.on('online_users_count', handleOnlineUsersCount);
+      console.log("ChatWindow: 'online_users_count' listener attached.");
+
+      // Optional: Emit an event to request initial count if backend supports it
+      // socket.emit('request_initial_online_users_count');
+
+      return () => {
+        socket.off('online_users_count', handleOnlineUsersCount);
+        console.log("ChatWindow: 'online_users_count' listener detached.");
+      };
+    } else {
+      setOnlineUsersCount(null); // Reset if socket is not available
+    }
+  }, [socket]);
+
   useEffect(() => {
     if (!socket || !selectedConversation) return;
 
@@ -277,6 +300,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
             )}
           </div>
         </div>
+        {onlineUsersCount !== null && (
+          <div className="text-xs text-gray-600 dark:text-gray-300 ml-auto pr-2">
+            Online Users: {onlineUsersCount}
+          </div>
+        )}
       </header>
 
       {loading && messages.length === 0 && (

@@ -1,5 +1,5 @@
 // src/components/Sidebar.tsx
-import React from 'react';
+import React, { useState, useEffect } from 'react'; // Import React hooks
 import { NavLink } from 'react-router-dom'; // useLocation is not strictly needed here anymore unless for other logic
 import {
   FileText,
@@ -14,10 +14,12 @@ import {
   // UserPlus as RegisterIcon 
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext'; 
+import { Socket } from 'socket.io-client'; // Import Socket type
 
 interface SidebarProps {
   collapsed: boolean;
   onToggleChat?: () => void; // Optional: if chat toggle is directly in sidebar
+  socket: Socket | null; // Add socket prop
 }
 
 interface NavItemConfig {
@@ -30,9 +32,30 @@ interface NavItemConfig {
   action?: () => void; // For items that trigger actions instead of navigation
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggleChat }) => {
+const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggleChat, socket }) => {
   const { user, isAuthenticated } = useAuth(); // Updated to use user object
   type RoleType = 'admin' | 'super_admin' | 'user';
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
+
+  useEffect(() => {
+    if (socket) {
+      const handleUnreadChatCount = (data: { count: number }) => {
+        console.log('Sidebar: Received unread_chat_count', data);
+        setUnreadChatCount(data.count);
+      };
+
+      socket.on('unread_chat_count', handleUnreadChatCount);
+      console.log("Sidebar: 'unread_chat_count' listener attached.");
+
+      return () => {
+        socket.off('unread_chat_count', handleUnreadChatCount);
+        console.log("Sidebar: 'unread_chat_count' listener detached.");
+      };
+    } else {
+      setUnreadChatCount(0);
+      console.log("Sidebar: Socket not available, unreadChatCount reset to 0.");
+    }
+  }, [socket]);
 
   const navItems: NavItemConfig[] = [
     {
@@ -70,7 +93,21 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggleChat }) => {
     {
       path: '#chat', // Placeholder path, action will be handled
       label: 'Chat',
-      icon: (isCollapsed) => <ChatIcon size={isCollapsed ? 24 : 20} />,
+      icon: (isCollapsed) => (
+        <div className="relative">
+          <ChatIcon size={isCollapsed ? 24 : 20} />
+          {unreadChatCount > 0 && (
+            <span
+              className={`absolute -top-1 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-xs font-bold flex items-center justify-center ${
+                isCollapsed ? 'transform scale-90 -translate-y-0.5' : '' // Slightly adjust badge when collapsed
+              }`}
+              style={{ lineHeight: '1' }}
+            >
+              {unreadChatCount > 99 ? '99+' : unreadChatCount}
+            </span>
+          )}
+        </div>
+      ),
       requiresAuth: true, // Assuming chat is for authenticated users
       action: onToggleChat,
     },

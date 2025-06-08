@@ -4,71 +4,30 @@ import { User, Conversation } from './types';
 import UserList from './UserList';
 import ConversationList from './ConversationList';
 import ChatWindow from './ChatWindow';
-import { io, Socket } from 'socket.io-client';
+// import { io, Socket } from 'socket.io-client'; // Socket is now a prop
+import { Socket } from 'socket.io-client'; // Still need Socket type
 
 import { useAuth } from '../../context/AuthContext'; // Import useAuth
 import * as api from '../../services/api'; // Import your API service
 
-// No longer need MOCK_CURRENT_USER_ID
+interface ChatMainProps {
+  socket: Socket | null; // Add socket as a prop
+}
 
-const ChatMain: React.FC = () => {
+const ChatMain: React.FC<ChatMainProps> = ({ socket }) => { // Destructure socket prop
   const [currentView, setCurrentView] = useState<'conversations' | 'users' | 'chat'>('conversations');
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
-  const { user, tokenData } = useAuth(); // Get user and tokenData from AuthContext
+  const { user } = useAuth(); // Get user from AuthContext (tokenData not needed here directly for socket)
   const currentUserId = user?.id || null;
-  const authToken = tokenData?.token || null; // Get auth token
+  // authToken is not directly used here anymore as socket is initialized by parent
 
-  const [socket, setSocket] = useState<Socket | null>(null);
+  // const [socket, setSocket] = useState<Socket | null>(null); // Socket is now a prop
 
   // Placeholder createConversationAPI (will be replaced by api.createConversation)
   // No longer need the placeholder createConversationAPI, will use api.createConversation directly
 
-  useEffect(() => {
-    if (!currentUserId || !authToken) { // Don't connect if user is not logged in
-      console.log('ChatMain: User not authenticated, Socket.IO connection deferred.');
-      return;
-    }
-
-    // Initialize Socket.IO connection
-    const newSocket = io(process.env.REACT_APP_API_URL || 'http://localhost:7000', {
-      auth: { token: authToken } // Send token for connection authentication
-      // query: { token: authToken } // Alternative way to send token
-    });
-
-    setSocket(newSocket);
-    console.log('Socket.IO: Attempting to connect with auth token...');
-
-    newSocket.on('connect', () => {
-      console.log('Socket.IO: Connected! SID:', newSocket.id);
-      // If selectedConversation exists, try to rejoin room (e.g., after a disconnect/reconnect)
-      // This join logic is now primarily in ChatWindow based on selectedConversation
-    });
-
-    newSocket.on('disconnect', (reason) => {
-      console.log('Socket.IO: Disconnected. Reason:', reason);
-    });
-
-    newSocket.on('connect_error', (error) => {
-      console.error('Socket.IO: Connection Error!', error);
-    });
-
-    // Global listeners for errors or other events can be here if needed
-    // Example:
-    // newSocket.on('join_error', (data) => {
-    //   console.error('Socket.IO: Global join_error listener:', data.error, 'for conv_id:', data.conversation_id);
-    // });
-    // newSocket.on('joined_conversation_success', (data) => {
-    //     console.log('Socket.IO: Global joined_conversation_success listener for conv_id:', data.conversation_id);
-    // });
-
-    // Cleanup on component unmount
-    return () => {
-      if (newSocket.connected) {
-        console.log('Socket.IO: Disconnecting on ChatMain unmount.');
-        newSocket.disconnect();
-      }
-    };
-  }, [currentUserId, authToken]); // Re-run if userId or token changes (e.g., on login/logout)
+  // useEffect for socket initialization is removed as socket is passed as a prop.
+  // Parent component (Layout.tsx) will manage the socket connection lifecycle.
 
   const handleUserSelect = async (selectedUser: User) => {
     if (!currentUserId) {

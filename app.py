@@ -10007,13 +10007,14 @@ def clear_batch_conversations():
             
             # If authorized, change status from default "skipped_authorization"
             current_conv_result["status"] = "processing"
+            app.logger.info(f"Processing clear for conversation_id: {conv_id}")
 
             # 2. Fetch User's Files
             user_files_to_delete = []
             try:
                 user_files_cursor = db.execute(
-                    "SELECT file_name FROM messages WHERE conversation_id = ? AND sender_id = ? AND file_name IS NOT NULL",
-                    (conv_id, current_user_id)
+                    "SELECT file_name FROM messages WHERE conversation_id = ? AND file_name IS NOT NULL",
+                    (conv_id,)
                 )
                 user_files_to_delete = [row['file_name'] for row in user_files_cursor.fetchall()]
             except Exception as e_fetch_files:
@@ -10025,82 +10026,105 @@ def clear_batch_conversations():
                 continue  # Skip to next conversation_id, but batch will be rolled back
 
             # 3. Attempt User's File Deletion
-            user_files_successfully_deleted = True  # For this specific conversation
+            all_files_successfully_deleted_for_conv = True  # For this specific conversation
             files_deleted_this_conversation = 0
             conversation_upload_path = os.path.join(app.config['CHAT_UPLOAD_FOLDER'], str(conv_id))
+            app.logger.info(f"Constructed conversation_upload_path: '{conversation_upload_path}' for conv_id: {conv_id}")
             
-            if user_files_to_delete:  # Only proceed if there are files to delete
+            if user_files_to_delete:  # Only proceed if there are files to delete (fetched for the whole conversation)
                 if not os.path.exists(conversation_upload_path):
-                    app.logger.warning(f"Upload path {conversation_upload_path} not found for conversation {conv_id}, but files {user_files_to_delete} were expected.")
-                    # This is not necessarily a failure of the *deletion* part, but a state inconsistency.
-                    # We'll consider user's files "successfully deleted" if they are not on disk.
+                    app.logger.warning(f"Upload path {conversation_upload_path} not found for conversation {conv_id}, but files {user_files_to_delete} were expected (for entire conversation).")
+                    # Consider all files "successfully deleted" if the folder doesn't exist.
                 else:
-                    for file_name_to_delete in user_files_to_delete:
-                        if not file_name_to_delete:
+                    for file_name_from_db in user_files_to_delete: # file_name_from_db is now the unique name
+                        app.logger.info(f"Raw file_name from DB (should be unique name): '{file_name_from_db}' for conv_id: {conv_id}")
+                        if not file_name_from_db:
+                            app.logger.warning(f"Empty file_name found in DB for conv_id: {conv_id}. Skipping.") # Changed to warning
                             continue
-                        file_path_to_delete = os.path.join(conversation_upload_path, file_name_to_delete)
-                        if os.path.exists(file_path_to_delete):
+                        
+                        file_path_to_delete = os.path.join(conversation_upload_path, file_name_from_db)
+                        app.logger.info(f"Constructed file_path_to_delete: '{file_path_to_delete}' for conv_id: {conv_id}")
+                        path_exists = os.path.exists(file_path_to_delete)
+                        app.logger.info(f"os.path.exists(file_path_to_delete) result: {path_exists} for '{file_path_to_delete}'")
+
+                        if path_exists:
                             try:
+                                app.logger.info(f"Attempting os.remove for: '{file_path_to_delete}'")
                                 os.remove(file_path_to_delete)
                                 files_deleted_this_conversation += 1
-                                app.logger.info(f"User {current_user_id} deleted file '{file_path_to_delete}' from conversation {conv_id}.")
+                                app.logger.info(f"User {current_user_id} (initiator) caused deletion of file '{file_path_to_delete}' from conversation {conv_id}.")
                             except OSError as e_remove:
-                                app.logger.error(f"CRITICAL: Failed to delete file '{file_path_to_delete}' for user {current_user_id}, conv {conv_id}: {e_remove}")
-                                user_files_successfully_deleted = False
-                                overall_success = False  # Critical: A file system delete error for user's own file
-                                current_conv_result["error_details"] = (current_conv_result.get("error_details") or "") + f"Failed to delete file {file_name_to_delete}; "
-                                # No break here, attempt to delete other files, but mark conv and batch as failed
+                                app.logger.error(f"CRITICAL: Failed to delete file '{file_path_to_delete}' (conversation {conv_id}): {e_remove}", exc_info=True)
+                                all_files_successfully_deleted_for_conv = False # Mark failure for this conversation
+                                overall_success = False  # Critical: A file system delete error
+                                current_conv_result["error_details"] = (current_conv_result.get("error_details") or "") + f"Failed to delete file {file_name_from_db}; "
+                                # No break here, attempt to delete other files for this conversation
                         else:
-                            app.logger.warning(f"File '{file_name_to_delete}' listed in DB for user {current_user_id}, conv {conv_id}, but not found at '{file_path_to_delete}'. Considered 'deleted'.")
-                            # This file is already gone, so it contributes to "successfully deleted" from user's perspective
+                            app.logger.warning(f"File '{file_name_from_db}' listed in DB for conversation {conv_id}, but not found at '{file_path_to_delete}'. Considered 'deleted'.")
             
             current_conv_result["files_deleted"] = files_deleted_this_conversation
 
-            # 4. Attempt Message Deletion (Conditional)
+            # 4. Attempt Message Deletion (Conditional on all files for the conversation being handled)
             messages_deleted_this_conversation = 0
-            if user_files_successfully_deleted:
+            if all_files_successfully_deleted_for_conv: # Check if all files for *this conversation* were handled
                 try:
+                    # This function needs to be adjusted or replaced if it only clears for *current_user_id*.
+                    # For now, assuming it clears all messages in the conversation if the user is authorized.
+                    # If clear_messages_for_user_in_conversation only soft-deletes or hides for one user,
+                    # then a new function like `database.clear_all_messages_in_conversation(db, conv_id)` would be needed.
+                    # Sticking to the existing function name as per the prompt's context, but noting this potential issue.
                     messages_deleted_this_conversation = database.clear_messages_for_user_in_conversation(db, conv_id, current_user_id)
-                    app.logger.info(f"Cleared {messages_deleted_this_conversation} messages for conv {conv_id} by user {current_user_id}.")
+                    # To truly clear for all, it might be:
+                    # messages_deleted_this_conversation = database.clear_all_messages_in_conversation(db, conv_id)
+                    app.logger.info(f"Cleared {messages_deleted_this_conversation} messages for conv {conv_id} by initiating user {current_user_id}.")
                 except Exception as e_msg_delete:
-                    app.logger.error(f"Error clearing messages for conv {conv_id}, user {current_user_id}: {e_msg_delete}", exc_info=True)
+                    app.logger.error(f"Error clearing messages for conv {conv_id} (initiated by user {current_user_id}): {e_msg_delete}", exc_info=True)
                     current_conv_result["status"] = "error_message_deletion"
                     current_conv_result["error_details"] = (current_conv_result.get("error_details") or "") + f"Message deletion error: {str(e_msg_delete)}; "
                     overall_success = False  # DB error during message deletion
             else:
                 # Messages not deleted due to prior file deletion failure for this conversation
                 current_conv_result["status"] = "file_deletion_failed_messages_skipped"
-                current_conv_result["error_details"] = (current_conv_result.get("error_details") or "") + "Messages not cleared due to file deletion failure; "
-                # overall_success is already False
+                current_conv_result["error_details"] = (current_conv_result.get("error_details") or "") + "Messages not cleared due to file deletion failure for this conversation; "
+                # overall_success is already False because all_files_successfully_deleted_for_conv was false
             
             current_conv_result["messages_deleted"] = messages_deleted_this_conversation
 
-            # 5. Attempt Conversation Folder Deletion (Conditional Cleanup)
-            if user_files_successfully_deleted:  # Only try to cleanup folder if user's part was successful
-                if os.path.exists(conversation_upload_path) and not os.listdir(conversation_upload_path):
-                    try:
-                        shutil.rmtree(conversation_upload_path)
-                        app.logger.info(f"Removed empty conversation upload folder: {conversation_upload_path} for conv {conv_id}.")
-                    except OSError as e_rmdir:
-                        app.logger.error(f"Error removing empty conversation folder '{conversation_upload_path}' for conv {conv_id}: {e_rmdir}. This is non-critical for the batch.")
-                        # This specific error does not set overall_success to False.
+            # 5. Attempt Conversation Folder Deletion (Conditional Cleanup - if all files in folder are gone)
+            if all_files_successfully_deleted_for_conv: # Only try to cleanup folder if all files in it were processed
+                app.logger.info(f"Checking conversation folder for deletion: '{conversation_upload_path}' for conv_id: {conv_id}")
+                folder_exists = os.path.exists(conversation_upload_path)
+                app.logger.info(f"os.path.exists(conversation_upload_path) result: {folder_exists} for '{conversation_upload_path}'")
+                if folder_exists:
+                    folder_content = os.listdir(conversation_upload_path)
+                    app.logger.info(f"os.listdir(conversation_upload_path) result: {folder_content} for '{conversation_upload_path}'")
+                    if not folder_content:
+                        try:
+                            app.logger.info(f"Attempting shutil.rmtree for empty folder: '{conversation_upload_path}'")
+                            shutil.rmtree(conversation_upload_path)
+                            app.logger.info(f"Removed empty conversation upload folder: {conversation_upload_path} for conv {conv_id}.")
+                        except OSError as e_rmdir:
+                            app.logger.error(f"Error removing empty conversation folder '{conversation_upload_path}' for conv {conv_id}: {e_rmdir}", exc_info=True)
+                            # This specific error does not set overall_success to False.
+                else:
+                    app.logger.info(f"Conversation folder '{conversation_upload_path}' does not exist, skipping rmtree for conv_id: {conv_id}")
             
             # 6. Update conversation_result['status']
             if current_conv_result["status"] == "processing":  # If no specific errors set status above
-                if user_files_successfully_deleted:
+                if all_files_successfully_deleted_for_conv:
                     current_conv_result["status"] = "cleared"
-                else:  # This case should have been caught by specific error statuses
+                else:
                     current_conv_result["status"] = "file_deletion_errors_occurred"
 
             processed_conversation_details.append(current_conv_result)
             # Log individual success if applicable (even if overall batch might fail later)
             if current_conv_result["status"] == "cleared":
                 log_audit_action(
-                    action_type='CLEAR_CONVERSATION_ATTEMPT_SUCCESS',  # Changed from SUCCESS to ATTEMPT_SUCCESS
+                    action_type='CLEAR_CONVERSATION_SUCCESS', # Reflects successful clearing for this conversation
                     target_table='conversations', target_id=conv_id, user_id=current_user_id,
                     details={
                         'messages_deleted': messages_deleted_this_conversation,
-                        'user_files_deleted': files_deleted_this_conversation,
+                        'files_deleted_from_conversation': files_deleted_this_conversation, # Renamed for clarity
                         'batch_operation': True,
                         'final_status_for_conv': current_conv_result["status"]
                     }

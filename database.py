@@ -877,10 +877,32 @@ def get_conversation_by_id(db, conversation_id: int) -> 'sqlite3.Row | None':
 def send_message(db, conversation_id: int, sender_id: int, recipient_id: int, content: str, file_name: str = None, file_url: str = None, file_type: str = None) -> 'sqlite3.Row | None':
     """Inserts a new message into the messages table and returns the newly created message."""
     try:
+        # Initial logging of received parameters
+        # print(f"DB_MESSAGES: send_message called with file_name='{file_name}', file_url='{file_url}'")
+
+        db_file_name_to_store = file_name  # Default to original file_name
+
+        if file_url and file_url.startswith("/files/chat_uploads/"):
+            try:
+                # Extract the unique filename from the URL
+                # Example: /files/chat_uploads/123/unique_abc123_original.jpg -> unique_abc123_original.jpg
+                extracted_unique_filename = file_url.split('/')[-1]
+                if extracted_unique_filename:
+                    db_file_name_to_store = extracted_unique_filename
+                    # print(f"DB_MESSAGES: Local chat upload detected. Overriding file_name. Original: '{file_name}', Extracted from URL: '{extracted_unique_filename}', Storing: '{db_file_name_to_store}'")
+                else:
+                    # print(f"DB_MESSAGES: file_url matched prefix, but extracted filename was empty. file_url: '{file_url}'")
+                    pass # Keep original file_name if extraction fails or is empty
+            except Exception as e_extract:
+                # print(f"DB_MESSAGES: Error extracting filename from file_url '{file_url}': {e_extract}. Using original file_name: '{file_name}'")
+                pass # Fallback to original file_name on any error during extraction
+
+        # print(f"DB_MESSAGES: Final db_file_name_to_store: '{db_file_name_to_store}'")
+
         cursor = db.execute(
             """INSERT INTO messages (conversation_id, sender_id, recipient_id, content, file_name, file_url, file_type)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (conversation_id, sender_id, recipient_id, content, file_name, file_url, file_type)
+            (conversation_id, sender_id, recipient_id, content, db_file_name_to_store, file_url, file_type)
         )
         db.commit()
         new_message_id = cursor.lastrowid

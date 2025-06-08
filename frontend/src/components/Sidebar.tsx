@@ -39,25 +39,27 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggleChat, socket, sock
   const [unreadChatCount, setUnreadChatCount] = useState(0);
 
   useEffect(() => {
-    console.log('Sidebar useEffect: Socket instance:', socket, 'Connected status prop:', socketConnected);
-    if (socket && socketConnected) {
+    // Example logging (optional, but good for debugging)
+    console.log('Sidebar useEffect [socket]: Socket instance:', socket, 'Connected status prop:', socketConnected);
+
+    if (socket) {
       const handleUnreadChatCount = (data: { count: number }) => {
         console.log('Sidebar: unread_chat_count event received, Data:', data);
         setUnreadChatCount(data.count);
       };
 
+      console.log("Sidebar: Attaching 'unread_chat_count' listener due to socket instance change.");
       socket.on('unread_chat_count', handleUnreadChatCount);
-      console.log("Sidebar: 'unread_chat_count' listener attached.");
 
       return () => {
+        console.log("Sidebar: Detaching 'unread_chat_count' listener due to socket instance change or unmount.");
         socket.off('unread_chat_count', handleUnreadChatCount);
-        console.log("Sidebar: 'unread_chat_count' listener detached.");
       };
     } else {
-      setUnreadChatCount(0); // Reset count if socket is not connected
-      console.log('Sidebar: Socket not available or not connected, listener not attached/removed.');
+      console.log('Sidebar: Socket instance is null. Resetting unread count.');
+      setUnreadChatCount(0);
     }
-  }, [socket, socketConnected]);
+  }, [socket]); // Only 'socket' is in the dependency array.
 
   const navItems: NavItemConfig[] = [
     {

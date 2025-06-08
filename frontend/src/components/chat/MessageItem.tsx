@@ -1,7 +1,9 @@
 // frontend/src/components/chat/MessageItem.tsx
-import React from 'react';
+import React, { useState, useEffect } from 'react'; // Added useState, useEffect
 import { Message } from './types';
-import { FileText, Download, Image as ImageIcon, Video as VideoIcon, Music as AudioIcon, ShieldQuestion } from 'lucide-react'; // Using ShieldQuestion for unknown/binary
+import { FileText, Download, Image as ImageIcon, Video as VideoIcon, Music as AudioIcon, ShieldQuestion } from 'lucide-react';
+import { formatTimeToIST } from '../../utils/dateUtils';
+import * as api from '../../services/api'; // Import the api service
 
 interface MessageItemProps {
   message: Message;
@@ -10,11 +12,40 @@ interface MessageItemProps {
 
 const MessageItem: React.FC<MessageItemProps> = ({ message, currentUserId }) => {
   const isCurrentUserSender = message.sender_id === currentUserId;
+  const [imageSrc, setImageSrc] = useState<string | null>(null);
+  const [isLoadingImage, setIsLoadingImage] = useState<boolean>(false);
+  const [imageError, setImageError] = useState<string | null>(null);
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    // Reset states when message.file_url or message.file_type changes
+    setImageSrc(null);
+    setIsLoadingImage(false);
+    setImageError(null);
+
+    if (message.file_type === 'image' && message.file_url) {
+      setIsLoadingImage(true);
+      api.fetchChatImageBlob(message.file_url)
+        .then(blob => {
+          objectUrl = URL.createObjectURL(blob);
+          setImageSrc(objectUrl);
+          setIsLoadingImage(false);
+        })
+        .catch(err => {
+          console.error("Failed to load image blob for message:", message.id, err);
+          setImageError("Failed to load image");
+          setIsLoadingImage(false);
+        });
+    }
+
+    return () => {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+        // console.log("Revoked object URL:", objectUrl, "for message:", message.id); // For debugging
+      }
+    };
+  }, [message.file_url, message.file_type, message.id]);
+
 
   const renderFileContent = () => {
     if (!message.file_url || !message.file_type) return null;
@@ -25,15 +56,24 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, currentUserId }) => 
 
     switch (message.file_type) {
       case 'image':
-        return (
-          <a href={message.file_url} target="_blank" rel="noopener noreferrer" className="block mt-1">
-            <img
-              src={message.file_url}
-              alt={message.file_name || 'Image attachment'}
-              className="max-w-full h-auto rounded-lg object-contain max-h-64 sm:max-h-80" // Constrain height
-            />
-          </a>
-        );
+        if (isLoadingImage) {
+          return <p className="text-xs italic p-2">Loading image...</p>;
+        }
+        if (imageError) {
+          return <p className="text-xs italic p-2 text-red-500">{imageError}</p>;
+        }
+        if (imageSrc) {
+          return (
+            <a href={message.file_url} target="_blank" rel="noopener noreferrer" className="block mt-1"> {/* Link still points to original URL for open in new tab */}
+              <img
+                src={imageSrc} // Use blob URL for display
+                alt={message.file_name || 'Image attachment'}
+                className="max-w-full h-auto rounded-lg object-contain max-h-64 sm:max-h-80"
+              />
+            </a>
+          );
+        }
+        return <p className="text-xs italic p-2">Image not available</p>; // Fallback if src is null but was expected
       case 'video':
         return (
           <div className="mt-1">
@@ -105,7 +145,7 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, currentUserId }) => 
 
         {/* Timestamp and Read Status */}
         <div className={`text-xs mt-1.5 flex items-center ${isCurrentUserSender ? 'justify-end text-blue-100 dark:text-blue-300' : 'justify-start text-gray-500 dark:text-gray-400'}`}>
-          <span>{formatDate(message.created_at)}</span>
+          <span>{formatTimeToIST(message.created_at)}</span>
           {isCurrentUserSender && message.is_read && (
              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 ml-1" viewBox="0 0 20 20" fill="currentColor">
                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />

@@ -63,6 +63,31 @@ export function formatToISTLocaleString(isoTimestamp: string): string {
     return 'Invalid Date'; // Fallback for other invalid timestamps
   }
 }
+export function formatTimeToIST(isoTimestamp: string | null | undefined): string {
+  if (!isoTimestamp) {
+    return 'N/A';
+  }
+
+  try {
+    const date = new Date(isoTimestamp);
+
+    const options: Intl.DateTimeFormatOptions = {
+      hour: '2-digit',
+      minute: '2-digit',
+      // second: '2-digit', // Omitting seconds for typical chat message time display
+      hour12: true,
+      timeZone: 'Asia/Kolkata',
+    };
+
+    return date.toLocaleTimeString('en-IN', options); // e.g., "10:00 AM"
+  } catch (error) {
+    console.error('Error formatting timestamp to IST time string:', isoTimestamp, error);
+    if (typeof isoTimestamp === 'string' && isoTimestamp.toLowerCase().includes('invalid date')) {
+        return isoTimestamp;
+    }
+    return 'Invalid Time'; // Fallback for other invalid timestamps
+  }
+}
 
 // Utility to format just the date part in YYYY-MM-DD for input fields
 export function formatDateForInput(isoTimestamp: string | null | undefined): string {

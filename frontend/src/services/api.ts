@@ -423,6 +423,35 @@ export async function fetchSoftware(): Promise<Software[]> {
   }
 }
 
+export async function fetchChatImageBlob(fileUrl: string): Promise<Blob> {
+  try {
+    // Ensure API_BASE_URL is prepended if fileUrl is relative (e.g., /files/chat_uploads/...)
+    // If fileUrl from the backend is already a full path, this might not be needed,
+    // but it's safer to ensure it's correctly formed.
+    // Current backend file_url for chat messages is relative like: "/files/chat_uploads/CONVO_ID/FILENAME"
+    const fullUrl = `${API_BASE_URL}${fileUrl}`;
+    
+    const response = await fetch(fullUrl, {
+      method: 'GET',
+      headers: { ...getAuthHeader() }, // Crucial for auth
+    });
+    if (!response.ok) {
+      // Handle error response (e.g., throw an error with status)
+      // Consider using handleApiError if it can be adapted or a similar specialized error handler
+      const errorText = await response.text(); // Get more details if possible
+      throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}. Body: ${errorText.substring(0,100)}`);
+    }
+    return response.blob();
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true); // Use your existing offline handler
+      showErrorToast(OFFLINE_MESSAGE); // Use your existing toast utility
+    }
+    console.error('Error fetching chat image blob:', fileUrl, error);
+    throw error; // Re-throw to be caught by the calling component
+  }
+}
+
 // --- Chat API Functions ---
 // Assuming types like User, Conversation, Message, PaginatedUsersResponse are imported from '../components/chat/types'
 // If not, they should be imported or defined here.

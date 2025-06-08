@@ -1,6 +1,7 @@
 // frontend/src/components/chat/ConversationList.tsx
 import React, { useState, useEffect, useCallback } from 'react'; // <--- ADD useCallback here
 import { Conversation } from './types';
+import { formatToISTLocaleString } from '../../utils/dateUtils'; // Import the utility
 // Placeholder for an API service
 // import { fetchConversations } from '../../services/api'; 
 
@@ -235,7 +236,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
                   </div>
                   {conv.last_message_created_at && (
                     <p className={`text-xs whitespace-nowrap ${selectedConversationId === conv.conversation_id ? 'text-blue-500 dark:text-blue-400' : 'text-gray-400 dark:text-gray-500'}`}>
-                      {new Date(conv.last_message_created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })}
+                      {formatToISTLocaleString(conv.last_message_created_at)}
                     </p>
                   )}
                 </div>

@@ -10340,9 +10340,9 @@ def upload_chat_file():
 
 # --- Chat File Serving Route ---
 @app.route('/files/chat_uploads/<int:conversation_id>/<path:filename>')
-@active_user_required # Ensures user is logged in
+@active_user_required # Changed back
 def serve_chat_file(conversation_id, filename):
-    current_user_id = int(get_jwt_identity())
+    current_user_id = int(get_jwt_identity()) # Provided by @active_user_required
     db = get_db()
 
     # Verify user is part of the conversation
@@ -10350,30 +10350,24 @@ def serve_chat_file(conversation_id, filename):
     if not conversation:
         return jsonify(msg="Conversation not found."), 404
     if current_user_id not in (conversation['user1_id'], conversation['user2_id']):
-        # Log this attempt, as it's a potential unauthorized access
         log_audit_action(
-            action_type='CHAT_FILE_ACCESS_DENIED',
-            target_table='messages', # Or chat_files if you have one
-            target_id=conversation_id, # Or a specific message/file ID if known
-            details={
-                'filename': filename,
-                'conversation_id': conversation_id,
-                'reason': 'User not part of conversation'
-            }
+            action_type='CHAT_FILE_ACCESS_DENIED_NOT_PART_OF_CONVO', # Kept specific audit log
+            user_id=current_user_id,
+            target_table='chat_files', # Conceptual table name
+            target_id=conversation_id, # Or a specific file ID if one were available here
+            details={'filename': filename, 'conversation_id': conversation_id, 'reason': 'User not part of conversation.'}
         )
         return jsonify(msg="You are not authorized to access files from this conversation."), 403
 
-    # Log download activity (optional, but good for tracking)
-    # Note: _log_download_activity might need adjustment if it expects item_type like 'document', 'patch'
-    # For chat, you might create a simplified logger or adapt the existing one.
-    # For now, skipping direct call to _log_download_activity to avoid complexity.
+    # Log successful access
     log_audit_action(
-        action_type='CHAT_FILE_DOWNLOAD_ATTEMPT', # Or 'CHAT_FILE_DOWNLOAD_SUCCESS' if logged after send_from_directory
-        target_table='messages', # Or chat_files
-        target_id=conversation_id, # Or specific message/file ID
+        action_type='CHAT_FILE_ACCESS_SUCCESS',
+        user_id=current_user_id,
+        target_table='chat_files', # Conceptual table name
+        target_id=conversation_id, # Or a specific file ID
         details={'filename': filename, 'conversation_id': conversation_id}
     )
-
+    
     directory_path = os.path.join(app.config['CHAT_UPLOAD_FOLDER'], str(conversation_id))
 
     # Security: Basic check to prevent path traversal, though send_from_directory handles it well.
@@ -10382,8 +10376,8 @@ def serve_chat_file(conversation_id, filename):
 
     if not os.path.exists(os.path.join(directory_path, filename)):
         return jsonify(msg="File not found on server."), 404
-
-    return send_from_directory(directory_path, filename, as_attachment=False) # as_attachment=False for inline display if browser supports
+        
+    return send_from_directory(directory_path, filename, as_attachment=False)
 
 app.register_blueprint(chat_bp)
 # --- End Chat API Endpoints ---
@@ -10502,77 +10496,72 @@ def handle_disconnect():
 
 @socketio.on('join_conversation')
 def handle_join_conversation(data):
+    # Validate data and conversation_id first
+    if not data or not isinstance(data, dict) or not data.get('conversation_id'):
+        app.logger.warning("SocketIO 'join_conversation': conversation_id missing or invalid in event data.")
+        emit('join_error', {'error': 'conversation_id is missing or invalid.'})
+        return
+
+    try:
+        # Ensure conversation_id is an integer. This also catches cases where it might be present but not a number.
+        conversation_id_int = int(data.get('conversation_id'))
+    except (ValueError, TypeError): # Catch TypeError if data.get('conversation_id') is None or not string/number
+        app.logger.warning(f"SocketIO 'join_conversation': Invalid conversation_id format '{data.get('conversation_id')}'. Must be an integer.")
+        emit('join_error', {'conversation_id': data.get('conversation_id'), 'error': 'Invalid conversation_id format.'})
+        return
+
     current_user_id_str = None
     token_from_event = data.get('token')
-    conversation_id_str = data.get('conversation_id') # Get conversation_id early for error emits
+    # conversation_id_str is already validated and converted to conversation_id_int
 
     if token_from_event:
         try:
-            decoded_token = flask_jwt_extended.decode_token(token_from_event) # Use flask_jwt_extended.decode_token
+            decoded_token = flask_jwt_extended.decode_token(token_from_event)
             current_user_id_str = decoded_token.get(app.config.get('JWT_IDENTITY_CLAIM', 'sub'))
             if not current_user_id_str:
                 app.logger.error("SocketIO 'join_conversation': Token valid but identity (sub) not found in token.")
-                emit('join_error', {'conversation_id': conversation_id_str, 'error': 'Identity not found in token.'})
+                emit('join_error', {'conversation_id': conversation_id_int, 'error': 'Identity not found in token.'})
                 return
-        except (flask_jwt_extended.exceptions.ExpiredSignatureError, flask_jwt_extended.exceptions.InvalidTokenError, Exception) as e_token: # Catch specific JWT errors
+        except (flask_jwt_extended.exceptions.ExpiredSignatureError, flask_jwt_extended.exceptions.InvalidTokenError, Exception) as e_token:
             app.logger.error(f"SocketIO 'join_conversation': Error decoding/validating token from event data: {e_token}")
-            emit('join_error', {'conversation_id': conversation_id_str, 'error': f'Invalid or expired token: {type(e_token).__name__}.'})
+            emit('join_error', {'conversation_id': conversation_id_int, 'error': f'Invalid or expired token: {type(e_token).__name__}.'})
             return
-    else: # No token in event, try JWT from context
+    else: 
         try:
-            # This part assumes get_jwt_identity() might raise an exception if no valid JWT in context,
-            # or returns None. The original code implies it might return None or raise.
-            # If it can raise, wrapping it in try-except is good.
-            # However, typical flask_jwt_extended.get_jwt_identity() called outside a @jwt_required
-            # context (if verify_jwt_in_request hasn't been successfully called) might return None
-            # without raising an error. Let's assume it returns None if no identity.
             current_user_id_str = get_jwt_identity() 
-            if not current_user_id_str: # Explicitly check if None or empty
+            if not current_user_id_str: 
                 app.logger.warning("SocketIO 'join_conversation': No token in event and no JWT identity in context.")
-                emit('join_error', {'conversation_id': conversation_id_str, 'error': 'Authentication required.'})
+                emit('join_error', {'conversation_id': conversation_id_int, 'error': 'Authentication required.'})
                 return
-        except Exception as e_jwt_context: # Catch if get_jwt_identity() itself raises an unexpected error
+        except Exception as e_jwt_context: 
             app.logger.error(f"SocketIO 'join_conversation': Error retrieving JWT identity from context: {e_jwt_context}")
-            emit('join_error', {'conversation_id': conversation_id_str, 'error': 'Error processing identity from context.'})
+            emit('join_error', {'conversation_id': conversation_id_int, 'error': 'Error processing identity from context.'})
             return
 
-    # At this point, current_user_id_str should be set if authentication was successful
-    if not current_user_id_str: # Should be redundant if logic above is correct, but as a safeguard
+    if not current_user_id_str: 
         app.logger.error("SocketIO 'join_conversation': User ID string is unexpectedly empty after auth checks.")
-        emit('join_error', {'conversation_id': conversation_id_str, 'error': 'User identity processing failed.'})
+        emit('join_error', {'conversation_id': conversation_id_int, 'error': 'User identity processing failed.'})
         return
 
     try:
         current_user_id = int(current_user_id_str)
     except ValueError:
         app.logger.error(f"SocketIO 'join_conversation': Invalid user ID format '{current_user_id_str}' after auth checks.")
-        emit('join_error', {'conversation_id': conversation_id_str, 'error': 'Invalid user identity format.'})
+        emit('join_error', {'conversation_id': conversation_id_int, 'error': 'Invalid user identity format.'})
         return
 
-    conversation_id_str = data.get('conversation_id')
-    if not conversation_id_str:
-        app.logger.warning("SocketIO 'join_conversation': conversation_id missing from event data.")
-        emit('join_error', {'error': 'conversation_id is required.'})
-        return
-    
-    try:
-        conversation_id = int(conversation_id_str)
-    except ValueError:
-        app.logger.warning(f"SocketIO 'join_conversation': Invalid conversation_id format '{conversation_id_str}'.")
-        emit('join_error', {'conversation_id': conversation_id_str, 'error': 'Invalid conversation_id format.'})
-        return
-
-    room_name = str(conversation_id) # Room name is string
+    # conversation_id is now conversation_id_int, which is validated
+    room_name = str(conversation_id_int) # Room name is string
     db = get_db()
-    conversation = get_conversation_by_id(db, conversation_id) # DB expects int
+    conversation = get_conversation_by_id(db, conversation_id_int) # Use validated integer ID
 
     if not conversation:
-        app.logger.warning(f"SocketIO 'join_conversation': User {current_user_id} tried to join non-existent conversation {conversation_id}.")
+        app.logger.warning(f"SocketIO 'join_conversation': User {current_user_id} tried to join non-existent conversation {conversation_id_int}.")
         emit('join_error', {'conversation_id': room_name, 'error': 'Conversation not found.'})
         return
 
     if current_user_id not in (conversation['user1_id'], conversation['user2_id']):
-        app.logger.warning(f"SocketIO 'join_conversation': User {current_user_id} not authorized for conversation {conversation_id}.")
+        app.logger.warning(f"SocketIO 'join_conversation': User {current_user_id} not authorized for conversation {conversation_id_int}.")
         emit('join_error', {'conversation_id': room_name, 'error': 'Not authorized for this conversation.'})
         return
 

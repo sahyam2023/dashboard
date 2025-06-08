@@ -12,6 +12,7 @@ import * as api from '../../services/api'; // Import your API service
 import { useAuth } from '../../context/AuthContext'; // For token
 import Spinner from './Spinner'; // Import Spinner
 import { useNotification } from '../../context/NotificationContext'; // Import useNotification
+import { formatToISTLocaleString } from '../../utils/dateUtils'; // Import the utility
 
 interface ChatWindowProps {
   selectedConversation: Conversation | null;
@@ -72,7 +73,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
   }, [messagesPerPage, showToastNotification]); // Added showToastNotification to dependencies
 
   useEffect(() => {
-    if (selectedConversation) {
+    if (selectedConversation && typeof selectedConversation.conversation_id === 'number') {
       setMessages([]);
       setHasMoreMessages(true);
       setCurrentPage(1); // Reset page to 1 for new conversation
@@ -85,30 +86,41 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
           token: tokenData.token // Send token for authentication
         });
       }
+
+      // Fetch initial online status for the new selected conversation's other user
+      // This part is moved inside the `if` block as it depends on selectedConversation.other_user_id
+      if (selectedConversation.other_user_id) {
+        const fetchStatus = async () => {
+          try {
+            console.log(`ChatWindow: Fetching status for user ${selectedConversation.other_user_id}`);
+            const statusData = await api.getUserChatStatus(selectedConversation.other_user_id);
+            setOtherUserStatus(statusData);
+          } catch (err: any) {
+            console.error("Failed to fetch user status:", err);
+            showToastNotification(err.message || 'Failed to load user status', 'error');
+            setOtherUserStatus(null);
+          }
+        };
+        fetchStatus();
+      } else {
+        // If other_user_id is not available (though it should be for a valid conversation)
+        setOtherUserStatus(null);
+      }
+
     } else {
       setMessages([]);
+      // Reset other relevant states if necessary
+      setHasMoreMessages(false); // No messages to load if no conversation
+      setCurrentPage(1); // Reset page
+      setOtherUserStatus(null); // Reset user status
+      // If there are other states that depend on a selected conversation, reset them here
+      // For example, if you had a state for 'typing indicator', reset it.
     }
+
     // No specific socket cleanup for 'leave_conversation' here,
     // as joining a new room effectively changes context on server if rooms are exclusive per client session
     // or server handles disconnects.
-    setOtherUserStatus(null); // Reset status when conversation changes
-    selectedConversationRef.current = selectedConversation; // Update ref
-
-    // Fetch initial online status for the new selected conversation's other user
-    if (selectedConversation?.other_user_id) {
-      const fetchStatus = async () => {
-        try {
-          console.log(`ChatWindow: Fetching status for user ${selectedConversation.other_user_id}`);
-          const statusData = await api.getUserChatStatus(selectedConversation.other_user_id);
-          setOtherUserStatus(statusData);
-        } catch (err: any) {
-          console.error("Failed to fetch user status:", err);
-          showToastNotification(err.message || 'Failed to load user status', 'error');
-          setOtherUserStatus(null);
-        }
-      };
-      fetchStatus();
-    }
+    selectedConversationRef.current = selectedConversation; // Update ref, this can stay outside the main `if`
 
   }, [selectedConversation, socket, loadMessages, tokenData?.token, showToastNotification]);
 
@@ -259,7 +271,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
               <div className="flex items-center space-x-1">
                 <span className={`h-2 w-2 rounded-full ${otherUserStatus.is_online ? 'bg-green-500' : 'bg-gray-400'}`}></span>
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  {otherUserStatus.is_online ? 'Online' : (otherUserStatus.last_seen ? `Last seen ${new Date(otherUserStatus.last_seen).toLocaleTimeString()}` : 'Offline')}
+                  {otherUserStatus.is_online ? 'Online' : (otherUserStatus.last_seen ? `Last seen ${formatToISTLocaleString(otherUserStatus.last_seen)}` : 'Offline')}
                 </p>
               </div>
             )}

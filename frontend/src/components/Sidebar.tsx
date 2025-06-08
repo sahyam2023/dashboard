@@ -39,23 +39,23 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggleChat, socket, sock
   const [unreadChatCount, setUnreadChatCount] = useState(0);
 
   useEffect(() => {
-  console.log('Sidebar useEffect [socket, socketConnected]: Socket instance:', socket, 'Connected status prop:', socketConnected);
+  // console.log('Sidebar useEffect [socket, socketConnected]: Socket instance:', socket, 'Connected status prop:', socketConnected);
 
   if (socket && socketConnected) {
       const handleUnreadChatCount = (data: { count: number }) => {
-        console.log('Sidebar: unread_chat_count event received, Data:', data);
+        // console.log('Sidebar: unread_chat_count event received, Data:', data);
         setUnreadChatCount(data.count);
       };
 
-    console.log("Sidebar: Socket connected. Attaching 'unread_chat_count' listener.");
+    // console.log("Sidebar: Socket connected. Attaching 'unread_chat_count' listener.");
       socket.on('unread_chat_count', handleUnreadChatCount);
 
       return () => {
-      console.log("Sidebar: Cleaning up 'unread_chat_count' listener.");
+      // console.log("Sidebar: Cleaning up 'unread_chat_count' listener.");
         socket.off('unread_chat_count', handleUnreadChatCount);
       };
     } else {
-    console.log('Sidebar: Socket is null or not connected. Resetting unread count and ensuring no listener is active.');
+    // console.log('Sidebar: Socket is null or not connected. Resetting unread count and ensuring no listener is active.');
       setUnreadChatCount(0);
     // If socket object exists but is not connected, and if listeners might persist,
     // explicitly turn them off. However, the structure ensures a new listener is added

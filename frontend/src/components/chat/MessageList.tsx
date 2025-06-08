@@ -50,8 +50,8 @@ const MessageList: React.FC<MessageListProps> = ({
       ref={messagesContainerRef}
       onScroll={handleScroll}
       // flex-1 makes it take available vertical space in ChatWindow's flex-col layout
-      // bg-gray-50 dark:bg-gray-850 provides a slightly different background for the message area
-      className="flex-1 p-3 sm:p-4 space-y-3 overflow-y-auto bg-gray-50 dark:bg-gray-850"
+      // bg-gray-50 dark:bg-gray-700 provides a slightly different background for the message area
+      className="flex-1 p-3 sm:p-4 space-y-3 overflow-y-auto bg-gray-50 dark:bg-gray-700"
     >
       {isLoadingOlder && (
         <div className="text-center py-2 text-gray-500 dark:text-gray-400">Loading older messages...</div>

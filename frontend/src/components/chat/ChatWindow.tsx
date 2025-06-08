@@ -202,8 +202,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
 
   if (!selectedConversation) {
     return (
-      <div className="flex-1 flex items-center justify-center h-full bg-gray-100">
-        <p className="text-gray-500 text-lg">Select a conversation to start chatting.</p>
+      <div className="flex-1 flex items-center justify-center h-full bg-gray-100 dark:bg-gray-800">
+        <p className="text-gray-500 dark:text-gray-400 text-lg">Select a conversation to start chatting.</p>
       </div>
     );
   }
@@ -211,7 +211,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
   return (
     // Use h-full and flex-col to make ChatWindow fill its container from ChatMain
     <div className="flex flex-col h-full bg-white dark:bg-gray-800 shadow-md">
-      <header className="p-3 sm:p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750"> {/* Slight bg change for header */}
+      <header className="p-3 sm:p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700"> {/* Slight bg change for header */}
         <div className="flex items-center space-x-3">
           <img
             src={selectedConversation.other_profile_picture_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(selectedConversation.other_username)}&background=random&size=40&color=fff`}

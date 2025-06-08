@@ -212,6 +212,7 @@ UTC = pytz.utc # Added UTC for clarity in conversion if needed
 # --- Token Blocklist ---
 blocklist = set()
 sid_to_user = {}
+import flask_jwt_extended.exceptions # For specific JWT exceptions
 
 # --- Import database functions for chat ---
 from database import (
@@ -10241,56 +10242,56 @@ app.register_blueprint(chat_bp)
 
 # --- SocketIO Event Handlers ---
 @socketio.on('connect')
-def handle_connect():
+def handle_connect(auth=None): # Add auth parameter, default to None for robustness
     user_id_for_connect = None
-    auth_token = None
-    
-    # Try to get token from request.args (common for Flask-SocketIO)
-    # The client sends auth: { token: "..." }
-    # Flask-SocketIO often makes 'auth' dict available as request.args
-    # or specific keys within it if they match query param names.
-    # Let's try to access the token assuming it's passed as a query parameter
-    # or is available in a way that get_jwt_identity() can pick up after explicit verification.
-    
-    # Attempt 1: Check if flask_jwt_extended can find it if passed in headers during handshake
-    # (This is less likely for socket.auth but good to check)
-    try:
-        verify_jwt_in_request(optional=True) # This might populate context if token is in standard places
-        identity = get_jwt_identity()
-        if identity:
-            user_id_for_connect = int(identity)
-            app.logger.info(f"SocketIO connect: Identity '{user_id_for_connect}' found via get_jwt_identity() on connect.")
-    except Exception as e:
-        app.logger.info(f"SocketIO connect: Error trying get_jwt_identity(): {e}")
+    token_source = "unknown"
 
-    # Attempt 2: Try to get token from request.args (common for socket.auth in some setups)
-    if not user_id_for_connect and request.args:
-        auth_token = request.args.get('token') # Check if 'token' is directly in request.args
-        if not auth_token and 'auth' in request.args and isinstance(request.args.get('auth'), dict):
-             auth_token = request.args.get('auth').get('token')
-
-
-    if not user_id_for_connect and auth_token:
-        app.logger.info(f"SocketIO connect: Token found in request.args: {auth_token[:20]}...") # Log truncated token
+    if auth and isinstance(auth, dict) and 'token' in auth:
+        auth_token = auth.get('token')
+        token_source = "socket_auth_payload"
+        if auth_token:
+            app.logger.info(f"SocketIO connect: Token found in auth payload. SID: {request.sid}")
+            try:
+                # Assuming flask_jwt_extended.decode_token is the correct function
+                # and app.config['JWT_SECRET_KEY'] is accessible.
+                # If decode_token is not directly from flask_jwt_extended, adjust import.
+                # This requires the JWTManager `jwt` to be initialized.
+                decoded_token = flask_jwt_extended.decode_token(auth_token)
+                identity = decoded_token.get(app.config.get('JWT_IDENTITY_CLAIM', 'sub'))
+                if identity:
+                    user_id_for_connect = int(identity)
+                    app.logger.info(f"SocketIO connect: User ID {user_id_for_connect} authenticated via token in auth payload. SID: {request.sid}")
+                else:
+                    app.logger.warning(f"SocketIO connect: Token from auth payload decoded but no identity (sub) claim found. SID: {request.sid}")
+            except flask_jwt_extended.exceptions.ExpiredSignatureError: # More specific exception
+                app.logger.warning(f"SocketIO connect: Auth token from auth payload has expired. SID: {request.sid}")
+            except flask_jwt_extended.exceptions.InvalidTokenError as e: # More specific exception
+                app.logger.warning(f"SocketIO connect: Auth token from auth payload is invalid: {e}. SID: {request.sid}")
+            except Exception as e:
+                app.logger.error(f"SocketIO connect: Unexpected error decoding token from auth payload: {e}. SID: {request.sid}")
+        else:
+            app.logger.warning(f"SocketIO connect: 'token' field provided in auth payload but it's empty. SID: {request.sid}")
+    else:
+        # Fallback to checking JWT from headers/cookies (less common for WebSocket direct connect)
+        app.logger.info(f"SocketIO connect: No auth payload or token in payload. Trying get_jwt_identity(). SID: {request.sid}")
         try:
-            decoded_token = decode_token(auth_token) # Use directly imported decode_token
-            identity = decoded_token.get(app.config.get('JWT_IDENTITY_CLAIM', 'sub'))
-            if identity:
-                user_id_for_connect = int(identity)
-                app.logger.info(f"SocketIO connect: User ID {user_id_for_connect} authenticated via token in request.args.")
-            else:
-                app.logger.warning("SocketIO connect: Token decoded but no identity (sub) claim found.")
-        except jwt.exceptions.ExpiredSignatureError:
-            app.logger.warning("SocketIO connect: Auth token from request.args has expired.")
-        except jwt.exceptions.InvalidTokenError as e:
-            app.logger.warning(f"SocketIO connect: Auth token from request.args is invalid: {e}")
+            # verify_jwt_in_request might be needed if get_jwt_identity() relies on it being called first.
+            # For socketio 'connect' event, the request context might be different.
+            # If this doesn't work, it implies JWT is not passed in a way flask_jwt_extended expects for non-HTTP requests.
+            # This path is less likely to succeed for WebSockets if the token isn't in headers/cookies for the handshake.
+            with app.test_request_context('/socket.io', environ_base=request.environ): # Create a request context
+                 verify_jwt_in_request(optional=True) 
+                 identity = get_jwt_identity()
+                 if identity:
+                     user_id_for_connect = int(identity)
+                     token_source = "jwt_header_or_cookie"
+                     app.logger.info(f"SocketIO connect: Identity '{user_id_for_connect}' found via get_jwt_identity(). SID: {request.sid}")
         except Exception as e:
-            app.logger.error(f"SocketIO connect: Unexpected error decoding token from request.args: {e}")
-    
+            app.logger.info(f"SocketIO connect: Error trying get_jwt_identity() (fallback): {e}. SID: {request.sid}")
+
     if user_id_for_connect:
         sid_to_user[request.sid] = user_id_for_connect
-        app.logger.info(f"SocketIO: Client connected (User ID: {user_id_for_connect}), SID: {request.sid}. Stored SID.")
-        # Proceed with existing logic to update user's online status
+        app.logger.info(f"SocketIO: Client connected (User ID: {user_id_for_connect}, Source: {token_source}), SID: {request.sid}. Stored SID.")
         try:
             db = get_db()
             db.execute(
@@ -10302,10 +10303,10 @@ def handle_connect():
             socketio.emit('user_online', {'user_id': user_id_for_connect}, broadcast=True)
         except Exception as e_status:
             app.logger.error(f"SocketIO connect: Error updating online status for user {user_id_for_connect}: {e_status}")
-            if 'db' in locals() and db: db.rollback()
+            # Ensure rollback if db connection was initiated by get_db()
+            if 'db' in locals() and db: db.rollback() 
     else:
-        # This replaces the old block that tried get_jwt_identity() without specific context.
-        app.logger.info(f"SocketIO: Client connected (Anonymous or auth failed), SID: {request.sid}. Previous get_jwt_identity() attempt might have failed or no token provided.")
+        app.logger.info(f"SocketIO: Client connected (Anonymous or auth failed, Source: {token_source}), SID: {request.sid}. No user_id resolved.")
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -10338,7 +10339,7 @@ def handle_disconnect():
                         app.logger.error(f"Error converting last_seen for disconnect event (user {user_id_for_disconnect}): {e_ts_conv}")
                         last_seen_timestamp_iso = datetime.now(timezone.utc).isoformat() # Fallback
                 
-                socketio.emit('user_offline', {'user_id': user_id_for_disconnect, 'last_seen': last_seen_timestamp_iso}, broadcast=True)
+                socketio.emit('user_offline', {'user_id': user_id_for_disconnect, 'last_seen': last_seen_timestamp_iso})
             else:
                 app.logger.warning(f"SocketIO disconnect: Failed to update online status for user {user_id_for_disconnect} (user not found or no change needed).")
         except Exception as e_status:
@@ -10359,13 +10360,13 @@ def handle_join_conversation(data):
 
     if token_from_event:
         try:
-            decoded_token = decode_token(token_from_event)
+            decoded_token = flask_jwt_extended.decode_token(token_from_event) # Use flask_jwt_extended.decode_token
             current_user_id_str = decoded_token.get(app.config.get('JWT_IDENTITY_CLAIM', 'sub'))
             if not current_user_id_str:
                 app.logger.error("SocketIO 'join_conversation': Token valid but identity (sub) not found in token.")
                 emit('join_error', {'conversation_id': conversation_id_str, 'error': 'Identity not found in token.'})
                 return
-        except (jwt.exceptions.ExpiredSignatureError, jwt.exceptions.InvalidTokenError, Exception) as e_token: # Catch specific JWT errors
+        except (flask_jwt_extended.exceptions.ExpiredSignatureError, flask_jwt_extended.exceptions.InvalidTokenError, Exception) as e_token: # Catch specific JWT errors
             app.logger.error(f"SocketIO 'join_conversation': Error decoding/validating token from event data: {e_token}")
             emit('join_error', {'conversation_id': conversation_id_str, 'error': f'Invalid or expired token: {type(e_token).__name__}.'})
             return

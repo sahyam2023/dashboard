@@ -158,8 +158,12 @@ const ChatMain: React.FC = () => {
             socket={socket} // Pass the socket instance
           />
         ) : (
-          <div className="flex-1 flex items-center justify-center h-full bg-gray-50 text-gray-400">
-            {currentView !== 'users' && <p className="text-lg">Select a conversation or start a new chat.</p>}
+          <div className="flex-1 flex items-center justify-center h-full bg-gray-50 dark:bg-gray-800">
+            {currentView !== 'users' && (
+              <p className="text-gray-400 dark:text-gray-300 text-lg">
+                Select a conversation or start a new chat.
+              </p>
+            )}
           </div>
         )}
       </div>

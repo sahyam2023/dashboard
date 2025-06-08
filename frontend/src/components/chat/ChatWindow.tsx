@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Conversation, Message } from './types';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
-import { io, Socket } from 'socket.io-client'; // Import socket.io-client
+import { Socket } from 'socket.io-client'; // Import socket.io-client
 
 // Placeholder for an API service
 // import { fetchMessages, sendMessage as sendMessageAPI } from '../../services/api';
@@ -69,7 +69,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
         setHasMoreMessages(false);
       }
       setMessages(prevMessages => initialLoad ? newMessages : [...newMessages, ...prevMessages]);
-      if(initialLoad) setCurrentPage(1); // Reset current page on initial load
+      if (initialLoad) setCurrentPage(1); // Reset current page on initial load
     } catch (err: any) { // Explicitly type err
       showToastNotification(`Error loading messages: ${err.message || 'Unknown error'}`, 'error');
     } finally {
@@ -136,9 +136,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
   useEffect(() => {
     if (selectedConversation && socket && !loading && messages.length > 0) {
       console.log(`ChatWindow: Emitting 'mark_as_read' for conversation ${selectedConversation.conversation_id}`);
-      socket.emit('mark_as_read', { 
+      socket.emit('mark_as_read', {
         conversation_id: selectedConversation.conversation_id,
-        token: tokenData?.token 
+        token: tokenData?.token
       });
     }
   }, [selectedConversation, socket, loading, messages, tokenData?.token]);
@@ -269,9 +269,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
 
   const handleLoadOlder = () => {
     if (selectedConversation && hasMoreMessages && !loadingOlder) { // Check loadingOlder
-        const nextPage = currentPage + 1;
-        loadMessages(selectedConversation.conversation_id, nextPage, false); // initialLoad = false
-        setCurrentPage(nextPage); // Update current page state
+      const nextPage = currentPage + 1;
+      loadMessages(selectedConversation.conversation_id, nextPage, false); // initialLoad = false
+      setCurrentPage(nextPage); // Update current page state
     }
   };
 
@@ -331,6 +331,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
 
       {/* MessageList should be flex-1 to take up available space */}
       <MessageList
+        key={selectedConversation.conversation_id}
         messages={messages} // ensure this is the correctly ordered list (oldest at top)
         currentUserId={currentUserId}
         onLoadOlderMessages={handleLoadOlder}

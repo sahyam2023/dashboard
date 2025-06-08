@@ -1,11 +1,12 @@
 // frontend/src/components/chat/MessageList.tsx
-import React, { useEffect, useRef, UIEvent } from 'react'; // Added UIEvent
+
+import React, { useEffect, useLayoutEffect, useRef, UIEvent } from 'react';
 import { Message } from './types';
 import MessageItem from './MessageItem';
 
 interface MessageListProps {
   messages: Message[];
-  currentUserId: number | null; // Ensure this is passed down correctly
+  currentUserId: number | null;
   onLoadOlderMessages?: () => void;
   hasMoreOlderMessages?: boolean;
   isLoadingOlder?: boolean;
@@ -20,27 +21,69 @@ const MessageList: React.FC<MessageListProps> = ({
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLUListElement>(null);
+  
+  // Ref to store the scrollHeight before a new message/page of messages is added
+  const scrollHeightBeforeUpdate = useRef(0);
+  const hasScrolledInitially = useRef(false);
 
-  const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
-    messagesEndRef.current?.scrollIntoView({ behavior });
-  };
-
-  useEffect(() => {
-    // Scroll to bottom when messages change, but only if user is near the bottom.
-    // This prevents auto-scroll if user has scrolled up to read history.
+  // Use useLayoutEffect to capture scrollHeight before the DOM is painted
+  useLayoutEffect(() => {
     const container = messagesContainerRef.current;
     if (container) {
-      const isScrolledToBottom = container.scrollHeight - container.clientHeight <= container.scrollTop + 150; // 150px threshold
-      if (isScrolledToBottom || messages.length <= 20) { // Auto-scroll if few messages or already at bottom
-         scrollToBottom("auto"); // Use "auto" for initial load or when user is at bottom
+      // If we are loading older messages, we want to maintain scroll position.
+      // Capture the height before new (older) messages are prepended.
+      if (isLoadingOlder) {
+        scrollHeightBeforeUpdate.current = container.scrollHeight;
       }
     }
-  }, [messages]);
+  }, [isLoadingOlder]); // Run only when isLoadingOlder changes
 
-  // Handle scrolling for loading older messages (basic example)
+
+  // This is now our main scrolling logic effect
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    // --- INITIAL SCROLL LOGIC ---
+    // If we haven't scrolled yet for this component instance, scroll to the bottom.
+    if (!hasScrolledInitially.current && messages.length > 0) {
+      // console.log("DEBUG: Initial mount for this conversation. Scrolling to bottom instantly.");
+      messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+      hasScrolledInitially.current = true;
+      return; // Stop here after initial scroll
+    }
+
+    // --- "LOAD OLDER MESSAGES" SCROLL LOGIC ---
+    // If isLoadingOlder just became false, it means we finished loading a new page of older messages.
+    if (!isLoadingOlder && scrollHeightBeforeUpdate.current > 0) {
+      const newScrollHeight = container.scrollHeight;
+      // Restore scroll position so it doesn't jump to the top.
+      container.scrollTop += newScrollHeight - scrollHeightBeforeUpdate.current;
+      // Reset the ref
+      scrollHeightBeforeUpdate.current = 0; 
+      // console.log("DEBUG: Restored scroll position after loading older messages.");
+    }
+    
+    // --- "NEW MESSAGE ARRIVED" SCROLL LOGIC ---
+    // This logic is for when a new message is added to the end.
+    const scrollThreshold = 200; // Pixels from bottom
+    const isScrolledNearBottom = container.scrollHeight - container.clientHeight <= container.scrollTop + scrollThreshold;
+    
+    if (hasScrolledInitially.current && isScrolledNearBottom) {
+        // Only auto-scroll if it's not part of loading older messages.
+        // We can check this by seeing if our scrollHeight ref is still 0.
+        if (scrollHeightBeforeUpdate.current === 0) {
+          // console.log("DEBUG: New message arrived and user is near bottom. Scrolling smoothly.");
+          messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        }
+    }
+
+  }, [messages, isLoadingOlder]); // Depend on messages and isLoadingOlder
+
   const handleScroll = (event: UIEvent<HTMLUListElement>) => {
     const { scrollTop } = event.currentTarget;
-    if (scrollTop === 0 && hasMoreOlderMessages && onLoadOlderMessages && !isLoadingOlder) {
+    if (scrollTop === 0 && hasMoreOlderMessages && !isLoadingOlder && onLoadOlderMessages) {
+      // console.log("DEBUG: Reached top of scroll. Firing onLoadOlderMessages.");
       onLoadOlderMessages();
     }
   };
@@ -49,10 +92,9 @@ const MessageList: React.FC<MessageListProps> = ({
     <ul
       ref={messagesContainerRef}
       onScroll={handleScroll}
-      // flex-1 makes it take available vertical space in ChatWindow's flex-col layout
-      // bg-gray-50 dark:bg-gray-700 provides a slightly different background for the message area
       className="flex-1 p-3 sm:p-4 space-y-3 overflow-y-auto bg-gray-50 dark:bg-gray-700"
     >
+      {/* ... rest of your JSX remains the same ... */}
       {isLoadingOlder && (
         <div className="text-center py-2 text-gray-500 dark:text-gray-400">Loading older messages...</div>
       )}
@@ -77,7 +119,6 @@ const MessageList: React.FC<MessageListProps> = ({
         </div>
       )}
       {messages.map((msg) => (
-        // Ensure currentUserId is correctly passed down
         <MessageItem key={msg.id} message={msg} currentUserId={currentUserId} />
       ))}
       <div ref={messagesEndRef} />

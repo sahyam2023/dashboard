@@ -120,7 +120,9 @@ const Layout: React.FC = () => {
               {/* Pass currentUserId which ChatMain expects as MOCK_CURRENT_USER_ID for now */}
               {/* ChatMain internally uses a MOCK_CURRENT_USER_ID, which is fine for now */}
               {/* We pass user.id to ChatMain if it's adapted to take it as a prop later */}
-              <ChatMain socket={socket} socketConnected={socketConnected} /> {/* Pass socket and socketConnected to ChatMain */}
+              <div className="flex-1 overflow-hidden"> {/* Added this wrapper */}
+                <ChatMain socket={socket} socketConnected={socketConnected} /> {/* Pass socket and socketConnected to ChatMain */}
+              </div>
             </div>
           </div>
         )}

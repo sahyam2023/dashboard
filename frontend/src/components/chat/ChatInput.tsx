@@ -1,5 +1,5 @@
 // frontend/src/components/chat/ChatInput.tsx
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Smile, Paperclip } from 'lucide-react'; // Assuming lucide-react for icons
 import Picker, { EmojiClickData, Theme, EmojiStyle } from 'emoji-picker-react';
 import { useDropzone, FileWithPath } from 'react-dropzone';
@@ -14,6 +14,18 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, onSendFile, disabl
   const [message, setMessage] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const prevDisabledRef = useRef<boolean>();
+
+  useEffect(() => {
+    // Store current disabled state for next render
+    const wasPreviouslyDisabled = prevDisabledRef.current;
+    prevDisabledRef.current = disabled;
+
+    // If it was previously disabled, is now enabled, and message is empty
+    if (wasPreviouslyDisabled && !disabled && message === '') {
+      inputRef.current?.focus();
+    }
+  }, [disabled, message]); // Re-run when disabled or message state changes
 
   const onDrop = useCallback((acceptedFiles: FileWithPath[]) => {
     if (acceptedFiles.length > 0 && !disabled) { // Also check if disabled
@@ -49,6 +61,7 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, onSendFile, disabl
     if (message.trim() && !disabled) {
       onSendMessage(message.trim()); // Send as text
       setMessage('');
+      // Focus logic moved to useEffect
     }
     // If a file was just sent via onDrop, message would be empty, so this won't run.
   };

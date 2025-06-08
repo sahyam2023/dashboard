@@ -193,7 +193,7 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
       setIsVmsOrVaSoftware(isCurrentSoftwareVmsOrVa);
 
       const defaultValues: Partial<LinkFormData> = {
-        selectedSoftwareId: linkToEdit.software_id.toString(),
+        selectedSoftwareId: (watchedSoftwareId && watchedSoftwareId !== linkToEdit.software_id.toString()) ? watchedSoftwareId : linkToEdit.software_id.toString(),
         title: linkToEdit.title,
         description: linkToEdit.description || '',
         inputMode: linkToEdit.is_external_link ? 'url' : 'upload',
@@ -207,19 +207,24 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
                                   : [],
       };
       
-      if (linkToEdit.version_id && linkToEdit.software_id.toString() === watchedSoftwareId && versionsList.length > 0) {
-        const existingVersionInList = versionsList.find(v => v.id === linkToEdit.version_id);
-        if (existingVersionInList) {
-          defaultValues.selectedVersionId = linkToEdit.version_id.toString();
-          defaultValues.typedVersionString = linkToEdit.version_name; 
-        } else {
-          defaultValues.selectedVersionId = CREATE_NEW_VERSION_SENTINEL;
-          defaultValues.typedVersionString = linkToEdit.version_name;
+      // Only prefill version details if the software context is still the original one
+      if (watchedSoftwareId === linkToEdit.software_id.toString()) {
+        if (linkToEdit.version_id && versionsList.length > 0) { // versionsList here is for the original software
+            const existingVersionInList = versionsList.find(v => v.id === linkToEdit.version_id);
+            if (existingVersionInList) {
+                defaultValues.selectedVersionId = linkToEdit.version_id.toString();
+                // defaultValues.typedVersionString = linkToEdit.version_name; // Keep original version name if version is selected
+            } else {
+                defaultValues.selectedVersionId = CREATE_NEW_VERSION_SENTINEL;
+                defaultValues.typedVersionString = linkToEdit.version_name;
+            }
+        } else if (linkToEdit.version_name) { // No version_id, but there was a version_name
+            defaultValues.selectedVersionId = CREATE_NEW_VERSION_SENTINEL;
+            defaultValues.typedVersionString = linkToEdit.version_name;
         }
-      } else if (linkToEdit.version_name) {
-          defaultValues.selectedVersionId = CREATE_NEW_VERSION_SENTINEL;
-          defaultValues.typedVersionString = linkToEdit.version_name;
       }
+      // If watchedSoftwareId is different, selectedVersionId and typedVersionString would have been
+      // cleared by the other useEffect, and they won't be set here, which is correct.
 
       reset(defaultValues);
 

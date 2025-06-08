@@ -10516,7 +10516,7 @@ def get_user_chat_status(target_user_id):
 
 # --- Chat File Upload Route ---
 @chat_bp.route('/upload_file', methods=['POST'])
-@active_user_required
+@active_user_required # Ensures user is logged in and active
 def upload_chat_file():
     current_user_id = int(get_jwt_identity())
     db = get_db()
@@ -10528,40 +10528,60 @@ def upload_chat_file():
     if file.filename == '':
         return jsonify(msg="No file selected for uploading."), 400
 
-    conversation_id_str = request.form.get('conversation_id')
-    if not conversation_id_str:
-        return jsonify(msg="conversation_id is required."), 400
+    # This is the ID passed from the frontend. It could be an actual conversation_id
+    # or (for a new chat) the other_user_id.
+    id_from_form_str = request.form.get('conversation_id')
+    if not id_from_form_str:
+        return jsonify(msg="conversation_id (or recipient_id for new chats) is required in form data."), 400
 
     try:
-        conversation_id = int(conversation_id_str)
+        id_from_form = int(id_from_form_str)
     except ValueError:
-        return jsonify(msg="Invalid conversation_id format."), 400
+        return jsonify(msg="Invalid conversation_id/recipient_id format. Must be an integer."), 400
 
-    # Verify user is part of the conversation
-    conversation = get_conversation_by_id(db, conversation_id)
-    if not conversation:
-        return jsonify(msg="Conversation not found."), 404
-    if current_user_id not in (conversation['user1_id'], conversation['user2_id']):
-        return jsonify(msg="You are not authorized to upload files to this conversation."), 403
+    path_segment_id_for_folder = None
+    is_provisional_upload = False
 
-    if file and allowed_file(file.filename): # Use existing allowed_file or a chat-specific one
+    # Try to fetch as an existing conversation
+    conversation = get_conversation_by_id(db, id_from_form)
+
+    if conversation:
+        # It's an existing conversation
+        if current_user_id not in (conversation['user1_id'], conversation['user2_id']):
+            return jsonify(msg="You are not authorized to upload files to this conversation."), 403
+        path_segment_id_for_folder = id_from_form # Use the actual conversation_id for the path
+        app.logger.info(f"Chat file upload: Existing conversation {path_segment_id_for_folder}. User {current_user_id} authorized.")
+    else:
+        # Conversation not found, assume id_from_form is a recipient_id for a new chat
+        is_provisional_upload = True
+        recipient_id_for_provisional = id_from_form
+
+        # Validate the recipient_id
+        recipient_user = find_user_by_id(recipient_id_for_provisional)
+        if not recipient_user or not recipient_user['is_active']:
+            return jsonify(msg="Recipient user for provisional chat not found or is inactive."), 404
+        if current_user_id == recipient_id_for_provisional:
+             return jsonify(msg="Cannot use self as recipient_id for provisional chat file upload."), 400
+
+        path_segment_id_for_folder = recipient_id_for_provisional # Use recipient_id for the path
+        app.logger.info(f"Chat file upload: Provisional chat. User {current_user_id} uploading for recipient {path_segment_id_for_folder}.")
+
+
+    if file and allowed_file(file.filename):
         original_filename = secure_filename(file.filename)
         file_extension = original_filename.rsplit('.', 1)[1].lower() if '.' in original_filename else ''
-
-        # Generate a unique filename
         unique_filename = f"{uuid.uuid4().hex[:12]}_{original_filename}"
 
-        # Create conversation-specific upload directory if it doesn't exist
-        conversation_upload_path = os.path.join(app.config['CHAT_UPLOAD_FOLDER'], str(conversation_id))
-        if not os.path.exists(conversation_upload_path):
-            os.makedirs(conversation_upload_path, exist_ok=True)
+        # Path uses path_segment_id_for_folder (either actual conv_id or recipient_id)
+        conversation_specific_upload_path = os.path.join(app.config['CHAT_UPLOAD_FOLDER'], str(path_segment_id_for_folder))
+        if not os.path.exists(conversation_specific_upload_path):
+            os.makedirs(conversation_specific_upload_path, exist_ok=True)
 
-        file_save_path = os.path.join(conversation_upload_path, unique_filename)
+        file_save_path = os.path.join(conversation_specific_upload_path, unique_filename)
 
         try:
             file.save(file_save_path)
 
-            # Determine file_type based on MIME type (similar to ChatWindow's getFileType)
             mime_type = file.mimetype
             file_type_category = 'binary' # Default
             if mime_type:
@@ -10574,37 +10594,36 @@ def upload_chat_file():
                 elif mime_type.startswith('application/') and ('doc' in mime_type or 'word' in mime_type or 'sheet' in mime_type or 'excel' in mime_type or 'powerpoint' in mime_type):
                     file_type_category = 'doc'
 
-            file_url_to_return = f"/files/chat_uploads/{conversation_id}/{unique_filename}"
+            # The URL returned will use the path_segment_id_for_folder
+            file_url_to_return = f"/files/chat_uploads/{path_segment_id_for_folder}/{unique_filename}"
 
             log_audit_action(
-                action_type='CHAT_FILE_UPLOAD',
-                target_table='messages', # Or a dedicated chat_files table if you make one
-                target_id=conversation_id, # Log against conversation for now
+                action_type='CHAT_FILE_UPLOADED_TO_PATH', # More specific audit log
+                target_table='chat_files_virtual', # Virtual table name for logging
+                target_id=path_segment_id_for_folder, # Log against the folder ID used
                 details={
                     'filename': original_filename,
                     'stored_as': unique_filename,
-                    'conversation_id': conversation_id,
-                    'file_type': file_type_category,
+                    'path_segment_id': path_segment_id_for_folder,
+                    'is_provisional': is_provisional_upload,
+                    'file_type_category': file_type_category,
                     'file_url': file_url_to_return
                 }
             )
 
             return jsonify({
                 "message": "File uploaded successfully",
-                "file_url": file_url_to_return,
-                "file_name": original_filename,
+                "file_url": file_url_to_return, # This URL is now based on recipient_id if provisional
+                "file_name": original_filename, # Original name for display
                 "file_type": file_type_category,
-                "file_extension": file_extension # Optional: useful for client-side icon display
+                "file_extension": file_extension
             }), 201
 
         except Exception as e:
             app.logger.error(f"Error saving chat file {original_filename} to {file_save_path}: {e}")
-            # Attempt to clean up partially saved file if error occurs
             if os.path.exists(file_save_path):
-                try:
-                    os.remove(file_save_path)
-                except Exception as e_clean:
-                    app.logger.error(f"Error cleaning up partially saved chat file {file_save_path}: {e_clean}")
+                try: os.remove(file_save_path)
+                except Exception as e_clean: app.logger.error(f"Error cleaning up partially saved chat file {file_save_path}: {e_clean}")
             return jsonify(msg="Error saving uploaded file."), 500
     else:
         return jsonify(msg="File type not allowed."), 400
@@ -10649,6 +10668,143 @@ def serve_chat_file(conversation_id, filename):
         return jsonify(msg="File not found on server."), 404
         
     return send_from_directory(directory_path, filename, as_attachment=False)
+
+@chat_bp.route('/conversations/start_and_send', methods=['POST'])
+@active_user_required
+def start_conversation_and_send_message():
+    current_user_id = int(get_jwt_identity())
+    db = get_db()
+
+    data = request.get_json()
+    if not data:
+        return jsonify(msg="Missing JSON data"), 400
+
+    recipient_id = data.get('recipient_id')
+    content = data.get('content', '').strip() # Default to empty if not present
+    file_name = data.get('file_name')
+    file_url = data.get('file_url')
+    file_type = data.get('file_type')
+
+    if not recipient_id or not isinstance(recipient_id, int):
+        return jsonify(msg="recipient_id (integer) is required."), 400
+
+    if not content and not file_url: # Must have content or a file
+        return jsonify(msg="Message content or a file is required."), 400
+
+    if file_url and (not file_name or not file_type):
+        return jsonify(msg="file_name and file_type are required when file_url is provided."), 400
+
+    if current_user_id == recipient_id:
+        return jsonify(msg="Cannot start a conversation with yourself."), 400
+
+    recipient_user = find_user_by_id(recipient_id) # find_user_by_id is globally available
+    if not recipient_user or not recipient_user['is_active']:
+        return jsonify(msg="Recipient user not found or is inactive."), 404
+
+    # 1. Create or get conversation
+    conversation_row = create_conversation(db, current_user_id, recipient_id)
+    if not conversation_row:
+        app.logger.error(f"Failed to create/get conversation between {current_user_id} and {recipient_id}")
+        return jsonify(msg="Failed to create or get conversation."), 500
+
+    actual_conversation_id = conversation_row['id']
+
+    # 2. Send the message
+    new_message_row = send_message(db, actual_conversation_id, current_user_id, recipient_id, content, file_name, file_url, file_type)
+    if not new_message_row:
+        app.logger.error(f"Failed to send message in new/existing conversation {actual_conversation_id}")
+        return jsonify(msg="Failed to send message."), 500
+
+    # 3. Prepare the conversation object to return
+    user_conversations_raw = get_user_conversations(db, current_user_id)
+    updated_conversation_to_return = None
+    for conv_raw in user_conversations_raw:
+        if conv_raw['conversation_id'] == actual_conversation_id:
+            conv_dict = dict(conv_raw)
+            last_msg_ts_str = conv_dict.get('last_message_created_at')
+            if isinstance(last_msg_ts_str, str) and last_msg_ts_str:
+                try:
+                    naive_dt = None
+                    try: naive_dt = datetime.strptime(last_msg_ts_str, '%Y-%m-%d %H:%M:%S.%f')
+                    except ValueError: naive_dt = datetime.strptime(last_msg_ts_str, '%Y-%m-%d %H:%M:%S')
+                    if naive_dt:
+                        utc_aware_dt = UTC.localize(naive_dt)
+                        ist_aware_dt = utc_aware_dt.astimezone(IST)
+                        conv_dict['last_message_created_at'] = ist_aware_dt.isoformat()
+                except Exception as e_ts_conv:
+                     app.logger.error(f"Timestamp conversion error for start_and_send (conv {actual_conversation_id}): {e_ts_conv}")
+
+            if conv_dict.get('other_profile_picture'):
+                conv_dict['other_profile_picture_url'] = f"/profile_pictures/{conv_dict['other_profile_picture']}"
+            else:
+                conv_dict['other_profile_picture_url'] = None
+            updated_conversation_to_return = conv_dict
+            break
+
+    if not updated_conversation_to_return:
+        app.logger.error(f"Could not find conversation {actual_conversation_id} in user's list after sending first message.")
+        updated_conversation_to_return = dict(conversation_row) # Fallback to basic info
+
+    # 4. Emit WebSocket events
+    message_dict_for_socket = dict(new_message_row)
+    created_at_socket_str = message_dict_for_socket.get('created_at')
+    if isinstance(created_at_socket_str, str) and created_at_socket_str:
+        try:
+            naive_dt_socket = None
+            try: naive_dt_socket = datetime.strptime(created_at_socket_str, '%Y-%m-%d %H:%M:%S.%f')
+            except ValueError: naive_dt_socket = datetime.strptime(created_at_socket_str, '%Y-%m-%d %H:%M:%S')
+            if naive_dt_socket:
+                utc_aware_dt_socket = UTC.localize(naive_dt_socket)
+                ist_aware_dt_socket = utc_aware_dt_socket.astimezone(IST)
+                message_dict_for_socket['created_at'] = ist_aware_dt_socket.isoformat()
+        except Exception as e_ts_sock:
+            app.logger.error(f"Timestamp conversion error for socket message (conv {actual_conversation_id}): {e_ts_sock}")
+
+
+    sender_user_details_socket = find_user_by_id(current_user_id)
+    if sender_user_details_socket and sender_user_details_socket['profile_picture_filename']:
+        message_dict_for_socket['sender_profile_picture_url'] = f"/profile_pictures/{sender_user_details_socket['profile_picture_filename']}"
+    else:
+        message_dict_for_socket['sender_profile_picture_url'] = None
+
+    if 'sender_username' not in message_dict_for_socket and sender_user_details_socket:
+        message_dict_for_socket['sender_username'] = sender_user_details_socket['username']
+
+    socketio.emit('new_message', message_dict_for_socket, room=str(actual_conversation_id))
+    app.logger.info(f"Emitted 'new_message' to room 'conversation_{actual_conversation_id}' for start_and_send.")
+
+    emit_unread_chat_count(recipient_id) # emit_unread_chat_count is globally available
+
+    if updated_conversation_to_return:
+        socketio.emit('new_conversation_started', updated_conversation_to_return, room=f'user_{current_user_id}')
+
+        recipient_conversations_raw = get_user_conversations(db, recipient_id)
+        recipient_conversation_payload = None
+        for conv_raw_recipient in recipient_conversations_raw:
+            if conv_raw_recipient['conversation_id'] == actual_conversation_id:
+                rcp_conv_dict = dict(conv_raw_recipient)
+                last_msg_ts_rcp = rcp_conv_dict.get('last_message_created_at')
+                if isinstance(last_msg_ts_rcp, str) and last_msg_ts_rcp:
+                    try:
+                        naive_dt_rcp = None
+                        try: naive_dt_rcp = datetime.strptime(last_msg_ts_rcp, '%Y-%m-%d %H:%M:%S.%f')
+                        except ValueError: naive_dt_rcp = datetime.strptime(last_msg_ts_rcp, '%Y-%m-%d %H:%M:%S')
+                        if naive_dt_rcp:
+                            utc_aware_dt_rcp = UTC.localize(naive_dt_rcp)
+                            ist_aware_dt_rcp = utc_aware_dt_rcp.astimezone(IST)
+                            rcp_conv_dict['last_message_created_at'] = ist_aware_dt_rcp.isoformat()
+                    except Exception as e_ts_rcp:
+                        app.logger.error(f"Timestamp conversion error for start_and_send (recipient, conv {actual_conversation_id}): {e_ts_rcp}")
+
+                if rcp_conv_dict.get('other_profile_picture'):
+                    rcp_conv_dict['other_profile_picture_url'] = f"/profile_pictures/{rcp_conv_dict['other_profile_picture']}"
+                else: rcp_conv_dict['other_profile_picture_url'] = None
+                recipient_conversation_payload = rcp_conv_dict
+                break
+        if recipient_conversation_payload:
+            socketio.emit('new_conversation_started', recipient_conversation_payload, room=f'user_{recipient_id}')
+
+    return jsonify(updated_conversation_to_return), 201
 
 app.register_blueprint(chat_bp)
 # --- End Chat API Endpoints ---

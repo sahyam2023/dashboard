@@ -12,3 +12,4 @@ click
 waitress
 thefuzz
 python-Levenshtein
+flask-socketio

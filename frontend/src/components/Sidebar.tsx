@@ -8,7 +8,8 @@ import {
   MoreHorizontal,
   UploadCloud as UploadIcon, // <-- Import an icon for Upload
   Settings as SettingsIcon, // Icon for "Manage Versions"
-  Star as StarIcon // Added for Favorites
+  Star as StarIcon, // Added for Favorites
+  MessageSquare as ChatIcon // Added for Chat
   // LogIn as LogInIcon, 
   // UserPlus as RegisterIcon 
 } from 'lucide-react';
@@ -16,6 +17,7 @@ import { useAuth } from '../context/AuthContext';
 
 interface SidebarProps {
   collapsed: boolean;
+  onToggleChat?: () => void; // Optional: if chat toggle is directly in sidebar
 }
 
 interface NavItemConfig {
@@ -25,9 +27,10 @@ interface NavItemConfig {
   requiresAuth?: boolean; 
   publicOnly?: boolean; 
   roles?: Array<'admin' | 'super_admin' | 'user'>; // Specify roles that can see this link
+  action?: () => void; // For items that trigger actions instead of navigation
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
+const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggleChat }) => {
   const { user, isAuthenticated } = useAuth(); // Updated to use user object
   type RoleType = 'admin' | 'super_admin' | 'user';
 
@@ -63,6 +66,13 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       label: 'Favorites',
       icon: (isCollapsed) => <StarIcon size={isCollapsed ? 24 : 20} />,
       requiresAuth: true,
+    },
+    {
+      path: '#chat', // Placeholder path, action will be handled
+      label: 'Chat',
+      icon: (isCollapsed) => <ChatIcon size={isCollapsed ? 24 : 20} />,
+      requiresAuth: true, // Assuming chat is for authenticated users
+      action: onToggleChat,
     },
     // Admin-specific links
     {
@@ -109,27 +119,45 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
     >
       <nav className="h-full flex flex-col py-4">
         <div className="space-y-1 px-3">
-          {visibleNavItems.map((item) => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              aria-label={item.label} // Added aria-label for better accessibility
-              className={({ isActive }) =>
-                `flex items-center px-3 py-3 text-sm sm:text-base rounded-md transition-colors group focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-500 dark:focus:ring-blue-400 ${ // Added focus states
-                  isActive
-                    ? 'bg-blue-100 dark:bg-blue-700 text-blue-700 dark:text-blue-50 font-medium' // Active state styling
-                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100' // Default and hover
-                }`
-              }
-              title={collapsed ? item.label : undefined} // Show tooltip when collapsed, good for visual users
-            >
-              {/* Updated icon span for dark mode compatibility, conditional active class needs care */}
-              <span className={`${collapsed ? 'mx-auto' : 'mr-3'} text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300 ${ ({isActive}: {isActive:boolean}) => isActive ? 'text-blue-600 dark:text-blue-300' : ''}`}>
-                {item.icon(collapsed)}
-              </span>
-              {!collapsed && <span className="truncate">{item.label}</span>}
-            </NavLink>
-          ))}
+          {visibleNavItems.map((item) => {
+            if (item.action) {
+              return (
+                <button
+                  key={item.label} // Use label for key if path is '#' or similar
+                  onClick={item.action}
+                  aria-label={item.label}
+                  className={`w-full flex items-center px-3 py-3 text-sm sm:text-base rounded-md transition-colors group focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-500 dark:focus:ring-blue-400 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100`}
+                  title={collapsed ? item.label : undefined}
+                >
+                  <span className={`${collapsed ? 'mx-auto' : 'mr-3'} text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300`}>
+                    {item.icon(collapsed)}
+                  </span>
+                  {!collapsed && <span className="truncate">{item.label}</span>}
+                </button>
+              );
+            }
+            return (
+              <NavLink
+                key={item.path}
+                to={item.path}
+                aria-label={item.label} // Added aria-label for better accessibility
+                className={({ isActive }) =>
+                  `flex items-center px-3 py-3 text-sm sm:text-base rounded-md transition-colors group focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-500 dark:focus:ring-blue-400 ${ // Added focus states
+                    isActive
+                      ? 'bg-blue-100 dark:bg-blue-700 text-blue-700 dark:text-blue-50 font-medium' // Active state styling
+                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100' // Default and hover
+                  }`
+                }
+                title={collapsed ? item.label : undefined} // Show tooltip when collapsed, good for visual users
+              >
+                {/* Updated icon span for dark mode compatibility, conditional active class needs care */}
+                <span className={`${collapsed ? 'mx-auto' : 'mr-3'} text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300 ${ ({isActive}: {isActive:boolean}) => isActive ? 'text-blue-600 dark:text-blue-300' : ''}`}>
+                  {item.icon(collapsed)}
+                </span>
+                {!collapsed && <span className="truncate">{item.label}</span>}
+              </NavLink>
+            );
+          })}
         </div>
       </nav>
     </aside>

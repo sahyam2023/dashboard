@@ -26,9 +26,11 @@ from datetime import datetime, timedelta, timezone # Ensured all are here
 from flask import Flask, request, g, jsonify, send_from_directory, has_request_context
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
+import flask_jwt_extended
 from flask_jwt_extended import (
     create_access_token, jwt_required, JWTManager,
-    get_jwt_identity, verify_jwt_in_request, get_jwt, get_jti
+    get_jwt_identity, verify_jwt_in_request, get_jwt, get_jti,
+    decode_token
 )
 from werkzeug.utils import secure_filename
 from tempfile import NamedTemporaryFile
@@ -36,6 +38,7 @@ import database # Your database.py helper
 from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
 from waitress import serve
+from flask_socketio import SocketIO, join_room, leave_room, emit
 
 # --- Helper function for PyInstaller ---
 def get_application_path():
@@ -84,12 +87,13 @@ LINK_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'official_uploads', 'lin
 MISC_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'misc_uploads')
 PROFILE_PICTURES_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'profile_pictures') # Added
 DEFAULT_PROFILE_PICTURES_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'default_profile_pictures') # New
+CHAT_UPLOAD_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'chat_uploads') # Added for chat file attachments
 # STATIC_FOLDER is defined above based on frozen status
 
 
 # Ensure all upload folders exist
 TMP_LARGE_UPLOADS_FOLDER = os.path.join(INSTANCE_FOLDER_PATH, 'tmp_large_uploads') # For large file chunks
-for folder in [BACKUP_DIR, DOC_UPLOAD_FOLDER, PATCH_UPLOAD_FOLDER, LINK_UPLOAD_FOLDER, MISC_UPLOAD_FOLDER, PROFILE_PICTURES_UPLOAD_FOLDER, DEFAULT_PROFILE_PICTURES_FOLDER, TMP_LARGE_UPLOADS_FOLDER]: # Added PROFILE_PICTURES_UPLOAD_FOLDER and DEFAULT_PROFILE_PICTURES_FOLDER and BACKUP_DIR
+for folder in [BACKUP_DIR, DOC_UPLOAD_FOLDER, PATCH_UPLOAD_FOLDER, LINK_UPLOAD_FOLDER, MISC_UPLOAD_FOLDER, PROFILE_PICTURES_UPLOAD_FOLDER, DEFAULT_PROFILE_PICTURES_FOLDER, TMP_LARGE_UPLOADS_FOLDER, CHAT_UPLOAD_FOLDER]: # Added CHAT_UPLOAD_FOLDER
     if not os.path.exists(folder):
         os.makedirs(folder, exist_ok=True) # exist_ok=True is helpful
 
@@ -130,13 +134,35 @@ CORS(app, resources={
             "http://localhost:7000",
             "http://127.0.0.1:7000",
             "http://192.168.3.40:7000",
-            "http://192.168.3.129:7000"
+            "http://192.168.3.129:7000",
+            "http://192.168.1.100:7000" # Example: Added another common private IP
+        ]
+    },
+    r"/socket.io/*": { # Socket.IO also needs CORS configuration
+        "origins": [
+            "http://localhost:5173",
+            "http://localhost:7000",
+            "http://127.0.0.1:7000",
+            "http://192.168.3.40:7000",
+            "http://192.168.3.129:7000",
+            "http://192.168.1.100:7000" # Ensure frontend URL is listed
         ]
     }
 },
 supports_credentials=True,
 allow_headers=["Content-Type", "Authorization", "Cache-Control", "Pragma"],
 methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
+
+# Initialize SocketIO
+# Using "*" for cors_allowed_origins for SocketIO is common in development.
+# For production, list specific frontend origins.
+# The existing CORS setup for /api/* will be respected by Flask routes.
+# SocketIO needs its own CORS config if requests originate from different domains/ports.
+socketio_cors_origins = [
+    "http://localhost:5173", "http://localhost:7000", "http://127.0.0.1:7000",
+    "http://192.168.3.40:7000", "http://192.168.3.129:7000", "http://192.168.1.100:7000"
+]
+socketio = SocketIO(app, cors_allowed_origins=socketio_cors_origins, async_mode='threading') # async_mode='threading' for waitress
 
 # App Configuration
 app.config['DATABASE'] = os.path.join(INSTANCE_FOLDER_PATH, 'software_dashboard.db') # DB in instance folder
@@ -176,6 +202,7 @@ app.config['LINK_UPLOAD_FOLDER'] = LINK_UPLOAD_FOLDER
 app.config['MISC_UPLOAD_FOLDER'] = MISC_UPLOAD_FOLDER
 app.config['PROFILE_PICTURES_UPLOAD_FOLDER'] = PROFILE_PICTURES_UPLOAD_FOLDER # Added
 app.config['DEFAULT_PROFILE_PICTURES_FOLDER'] = DEFAULT_PROFILE_PICTURES_FOLDER # New
+app.config['CHAT_UPLOAD_FOLDER'] = CHAT_UPLOAD_FOLDER # Added for chat
 app.config['INSTANCE_FOLDER_PATH'] = INSTANCE_FOLDER_PATH # Added for DB backup
 app.config['TMP_LARGE_UPLOADS_FOLDER'] = TMP_LARGE_UPLOADS_FOLDER # For large file chunks
 
@@ -186,6 +213,16 @@ UTC = pytz.utc # Added UTC for clarity in conversion if needed
 
 # --- Token Blocklist ---
 blocklist = set()
+sid_to_user = {}
+import flask_jwt_extended.exceptions # For specific JWT exceptions
+
+# --- Import database functions for chat ---
+from database import (
+    create_conversation, send_message, get_messages,
+    get_user_conversations, get_conversation_by_users,
+    mark_messages_as_read, get_conversation_by_id, get_message_by_id
+)
+from flask import Blueprint
 
 @jwt.token_in_blocklist_loader
 def check_if_token_in_blocklist(jwt_header, jwt_payload):
@@ -1928,10 +1965,14 @@ def register():
 @app.route('/api/auth/login', methods=['POST'])
 def login():
     data = request.get_json()
-    if not data: return jsonify(msg="Missing JSON data"), 400
+    if not data:
+        return jsonify(msg="Missing JSON data"), 400
+
     username, password = data.get('username'), data.get('password')
 
-    if not username or not password: return jsonify(msg="Missing username or password"), 400
+    if not username or not password:
+        return jsonify(msg="Missing username or password"), 400
+
     user = find_user_by_username(username)
     if user and bcrypt.check_password_hash(user['password_hash'], password):
         if not user['is_active']:
@@ -1939,8 +1980,8 @@ def login():
                 action_type='USER_LOGIN_FAILED_INACTIVE',
                 target_table='users',
                 target_id=user['id'],
-                user_id=user['id'], 
-                username=user['username'], 
+                user_id=user['id'],
+                username=user['username'],
                 details={'reason': 'Account deactivated'}
             )
             return jsonify(msg="Account deactivated."), 403
@@ -1956,16 +1997,20 @@ def login():
                     username=user['username'],
                     details={'reason': 'Maintenance mode active'}
                 )
-                return jsonify({"msg": "System is currently undergoing maintenance. Only super administrators can log in at this time.", "maintenance_mode_active": True}), 503
-        
-        access_token = create_access_token(identity=str(user['id'])) 
+                return jsonify({
+                    "msg": "System is currently undergoing maintenance. Only super administrators can log in at this time.",
+                    "maintenance_mode_active": True
+                }), 503
+
+        access_token = create_access_token(identity=str(user['id']))
         log_audit_action(
             action_type='USER_LOGIN',
             target_table='users',
             target_id=user['id'],
-            user_id=user['id'], # Explicitly pass logged-in user's ID
-            username=user['username'] # Explicitly pass logged-in user's username
+            user_id=user['id'],
+            username=user['username']
         )
+
         # Include password_reset_required flag in the response
         raw_password_reset_flag = None
         raw_password_reset_flag_type = None
@@ -1977,31 +2022,43 @@ def login():
         password_reset_required = user['password_reset_required'] if 'password_reset_required' in user.keys() and user['password_reset_required'] is not None else False
         app.logger.debug(f"[Login Debug] Calculated password_reset_required for JSON response: {password_reset_required}")
         app.logger.debug(f"[Login Debug] Type of calculated password_reset_required for JSON response: {type(password_reset_required).__name__}")
-        
+
         profile_picture_url = None
         if user['profile_picture_filename']:
             profile_picture_url = f"/profile_pictures/{user['profile_picture_filename']}"
 
+        # --- Real-time Online Status Update (moved before return) ---
+        try:
+            db = get_db()
+            db.execute(
+                "UPDATE users SET is_online = TRUE, last_seen = CURRENT_TIMESTAMP WHERE id = ?",
+                (user['id'],)
+            )
+            db.commit()
+            app.logger.info(f"User {user['id']} status set to online and last_seen updated.")
+            socketio.emit('user_online', {'user_id': user['id']}, broadcast=True)
+        except Exception as e_status:
+            app.logger.error(f"Error updating user online status for user {user['id']}: {e_status}")
+        # --- End Real-time Online Status Update ---
+
         return jsonify(
-            access_token=access_token, 
-            username=user['username'], 
+            access_token=access_token,
+            username=user['username'],
             role=user['role'],
-            user_id=user['id'], 
+            user_id=user['id'],
             password_reset_required=password_reset_required,
-            profile_picture_url=profile_picture_url # Added
+            profile_picture_url=profile_picture_url
         ), 200
-    
+
     # Log failed login attempt (bad username or password)
-    # Need to determine if user exists to get target_id, or log without it if user not found
     target_id_for_failed_login = user['id'] if user else None
-    username_for_failed_login = username # Log the username that was attempted
+    username_for_failed_login = username
 
     log_audit_action(
         action_type='USER_LOGIN_FAILED',
         target_table='users',
-        target_id=target_id_for_failed_login, # Will be None if username doesn't exist
-        username=username_for_failed_login, # Log the attempted username as the "actor" in this context
-                                            # or could be None if we don't want to identify non-existent users
+        target_id=target_id_for_failed_login,
+        username=username_for_failed_login,
         details={'reason': 'Bad username or password', 'provided_username': username}
     )
     return jsonify(msg="Bad username or password"), 401
@@ -6610,6 +6667,61 @@ def admin_list_versions():
     except Exception as e:
         app.logger.error(f"Unexpected error in admin_list_versions: {e}", exc_info=True)
         return jsonify(error="Failed to retrieve software versions", details=str(e)), 500
+
+@app.route('/api/auth/logout', methods=['POST'])
+@active_user_required # Ensures only logged-in, active users can logout
+def logout():
+    current_user_id = int(get_jwt_identity())
+    jti = get_jwt()['jti'] # Get JWT ID
+    blocklist.add(jti) # Add token to blocklist
+
+    # --- Real-time Online Status Update ---
+    try:
+        db = get_db()
+        # Update user's online status and last_seen timestamp
+        # Using CURRENT_TIMESTAMP for SQLite to set the current UTC time
+        cursor = db.execute(
+            "UPDATE users SET is_online = FALSE, last_seen = CURRENT_TIMESTAMP WHERE id = ?",
+            (current_user_id,)
+        )
+        db.commit()
+        
+        if cursor.rowcount > 0:
+            app.logger.info(f"User {current_user_id} status set to offline and last_seen updated.")
+            # Fetch the updated last_seen time to include in the event
+            # This requires another query. Alternatively, client can use its own timestamp.
+            # For accuracy, fetching from DB is better if precise last_seen is critical.
+            user_details_for_event = db.execute("SELECT last_seen FROM users WHERE id = ?", (current_user_id,)).fetchone()
+            last_seen_timestamp_iso = None
+            if user_details_for_event and user_details_for_event['last_seen']:
+                # Convert to ISO format, assuming it's stored as a string that can be parsed or directly used.
+                # If it's a naive string, parse and make aware (similar to convert_timestamps_to_ist_iso)
+                # For CURRENT_TIMESTAMP in SQLite, it's usually UTC.
+                try:
+                    naive_dt = datetime.strptime(user_details_for_event['last_seen'], '%Y-%m-%d %H:%M:%S')
+                    # Assuming CURRENT_TIMESTAMP in SQLite gives UTC. If it's local, adjust timezone.
+                    utc_dt = UTC.localize(naive_dt) # Make it timezone-aware (UTC)
+                    last_seen_timestamp_iso = utc_dt.isoformat()
+                except Exception as e_ts_conv:
+                    app.logger.error(f"Error converting last_seen for logout event (user {current_user_id}): {e_ts_conv}")
+                    last_seen_timestamp_iso = datetime.now(timezone.utc).isoformat() # Fallback
+
+            socketio.emit('user_offline', {'user_id': current_user_id, 'last_seen': last_seen_timestamp_iso}, broadcast=True)
+        else:
+            app.logger.warning(f"Logout: Failed to update online status for user {current_user_id} (user not found or no change).")
+
+    except Exception as e_status:
+        app.logger.error(f"Error updating user online status during logout for user {current_user_id}: {e_status}")
+        # Do not fail logout if status update fails.
+    # --- End Real-time Online Status Update ---
+
+    log_audit_action(
+        action_type='USER_LOGOUT',
+        target_table='users', # Or 'auth_tokens' if you had a table for JTIs
+        target_id=current_user_id, # User who logged out
+        details={'jti_blocklisted': jti}
+    )
+    return jsonify(msg="Logout successful, token revoked."), 200
     
 @app.route('/api/admin/versions/<int:version_id>', methods=['GET'])
 @jwt_required()
@@ -9828,6 +9940,776 @@ def clear_all_user_notifications_api():
         app.logger.error(f"Error clearing all notifications for user {user_id}: {e}", exc_info=True)
         return jsonify(msg="An error occurred while clearing all notifications."), 500
     
+
+
+# --- Chat API Endpoints ---
+chat_bp = Blueprint('chat_api', __name__, url_prefix='/api/chat')
+
+@chat_bp.route('/users', methods=['GET'])
+@active_user_required
+def list_chat_users():
+    db = get_db()
+    page = request.args.get('page', default=1, type=int)
+    per_page = request.args.get('per_page', default=20, type=int) # Adjusted default
+    search_term = request.args.get('search', default=None, type=str)
+
+    if page <= 0: page = 1
+    if per_page <= 0: per_page = 20
+    if per_page > 100: per_page = 100
+
+    query_params = []
+    base_user_query = "SELECT id, username, profile_picture_filename FROM users WHERE is_active = TRUE"
+    count_query = "SELECT COUNT(id) as count FROM users WHERE is_active = TRUE"
+
+    if search_term:
+        base_user_query += " AND LOWER(username) LIKE ?"
+        count_query += " AND LOWER(username) LIKE ?"
+        query_params.append(f"%{search_term.lower()}%")
+
+    try:
+        total_users_cursor = db.execute(count_query, tuple(query_params))
+        total_users = total_users_cursor.fetchone()['count']
+    except Exception as e:
+        app.logger.error(f"Error fetching total chat user count: {e}")
+        return jsonify(msg="Error fetching user count."), 500
+
+    total_pages = math.ceil(total_users / per_page) if total_users > 0 else 1
+    offset = (page - 1) * per_page
+    if page > total_pages and total_users > 0:
+        page = total_pages # Adjust page if out of bounds
+        offset = (page - 1) * per_page
+
+    base_user_query += " ORDER BY username ASC LIMIT ? OFFSET ?"
+    query_params.extend([per_page, offset])
+
+    users_cursor = db.execute(base_user_query, tuple(query_params))
+    users_list = []
+    for row in users_cursor.fetchall():
+        user_dict = dict(row)
+        if user_dict['profile_picture_filename']:
+            user_dict['profile_picture_url'] = f"/profile_pictures/{user_dict['profile_picture_filename']}"
+        else:
+            user_dict['profile_picture_url'] = None # Or a default avatar URL
+        users_list.append(user_dict)
+
+    return jsonify({
+        "users": users_list,
+        "page": page,
+        "per_page": per_page,
+        "total_users": total_users,
+        "total_pages": total_pages
+    })
+
+@chat_bp.route('/conversations', methods=['POST'])
+@active_user_required
+def start_new_conversation():
+    current_user_id = int(get_jwt_identity())
+    data = request.get_json()
+    if not data or 'user2_id' not in data:
+        return jsonify(msg="user2_id is required to start a conversation."), 400
+
+    user2_id = data['user2_id']
+    if not isinstance(user2_id, int):
+        return jsonify(msg="user2_id must be an integer."), 400
+
+    if current_user_id == user2_id:
+        return jsonify(msg="Cannot start a conversation with yourself."), 400
+
+    db = get_db()
+    # Check if user2_id exists and is active
+    user2 = find_user_by_id(user2_id)
+    if not user2 or not user2['is_active']:
+        return jsonify(msg="The other user does not exist or is inactive."), 404
+
+    conversation = create_conversation(db, current_user_id, user2_id)
+    if conversation:
+        # `create_conversation` returns a Row object. Convert to dict for jsonify.
+        # Also, convert timestamps if necessary.
+        conv_dict = convert_timestamps_to_ist_iso(dict(conversation), ['created_at'])
+
+        # --- Real-time Update for New Conversation ---
+        user1_id = conversation['user1_id']
+        user2_id = conversation['user2_id']
+
+        # Fetch conversation details for user1 (perspective of user1)
+        # get_user_conversations returns a list, we need to find the specific one.
+        # This is not the most efficient way if get_user_conversations is heavy.
+        # A more direct fetch might be better: get_conversation_details_for_user(db, conversation_id, user_id)
+        
+        # Simplification: Assuming get_user_conversations is efficient enough for now,
+        # or that the frontend can handle a list and find the new one.
+        # A more targeted approach would be to construct the payload directly.
+
+        # Construct payload for user1
+        user1_conversations_raw = get_user_conversations(db, user1_id)
+        user1_conv_payload = None
+        for conv_raw in user1_conversations_raw:
+            if conv_raw['conversation_id'] == conversation['id']:
+                temp_conv_dict = convert_timestamps_to_ist_iso(dict(conv_raw), ['last_message_created_at'])
+                if temp_conv_dict.get('other_profile_picture'):
+                    temp_conv_dict['other_profile_picture_url'] = f"/profile_pictures/{temp_conv_dict['other_profile_picture']}"
+                else:
+                    temp_conv_dict['other_profile_picture_url'] = None
+                user1_conv_payload = temp_conv_dict
+                break
+        
+        if user1_conv_payload:
+             # Emit to user1's room (assuming user-specific rooms like 'user_USERID')
+            socketio.emit('new_conversation_started', user1_conv_payload, room=f'user_{user1_id}')
+            app.logger.info(f"Emitted 'new_conversation_started' to user {user1_id} for conversation {conversation['id']}")
+
+        # Construct payload for user2
+        user2_conversations_raw = get_user_conversations(db, user2_id)
+        user2_conv_payload = None
+        for conv_raw in user2_conversations_raw:
+            if conv_raw['conversation_id'] == conversation['id']:
+                temp_conv_dict_u2 = convert_timestamps_to_ist_iso(dict(conv_raw), ['last_message_created_at'])
+                if temp_conv_dict_u2.get('other_profile_picture'):
+                    temp_conv_dict_u2['other_profile_picture_url'] = f"/profile_pictures/{temp_conv_dict_u2['other_profile_picture']}"
+                else:
+                    temp_conv_dict_u2['other_profile_picture_url'] = None
+                user2_conv_payload = temp_conv_dict_u2
+                break
+
+        if user2_conv_payload:
+            socketio.emit('new_conversation_started', user2_conv_payload, room=f'user_{user2_id}')
+            app.logger.info(f"Emitted 'new_conversation_started' to user {user2_id} for conversation {conversation['id']}")
+        # --- End Real-time Update ---
+
+        return jsonify(conv_dict), 201 # 201 for new, or 200 if existing returned
+    else:
+        # This case might occur if create_conversation itself had an unhandled error,
+        # or if the DB integrity check (user1_id < user2_id) failed unexpectedly.
+        app.logger.error(f"Failed to create or retrieve conversation between {current_user_id} and {user2_id}")
+        return jsonify(msg="Failed to create or retrieve conversation."), 500
+
+@chat_bp.route('/conversations', methods=['GET'])
+@active_user_required
+def get_my_conversations():
+    current_user_id = int(get_jwt_identity())
+    db = get_db()
+    conversations_raw = get_user_conversations(db, current_user_id)
+
+    conversations_processed = []
+    for conv_row in conversations_raw:
+        conv_dict = dict(conv_row)
+        
+        last_message_ts_str = conv_dict.get('last_message_created_at')
+        if isinstance(last_message_ts_str, str) and last_message_ts_str:
+            try:
+                naive_dt = None
+                try:
+                    naive_dt = datetime.strptime(last_message_ts_str, '%Y-%m-%d %H:%M:%S.%f')
+                except ValueError:
+                    naive_dt = datetime.strptime(last_message_ts_str, '%Y-%m-%d %H:%M:%S')
+                
+                if naive_dt:
+                    utc_aware_dt = UTC.localize(naive_dt)
+                    ist_aware_dt = utc_aware_dt.astimezone(IST)
+                    conv_dict['last_message_created_at'] = ist_aware_dt.isoformat()
+                else:
+                    app.logger.warning(f"Conv list timestamp parsing failed for: '{last_message_ts_str}' in conv ID: {conv_dict.get('conversation_id')}")
+            except Exception as e_ts_conv_list:
+                app.logger.error(f"Conv list timestamp conversion error for conv {conv_dict.get('conversation_id')}: {e_ts_conv_list}", exc_info=True)
+                # In case of error, conv_dict['last_message_created_at'] remains the original string
+
+        if conv_dict.get('other_profile_picture'):
+            conv_dict['other_profile_picture_url'] = f"/profile_pictures/{conv_dict['other_profile_picture']}"
+        else:
+            conv_dict['other_profile_picture_url'] = None # Or default avatar
+        conversations_processed.append(conv_dict)
+
+    return jsonify(conversations_processed), 200
+
+@chat_bp.route('/conversations/<int:conversation_id>/messages', methods=['GET'])
+@active_user_required
+def get_conversation_messages(conversation_id):
+    current_user_id = int(get_jwt_identity())
+    db = get_db()
+
+    # First, verify the current user is part of this conversation
+    conversation = get_conversation_by_id(db, conversation_id)
+    if not conversation:
+        return jsonify(msg="Conversation not found."), 404
+    if current_user_id not in (conversation['user1_id'], conversation['user2_id']):
+        return jsonify(msg="You are not authorized to view this conversation."), 403
+
+    # Mark messages as read for the current user in this conversation
+    # This should happen before fetching messages if we want the fetch to reflect the read status update.
+    # However, get_messages itself doesn't currently re-fetch based on read status change within the same call.
+    # The client would typically see the change on the next fetch or via WebSocket.
+    try:
+        rows_updated = mark_messages_as_read(db, conversation_id, current_user_id)
+        db.commit() # Ensure changes from mark_messages_as_read are committed
+        app.logger.info(f"Marked {rows_updated} messages as read for user {current_user_id} in conversation {conversation_id} and committed.")
+    except Exception as e_mark_read:
+        db.rollback() # Rollback if marking as read or committing fails
+        app.logger.error(f"Error marking messages as read for conv {conversation_id}, user {current_user_id}: {e_mark_read}")
+        # Continue to fetch messages even if marking read fails, or return error depending on policy
+
+    limit = request.args.get('limit', default=50, type=int)
+    offset = request.args.get('offset', default=0, type=int)
+    if limit <=0 : limit = 50
+    if limit > 200: limit = 200 # Max limit for messages per page
+    if offset < 0: offset = 0
+
+    messages_raw = get_messages(db, conversation_id, limit, offset)
+    messages_processed = []
+    for msg_row in messages_raw:
+        message_dict = dict(msg_row)
+        created_at_str = message_dict.get('created_at')
+
+        if isinstance(created_at_str, str) and created_at_str:
+            try:
+                naive_dt = None
+                try:
+                    naive_dt = datetime.strptime(created_at_str, '%Y-%m-%d %H:%M:%S.%f')
+                except ValueError:
+                    naive_dt = datetime.strptime(created_at_str, '%Y-%m-%d %H:%M:%S')
+                
+                if naive_dt:
+                    utc_aware_dt = UTC.localize(naive_dt)
+                    ist_aware_dt = utc_aware_dt.astimezone(IST)
+                    message_dict['created_at'] = ist_aware_dt.isoformat()
+                else:
+                    # Log if parsing completely failed (should be rare if DB format is consistent)
+                    app.logger.warning(f"Chat history timestamp parsing failed for: '{created_at_str}' in message ID (if available): {message_dict.get('id')}")
+            except Exception as e_ts_conv_hist:
+                app.logger.error(f"Chat history timestamp conversion error for message {message_dict.get('id')}: {e_ts_conv_hist}", exc_info=True)
+                # In case of error, message_dict['created_at'] remains the original string
+        
+        messages_processed.append(message_dict)
+
+    # TODO: Add total message count for pagination if needed by client.
+    # Requires a separate count query in get_messages or here.
+
+    return jsonify(messages_processed), 200
+
+@chat_bp.route('/conversations/<int:conversation_id>/messages', methods=['POST'])
+@active_user_required
+def post_new_message(conversation_id):
+    current_user_id = int(get_jwt_identity())
+    db = get_db()
+
+    conversation = get_conversation_by_id(db, conversation_id)
+    if not conversation:
+        return jsonify(msg="Conversation not found."), 404
+    if current_user_id not in (conversation['user1_id'], conversation['user2_id']):
+        return jsonify(msg="You are not authorized to send messages in this conversation."), 403
+
+    data = request.get_json()
+    if not data:
+        return jsonify(msg="Missing JSON data"), 400
+
+    content = data.get('content', '').strip() # Default to empty string if not present
+    file_name = data.get('file_name')
+    file_url = data.get('file_url')
+    file_type = data.get('file_type')
+
+    if not content and not file_url: # Must have content or a file
+        return jsonify(msg="Message content or a file is required."), 400
+
+    if file_url and (not file_name or not file_type):
+        return jsonify(msg="file_name and file_type are required when file_url is provided."), 400
+
+    # Basic validation for file_type if provided
+    allowed_file_types = ['image', 'video', 'audio', 'pdf', 'archive', 'doc', 'binary']
+    if file_type and file_type not in allowed_file_types:
+        return jsonify(msg=f"Invalid file_type. Allowed types are: {', '.join(allowed_file_types)}"), 400
+
+
+    # Determine recipient_id
+    recipient_id = None
+    if current_user_id == conversation['user1_id']:
+        recipient_id = conversation['user2_id']
+    else:
+        recipient_id = conversation['user1_id']
+
+    # Check if recipient is active (optional, but good for UX)
+    recipient_user = find_user_by_id(recipient_id)
+    if not recipient_user or not recipient_user['is_active']:
+        app.logger.warning(f"Sending message from {current_user_id} to inactive user {recipient_id} in conversation {conversation_id}.")
+
+    new_message = send_message(db, conversation_id, current_user_id, recipient_id, content, file_name, file_url, file_type)
+    if new_message:
+        message_dict = dict(new_message) 
+
+        created_at_str = message_dict.get('created_at')
+        if isinstance(created_at_str, str) and created_at_str: 
+            try:
+                naive_dt = None
+                try:
+                    naive_dt = datetime.strptime(created_at_str, '%Y-%m-%d %H:%M:%S.%f')
+                except ValueError:
+                    naive_dt = datetime.strptime(created_at_str, '%Y-%m-%d %H:%M:%S')
+                
+                if naive_dt: 
+                    utc_aware_dt = UTC.localize(naive_dt) 
+                    ist_aware_dt = utc_aware_dt.astimezone(IST) 
+                    message_dict['created_at'] = ist_aware_dt.isoformat()
+                else:
+                    app.logger.warning(f"Chat timestamp parsing failed for: '{created_at_str}' in message ID (if available): {message_dict.get('id')}")
+            except Exception as e_ts_conv:
+                app.logger.error(f"Chat timestamp conversion error for message {message_dict.get('id')}: {e_ts_conv}", exc_info=True)
+        
+        message_dict_for_api_response = message_dict 
+        
+        sender_user_details = find_user_by_id(current_user_id) 
+        recipient_user_details = find_user_by_id(recipient_id) 
+
+        if 'sender_username' not in message_dict_for_api_response:
+            message_dict_for_api_response['sender_username'] = sender_user_details['username'] if sender_user_details else 'Unknown'
+        if 'recipient_username' not in message_dict_for_api_response:
+            message_dict_for_api_response['recipient_username'] = recipient_user_details['username'] if recipient_user_details else 'Unknown'
+        
+        message_data_for_socket = message_dict_for_api_response.copy()
+        if sender_user_details and sender_user_details['profile_picture_filename']:
+            message_data_for_socket['sender_profile_picture_url'] = f"/profile_pictures/{sender_user_details['profile_picture_filename']}"
+        else:
+            message_data_for_socket['sender_profile_picture_url'] = None
+
+        socketio.emit('new_message', message_data_for_socket, room=str(conversation_id)) 
+        app.logger.info(f"Emitted 'new_message' to room 'conversation_{conversation_id}'")
+
+        return jsonify(message_dict_for_api_response), 201
+    else:
+        app.logger.error(f"Failed to send message in conversation {conversation_id} from user {current_user_id}")
+        return jsonify(msg="Failed to send message."), 500
+
+@chat_bp.route('/user_status/<int:target_user_id>', methods=['GET'])
+@active_user_required # Ensure only authenticated users can request status
+def get_user_chat_status(target_user_id):
+    db = get_db()
+    user_status = db.execute(
+        "SELECT is_online, last_seen FROM users WHERE id = ?", (target_user_id,)
+    ).fetchone()
+
+    if not user_status:
+        return jsonify(msg="User not found."), 404
+
+    status_dict = dict(user_status)
+    # Convert last_seen to ISO format
+    if status_dict.get('last_seen'):
+        try:
+            naive_dt = datetime.strptime(status_dict['last_seen'], '%Y-%m-%d %H:%M:%S')
+            aware_dt = UTC.localize(naive_dt) 
+            status_dict['last_seen'] = aware_dt.isoformat()
+        except ValueError as e_ts_conv:
+            app.logger.error(f"Error converting last_seen for user_status endpoint (user {target_user_id}): {e_ts_conv}. Value: {status_dict['last_seen']}")
+    
+    return jsonify(status_dict), 200
+
+# --- Chat File Upload Route ---
+@chat_bp.route('/upload_file', methods=['POST'])
+@active_user_required
+def upload_chat_file():
+    current_user_id = int(get_jwt_identity())
+    db = get_db()
+
+    if 'file' not in request.files:
+        return jsonify(msg="No file part in the request."), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify(msg="No file selected for uploading."), 400
+
+    conversation_id_str = request.form.get('conversation_id')
+    if not conversation_id_str:
+        return jsonify(msg="conversation_id is required."), 400
+
+    try:
+        conversation_id = int(conversation_id_str)
+    except ValueError:
+        return jsonify(msg="Invalid conversation_id format."), 400
+
+    # Verify user is part of the conversation
+    conversation = get_conversation_by_id(db, conversation_id)
+    if not conversation:
+        return jsonify(msg="Conversation not found."), 404
+    if current_user_id not in (conversation['user1_id'], conversation['user2_id']):
+        return jsonify(msg="You are not authorized to upload files to this conversation."), 403
+
+    if file and allowed_file(file.filename): # Use existing allowed_file or a chat-specific one
+        original_filename = secure_filename(file.filename)
+        file_extension = original_filename.rsplit('.', 1)[1].lower() if '.' in original_filename else ''
+
+        # Generate a unique filename
+        unique_filename = f"{uuid.uuid4().hex[:12]}_{original_filename}"
+
+        # Create conversation-specific upload directory if it doesn't exist
+        conversation_upload_path = os.path.join(app.config['CHAT_UPLOAD_FOLDER'], str(conversation_id))
+        if not os.path.exists(conversation_upload_path):
+            os.makedirs(conversation_upload_path, exist_ok=True)
+
+        file_save_path = os.path.join(conversation_upload_path, unique_filename)
+
+        try:
+            file.save(file_save_path)
+
+            # Determine file_type based on MIME type (similar to ChatWindow's getFileType)
+            mime_type = file.mimetype
+            file_type_category = 'binary' # Default
+            if mime_type:
+                if mime_type.startswith('image/'): file_type_category = 'image'
+                elif mime_type.startswith('video/'): file_type_category = 'video'
+                elif mime_type.startswith('audio/'): file_type_category = 'audio'
+                elif mime_type == 'application/pdf': file_type_category = 'pdf'
+                elif mime_type.startswith('application/') and ('zip' in mime_type or 'compressed' in mime_type or 'archive' in mime_type):
+                    file_type_category = 'archive'
+                elif mime_type.startswith('application/') and ('doc' in mime_type or 'word' in mime_type or 'sheet' in mime_type or 'excel' in mime_type or 'powerpoint' in mime_type):
+                    file_type_category = 'doc'
+
+            file_url_to_return = f"/files/chat_uploads/{conversation_id}/{unique_filename}"
+
+            log_audit_action(
+                action_type='CHAT_FILE_UPLOAD',
+                target_table='messages', # Or a dedicated chat_files table if you make one
+                target_id=conversation_id, # Log against conversation for now
+                details={
+                    'filename': original_filename,
+                    'stored_as': unique_filename,
+                    'conversation_id': conversation_id,
+                    'file_type': file_type_category,
+                    'file_url': file_url_to_return
+                }
+            )
+
+            return jsonify({
+                "message": "File uploaded successfully",
+                "file_url": file_url_to_return,
+                "file_name": original_filename,
+                "file_type": file_type_category,
+                "file_extension": file_extension # Optional: useful for client-side icon display
+            }), 201
+
+        except Exception as e:
+            app.logger.error(f"Error saving chat file {original_filename} to {file_save_path}: {e}")
+            # Attempt to clean up partially saved file if error occurs
+            if os.path.exists(file_save_path):
+                try:
+                    os.remove(file_save_path)
+                except Exception as e_clean:
+                    app.logger.error(f"Error cleaning up partially saved chat file {file_save_path}: {e_clean}")
+            return jsonify(msg="Error saving uploaded file."), 500
+    else:
+        return jsonify(msg="File type not allowed."), 400
+
+# --- Chat File Serving Route ---
+@app.route('/files/chat_uploads/<int:conversation_id>/<path:filename>')
+@active_user_required # Changed back
+def serve_chat_file(conversation_id, filename):
+    current_user_id = int(get_jwt_identity()) # Provided by @active_user_required
+    db = get_db()
+
+    # Verify user is part of the conversation
+    conversation = get_conversation_by_id(db, conversation_id)
+    if not conversation:
+        return jsonify(msg="Conversation not found."), 404
+    if current_user_id not in (conversation['user1_id'], conversation['user2_id']):
+        log_audit_action(
+            action_type='CHAT_FILE_ACCESS_DENIED_NOT_PART_OF_CONVO', # Kept specific audit log
+            user_id=current_user_id,
+            target_table='chat_files', # Conceptual table name
+            target_id=conversation_id, # Or a specific file ID if one were available here
+            details={'filename': filename, 'conversation_id': conversation_id, 'reason': 'User not part of conversation.'}
+        )
+        return jsonify(msg="You are not authorized to access files from this conversation."), 403
+
+    # Log successful access
+    log_audit_action(
+        action_type='CHAT_FILE_ACCESS_SUCCESS',
+        user_id=current_user_id,
+        target_table='chat_files', # Conceptual table name
+        target_id=conversation_id, # Or a specific file ID
+        details={'filename': filename, 'conversation_id': conversation_id}
+    )
+    
+    directory_path = os.path.join(app.config['CHAT_UPLOAD_FOLDER'], str(conversation_id))
+
+    # Security: Basic check to prevent path traversal, though send_from_directory handles it well.
+    if ".." in filename or filename.startswith("/"):
+        return jsonify(msg="Invalid filename."), 400
+
+    if not os.path.exists(os.path.join(directory_path, filename)):
+        return jsonify(msg="File not found on server."), 404
+        
+    return send_from_directory(directory_path, filename, as_attachment=False)
+
+app.register_blueprint(chat_bp)
+# --- End Chat API Endpoints ---
+
+# --- SocketIO Event Handlers ---
+@socketio.on('connect')
+def handle_connect(auth=None): # Add auth parameter, default to None for robustness
+    user_id_for_connect = None
+    token_source = "unknown"
+
+    if auth and isinstance(auth, dict) and 'token' in auth:
+        auth_token = auth.get('token')
+        token_source = "socket_auth_payload"
+        if auth_token:
+            app.logger.info(f"SocketIO connect: Token found in auth payload. SID: {request.sid}")
+            try:
+                # Assuming flask_jwt_extended.decode_token is the correct function
+                # and app.config['JWT_SECRET_KEY'] is accessible.
+                # If decode_token is not directly from flask_jwt_extended, adjust import.
+                # This requires the JWTManager `jwt` to be initialized.
+                decoded_token = flask_jwt_extended.decode_token(auth_token)
+                identity = decoded_token.get(app.config.get('JWT_IDENTITY_CLAIM', 'sub'))
+                if identity:
+                    user_id_for_connect = int(identity)
+                    app.logger.info(f"SocketIO connect: User ID {user_id_for_connect} authenticated via token in auth payload. SID: {request.sid}")
+                else:
+                    app.logger.warning(f"SocketIO connect: Token from auth payload decoded but no identity (sub) claim found. SID: {request.sid}")
+            except flask_jwt_extended.exceptions.ExpiredSignatureError: # More specific exception
+                app.logger.warning(f"SocketIO connect: Auth token from auth payload has expired. SID: {request.sid}")
+            except flask_jwt_extended.exceptions.InvalidTokenError as e: # More specific exception
+                app.logger.warning(f"SocketIO connect: Auth token from auth payload is invalid: {e}. SID: {request.sid}")
+            except Exception as e:
+                app.logger.error(f"SocketIO connect: Unexpected error decoding token from auth payload: {e}. SID: {request.sid}")
+        else:
+            app.logger.warning(f"SocketIO connect: 'token' field provided in auth payload but it's empty. SID: {request.sid}")
+    else:
+        # Fallback to checking JWT from headers/cookies (less common for WebSocket direct connect)
+        app.logger.info(f"SocketIO connect: No auth payload or token in payload. Trying get_jwt_identity(). SID: {request.sid}")
+        try:
+            # verify_jwt_in_request might be needed if get_jwt_identity() relies on it being called first.
+            # For socketio 'connect' event, the request context might be different.
+            # If this doesn't work, it implies JWT is not passed in a way flask_jwt_extended expects for non-HTTP requests.
+            # This path is less likely to succeed for WebSockets if the token isn't in headers/cookies for the handshake.
+            with app.test_request_context('/socket.io', environ_base=request.environ): # Create a request context
+                 verify_jwt_in_request(optional=True) 
+                 identity = get_jwt_identity()
+                 if identity:
+                     user_id_for_connect = int(identity)
+                     token_source = "jwt_header_or_cookie"
+                     app.logger.info(f"SocketIO connect: Identity '{user_id_for_connect}' found via get_jwt_identity(). SID: {request.sid}")
+        except Exception as e:
+            app.logger.info(f"SocketIO connect: Error trying get_jwt_identity() (fallback): {e}. SID: {request.sid}")
+
+    if user_id_for_connect:
+        sid_to_user[request.sid] = user_id_for_connect
+        app.logger.info(f"SocketIO: Client connected (User ID: {user_id_for_connect}, Source: {token_source}), SID: {request.sid}. Stored SID.")
+        try:
+            db = get_db()
+            db.execute(
+                "UPDATE users SET is_online = TRUE, last_seen = CURRENT_TIMESTAMP WHERE id = ?",
+                (user_id_for_connect,)
+            )
+            db.commit()
+            app.logger.info(f"SocketIO connect: User {user_id_for_connect} status set to online and last_seen updated.")
+            socketio.emit('user_online', {'user_id': user_id_for_connect}, broadcast=True)
+        except Exception as e_status:
+            app.logger.error(f"SocketIO connect: Error updating online status for user {user_id_for_connect}: {e_status}")
+            # Ensure rollback if db connection was initiated by get_db()
+            if 'db' in locals() and db: db.rollback() 
+    else:
+        app.logger.info(f"SocketIO: Client connected (Anonymous or auth failed, Source: {token_source}), SID: {request.sid}. No user_id resolved.")
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    user_id_for_disconnect = sid_to_user.pop(request.sid, None) # Retrieve and remove SID
+
+    if user_id_for_disconnect:
+        app.logger.info(f"SocketIO: Client disconnected (User ID: {user_id_for_disconnect}), SID: {request.sid}. Removed SID from mapping.")
+        
+        # Update user's online status to FALSE and record last_seen
+        try:
+            db = get_db() # Ensure db is accessible
+            cursor = db.execute(
+                "UPDATE users SET is_online = FALSE, last_seen = CURRENT_TIMESTAMP WHERE id = ?",
+                (user_id_for_disconnect,)
+            )
+            db.commit()
+
+            if cursor.rowcount > 0:
+                app.logger.info(f"SocketIO disconnect: User {user_id_for_disconnect} status set to offline and last_seen updated.")
+                # Fetch the updated last_seen time
+                user_details_for_event = db.execute("SELECT last_seen FROM users WHERE id = ?", (user_id_for_disconnect,)).fetchone()
+                last_seen_timestamp_iso = None
+                if user_details_for_event and user_details_for_event['last_seen']:
+                    try:
+                        # Assuming last_seen is stored as 'YYYY-MM-DD HH:MM:SS' (UTC from CURRENT_TIMESTAMP)
+                        naive_dt = datetime.strptime(user_details_for_event['last_seen'], '%Y-%m-%d %H:%M:%S')
+                        aware_dt = UTC.localize(naive_dt) # Make it UTC aware
+                        last_seen_timestamp_iso = aware_dt.isoformat()
+                    except Exception as e_ts_conv:
+                        app.logger.error(f"Error converting last_seen for disconnect event (user {user_id_for_disconnect}): {e_ts_conv}")
+                        last_seen_timestamp_iso = datetime.now(timezone.utc).isoformat() # Fallback
+                
+                socketio.emit('user_offline', {'user_id': user_id_for_disconnect, 'last_seen': last_seen_timestamp_iso})
+            else:
+                app.logger.warning(f"SocketIO disconnect: Failed to update online status for user {user_id_for_disconnect} (user not found or no change needed).")
+        except Exception as e_status:
+            app.logger.error(f"SocketIO disconnect: Error updating online status for user {user_id_for_disconnect}: {e_status}")
+            if 'db' in locals() and db: db.rollback() # Rollback on error
+    else:
+        # This means the SID was not found in our mapping, so either it was an anonymous connection
+        # or authentication failed during connect.
+        app.logger.info(f"SocketIO: Client disconnected (Anonymous or unauthenticated), SID: {request.sid}")
+
+    # The old logic relying on get_jwt_identity() here is removed as it's unreliable in disconnect context.
+
+@socketio.on('join_conversation')
+def handle_join_conversation(data):
+    # Validate data and conversation_id first
+    if not data or not isinstance(data, dict) or not data.get('conversation_id'):
+        app.logger.warning("SocketIO 'join_conversation': conversation_id missing or invalid in event data.")
+        emit('join_error', {'error': 'conversation_id is missing or invalid.'})
+        return
+
+    try:
+        # Ensure conversation_id is an integer. This also catches cases where it might be present but not a number.
+        conversation_id_int = int(data.get('conversation_id'))
+    except (ValueError, TypeError): # Catch TypeError if data.get('conversation_id') is None or not string/number
+        app.logger.warning(f"SocketIO 'join_conversation': Invalid conversation_id format '{data.get('conversation_id')}'. Must be an integer.")
+        emit('join_error', {'conversation_id': data.get('conversation_id'), 'error': 'Invalid conversation_id format.'})
+        return
+
+    current_user_id_str = None
+    token_from_event = data.get('token')
+    # conversation_id_str is already validated and converted to conversation_id_int
+
+    if token_from_event:
+        try:
+            decoded_token = flask_jwt_extended.decode_token(token_from_event)
+            current_user_id_str = decoded_token.get(app.config.get('JWT_IDENTITY_CLAIM', 'sub'))
+            if not current_user_id_str:
+                app.logger.error("SocketIO 'join_conversation': Token valid but identity (sub) not found in token.")
+                emit('join_error', {'conversation_id': conversation_id_int, 'error': 'Identity not found in token.'})
+                return
+        except (flask_jwt_extended.exceptions.ExpiredSignatureError, flask_jwt_extended.exceptions.InvalidTokenError, Exception) as e_token:
+            app.logger.error(f"SocketIO 'join_conversation': Error decoding/validating token from event data: {e_token}")
+            emit('join_error', {'conversation_id': conversation_id_int, 'error': f'Invalid or expired token: {type(e_token).__name__}.'})
+            return
+    else: 
+        try:
+            current_user_id_str = get_jwt_identity() 
+            if not current_user_id_str: 
+                app.logger.warning("SocketIO 'join_conversation': No token in event and no JWT identity in context.")
+                emit('join_error', {'conversation_id': conversation_id_int, 'error': 'Authentication required.'})
+                return
+        except Exception as e_jwt_context: 
+            app.logger.error(f"SocketIO 'join_conversation': Error retrieving JWT identity from context: {e_jwt_context}")
+            emit('join_error', {'conversation_id': conversation_id_int, 'error': 'Error processing identity from context.'})
+            return
+
+    if not current_user_id_str: 
+        app.logger.error("SocketIO 'join_conversation': User ID string is unexpectedly empty after auth checks.")
+        emit('join_error', {'conversation_id': conversation_id_int, 'error': 'User identity processing failed.'})
+        return
+
+    try:
+        current_user_id = int(current_user_id_str)
+    except ValueError:
+        app.logger.error(f"SocketIO 'join_conversation': Invalid user ID format '{current_user_id_str}' after auth checks.")
+        emit('join_error', {'conversation_id': conversation_id_int, 'error': 'Invalid user identity format.'})
+        return
+
+    # conversation_id is now conversation_id_int, which is validated
+    room_name = str(conversation_id_int) # Room name is string
+    db = get_db()
+    conversation = get_conversation_by_id(db, conversation_id_int) # Use validated integer ID
+
+    if not conversation:
+        app.logger.warning(f"SocketIO 'join_conversation': User {current_user_id} tried to join non-existent conversation {conversation_id_int}.")
+        emit('join_error', {'conversation_id': room_name, 'error': 'Conversation not found.'})
+        return
+
+    if current_user_id not in (conversation['user1_id'], conversation['user2_id']):
+        app.logger.warning(f"SocketIO 'join_conversation': User {current_user_id} not authorized for conversation {conversation_id_int}.")
+        emit('join_error', {'conversation_id': room_name, 'error': 'Not authorized for this conversation.'})
+        return
+
+    # Join user-specific room (for direct emits like new_conversation_started)
+    user_room_name = f'user_{current_user_id}'
+    join_room(user_room_name)
+    app.logger.info(f"SocketIO: User {current_user_id} (SID: {request.sid}) joined their user-specific room '{user_room_name}'")
+
+    # Join conversation-specific room
+    join_room(room_name)
+    app.logger.info(f"SocketIO: User {current_user_id} (SID: {request.sid}) joined conversation room 'conversation_{room_name}' (actual room name: '{room_name}')")
+    emit('joined_conversation_success', {'conversation_id': room_name}, room=request.sid)
+
+
+@socketio.on('mark_as_read')
+def handle_mark_as_read(data):
+    current_user_id_str = None
+    token_from_event = data.get('token')
+    conversation_id = data.get('conversation_id') # Get conversation_id early for error emits
+
+    if token_from_event:
+        try:
+            decoded_token = flask_jwt_extended.decode_token(token_from_event)
+            current_user_id_str = decoded_token.get(app.config.get('JWT_IDENTITY_CLAIM', 'sub'))
+            if not current_user_id_str:
+                app.logger.error("SocketIO 'mark_as_read': Token valid but identity (sub) not found in token.")
+                emit('mark_as_read_error', {'conversation_id': conversation_id, 'error': 'Identity not found in token.'})
+                return
+        except (jwt.exceptions.ExpiredSignatureError, jwt.exceptions.InvalidTokenError, Exception) as e_token: # Catch specific JWT errors
+            app.logger.error(f"SocketIO 'mark_as_read': Error decoding/validating token from event data: {e_token}")
+            emit('mark_as_read_error', {'conversation_id': conversation_id, 'error': f'Invalid or expired token: {type(e_token).__name__}.'})
+            return
+    else: # No token in event, try JWT from context
+        try:
+            current_user_id_str = get_jwt_identity()
+            if not current_user_id_str:
+                app.logger.warning("SocketIO 'mark_as_read': No token in event and no JWT identity in context.")
+                emit('mark_as_read_error', {'conversation_id': conversation_id, 'error': 'Authentication required.'})
+                return
+        except Exception as e_jwt_context:
+            app.logger.error(f"SocketIO 'mark_as_read': Error retrieving JWT identity from context: {e_jwt_context}")
+            emit('mark_as_read_error', {'conversation_id': conversation_id, 'error': 'Error processing identity from context.'})
+            return
+            
+    if not current_user_id_str: # Safeguard
+        app.logger.error("SocketIO 'mark_as_read': User ID string is unexpectedly empty after auth checks.")
+        emit('mark_as_read_error', {'conversation_id': conversation_id, 'error': 'User identity processing failed.'})
+        return
+
+    try:
+        current_user_id = int(current_user_id_str)
+    except ValueError:
+        app.logger.error(f"SocketIO 'mark_as_read': Invalid user ID format '{current_user_id_str}' after auth checks.")
+        emit('mark_as_read_error', {'conversation_id': conversation_id, 'error': 'Invalid user identity format.'})
+        return
+
+    if not conversation_id: # conversation_id was fetched earlier, but check again before use
+        app.logger.warning("SocketIO 'mark_as_read': conversation_id missing from event data (should have been caught).")
+        emit('mark_as_read_error', {'error': 'conversation_id is required.'})
+        return
+
+    try:
+        conversation_id_int = int(conversation_id)
+    except ValueError:
+        app.logger.warning(f"SocketIO 'mark_as_read': Invalid conversation_id format '{conversation_id}' (should have been caught).")
+        emit('mark_as_read_error', {'conversation_id': conversation_id, 'error': 'Invalid conversation_id format.'})
+        return
+        
+    db = get_db()
+    try:
+        rows_updated = mark_messages_as_read(db, conversation_id_int, current_user_id)
+        db.commit()
+        app.logger.info(f"SocketIO: Marked {rows_updated} messages as read for user {current_user_id} in conversation {conversation_id_int} and committed.")
+        
+        # Emit an event back to the specific user (client) who sent this, using their SID
+        # The room for the conversation is str(conversation_id_int)
+        # We can also broadcast to the room if other clients of the same user need update,
+        # or just to this SID.
+        emit('unread_cleared', {'conversation_id': conversation_id_int, 'messages_marked_read': rows_updated}, room=request.sid)
+        
+        # Additionally, you might want to notify other clients of this user if they are connected elsewhere
+        # This requires tracking SIDs per user_id. For simplicity, this example only emits to the requesting SID.
+        # If you have user-specific rooms (e.g., room=str(current_user_id)), you could emit there:
+        # socketio.emit('unread_count_updated', {'conversation_id': conversation_id_int, 'unread_count': 0}, room=str(current_user_id))
+
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"SocketIO 'mark_as_read': Error processing for conv {conversation_id_int}, user {current_user_id}: {e}")
+        emit('mark_as_read_error', {'conversation_id': conversation_id_int, 'error': 'Failed to mark messages as read.'})
+    # No explicit close_db(e) here as it's handled by teardown_appcontext
+
+# --- End SocketIO Event Handlers ---
 @app.route('/assets/<path:filename>')
 def serve_spa_assets(filename):
     return send_from_directory(os.path.join(app.static_folder, 'assets'), filename)
@@ -9894,9 +10776,16 @@ if __name__ == '__main__':
     replicate_default_files_if_bundled()
     # --- End replication call ---
 
+
     try:
         flask_port = int(os.environ.get('FLASK_RUN_PORT', 7000))
-        serve(app, host='0.0.0.0', port=flask_port)
+        # When using Flask-SocketIO with Waitress or Gunicorn,
+        # you serve the `socketio` object instead of the `app` object directly if those servers
+        # don't have native Socket.IO support (Waitress doesn't, Gunicorn needs eventlet/gevent worker).
+        # However, initializing SocketIO with SocketIO(app) wraps the app.
+        # So, serving `app` with Waitress should work if `async_mode` is compatible (e.g. 'threading').
+        app.logger.info(f"Starting Waitress server on port {flask_port} for Flask app with SocketIO...")
+        serve(app, host='0.0.0.0', port=flask_port) # Waitress should serve the Flask app, SocketIO is integrated.
     except (KeyboardInterrupt, SystemExit):
         app.logger.info("Flask application shutting down...")
     # Removed explicit scheduler shutdown from here as it's handled by atexit

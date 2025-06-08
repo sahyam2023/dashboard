@@ -423,6 +423,181 @@ export async function fetchSoftware(): Promise<Software[]> {
   }
 }
 
+export async function fetchChatImageBlob(fileUrl: string): Promise<Blob> {
+  try {
+    // Ensure API_BASE_URL is prepended if fileUrl is relative (e.g., /files/chat_uploads/...)
+    // If fileUrl from the backend is already a full path, this might not be needed,
+    // but it's safer to ensure it's correctly formed.
+    // Current backend file_url for chat messages is relative like: "/files/chat_uploads/CONVO_ID/FILENAME"
+    const fullUrl = `${API_BASE_URL}${fileUrl}`;
+    
+    const response = await fetch(fullUrl, {
+      method: 'GET',
+      headers: { ...getAuthHeader() }, // Crucial for auth
+    });
+    if (!response.ok) {
+      // Handle error response (e.g., throw an error with status)
+      // Consider using handleApiError if it can be adapted or a similar specialized error handler
+      const errorText = await response.text(); // Get more details if possible
+      throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}. Body: ${errorText.substring(0,100)}`);
+    }
+    return response.blob();
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true); // Use your existing offline handler
+      showErrorToast(OFFLINE_MESSAGE); // Use your existing toast utility
+    }
+    console.error('Error fetching chat image blob:', fileUrl, error);
+    throw error; // Re-throw to be caught by the calling component
+  }
+}
+
+// --- Chat API Functions ---
+// Assuming types like User, Conversation, Message, PaginatedUsersResponse are imported from '../components/chat/types'
+// If not, they should be imported or defined here.
+// For this example, let's assume they are available from:
+import {
+  User as ChatUser, // Alias to avoid conflict with User interface already in this file
+  Conversation as ChatConversation,
+  Message as ChatMessage,
+  PaginatedUsersResponse as ChatPaginatedUsersResponse
+} from '../components/chat/types';
+
+
+export async function getUsers(page: number, per_page: number, search?: string): Promise<ChatPaginatedUsersResponse> {
+  try {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      per_page: per_page.toString(),
+    });
+    if (search) {
+      params.append('search', search);
+    }
+    const response = await fetch(`${API_BASE_URL}/api/chat/users?${params.toString()}`, {
+      method: 'GET',
+      headers: { ...getAuthHeader(), 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+    });
+    return handleApiError(response, 'Failed to fetch users');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error fetching users:', error);
+    throw error;
+  }
+}
+
+export async function createConversation(user2_id: number): Promise<ChatConversation> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/chat/conversations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ user2_id }),
+    });
+    return handleApiError(response, 'Failed to create or get conversation');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error creating/getting conversation:', error);
+    throw error;
+  }
+}
+
+export async function getUserConversations(): Promise<ChatConversation[]> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/chat/conversations`, {
+      method: 'GET',
+      headers: { ...getAuthHeader(), 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+    });
+    return handleApiError(response, 'Failed to fetch user conversations');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error fetching user conversations:', error);
+    throw error;
+  }
+}
+
+export async function getMessages(conversation_id: number, limit: number, offset: number): Promise<ChatMessage[]> {
+  try {
+    const params = new URLSearchParams({
+      limit: limit.toString(),
+      offset: offset.toString(),
+    });
+    const response = await fetch(`${API_BASE_URL}/api/chat/conversations/${conversation_id}/messages?${params.toString()}`, {
+      method: 'GET',
+      headers: { ...getAuthHeader(), 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+    });
+    return handleApiError(response, `Failed to fetch messages for conversation ${conversation_id}`);
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error(`Error fetching messages for conversation ${conversation_id}:`, error);
+    throw error;
+  }
+}
+
+export async function uploadChatFile(file: File, conversationId: number): Promise<{ file_url: string; file_name: string; file_type: string, file_extension?: string }> {
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('conversation_id', conversationId.toString());
+
+    const response = await fetch(`${API_BASE_URL}/api/chat/upload_file`, {
+      method: 'POST',
+      headers: { ...getAuthHeader() }, // Content-Type is set automatically for FormData
+      body: formData,
+    });
+    return handleApiError(response, 'Failed to upload chat file');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error uploading chat file:', error);
+    throw error;
+  }
+}
+
+export async function sendMessage(
+  conversation_id: number,
+  content: string,
+  file_url?: string,
+  file_name?: string,
+  file_type?: string
+): Promise<ChatMessage> {
+  try {
+    const payload: any = { content };
+    if (file_url && file_name && file_type) {
+      payload.file_url = file_url;
+      payload.file_name = file_name;
+      payload.file_type = file_type;
+    }
+
+    const response = await fetch(`${API_BASE_URL}/api/chat/conversations/${conversation_id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify(payload),
+    });
+    return handleApiError(response, `Failed to send message to conversation ${conversation_id}`);
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error(`Error sending message to conversation ${conversation_id}:`, error);
+    throw error;
+  }
+}
+// --- End Chat API Functions ---
+
 // --- Super Admin File Permission Management Functions ---
 
 export async function getUserFilePermissions(userId: number): Promise<FilePermission[]> {
@@ -2532,6 +2707,23 @@ export const createAnnouncement = async (message: string): Promise<CreateAnnounc
   }
 };
 // --- End Announcement API ---
+
+export const getUserChatStatus = async (userId: number): Promise<{ is_online: boolean; last_seen: string | null }> => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/chat/user_status/${userId}`, {
+      method: 'GET',
+      headers: { ...getAuthHeader(), 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+    });
+    return handleApiError(response, `Failed to fetch chat status for user ${userId}`);
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error(`Error fetching chat status for user ${userId}:`, error);
+    throw error;
+  }
+};
 
 // --- Large File Upload (Chunked) ---
 

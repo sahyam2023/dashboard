@@ -10971,7 +10971,17 @@ def emit_online_users_count():
 
 # --- End SocketIO Event Handlers ---
 
+# --- Custom Silent Logger for Eventlet ---
+class SilentLogger:
+    def write(self, *args, **kwargs):
+        # Log to Flask's logger if needed, or do nothing
+        # app.logger.debug(f"Eventlet log: {args}") # Optional: for debugging eventlet output
+        pass
 
+    def flush(self):
+        # No-op
+        pass
+# --- End Custom Silent Logger ---
 
 @app.route('/assets/<path:filename>')
 def serve_spa_assets(filename):
@@ -11051,7 +11061,8 @@ if __name__ == '__main__':
         # serve(app, host='0.0.0.0', port=flask_port) # Waitress should serve the Flask app, SocketIO is integrated. # Removed Waitress serve
         app.logger.info(f"Starting Eventlet server on port {flask_port} for Flask app with SocketIO...")
         # Use the app instance with eventlet, as SocketIO is already integrated with app
-        eventlet.wsgi.server(eventlet.listen(('0.0.0.0', flask_port)), app) # Use app instance for eventlet
+        silent_logger = SilentLogger()
+        eventlet.wsgi.server(eventlet.listen(('0.0.0.0', flask_port)), app, log=silent_logger)
     except (KeyboardInterrupt, SystemExit):
         app.logger.info("Flask application shutting down...")
     # Removed explicit scheduler shutdown from here as it's handled by atexit

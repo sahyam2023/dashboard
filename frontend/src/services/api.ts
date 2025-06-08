@@ -444,7 +444,7 @@ export async function getUsers(page: number, per_page: number, search?: string):
     if (search) {
       params.append('search', search);
     }
-    const response = await fetch(`${API_BASE_URL}/api/users?${params.toString()}`, {
+    const response = await fetch(`${API_BASE_URL}/api/chat/users?${params.toString()}`, {
       method: 'GET',
       headers: { ...getAuthHeader(), 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
     });
@@ -461,7 +461,7 @@ export async function getUsers(page: number, per_page: number, search?: string):
 
 export async function createConversation(user2_id: number): Promise<ChatConversation> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/conversations`, {
+    const response = await fetch(`${API_BASE_URL}/api/chat/conversations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       body: JSON.stringify({ user2_id }),
@@ -479,7 +479,7 @@ export async function createConversation(user2_id: number): Promise<ChatConversa
 
 export async function getUserConversations(): Promise<ChatConversation[]> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/conversations`, {
+    const response = await fetch(`${API_BASE_URL}/api/chat/conversations`, {
       method: 'GET',
       headers: { ...getAuthHeader(), 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
     });
@@ -500,7 +500,7 @@ export async function getMessages(conversation_id: number, limit: number, offset
       limit: limit.toString(),
       offset: offset.toString(),
     });
-    const response = await fetch(`${API_BASE_URL}/api/conversations/${conversation_id}/messages?${params.toString()}`, {
+    const response = await fetch(`${API_BASE_URL}/api/chat/conversations/${conversation_id}/messages?${params.toString()}`, {
       method: 'GET',
       headers: { ...getAuthHeader(), 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
     });
@@ -517,7 +517,7 @@ export async function getMessages(conversation_id: number, limit: number, offset
 
 export async function sendMessage(conversation_id: number, content: string): Promise<ChatMessage> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/conversations/${conversation_id}/messages`, {
+    const response = await fetch(`${API_BASE_URL}/api/chat/conversations/${conversation_id}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       body: JSON.stringify({ content }),

@@ -27,6 +27,7 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // 
   const [showClearConfirmModal, setShowClearConfirmModal] = useState<boolean>(false);
   const { showToastNotification } = useNotification(); // For toast notifications
   const [conversationListRefreshKey, setConversationListRefreshKey] = useState<number>(0); // Added state for refresh key
+  const [onlineUsersCount, setOnlineUsersCount] = useState<number | null>(null);
 
   // authToken is not directly used here anymore as socket is initialized by parent
 
@@ -37,6 +38,25 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // 
 
   // useEffect for socket initialization is removed as socket is passed as a prop.
   // Parent component (Layout.tsx) will manage the socket connection lifecycle.
+
+  useEffect(() => {
+    if (socket && socketConnected) {
+      const handleOnlineUsersCount = (data: { count: number }) => {
+        console.log('ChatMain: Socket event "online_users_count" received:', data);
+        setOnlineUsersCount(data.count);
+      };
+      socket.on('online_users_count', handleOnlineUsersCount);
+      console.log("ChatMain: 'online_users_count' listener attached.");
+
+      return () => {
+        socket.off('online_users_count', handleOnlineUsersCount);
+        console.log("ChatMain: 'online_users_count' listener detached.");
+      };
+    } else {
+      setOnlineUsersCount(null); // Reset if socket is not available or connected
+      console.log('ChatMain: online_users_count listener - socket not available or not connected.');
+    }
+  }, [socket, socketConnected]);
 
   const handleUserSelect = async (selectedUser: User) => {
     if (!currentUserId) {
@@ -181,6 +201,15 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // 
             <div className="p-3 border-b dark:border-gray-700">
               <div className="flex justify-between items-center mb-2">
                 <h1 className="text-xl font-bold">My Chats</h1>
+                {/* Online Users Count Display */}
+                {currentView === 'conversations' && onlineUsersCount !== null && onlineUsersCount > 0 && !selectionMode && (
+                  <div className="flex items-center text-sm text-gray-600 dark:text-gray-400 ml-auto mr-2"> {/* Added mr-2 for spacing */}
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                    {onlineUsersCount} Online
+                  </div>
+                )}
                 <div className="flex items-center space-x-2">
                   <button
                     onClick={handleToggleSelectionMode}
@@ -209,7 +238,7 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // 
                   </button>
                 </div>
               </div>
-              {selectionMode && selectedIds.size > 0 && (
+              {currentView === 'conversations' && selectionMode && selectedIds.size > 0 && (
                 <div className="mt-2">
                   <button
                     onClick={handleInitiateClearSelected}

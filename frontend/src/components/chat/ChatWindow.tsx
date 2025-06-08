@@ -4,10 +4,6 @@ import { Conversation, Message } from './types';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
 import { Socket } from 'socket.io-client'; // Import socket.io-client
-
-// Placeholder for an API service
-// import { fetchMessages, sendMessage as sendMessageAPI } from '../../services/api';
-
 import * as api from '../../services/api'; // Import your API service
 import { useAuth } from '../../context/AuthContext'; // For token
 import Spinner from './Spinner'; // Import Spinner
@@ -36,12 +32,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
   const [sending, setSending] = useState(false);
   const { showToastNotification } = useNotification(); // Corrected to showToastNotification
   const [otherUserStatus, setOtherUserStatus] = useState<OtherUserStatus | null>(null);
-  const [onlineUsersCount, setOnlineUsersCount] = useState<number | null>(null); // State for online users count
   const selectedConversationRef = useRef<Conversation | null>(null); // Ref for selectedConversation
   // const { onGoBack } = props; // onGoBack is now directly destructured
-
-  // Log state before return
-  console.log('ChatWindow render: onlineUsersCount state:', onlineUsersCount);
 
   // Pagination for messages
   const [currentPage, setCurrentPage] = useState(1);
@@ -88,7 +80,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
       setCurrentPage(1); // Reset page to 1 for new conversation
       loadMessages(selectedConversation.conversation_id, 1, true);
 
-      if (socket && tokenData?.token) {
+      if (socket && socketConnected && tokenData?.token) {
         console.log(`ChatWindow: Emitting 'join_conversation' for ${selectedConversation.conversation_id}`);
         socket.emit('join_conversation', {
           conversation_id: selectedConversation.conversation_id,
@@ -131,21 +123,21 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
     // or server handles disconnects.
     selectedConversationRef.current = selectedConversation; // Update ref, this can stay outside the main `if`
 
-  }, [selectedConversation, socket, loadMessages, tokenData?.token, showToastNotification]);
+  }, [selectedConversation, socket, socketConnected, loadMessages, tokenData?.token, showToastNotification]);
 
   useEffect(() => {
-    if (selectedConversation && socket && !loading && messages.length > 0) {
+    if (selectedConversation && socket && socketConnected && !loading && messages.length > 0) {
       console.log(`ChatWindow: Emitting 'mark_as_read' for conversation ${selectedConversation.conversation_id}`);
       socket.emit('mark_as_read', {
         conversation_id: selectedConversation.conversation_id,
         token: tokenData?.token
       });
     }
-  }, [selectedConversation, socket, loading, messages, tokenData?.token]);
+  }, [selectedConversation, socket, socketConnected, loading, messages, tokenData?.token]);
 
   // Listen for real-time online/offline status updates
   useEffect(() => {
-    if (!socket) return;
+    if (!socket || !socketConnected) return;
 
     const handleUserOnline = (data: { user_id: number }) => {
       console.log("ChatWindow: user_online event", data, "current other_user_id:", selectedConversationRef.current?.other_user_id);
@@ -170,31 +162,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
       socket.off('user_offline', handleUserOffline);
       console.log(`ChatWindow: 'user_online'/'user_offline' listeners detached.`);
     };
-  }, [socket]); // Depends only on socket, selectedConversationRef is used to check current relevance
-
-  // Listen for online_users_count
-  useEffect(() => {
-    console.log('ChatWindow: online_users_count listener effect. Socket:', socket, 'Connected:', socketConnected);
-    if (socket && socketConnected) {
-      const handleOnlineUsersCount = (data: { count: number }) => {
-        console.log('ChatWindow: Socket event "online_users_count" received:', data);
-        setOnlineUsersCount(data.count);
-      };
-      socket.on('online_users_count', handleOnlineUsersCount);
-      console.log("ChatWindow: 'online_users_count' listener attached.");
-
-      return () => {
-        socket.off('online_users_count', handleOnlineUsersCount);
-        console.log("ChatWindow: 'online_users_count' listener detached.");
-      };
-    } else {
-      setOnlineUsersCount(null); // Reset if socket is not available or connected
-      console.log('ChatWindow: online_users_count listener - socket not available or not connected.');
-    }
-  }, [socket, socketConnected]);
+  }, [socket, socketConnected]); // Depends only on socket, selectedConversationRef is used to check current relevance
 
   useEffect(() => {
-    if (!socket || !selectedConversation) return;
+    if (!socket || !socketConnected || !selectedConversation) return;
 
     const handleNewMessage = (newMessage: Message) => {
       console.log('SocketIO: new_message received in ChatWindow', newMessage);
@@ -212,7 +183,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
       socket.off('new_message', handleNewMessage);
       console.log(`ChatWindow: 'new_message' listener detached for conv ${selectedConversation.conversation_id}.`);
     };
-  }, [socket, selectedConversation]); // Rerun when selectedConversation changes to listen to correct new_message
+  }, [socket, socketConnected, selectedConversation]); // Rerun when selectedConversation changes to listen to correct new_message
 
   // Removed getFileType as file type is now determined by backend.
   // const getFileType = (fileType: string): Message['file_type'] => { ... };
@@ -314,12 +285,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
             )}
           </div>
         </div>
-        {/* Online users count - keep it to the right or integrate differently if needed */}
-        {onlineUsersCount !== null && (
-          <div className="text-red-500 text-2xl border border-green-500 p-1 pr-2 hidden sm:block"> {/* Prominent styling + padding */}
-            Online Users: {onlineUsersCount}
-          </div>
-        )}
       </header>
 
       {loading && messages.length === 0 && (
@@ -342,7 +307,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedConversation, currentUs
       <ChatInput
         onSendMessage={handleSendMessage}
         onSendFile={handleSendFile}
-        disabled={sending || !socket?.connected}
+        disabled={sending || !socket || !socketConnected}
       />
     </div>
   );

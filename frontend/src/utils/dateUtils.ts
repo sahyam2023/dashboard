@@ -5,21 +5,27 @@ export function formatDateDisplay(dateString: string | null | undefined): string
   }
   try {
     // Assuming dateString is 'YYYY-MM-DD' and represents a specific day.
-    // Create date as UTC to avoid timezone shifts during parsing by `new Date()`.
     const parts = dateString.split('-');
-    if (parts.length !== 3) return 'Invalid Date Input';
+    if (parts.length !== 3) {
+        console.warn('Invalid dateString format in formatDateDisplay:', dateString);
+        return 'Invalid Date Input';
+    }
 
     const year = parseInt(parts[0], 10);
     const month = parseInt(parts[1], 10); // 1-12
     const day = parseInt(parts[2], 10);
 
     if (isNaN(year) || isNaN(month) || isNaN(day)) {
+        console.warn('NaN date parts in formatDateDisplay for:', dateString);
         return 'Invalid Date Parts';
     }
 
-    // Create a new Date object treating the input as calendar date components.
-    // Date.UTC expects month to be 0-11.
+    // Create a new Date object treating the input as calendar date components in UTC.
     const date = new Date(Date.UTC(year, month - 1, day));
+    if (isNaN(date.getTime())) { // Add this check for robustness
+        console.error('Invalid Date object created in formatDateDisplay for:', dateString);
+        return 'Invalid Date';
+    }
 
     return date.toLocaleDateString('en-IN', {
       day: '2-digit',
@@ -39,7 +45,13 @@ export function formatToISTLocaleString(isoTimestamp: string): string {
   }
 
   try {
-    const date = new Date(isoTimestamp); // Correctly parses "YYYY-MM-DDTHH:MM:SS+05:30"
+    console.log('Incoming isoTimestamp for formatToISTLocaleString:', isoTimestamp); // Debugging line
+
+    const date = new Date(isoTimestamp); // Parses ISO 8601 strings (e.g., "YYYY-MM-DDTHH:MM:SSZ" for UTC)
+    if (isNaN(date.getTime())) { // Check if date is valid
+        console.error('Invalid Date object created for formatToISTLocaleString:', isoTimestamp);
+        return 'Invalid Date';
+    }
 
     // Format date and time parts using 'en-IN' locale and IST timezone.
     const options: Intl.DateTimeFormatOptions = {
@@ -50,10 +62,13 @@ export function formatToISTLocaleString(isoTimestamp: string): string {
       minute: '2-digit',
       second: '2-digit',
       hour12: true,
+      hourCycle: 'h12', // Explicitly setting hourCycle to 'h12' to resolve 'am0'/'pm0' issue
       timeZone: 'Asia/Kolkata', // Ensures the output is IST
     };
 
-    return date.toLocaleString('en-IN', options); // e.g., "dd/mm/yyyy, h:mm:ss AM/PM"
+    const formattedString = date.toLocaleString('en-IN', options);
+    console.log('Formatted string from formatToISTLocaleString:', formattedString); // Debugging line
+    return formattedString;
   } catch (error) {
     console.error('Error formatting timestamp to IST locale string:', isoTimestamp, error);
     // Check if the original string was "Invalid Date" or similar from backend already
@@ -63,23 +78,33 @@ export function formatToISTLocaleString(isoTimestamp: string): string {
     return 'Invalid Date'; // Fallback for other invalid timestamps
   }
 }
+
 export function formatTimeToIST(isoTimestamp: string | null | undefined): string {
   if (!isoTimestamp) {
     return 'N/A';
   }
 
   try {
+    console.log('Incoming isoTimestamp for formatTimeToIST:', isoTimestamp); // Debugging line
+
     const date = new Date(isoTimestamp);
+    if (isNaN(date.getTime())) { // Check if date is valid
+        console.error('Invalid Date object created for formatTimeToIST:', isoTimestamp);
+        return 'Invalid Time';
+    }
 
     const options: Intl.DateTimeFormatOptions = {
       hour: '2-digit',
       minute: '2-digit',
       // second: '2-digit', // Omitting seconds for typical chat message time display
       hour12: true,
+      hourCycle: 'h12', // Explicitly setting hourCycle to 'h12'
       timeZone: 'Asia/Kolkata',
     };
 
-    return date.toLocaleTimeString('en-IN', options); // e.g., "10:00 AM"
+    const formattedString = date.toLocaleTimeString('en-IN', options);
+    console.log('Formatted string from formatTimeToIST:', formattedString); // Debugging line
+    return formattedString; // e.g., "10:00 AM"
   } catch (error) {
     console.error('Error formatting timestamp to IST time string:', isoTimestamp, error);
     if (typeof isoTimestamp === 'string' && isoTimestamp.toLowerCase().includes('invalid date')) {
@@ -96,14 +121,13 @@ export function formatDateForInput(isoTimestamp: string | null | undefined): str
   }
   try {
     const date = new Date(isoTimestamp);
+    if (isNaN(date.getTime())) { // Check for invalid date
+        console.error('Invalid Date object created for formatDateForInput:', isoTimestamp);
+        return '';
+    }
+
     // Adjust for timezone offset to get the correct date in 'Asia/Kolkata'
     // then format as YYYY-MM-DD
-
-    // Create a new date object that represents the date in IST.
-    // Date.toLocaleDateString with specific options can give parts, but direct formatting is easier.
-    // We need to be careful: `new Date(isoTimestamp)` creates a Date object whose internal value is UTC.
-    // `getFullYear`, `getMonth`, `getDate` operate on the *local* time of the system running the JS.
-    // To get the correct YYYY-MM-DD for IST from an IST-offsetted ISO string:
     const year = date.toLocaleDateString('en-US', { year: 'numeric', timeZone: 'Asia/Kolkata' });
     const month = date.toLocaleDateString('en-US', { month: '2-digit', timeZone: 'Asia/Kolkata' });
     const day = date.toLocaleDateString('en-US', { day: '2-digit', timeZone: 'Asia/Kolkata' });

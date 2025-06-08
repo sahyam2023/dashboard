@@ -55,7 +55,7 @@ const Layout: React.FC = () => {
             onClick={toggleChatModal} // Close on overlay click
           >
             <div
-              className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-full max-w-4xl h-[calc(100vh-80px)] sm:h-[calc(100vh-100px)] md:max-h-[700px] lg:max-h-[800px] flex flex-col overflow-hidden" // Adjusted height constraints
+              className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-full max-w-6xl h-[calc(100vh-80px)] sm:h-[calc(100vh-100px)] md:max-h-[700px] lg:max-h-[800px] flex flex-col overflow-hidden" // Adjusted height constraints
               onClick={(e) => e.stopPropagation()} // Prevent modal close when clicking inside modal
             >
               <div className="flex justify-between items-center p-3 sm:p-4 border-b border-gray-200 dark:border-gray-700">

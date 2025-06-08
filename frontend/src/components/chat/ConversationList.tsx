@@ -235,7 +235,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
                     </p>
                   </div>
                   {conv.last_message_created_at && (
-                    <p className={`text-xs whitespace-nowrap ${selectedConversationId === conv.conversation_id ? 'text-blue-500 dark:text-blue-400' : 'text-gray-400 dark:text-gray-500'}`}>
+                    <p className={`text-xs whitespace-nowrap ml-2 ${selectedConversationId === conv.conversation_id ? 'text-blue-500 dark:text-blue-400' : 'text-gray-400 dark:text-gray-500'}`}>
                       {formatToISTLocaleString(conv.last_message_created_at)}
                     </p>
                   )}

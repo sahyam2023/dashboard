@@ -10093,11 +10093,26 @@ def get_my_conversations():
     conversations_processed = []
     for conv_row in conversations_raw:
         conv_dict = dict(conv_row)
-        # Convert relevant timestamps. 'last_message_created_at' is the primary one from get_user_conversations.
-        # The 'created_at' of the conversation itself might also be present in some contexts but not directly from this function.
-        conv_dict = convert_timestamps_to_ist_iso(conv_dict, ['last_message_created_at'])
+        
+        last_message_ts_str = conv_dict.get('last_message_created_at')
+        if isinstance(last_message_ts_str, str) and last_message_ts_str:
+            try:
+                naive_dt = None
+                try:
+                    naive_dt = datetime.strptime(last_message_ts_str, '%Y-%m-%d %H:%M:%S.%f')
+                except ValueError:
+                    naive_dt = datetime.strptime(last_message_ts_str, '%Y-%m-%d %H:%M:%S')
+                
+                if naive_dt:
+                    utc_aware_dt = UTC.localize(naive_dt)
+                    ist_aware_dt = utc_aware_dt.astimezone(IST)
+                    conv_dict['last_message_created_at'] = ist_aware_dt.isoformat()
+                else:
+                    app.logger.warning(f"Conv list timestamp parsing failed for: '{last_message_ts_str}' in conv ID: {conv_dict.get('conversation_id')}")
+            except Exception as e_ts_conv_list:
+                app.logger.error(f"Conv list timestamp conversion error for conv {conv_dict.get('conversation_id')}: {e_ts_conv_list}", exc_info=True)
+                # In case of error, conv_dict['last_message_created_at'] remains the original string
 
-        # Construct profile picture URL for the other user
         if conv_dict.get('other_profile_picture'):
             conv_dict['other_profile_picture_url'] = f"/profile_pictures/{conv_dict['other_profile_picture']}"
         else:
@@ -10139,7 +10154,31 @@ def get_conversation_messages(conversation_id):
     if offset < 0: offset = 0
 
     messages_raw = get_messages(db, conversation_id, limit, offset)
-    messages_processed = [convert_timestamps_to_ist_iso(dict(msg), ['created_at']) for msg in messages_raw]
+    messages_processed = []
+    for msg_row in messages_raw:
+        message_dict = dict(msg_row)
+        created_at_str = message_dict.get('created_at')
+
+        if isinstance(created_at_str, str) and created_at_str:
+            try:
+                naive_dt = None
+                try:
+                    naive_dt = datetime.strptime(created_at_str, '%Y-%m-%d %H:%M:%S.%f')
+                except ValueError:
+                    naive_dt = datetime.strptime(created_at_str, '%Y-%m-%d %H:%M:%S')
+                
+                if naive_dt:
+                    utc_aware_dt = UTC.localize(naive_dt)
+                    ist_aware_dt = utc_aware_dt.astimezone(IST)
+                    message_dict['created_at'] = ist_aware_dt.isoformat()
+                else:
+                    # Log if parsing completely failed (should be rare if DB format is consistent)
+                    app.logger.warning(f"Chat history timestamp parsing failed for: '{created_at_str}' in message ID (if available): {message_dict.get('id')}")
+            except Exception as e_ts_conv_hist:
+                app.logger.error(f"Chat history timestamp conversion error for message {message_dict.get('id')}: {e_ts_conv_hist}", exc_info=True)
+                # In case of error, message_dict['created_at'] remains the original string
+        
+        messages_processed.append(message_dict)
 
     # TODO: Add total message count for pagination if needed by client.
     # Requires a separate count query in get_messages or here.
@@ -10193,26 +10232,43 @@ def post_new_message(conversation_id):
 
     new_message = send_message(db, conversation_id, current_user_id, recipient_id, content, file_name, file_url, file_type)
     if new_message:
-        message_dict_for_api_response = convert_timestamps_to_ist_iso(dict(new_message), ['created_at'])
+        message_dict = dict(new_message) 
 
-        # Add sender_username and recipient_username if not already in new_message from send_message
-        # (assuming get_message_by_id used by send_message doesn't join users table)
-        sender_user_details = find_user_by_id(current_user_id)
-        recipient_user_details = find_user_by_id(recipient_id)
+        created_at_str = message_dict.get('created_at')
+        if isinstance(created_at_str, str) and created_at_str: 
+            try:
+                naive_dt = None
+                try:
+                    naive_dt = datetime.strptime(created_at_str, '%Y-%m-%d %H:%M:%S.%f')
+                except ValueError:
+                    naive_dt = datetime.strptime(created_at_str, '%Y-%m-%d %H:%M:%S')
+                
+                if naive_dt: 
+                    utc_aware_dt = UTC.localize(naive_dt) 
+                    ist_aware_dt = utc_aware_dt.astimezone(IST) 
+                    message_dict['created_at'] = ist_aware_dt.isoformat()
+                else:
+                    app.logger.warning(f"Chat timestamp parsing failed for: '{created_at_str}' in message ID (if available): {message_dict.get('id')}")
+            except Exception as e_ts_conv:
+                app.logger.error(f"Chat timestamp conversion error for message {message_dict.get('id')}: {e_ts_conv}", exc_info=True)
+        
+        message_dict_for_api_response = message_dict 
+        
+        sender_user_details = find_user_by_id(current_user_id) 
+        recipient_user_details = find_user_by_id(recipient_id) 
 
         if 'sender_username' not in message_dict_for_api_response:
             message_dict_for_api_response['sender_username'] = sender_user_details['username'] if sender_user_details else 'Unknown'
         if 'recipient_username' not in message_dict_for_api_response:
             message_dict_for_api_response['recipient_username'] = recipient_user_details['username'] if recipient_user_details else 'Unknown'
-
-        # Prepare data for SocketIO emission (can be same as API response or tailored)
+        
         message_data_for_socket = message_dict_for_api_response.copy()
-        # Add profile picture URLs to socket message if available
-        message_data_for_socket['sender_profile_picture_url'] = f"/profile_pictures/{sender_user_details['profile_picture_filename']}" if sender_user_details and sender_user_details['profile_picture_filename'] else None
+        if sender_user_details and sender_user_details['profile_picture_filename']:
+            message_data_for_socket['sender_profile_picture_url'] = f"/profile_pictures/{sender_user_details['profile_picture_filename']}"
+        else:
+            message_data_for_socket['sender_profile_picture_url'] = None
 
-        # Emit the new message to the conversation room
-        # The socketio object should be accessible here if initialized in the global scope of app.py
-        socketio.emit('new_message', message_data_for_socket, room=str(conversation_id))
+        socketio.emit('new_message', message_data_for_socket, room=str(conversation_id)) 
         app.logger.info(f"Emitted 'new_message' to room 'conversation_{conversation_id}'")
 
         return jsonify(message_dict_for_api_response), 201

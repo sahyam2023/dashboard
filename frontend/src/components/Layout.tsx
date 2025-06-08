@@ -7,12 +7,51 @@ import Breadcrumbs from './Breadcrumbs'; // Import the new component
 import Footer from './Footer'; // Import the new Footer component
 import ChatMain from './chat/ChatMain'; // Import ChatMain
 import { useAuth } from '../context/AuthContext'; // To get currentUserId
+import { io, Socket } from 'socket.io-client'; // Import socket.io-client
+import { useEffect } from 'react'; // Import useEffect
 
 const Layout: React.FC = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [isChatOpen, setIsChatOpen] = useState(false); // State for chat modal
-  const { user } = useAuth(); // Get user from AuthContext
+  const { user, tokenData } = useAuth(); // Get user and tokenData from AuthContext
+  const [socket, setSocket] = useState<Socket | null>(null); // Socket state
+
+  useEffect(() => {
+    if (user && tokenData?.token) {
+      const newSocket = io(process.env.REACT_APP_API_URL || 'http://localhost:7000', {
+        auth: { token: tokenData.token }
+      });
+      setSocket(newSocket);
+
+      newSocket.on('connect', () => {
+        console.log('Socket.IO connected in Layout:', newSocket.id);
+      });
+
+      newSocket.on('disconnect', (reason) => {
+        console.log('Socket.IO disconnected in Layout. Reason:', reason);
+      });
+
+      newSocket.on('connect_error', (error) => {
+        console.error('Socket.IO connection error in Layout:', error);
+      });
+
+      return () => {
+        if (newSocket.connected) {
+          console.log('Socket.IO disconnecting in Layout cleanup.');
+          newSocket.disconnect();
+        }
+        setSocket(null);
+      };
+    } else {
+      // If user logs out or token becomes unavailable, disconnect and clear socket
+      if (socket && socket.connected) {
+        console.log('Socket.IO disconnecting in Layout due to user logout/token removal.');
+        socket.disconnect();
+      }
+      setSocket(null);
+    }
+  }, [user, tokenData]);
 
   const toggleSidebar = () => {
     setSidebarCollapsed(prev => !prev);
@@ -36,7 +75,7 @@ const Layout: React.FC = () => {
         // Consider adding a chat toggle button to Header as well or instead of Sidebar
       />
       <div className="flex flex-1 overflow-hidden relative"> {/* Added relative for modal positioning context */}
-        <Sidebar collapsed={sidebarCollapsed} onToggleChat={toggleChatModal} />
+        <Sidebar collapsed={sidebarCollapsed} onToggleChat={toggleChatModal} socket={socket} />
         <main 
           className={`flex-1 p-6 overflow-auto transition-all duration-300 ease-in-out ${
             sidebarCollapsed ? 'ml-20' : 'ml-64' // Adjust based on actual sidebar width
@@ -73,7 +112,7 @@ const Layout: React.FC = () => {
               {/* Pass currentUserId which ChatMain expects as MOCK_CURRENT_USER_ID for now */}
               {/* ChatMain internally uses a MOCK_CURRENT_USER_ID, which is fine for now */}
               {/* We pass user.id to ChatMain if it's adapted to take it as a prop later */}
-              <ChatMain />
+              <ChatMain socket={socket} /> {/* Pass socket to ChatMain */}
             </div>
           </div>
         )}

@@ -220,7 +220,8 @@ import flask_jwt_extended.exceptions # For specific JWT exceptions
 from database import (
     create_conversation, send_message, get_messages,
     get_user_conversations, get_conversation_by_users,
-    mark_messages_as_read, get_conversation_by_id, get_message_by_id
+    mark_messages_as_read, get_conversation_by_id, get_message_by_id,
+    get_total_unread_messages, get_online_users_count,
 )
 from flask import Blueprint
 
@@ -6721,6 +6722,8 @@ def logout():
         target_id=current_user_id, # User who logged out
         details={'jti_blocklisted': jti}
     )
+    # Emit online users count after successful logout and status update
+    emit_online_users_count()
     return jsonify(msg="Logout successful, token revoked."), 200
     
 @app.route('/api/admin/versions/<int:version_id>', methods=['GET'])
@@ -10499,8 +10502,12 @@ def handle_connect(auth=None): # Add auth parameter, default to None for robustn
             db.commit()
             app.logger.info(f"SocketIO connect: User {user_id_for_connect} status set to online and last_seen updated.")
             socketio.emit('user_online', {'user_id': user_id_for_connect}, broadcast=True)
+            # Emit unread chat count on connect
+            emit_unread_chat_count(user_id_for_connect)
+            # Emit online users count
+            emit_online_users_count()
         except Exception as e_status:
-            app.logger.error(f"SocketIO connect: Error updating online status for user {user_id_for_connect}: {e_status}")
+            app.logger.error(f"SocketIO connect: Error updating online status or emitting counts for user {user_id_for_connect}: {e_status}")
             # Ensure rollback if db connection was initiated by get_db()
             if 'db' in locals() and db: db.rollback() 
     else:
@@ -10538,10 +10545,12 @@ def handle_disconnect():
                         last_seen_timestamp_iso = datetime.now(timezone.utc).isoformat() # Fallback
                 
                 socketio.emit('user_offline', {'user_id': user_id_for_disconnect, 'last_seen': last_seen_timestamp_iso})
+                # Emit online users count
+                emit_online_users_count()
             else:
                 app.logger.warning(f"SocketIO disconnect: Failed to update online status for user {user_id_for_disconnect} (user not found or no change needed).")
         except Exception as e_status:
-            app.logger.error(f"SocketIO disconnect: Error updating online status for user {user_id_for_disconnect}: {e_status}")
+            app.logger.error(f"SocketIO disconnect: Error updating online status or emitting online users count for user {user_id_for_disconnect}: {e_status}")
             if 'db' in locals() and db: db.rollback() # Rollback on error
     else:
         # This means the SID was not found in our mapping, so either it was an anonymous connection
@@ -10698,6 +10707,9 @@ def handle_mark_as_read(data):
         # or just to this SID.
         emit('unread_cleared', {'conversation_id': conversation_id_int, 'messages_marked_read': rows_updated}, room=request.sid)
         
+        # Emit unread chat count after marking messages as read
+        emit_unread_chat_count(current_user_id)
+
         # Additionally, you might want to notify other clients of this user if they are connected elsewhere
         # This requires tracking SIDs per user_id. For simplicity, this example only emits to the requesting SID.
         # If you have user-specific rooms (e.g., room=str(current_user_id)), you could emit there:
@@ -10708,6 +10720,27 @@ def handle_mark_as_read(data):
         app.logger.error(f"SocketIO 'mark_as_read': Error processing for conv {conversation_id_int}, user {current_user_id}: {e}")
         emit('mark_as_read_error', {'conversation_id': conversation_id_int, 'error': 'Failed to mark messages as read.'})
     # No explicit close_db(e) here as it's handled by teardown_appcontext
+
+# --- Helper Functions ---
+def emit_unread_chat_count(user_id: int):
+    """Helper function to get and emit unread chat count for a user."""
+    try:
+        db = get_db()
+        count = get_total_unread_messages(db, user_id)
+        socketio.emit("unread_chat_count", {"count": count}, room=f"user_{user_id}")
+        app.logger.info(f"CHAT_SOCKET: Emitted unread_chat_count {count} for user {user_id}")
+    except Exception as e:
+        app.logger.error(f"CHAT_SOCKET: Error emitting unread_chat_count for user {user_id}: {e}")
+
+def emit_online_users_count():
+    """Helper function to get and emit the total number of online users."""
+    try:
+        db = get_db()
+        count = get_online_users_count(db)
+        socketio.emit("online_users_count", {"count": count}) # Broadcast to all
+        app.logger.info(f"APP_SOCKET: Emitted online_users_count {count} to all clients.")
+    except Exception as e:
+        app.logger.error(f"APP_SOCKET: Error emitting online_users_count: {e}")
 
 # --- End SocketIO Event Handlers ---
 @app.route('/assets/<path:filename>')

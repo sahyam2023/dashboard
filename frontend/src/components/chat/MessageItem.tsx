@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react'; // Added useState, useEffect
 import { Message } from './types';
 import { FileText, Download, Image as ImageIcon, Video as VideoIcon, Music as AudioIcon, ShieldQuestion } from 'lucide-react';
-import { formatTimeToIST } from '../../utils/dateUtils';
+import { formatToISTLocaleString } from '../../utils/dateUtils';
 import * as api from '../../services/api'; // Import the api service
 
 interface MessageItemProps {
@@ -145,7 +145,7 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, currentUserId }) => 
 
         {/* Timestamp and Read Status */}
         <div className={`text-xs mt-1.5 flex items-center ${isCurrentUserSender ? 'justify-end text-blue-100 dark:text-blue-300' : 'justify-start text-gray-500 dark:text-gray-400'}`}>
-          <span>{formatTimeToIST(message.created_at)}</span>
+          <span>{formatToISTLocaleString(message.created_at)}</span>
           {isCurrentUserSender && message.is_read && (
              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 ml-1" viewBox="0 0 20 20" fill="currentColor">
                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />

@@ -1,3 +1,5 @@
+import eventlet
+eventlet.monkey_patch()
 #app.py
 
 import os
@@ -16,6 +18,9 @@ from functools import wraps
 # import cProfile # Removed
 # import pstats # Removed
 # import io # Removed
+# import eventlet # Moved to top
+import eventlet.wsgi # Keeping this here as per instruction
+# eventlet.monkey_patch() # Moved to top
 import random
 import shutil # Added for file replication
 import sys # Added for PyInstaller path handling
@@ -37,7 +42,7 @@ from tempfile import NamedTemporaryFile
 import database # Your database.py helper
 from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
-from waitress import serve
+# from waitress import serve # Removed Waitress
 from flask_socketio import SocketIO, join_room, leave_room, emit
 
 # --- Helper function for PyInstaller ---
@@ -162,7 +167,7 @@ socketio_cors_origins = [
     "http://localhost:5173", "http://localhost:7000", "http://127.0.0.1:7000",
     "http://192.168.3.40:7000", "http://192.168.3.129:7000", "http://192.168.1.100:7000"
 ]
-socketio = SocketIO(app, cors_allowed_origins=socketio_cors_origins, async_mode='threading') # async_mode='threading' for waitress
+socketio = SocketIO(app, cors_allowed_origins=socketio_cors_origins, async_mode='eventlet') # Changed async_mode to eventlet
 
 # App Configuration
 app.config['DATABASE'] = os.path.join(INSTANCE_FOLDER_PATH, 'software_dashboard.db') # DB in instance folder
@@ -11042,8 +11047,11 @@ if __name__ == '__main__':
         # don't have native Socket.IO support (Waitress doesn't, Gunicorn needs eventlet/gevent worker).
         # However, initializing SocketIO with SocketIO(app) wraps the app.
         # So, serving `app` with Waitress should work if `async_mode` is compatible (e.g. 'threading').
-        app.logger.info(f"Starting Waitress server on port {flask_port} for Flask app with SocketIO...")
-        serve(app, host='0.0.0.0', port=flask_port) # Waitress should serve the Flask app, SocketIO is integrated.
+        # app.logger.info(f"Starting Waitress server on port {flask_port} for Flask app with SocketIO...") # Removed Waitress log
+        # serve(app, host='0.0.0.0', port=flask_port) # Waitress should serve the Flask app, SocketIO is integrated. # Removed Waitress serve
+        app.logger.info(f"Starting Eventlet server on port {flask_port} for Flask app with SocketIO...")
+        # Use the app instance with eventlet, as SocketIO is already integrated with app
+        eventlet.wsgi.server(eventlet.listen(('0.0.0.0', flask_port)), app) # Use app instance for eventlet
     except (KeyboardInterrupt, SystemExit):
         app.logger.info("Flask application shutting down...")
     # Removed explicit scheduler shutdown from here as it's handled by atexit

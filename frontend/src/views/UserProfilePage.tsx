@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import Modal from '../components/shared/Modal'; // Import Modal
 import { useWatch } from '../context/WatchContext'; // Import useWatch
 import { Navigate } from 'react-router-dom';
-import { Camera, PlusCircle, CheckCircle, MessageSquareQuestion } from 'lucide-react'; // For icon // Added MessageSquareQuestion
+import { Camera, PlusCircle, CheckCircle, MessageCircleQuestion } from 'lucide-react'; // For icon // Added MessageCircleQuestion 
 import { showSuccessToast, showErrorToast } from '../utils/toastUtils'; 
 import { submitUserFeedback } from '../services/api'; // Added for feedback
 
@@ -344,7 +344,7 @@ const UserProfilePage: React.FC = () => {
           onClick={() => setIsFeedbackModalOpen(true)}
           className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500"
         >
-          <MessageSquareQuestion size={16} className="mr-2" />
+          <MessageCircleQuestion size={16} className="mr-2" />
           Report Bug / Give Feedback
         </button>
       </div>

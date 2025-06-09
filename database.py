@@ -365,7 +365,7 @@ def add_default_watch_preferences(db, user_id: int):
     ]
     
     added_count = 0
-    print(f"DB_WATCH_PREFS: Adding default watch preferences for user {user_id}.")
+    # print(f"DB_WATCH_PREFS: Adding default watch preferences for user {user_id}.")
     for content_type, category in default_preferences:
         try:
             # add_watch_preference returns lastrowid on success, None on failure/existing

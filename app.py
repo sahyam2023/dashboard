@@ -10358,6 +10358,74 @@ def get_my_conversations():
 
     return jsonify(conversations_processed), 200
 
+@chat_bp.route('/conversations/with_user/<int:other_user_id_param>', methods=['GET'])
+@active_user_required
+def get_conversation_with_user(other_user_id_param):
+    current_user_id = int(get_jwt_identity())
+    db = get_db()
+
+    if current_user_id == other_user_id_param:
+        return jsonify(msg="Cannot fetch conversation with yourself."), 400
+
+    # Use the existing database function to find the conversation
+    # get_conversation_by_users ensures user1_id < user2_id for lookup
+    conversation_row = database.get_conversation_by_users(db, current_user_id, other_user_id_param)
+
+    if not conversation_row:
+        return jsonify(msg="Conversation not found"), 404
+
+    # Replicate payload structure similar to get_user_conversations
+    # This requires fetching details for this specific conversation
+    # We need: conversation_id, other_user_id, other_username, last_message_content, 
+    # last_message_created_at, unread_count, other_profile_picture_url
+
+    # Fetch all conversations for the current user and then filter
+    # This is not the most efficient way, but reuses existing logic for payload construction.
+    # A more direct fetch function `get_conversation_details_for_user(db, conversation_id, current_user_id)` would be better.
+    
+    all_my_conversations_raw = get_user_conversations(db, current_user_id) # This is a function in database.py
+    
+    target_conversation_details = None
+    for conv_data in all_my_conversations_raw:
+        # conv_data is already a dict-like Row object
+        # 'other_user_id' in conv_data is the ID of the other participant from the perspective of current_user_id
+        if conv_data['other_user_id'] == other_user_id_param and conv_data['conversation_id'] == conversation_row['id']:
+            target_conversation_details = dict(conv_data) # Convert Row to dict
+            break
+    
+    if not target_conversation_details:
+        # This case should ideally not be reached if conversation_row was found
+        # and get_user_conversations works correctly.
+        app.logger.error(f"Could not find detailed conversation data for conv_id {conversation_row['id']} with user {other_user_id_param} for current user {current_user_id}")
+        return jsonify(msg="Conversation details could not be constructed."), 500
+
+    # Timestamp conversion for last_message_created_at
+    last_msg_ts_str = target_conversation_details.get('last_message_created_at')
+    if isinstance(last_msg_ts_str, str) and last_msg_ts_str:
+        try:
+            naive_dt = None
+            try: naive_dt = datetime.strptime(last_msg_ts_str, '%Y-%m-%d %H:%M:%S.%f')
+            except ValueError: naive_dt = datetime.strptime(last_msg_ts_str, '%Y-%m-%d %H:%M:%S')
+            
+            if naive_dt:
+                utc_aware_dt = UTC.localize(naive_dt) # Assuming stored as UTC
+                ist_aware_dt = utc_aware_dt.astimezone(IST) # Convert to IST
+                target_conversation_details['last_message_created_at'] = ist_aware_dt.isoformat()
+        except Exception as e_ts_conv_single:
+            app.logger.error(f"Timestamp conversion error for single conversation {conversation_row['id']}: {e_ts_conv_single}")
+            # Keep original string if conversion fails
+
+    # Ensure profile picture URL is correctly formatted
+    if target_conversation_details.get('other_profile_picture'):
+        target_conversation_details['other_profile_picture_url'] = f"/profile_pictures/{target_conversation_details['other_profile_picture']}"
+    else:
+        target_conversation_details['other_profile_picture_url'] = None
+    
+    # The 'unread_messages_count' should already be in target_conversation_details from get_user_conversations
+
+    return jsonify(target_conversation_details), 200
+
+
 @chat_bp.route('/conversations/<int:conversation_id>/messages', methods=['GET'])
 @active_user_required
 def get_conversation_messages(conversation_id):

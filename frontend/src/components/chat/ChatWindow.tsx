@@ -205,19 +205,39 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     if (!socket || !socketConnected || !selectedConversation || selectedConversation.conversation_id === null || !currentUserId) {
       return;
     }
+    
+    const conversationIdForLog = selectedConversation.conversation_id; // Capture for cleanup log
 
     const handleMessagesReadUpdate = (data: { conversation_id: string | number; reader_id: number; message_ids: number[] }) => {
-      console.log('SocketIO: messages_read_update received in ChatWindow', data);
+      console.log('[CW_MRU_DEBUG] Full data object received:', data);
+      // Ensure selectedConversation is accessed safely, perhaps from a ref or by checking its current value if it can change during the handler's life
+      const currentComponentConvId = selectedConversationRef.current?.conversation_id; // Using ref for safety within callback
+      console.log('[CW_MRU_DEBUG] Component currentConversationId (from ref):', currentComponentConvId, 'currentUserId:', currentUserId);
 
       // Ensure conversation_id types are consistent for comparison
-      const currentConversationId = selectedConversation.conversation_id;
+      // Use selectedConversationRef.current for safety within the async callback
+      const currentConversationId = selectedConversationRef.current?.conversation_id;
+      if (currentConversationId === null || currentConversationId === undefined) {
+        console.log('[CW_MRU_DEBUG] selectedConversationRef.current.conversation_id is null or undefined in handleMessagesReadUpdate. Skipping.');
+        return;
+      }
       const receivedConversationId = typeof data.conversation_id === 'string' ? parseInt(data.conversation_id, 10) : data.conversation_id;
+      
+      console.log('[CW_MRU_DEBUG] Before setMessages - receivedConversationId:', receivedConversationId, 'currentConversationId (from ref):', currentConversationId, 'Comparison result (received === current):', receivedConversationId === currentConversationId);
 
       if (currentConversationId === receivedConversationId) {
         setMessages(prevMessages =>
           prevMessages.map(msg => {
-            // Check if this message was sent by the current user and is in the list of read messages
-            if (data.message_ids.includes(msg.id) && msg.sender_id === currentUserId) {
+            console.log('[CW_MRU_DEBUG] Processing msg.id:', msg.id, 'msg.sender_id:', msg.sender_id);
+            const isMessageIncluded = data.message_ids.includes(msg.id);
+            console.log('[CW_MRU_DEBUG] data.message_ids.includes(msg.id):', isMessageIncluded);
+            const isSenderCurrentUser = msg.sender_id === currentUserId; // currentUserId is from useEffect's scope, should be stable unless it's a prop that changes the effect
+            console.log('[CW_MRU_DEBUG] msg.sender_id === currentUserId:', isSenderCurrentUser);
+            const conditionMet = isMessageIncluded && isSenderCurrentUser;
+            console.log('[CW_MRU_DEBUG] Entire condition (isMessageIncluded && isSenderCurrentUser) is:', conditionMet);
+
+            if (conditionMet) {
+              console.log('[CW_MRU_DEBUG] Setting is_read to true for msg.id:', msg.id);
               return { ...msg, is_read: true };
             }
             return msg;
@@ -225,13 +245,17 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         );
       }
     };
-
+    
+    console.log('[CW_LISTENER_SETUP] Attempting to attach "messages_read_update" listener for conversation ID:', conversationIdForLog);
     socket.on('messages_read_update', handleMessagesReadUpdate);
-    console.log(`ChatWindow: 'messages_read_update' listener attached for conv ${selectedConversation.conversation_id}.`);
+    // The existing log below is fine, or can be removed if the new one is preferred. Keeping it for now.
+    console.log(`ChatWindow: 'messages_read_update' listener attached for conv ${conversationIdForLog}.`);
 
     return () => {
+      console.log('[CW_LISTENER_SETUP] Detaching "messages_read_update" listener for conversation ID:', conversationIdForLog);
       socket.off('messages_read_update', handleMessagesReadUpdate);
-      console.log(`ChatWindow: 'messages_read_update' listener detached for conv ${selectedConversation.conversation_id}.`);
+      // The existing log below is fine, or can be removed. Keeping it for now.
+      console.log(`ChatWindow: 'messages_read_update' listener detached for conv ${conversationIdForLog}.`);
     };
   }, [socket, socketConnected, selectedConversation, currentUserId, setMessages]); // setMessages added to dependencies as it's used in effect
 

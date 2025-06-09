@@ -11107,12 +11107,14 @@ def handle_mark_as_read(user_id, data): # user_id is now passed by the decorator
 
 @socketio.on('join_user_channel')
 def handle_join_user_channel(data=None): # data might not be needed if using SID
-    app.logger.info("SOCKETIO DEBUG: 'join_user_channel' event handler invoked.") # <<< ADD THIS LINE
+    app.logger.info(f"[SOCKET_JOIN_USER_CHANNEL] Event received for SID: {request.sid}")
     user_id = sid_to_user.get(request.sid)
+    app.logger.info(f"[SOCKET_JOIN_USER_CHANNEL] User ID for SID {request.sid} is: {user_id}")
     if user_id:
         room_name = f'user_{user_id}'
+        app.logger.info(f"[SOCKET_JOIN_USER_CHANNEL] Attempting to join SID {request.sid} (User ID: {user_id}) to room: {room_name}")
         join_room(room_name)
-        app.logger.info(f"SocketIO: User {user_id} (SID: {request.sid}) joined their user-specific room '{room_name}' via 'join_user_channel' event.")
+        app.logger.info(f"[SOCKET_JOIN_USER_CHANNEL] Successfully called join_room for SID {request.sid} to room: {room_name}")
         # Optionally, re-emit unread count now that they've joined the room
         emit_unread_chat_count(user_id) # This function already logs
     else:

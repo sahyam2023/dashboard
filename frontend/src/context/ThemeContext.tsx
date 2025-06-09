@@ -10,7 +10,7 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 export const ThemeContextProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [themeMode, setThemeMode] = useState<'light' | 'dark'>(() => {
     const storedPreference = localStorage.getItem('themeMode');
-    return (storedPreference === 'dark' || storedPreference === 'light') ? storedPreference : 'light';
+    return (storedPreference === 'dark' || storedPreference === 'light') ? storedPreference : 'dark';
   });
 
   useEffect(() => {

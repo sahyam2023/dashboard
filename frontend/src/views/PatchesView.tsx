@@ -361,9 +361,11 @@ const PatchesView: React.FC = () => {
         if (e.response.data.msg) {
           // console.warn('[PatchesView] Backend message for conflict:', e.response.data.msg); // Removed
         }
-      } else if (e.message) {
-        showErrorToast(e.message);
-      } else {
+      } else if (e.message && typeof e.message === 'string' && e.message.includes("UNIQUE constraint failed")) {
+        showErrorToast("A patch with this name already exists for the target software/version. Please check for duplicates.");
+     } else if (e.message) {
+       showErrorToast(e.message);
+     } else {
         showErrorToast("Bulk move failed due to an unexpected error.");
       }
       // It's good practice to also log the full error for debugging purposes

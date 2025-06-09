@@ -16,7 +16,8 @@ a = Analysis(['app.py'], # Main application script
                  ('schema.sql', '.') # Bundle schema.sql at the root of the bundle
              ],
              hiddenimports=[
-                 'waitress',
+                 'eventlet',
+                 'eventlet.wsgi',
                  'apscheduler', # Keep this general, specific schedulers might be found
                  'apscheduler.schedulers.background',
                  'flask_bcrypt',

@@ -37,6 +37,8 @@ export interface Conversation {
   last_message_sender_id: number | null;
   unread_messages_count: number;
   created_at: string | null; // ISO string, allow null for provisional
+  last_message_id?: number | null;
+  last_message_is_read?: boolean | null;
 }
 
 // For API responses that include pagination

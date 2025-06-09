@@ -458,7 +458,8 @@ export async function fetchChatImageBlob(fileUrl: string): Promise<Blob> {
 // For this example, let's assume they are available from:
 import {
   User as ChatUser, // Alias to avoid conflict with User interface already in this file
-  Conversation as ChatConversation,
+  Conversation as ChatConversation, // This is the full conversation type
+  // NewConversationResponse, // Removed as per previous subtask; type no longer exists
   Message as ChatMessage,
   PaginatedUsersResponse as ChatPaginatedUsersResponse
 } from '../components/chat/types';
@@ -495,7 +496,19 @@ export async function createConversation(user2_id: number): Promise<ChatConversa
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       body: JSON.stringify({ user2_id }),
     });
-    return handleApiError(response, 'Failed to create or get conversation');
+    
+    // The backend for this route returns an object with 'id', 'user1_id', 'user2_id', 'created_at'.
+    // We need to map 'id' to 'conversation_id' to match the ChatConversation type.
+    const backendResponse = await handleApiError(response, 'Failed to create or get conversation');
+
+    if (backendResponse && typeof backendResponse.id !== 'undefined') {
+      backendResponse.conversation_id = backendResponse.id;
+      delete backendResponse.id; // Remove original 'id' to align with ChatConversation type
+    }
+    // The backendResponse might not have all fields of ChatConversation (e.g. other_username, last_message_content).
+    // However, it now has conversation_id and the core fields.
+    // Components using this must be aware of what fields are actually populated by this specific API call.
+    return backendResponse as ChatConversation;
   } catch (error: any) {
     if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
       setGlobalOfflineStatus(true);
@@ -631,6 +644,43 @@ export async function startConversationAndSendMessage(
     }
     console.error(`Error starting conversation with user ${recipientUserId}:`, error);
     throw error;
+  }
+}
+
+export async function findConversationByUserId(otherUserId: number): Promise<ChatConversation | null> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/chat/conversations/with_user/${otherUserId}`, {
+      method: 'GET',
+      headers: { ...getAuthHeader(), 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+    });
+
+    if (response.status === 404) {
+      try { await response.text(); } catch (e) { /* Consume body if any, ignore error */ }
+      setGlobalOfflineStatus(false); 
+      return null; 
+    }
+
+    const responseData = await handleApiError(response, `Finding conversation with user ${otherUserId}`);
+
+    if (response.ok) {
+      if (responseData && typeof responseData.conversation_id === 'number') {
+        return responseData as ChatConversation;
+      } else {
+        // console.warn('findConversationByUserId: Received OK response but data is not a valid conversation object:', responseData);
+        return null;
+      }
+    }
+    
+    // console.warn('findConversationByUserId: Unexpected state after handleApiError for non-OK response.');
+    return null; 
+
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    // console.error(`Error in findConversationByUserId for user ${otherUserId}:`, error); // Error will be logged by ChatMain
+    throw error; 
   }
 }
 // --- End Chat API Functions ---
@@ -2781,6 +2831,102 @@ export async function clearBatchConversations(conversationIds: number[]): Promis
   }
 }
 // --- End Chat Batch Clear API Function ---
+
+// --- User Feedback API Functions ---
+export interface UserFeedback {
+  id: number;
+  user_id: number;
+  message_content: string;
+  type: 'bug' | 'feedback';
+  created_at: string; // ISO date string
+  is_resolved: boolean;
+  username?: string; // Joined from users table
+  profile_picture_filename?: string | null; // Joined from users table
+}
+
+export interface UserFeedbackSubmission {
+  message_content: string;
+  type: 'bug' | 'feedback';
+}
+
+// Generic PaginatedResponse (if not already defined elsewhere)
+export interface PaginatedResponse<T> {
+  feedback: T[]; // Renaming 'items' to 'feedback' to match backend key for this specific response
+  total_feedback: number;
+  total_pages: number;
+  page: number;
+  per_page: number;
+}
+
+export async function submitUserFeedback(payload: UserFeedbackSubmission): Promise<UserFeedback> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify(payload),
+    });
+    return handleApiError(response, 'Failed to submit user feedback');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error submitting user feedback:', error);
+    throw error;
+  }
+}
+
+export async function fetchAdminFeedback(params: {
+  page?: number;
+  perPage?: number;
+  resolved_status?: 'true' | 'false' | 'all';
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+}): Promise<PaginatedResponse<UserFeedback>> {
+  try {
+    const queryParams = new URLSearchParams();
+    if (params.page) queryParams.append('page', params.page.toString());
+    if (params.perPage) queryParams.append('per_page', params.perPage.toString());
+    if (params.resolved_status) queryParams.append('resolved_status', params.resolved_status);
+    if (params.sortBy) queryParams.append('sort_by', params.sortBy);
+    if (params.sortOrder) queryParams.append('sort_order', params.sortOrder);
+
+    const queryString = queryParams.toString();
+    const url = `${API_BASE_URL}/api/admin/feedback${queryString ? `?${queryString}` : ''}`;
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { ...getAuthHeader(), 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+    });
+    return handleApiError(response, 'Failed to fetch admin feedback');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error fetching admin feedback:', error);
+    throw error;
+  }
+}
+
+export async function updateAdminFeedbackStatus(feedbackId: number, isResolved: boolean): Promise<UserFeedback> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/admin/feedback/${feedbackId}/resolve`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ is_resolved: isResolved }),
+    });
+    return handleApiError(response, `Failed to update feedback status for ID ${feedbackId}`);
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error(`Error updating feedback status for ID ${feedbackId}:`, error);
+    throw error;
+  }
+}
+// --- End User Feedback API Functions ---
 
 export const getUserChatStatus = async (userId: number): Promise<{ is_online: boolean; last_seen: string | null }> => {
   try {

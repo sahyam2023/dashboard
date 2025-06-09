@@ -19,6 +19,7 @@ import {
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils'; // Import toast utility
 import LoadingState from '../components/LoadingState'; // For overall loading
 import ErrorState from '../components/ErrorState'; // For overall error
+import FeedbackViewerWidget from '../components/admin/FeedbackViewerWidget'; // Import the new widget
 
 ChartJS.register( CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend, PointElement, LineElement );
 
@@ -31,6 +32,7 @@ const WIDGET_KEYS = {
   LOGIN_TRENDS: 'loginTrends', UPLOAD_TRENDS: 'uploadTrends', DOWNLOAD_TRENDS: 'downloadTrends',
   DOCS_PER_SOFTWARE: 'docsPerSoftware', POPULAR_DOWNLOADS: 'popularDownloads',
   MISSING_DESCRIPTIONS: 'missingDescriptions', STALE_CONTENT: 'staleContent', QUICK_LINKS: 'quickLinks',
+  USER_FEEDBACK: 'userFeedback', // Added new widget key
 };
 
 function formatBytes(bytes?: number | null, decimals = 2) {
@@ -71,13 +73,22 @@ const initialLayoutLg: LayoutItem[] = [
   { i: WIDGET_KEYS.DOWNLOAD_TRENDS,  x: 0, y: 1, w: 4, h: 8, minH: 6, minW: 2 },
   { i: WIDGET_KEYS.LOGIN_TRENDS,     x: 4, y: 1, w: 4, h: 8, minH: 6, minW: 2 },
   { i: WIDGET_KEYS.UPLOAD_TRENDS,    x: 8, y: 1, w: 4, h: 8, minH: 6, minW: 2 },
-  { i: WIDGET_KEYS.RECENT_ACTIVITIES,  x: 0, y: 2, w: 7, h: 10, minH: 8, minW: 2 },
+  { i: WIDGET_KEYS.RECENT_ACTIVITIES,  x: 0, y: 2, w: 7, h: 10, minH: 8, minW: 2 }, // Audit Logs Widget
   { i: WIDGET_KEYS.DOCS_PER_SOFTWARE,  x: 7, y: 2, w: 5, h: 10, minH: 8, minW: 2 },
   { i: WIDGET_KEYS.RECENT_ADDITIONS,   x: 0, y: 3, w: 5, h: 10, minH: 8, minW: 2 },
   { i: WIDGET_KEYS.POPULAR_DOWNLOADS,  x: 5, y: 3, w: 7, h: 10, minH: 8, minW: 2 },
   { i: WIDGET_KEYS.MISSING_DESCRIPTIONS, x: 0, y: 4, w: 6, h: 10, minH: 8, minW: 2 },
   { i: WIDGET_KEYS.STALE_CONTENT,        x: 6, y: 4, w: 6, h: 10, minH: 8, minW: 2 },
-  { i: WIDGET_KEYS.QUICK_LINKS,          x: 0, y: 5, w: 12, h: 5, minH: 4, minW: 2 },
+  // Adjust y for Quick Links if USER_FEEDBACK is placed before it
+  // Original y: 5 for QUICK_LINKS. If USER_FEEDBACK is at y:5, QUICK_LINKS needs to move down.
+  // Let's assume USER_FEEDBACK will take the full width at y:5, then QUICK_LINKS at y:6
+  // If USER_FEEDBACK is h:8, then y:5 + h:8 = 13. So QUICK_LINKS could be at y:13 or later.
+  // For now, let's place USER_FEEDBACK at y:5 (after Stale Content which ends at y=4+h=14 if maxH, but default h=10 so y=4+h=14),
+  // this seems too large. Let's re-evaluate y positions.
+  // Assuming Audit Logs (RECENT_ACTIVITIES) is at y:2, h:10. Ends at y=12.
+  // Let USER_FEEDBACK be at y:12 (directly below audit logs).
+  { i: WIDGET_KEYS.USER_FEEDBACK,      x: 0, y: 12, w: 12, h: 8, minH: 6, minW: 4 },
+  { i: WIDGET_KEYS.QUICK_LINKS,          x: 0, y: 20, w: 12, h: 5, minH: 4, minW: 2 }, // Moved Quick Links further down
 ];
 
 
@@ -110,6 +121,7 @@ const AdminDashboardPage: React.FC = () => {
     { id: WIDGET_KEYS.POPULAR_DOWNLOADS, name: "Popular Downloads", defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.POPULAR_DOWNLOADS)!, component: (props: WidgetComponentProps) => ( <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}> <Typography variant="h6" gutterBottom>Popular Downloads (Top 5)</Typography> {props.loadingStats && isInitialLoad ? <CircularProgress /> : props.dashboardStats?.popular_downloads?.length ? (<Box sx={{ flexGrow: 1, height: 'calc(100% - 48px)'}}><Pie data={props.popularDownloadsChartData} options={{...props.chartBaseOptions, plugins: {...props.chartBaseOptions.plugins, title: {...props.chartBaseOptions.plugins.title, display: true, text: 'Popular Downloads'}}}} /></Box>) : (<Typography sx={{textAlign: 'center', mt: 4}}>No download data available for chart.</Typography>)} </Paper> ) },
     { id: WIDGET_KEYS.MISSING_DESCRIPTIONS, name: "Missing Descriptions", defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.MISSING_DESCRIPTIONS)!, component: (props: WidgetComponentProps) => ( <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}> <Typography variant="h6" gutterBottom>Content: Missing Descriptions</Typography> {props.loadingStats && isInitialLoad ? <CircularProgress /> : props.renderHealthStatsList(props.dashboardStats?.content_health?.missing_descriptions, 'missing')} </Paper> ) },
     { id: WIDGET_KEYS.STALE_CONTENT, name: "Stale Content", defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.STALE_CONTENT)!, component: (props: WidgetComponentProps) => ( <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}> <Typography variant="h6" gutterBottom>Content: Stale Items (Older than 1 year)</Typography> {props.loadingStats && isInitialLoad ? <CircularProgress /> : props.renderHealthStatsList(props.dashboardStats?.content_health?.stale_content, 'stale')} </Paper> ) },
+    { id: WIDGET_KEYS.USER_FEEDBACK, name: "User Feedback & Bug Reports", defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.USER_FEEDBACK)!, component: (props: WidgetComponentProps) => <FeedbackViewerWidget /> },
     { id: WIDGET_KEYS.QUICK_LINKS, name: "Quick Links", defaultLayout: initialLayoutLg.find(l => l.i === WIDGET_KEYS.QUICK_LINKS)!, component: (props: WidgetComponentProps) => ( <Paper sx={{ p: 2, height: '100%' }}> <Typography variant="h6" gutterBottom>Quick Links</Typography> <List dense> <ListItemButton component={RouterLink} to="/admin/versions"><ListItemText primary="Manage Versions" /></ListItemButton> <ListItemButton component={RouterLink} to="/admin/audit-logs"><ListItemText primary="View Audit Logs" /></ListItemButton> <ListItemButton component={RouterLink} to="/superadmin"><ListItemText primary="Manage Users (Super Admin)" /></ListItemButton> </List> </Paper> ) },
   ], [isInitialLoad]); // Added isInitialLoad to dependency array for widget components
 

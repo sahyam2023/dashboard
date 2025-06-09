@@ -105,9 +105,16 @@ const role = user?.role; // Access role safely, as user can be null
       if (onSuccess) onSuccess(resultCategory); 
 
     } catch (err: any) {
-      const apiErrorMessage = err.response?.data?.msg || err.message;
-      // showErrorToast(apiErrorMessage || `Failed to ${isEditMode ? 'update' : 'add'} category.`);
-      showErrorToast(apiErrorMessage || 'Failed to save category.');
+      const backendMessage = err.response?.data?.msg || err.message;
+      let userMessage = `Failed to ${isEditMode ? 'update' : 'add'} category.`;
+
+      if (backendMessage && typeof backendMessage === 'string' && backendMessage.includes("UNIQUE constraint failed")) {
+        userMessage = "A category with this name already exists. Please use a different name.";
+      } else if (backendMessage) {
+        userMessage = backendMessage;
+      }
+      showErrorToast(userMessage);
+      // Future: Add checks for other constraint errors here
     } finally {
       setIsLoading(false);
     }

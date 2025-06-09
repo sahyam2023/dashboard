@@ -422,7 +422,16 @@ useEffect(() => {
       const res = await bulkMoveItems(Array.from(selectedDocumentIds), 'document' as BulkItemType, { target_software_id: targetSoftwareForMove });
       showSuccessToast(res.msg || `${res.moved_count} item(s) moved.`);
       setSelectedDocumentIds(new Set()); fetchAndSetDocuments(1, true);
-    } catch (e: any) { showErrorToast(e.message || "Bulk move failed."); }
+    } catch (e: any) {
+      let userMessage = "Bulk move failed.";
+      if (e.message && typeof e.message === 'string' && e.message.includes("UNIQUE constraint failed")) {
+        userMessage = "A document with this name already exists in the target software category. Please check for duplicates.";
+      } else if (e.message) {
+        userMessage = e.message;
+      }
+      showErrorToast(userMessage);
+      // Future: Add checks for other constraint errors here if needed
+    }
     finally { setIsMovingSelected(false); setTargetSoftwareForMove(null); }
   };
 

@@ -4,8 +4,9 @@ import { useAuth } from '../context/AuthContext';
 import Modal from '../components/shared/Modal'; // Import Modal
 import { useWatch } from '../context/WatchContext'; // Import useWatch
 import { Navigate } from 'react-router-dom';
-import { Camera, PlusCircle, CheckCircle } from 'lucide-react'; // For icon
+import { Camera, PlusCircle, CheckCircle, MessageCircleQuestion } from 'lucide-react'; // For icon // Added MessageCircleQuestion 
 import { showSuccessToast, showErrorToast } from '../utils/toastUtils'; 
+import { submitUserFeedback } from '../services/api'; // Added for feedback
 
 
 const UserProfilePage: React.FC = () => {
@@ -47,6 +48,12 @@ const UserProfilePage: React.FC = () => {
   const [usernameError, setUsernameError] = useState<string | null>(null);
   const [usernameSuccess, setUsernameSuccess] = useState<string | null>(null);
   const [isUpdatingUsername, setIsUpdatingUsername] = useState(false);
+
+  // State for Feedback Modal
+  const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
+  const [feedbackType, setFeedbackType] = useState<'bug' | 'feedback'>('feedback');
+  const [feedbackMessage, setFeedbackMessage] = useState('');
+  const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
 
   // State for Watch Preferences
   // Using imported types
@@ -238,6 +245,26 @@ const UserProfilePage: React.FC = () => {
       setIsUploading(false);
     }
   };
+
+  const handleFeedbackSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!feedbackMessage.trim()) {
+      showErrorToast("Feedback message cannot be empty.");
+      return;
+    }
+    setIsSubmittingFeedback(true);
+    try {
+      await submitUserFeedback({ message_content: feedbackMessage, type: feedbackType });
+      showSuccessToast("Feedback submitted successfully!");
+      setIsFeedbackModalOpen(false);
+      setFeedbackMessage('');
+      setFeedbackType('feedback');
+    } catch (error: any) {
+      showErrorToast(error.message || "Failed to submit feedback.");
+    } finally {
+      setIsSubmittingFeedback(false);
+    }
+  };
   
   useEffect(() => {
     if (auth.user?.profile_picture_url && !previewUrl && !selectedFile) {
@@ -310,6 +337,19 @@ const UserProfilePage: React.FC = () => {
         {/* Toggle rendering logic is now moved to the modal */}
       </div>
 
+      {/* Feedback Section */}
+      <div className="mb-8 p-6 bg-white dark:bg-gray-800 rounded-lg shadow">
+        <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-gray-100">Support</h2>
+        <button
+          onClick={() => setIsFeedbackModalOpen(true)}
+          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500"
+        >
+          <MessageCircleQuestion size={16} className="mr-2" />
+          Report Bug / Give Feedback
+        </button>
+      </div>
+
+
       {/* ... other profile sections ... */}
 
       {/* The new Modal for Watch Preferences */}
@@ -379,6 +419,67 @@ const UserProfilePage: React.FC = () => {
           )}
         </Modal>
       )}
+
+      {/* Feedback Modal */}
+      {isFeedbackModalOpen && (
+        <Modal
+          isOpen={isFeedbackModalOpen}
+          onClose={() => setIsFeedbackModalOpen(false)}
+          title="Submit Feedback or Report Bug"
+        >
+          <form onSubmit={handleFeedbackSubmit}>
+            <div className="mb-4">
+              <label htmlFor="feedbackType" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Type
+              </label>
+              <select
+                id="feedbackType"
+                name="feedbackType"
+                value={feedbackType}
+                onChange={(e) => setFeedbackType(e.target.value as 'bug' | 'feedback')}
+                className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              >
+                <option value="feedback">General Feedback</option>
+                <option value="bug">Bug Report</option>
+              </select>
+            </div>
+            <div className="mb-4">
+              <label htmlFor="feedbackMessage" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Message
+              </label>
+              <textarea
+                id="feedbackMessage"
+                name="feedbackMessage"
+                rows={4}
+                value={feedbackMessage}
+                onChange={(e) => setFeedbackMessage(e.target.value)}
+                className="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-indigo-500 focus:border-indigo-500"
+                placeholder="Please provide details..."
+              />
+            </div>
+            <div className="mt-6 flex justify-end space-x-3">
+              <button
+                type="button"
+                onClick={() => setIsFeedbackModalOpen(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-500 rounded-md shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isSubmittingFeedback}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 border border-transparent rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+              >
+                {isSubmittingFeedback ? (
+                  <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white mr-2 inline-block"></div>
+                ) : null}
+                Submit
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         {/* Change Password Form */}

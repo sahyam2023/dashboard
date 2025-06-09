@@ -90,7 +90,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       loadMessages(selectedConversation.conversation_id, 1, true);
 
       if (socket && socketConnected && tokenData?.token) {
-        console.log(`ChatWindow: Emitting 'join_conversation' for ${selectedConversation.conversation_id}`);
+        // console.log(`ChatWindow: Emitting 'join_conversation' for ${selectedConversation.conversation_id}`);
         socket.emit('join_conversation', {
           conversation_id: selectedConversation.conversation_id,
           token: tokenData.token,
@@ -142,7 +142,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
   useEffect(() => {
     if (selectedConversation && typeof selectedConversation.conversation_id === 'number' && socket && socketConnected && !loading && messages.length > 0) {
-      console.log(`ChatWindow: Emitting 'mark_as_read' for conversation ${selectedConversation.conversation_id}`);
+      // console.log(`ChatWindow: Emitting 'mark_as_read' for conversation ${selectedConversation.conversation_id}`);
       socket.emit('mark_as_read', {
         conversation_id: selectedConversation.conversation_id,
         token: tokenData?.token
@@ -155,14 +155,14 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     if (!socket || !socketConnected) return;
 
     const handleUserOnline = (data: { user_id: number }) => {
-      console.log("ChatWindow: user_online event", data, "current other_user_id:", selectedConversationRef.current?.other_user_id);
+      // console.log("ChatWindow: user_online event", data, "current other_user_id:", selectedConversationRef.current?.other_user_id);
       if (data.user_id === selectedConversationRef.current?.other_user_id) {
         setOtherUserStatus(prevStatus => ({ ...prevStatus, is_online: true, last_seen: null }));
       }
     };
 
     const handleUserOffline = (data: { user_id: number; last_seen: string }) => {
-      console.log("ChatWindow: user_offline event", data, "current other_user_id:", selectedConversationRef.current?.other_user_id);
+      // console.log("ChatWindow: user_offline event", data, "current other_user_id:", selectedConversationRef.current?.other_user_id);
       if (data.user_id === selectedConversationRef.current?.other_user_id) {
         setOtherUserStatus(prevStatus => ({ ...prevStatus, is_online: false, last_seen: data.last_seen }));
       }
@@ -170,12 +170,12 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
     socket.on('user_online', handleUserOnline);
     socket.on('user_offline', handleUserOffline);
-    console.log(`ChatWindow: 'user_online'/'user_offline' listeners attached globally.`);
+    // console.log(`ChatWindow: 'user_online'/'user_offline' listeners attached globally.`);
 
     return () => {
       socket.off('user_online', handleUserOnline);
       socket.off('user_offline', handleUserOffline);
-      console.log(`ChatWindow: 'user_online'/'user_offline' listeners detached.`);
+      // console.log(`ChatWindow: 'user_online'/'user_offline' listeners detached.`);
     };
   }, [socket, socketConnected]); // Depends only on socket, selectedConversationRef is used to check current relevance
 
@@ -183,7 +183,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     if (!socket || !socketConnected || !selectedConversation) return;
 
     const handleNewMessage = (newMessage: Message) => {
-      console.log('SocketIO: new_message received in ChatWindow', newMessage);
+      // console.log('SocketIO: new_message received in ChatWindow', newMessage);
       if (newMessage.conversation_id === selectedConversation.conversation_id) {
         setMessages((prevMessages) => [...prevMessages, newMessage]);
         // Potentially mark as read if user is viewing this conversation
@@ -192,13 +192,72 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     };
 
     socket.on('new_message', handleNewMessage);
-    console.log(`ChatWindow: 'new_message' listener attached for conv ${selectedConversation.conversation_id}.`);
+    // console.log(`ChatWindow: 'new_message' listener attached for conv ${selectedConversation.conversation_id}.`);
 
     return () => {
       socket.off('new_message', handleNewMessage);
-      console.log(`ChatWindow: 'new_message' listener detached for conv ${selectedConversation.conversation_id}.`);
+      // console.log(`ChatWindow: 'new_message' listener detached for conv ${selectedConversation.conversation_id}.`);
     };
   }, [socket, socketConnected, selectedConversation]); // Rerun when selectedConversation changes to listen to correct new_message
+
+  // Effect to handle real-time message read updates
+  useEffect(() => {
+    if (!socket || !socketConnected || !selectedConversation || selectedConversation.conversation_id === null || !currentUserId) {
+      return;
+    }
+    
+    // const conversationIdForLog = selectedConversation.conversation_id; // Capture for cleanup log
+
+    const handleMessagesReadUpdate = (data: { conversation_id: string | number; reader_id: number; message_ids: number[] }) => {
+      // console.log('[CW_MRU_DEBUG] Full data object received:', data);
+      // Ensure selectedConversation is accessed safely, perhaps from a ref or by checking its current value if it can change during the handler's life
+      // const currentComponentConvId = selectedConversationRef.current?.conversation_id; // Using ref for safety within callback
+      // console.log('[CW_MRU_DEBUG] Component currentConversationId (from ref):', currentComponentConvId, 'currentUserId:', currentUserId);
+
+      // Ensure conversation_id types are consistent for comparison
+      // Use selectedConversationRef.current for safety within the async callback
+      const currentConversationId = selectedConversationRef.current?.conversation_id;
+      if (currentConversationId === null || currentConversationId === undefined) {
+        // console.log('[CW_MRU_DEBUG] selectedConversationRef.current.conversation_id is null or undefined in handleMessagesReadUpdate. Skipping.');
+        return;
+      }
+      const receivedConversationId = typeof data.conversation_id === 'string' ? parseInt(data.conversation_id, 10) : data.conversation_id;
+      
+      // console.log('[CW_MRU_DEBUG] Before setMessages - receivedConversationId:', receivedConversationId, 'currentConversationId (from ref):', currentConversationId, 'Comparison result (received === current):', receivedConversationId === currentConversationId);
+
+      if (currentConversationId === receivedConversationId) {
+        setMessages(prevMessages =>
+          prevMessages.map(msg => {
+            // console.log('[CW_MRU_DEBUG] Processing msg.id:', msg.id, 'msg.sender_id:', msg.sender_id);
+            const isMessageIncluded = data.message_ids.includes(msg.id);
+            // console.log('[CW_MRU_DEBUG] data.message_ids.includes(msg.id):', isMessageIncluded);
+            const isSenderCurrentUser = msg.sender_id === currentUserId; // currentUserId is from useEffect's scope, should be stable unless it's a prop that changes the effect
+            // console.log('[CW_MRU_DEBUG] msg.sender_id === currentUserId:', isSenderCurrentUser);
+            const conditionMet = isMessageIncluded && isSenderCurrentUser;
+            // console.log('[CW_MRU_DEBUG] Entire condition (isMessageIncluded && isSenderCurrentUser) is:', conditionMet);
+
+            if (conditionMet) {
+              // console.log('[CW_MRU_DEBUG] Setting is_read to true for msg.id:', msg.id);
+              return { ...msg, is_read: true };
+            }
+            return msg;
+          })
+        );
+      }
+    };
+    
+    // console.log('[CW_LISTENER_SETUP] Attempting to attach "messages_read_update" listener for conversation ID:', conversationIdForLog);
+    socket.on('messages_read_update', handleMessagesReadUpdate);
+    // The existing log below is fine, or can be removed if the new one is preferred. Keeping it for now.
+    // console.log(`ChatWindow: 'messages_read_update' listener attached for conv ${conversationIdForLog}.`);
+
+    return () => {
+      // console.log('[CW_LISTENER_SETUP] Detaching "messages_read_update" listener for conversation ID:', conversationIdForLog);
+      socket.off('messages_read_update', handleMessagesReadUpdate);
+      // The existing log below is fine, or can be removed. Keeping it for now.
+      // console.log(`ChatWindow: 'messages_read_update' listener detached for conv ${conversationIdForLog}.`);
+    };
+  }, [socket, socketConnected, selectedConversation, currentUserId, setMessages]); // setMessages added to dependencies as it's used in effect
 
   // Removed getFileType as file type is now determined by backend.
   // const getFileType = (fileType: string): Message['file_type'] => { ... };

@@ -1,5 +1,5 @@
 //src/components/Layout.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react'; // useEffect was already imported
 import { Outlet } from 'react-router-dom';
 import Header from './Header';
 import Sidebar from './Sidebar';
@@ -7,14 +7,21 @@ import Breadcrumbs from './Breadcrumbs'; // Import the new component
 import Footer from './Footer'; // Import the new Footer component
 import ChatMain from './chat/ChatMain'; // Import ChatMain
 import { useAuth } from '../context/AuthContext'; // To get currentUserId
+import { useChatActions } from '../context/ChatActionContext'; // Import useChatActions
 import { io, Socket } from 'socket.io-client'; // Import socket.io-client
-import { useEffect } from 'react'; // Import useEffect
 
 const Layout: React.FC = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [isChatOpen, setIsChatOpen] = useState(false); // State for chat modal
+  // const [isChatOpen, setIsChatOpen] = useState(false); // Removed local state
   const { user, tokenData } = useAuth(); // Get user and tokenData from AuthContext
+  const { 
+    isChatModalOpen, 
+    openChatWithUser, 
+    closeChatModal, 
+    targetUser 
+  } = useChatActions(); // Get values from ChatActionContext
+
   const [socket, setSocket] = useState<Socket | null>(null); // Socket state
   const [socketConnected, setSocketConnected] = useState(false); // New state for socket connection status
 
@@ -65,9 +72,9 @@ const Layout: React.FC = () => {
     setSidebarCollapsed(prev => !prev);
   };
 
-  const toggleChatModal = () => {
-    setIsChatOpen(prev => !prev);
-  };
+  // const toggleChatModal = () => { // Removed local toggle function
+  //   setIsChatOpen(prev => !prev);
+  // };
 
   const handleSearch = (term: string) => {
     setSearchTerm(term);
@@ -83,7 +90,8 @@ const Layout: React.FC = () => {
         // Consider adding a chat toggle button to Header as well or instead of Sidebar
       />
       <div className="flex flex-1 overflow-hidden relative"> {/* Added relative for modal positioning context */}
-        <Sidebar collapsed={sidebarCollapsed} onToggleChat={toggleChatModal} socket={socket} socketConnected={socketConnected} />
+        {/* Updated onToggleChat to use openChatWithUser(null) for generic open */}
+        <Sidebar collapsed={sidebarCollapsed} onToggleChat={() => openChatWithUser(null)} socket={socket} socketConnected={socketConnected} />
         <main 
           className={`flex-1 p-6 overflow-auto transition-all duration-300 ease-in-out ${
             sidebarCollapsed ? 'ml-20' : 'ml-64' // Adjust based on actual sidebar width
@@ -96,10 +104,11 @@ const Layout: React.FC = () => {
         </main>
 
         {/* Chat Modal/Overlay */}
-        {isChatOpen && user && (
+        {/* Updated rendering condition to use isChatModalOpen */}
+        {isChatModalOpen && user && ( 
           <div
             className="fixed inset-0 bg-black bg-opacity-30 backdrop-blur-sm flex items-center justify-center z-40"
-            onClick={toggleChatModal} // Close on overlay click
+            onClick={closeChatModal} // Close on overlay click using context function
           >
             <div
               className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-11/12 max-w-7xl h-[90vh] sm:h-[90vh] md:max-h-[750px] lg:max-h-[850px] flex flex-col overflow-hidden" // Updated size classes
@@ -108,7 +117,7 @@ const Layout: React.FC = () => {
               <div className="flex justify-between items-center p-3 sm:p-4 border-b border-gray-200 dark:border-gray-700">
                 <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100">Chat</h2>
                 <button
-                  onClick={toggleChatModal}
+                  onClick={closeChatModal} // Close button uses context function
                   className="p-1.5 rounded-full text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
                   aria-label="Close chat"
                 >
@@ -117,11 +126,13 @@ const Layout: React.FC = () => {
                   </svg>
                 </button>
               </div>
-              {/* Pass currentUserId which ChatMain expects as MOCK_CURRENT_USER_ID for now */}
-              {/* ChatMain internally uses a MOCK_CURRENT_USER_ID, which is fine for now */}
-              {/* We pass user.id to ChatMain if it's adapted to take it as a prop later */}
               <div className="flex-1 overflow-hidden"> {/* Added this wrapper */}
-                <ChatMain socket={socket} socketConnected={socketConnected} /> {/* Pass socket and socketConnected to ChatMain */}
+                {/* Pass targetUser and other necessary props to ChatMain */}
+                <ChatMain 
+                  socket={socket} 
+                  socketConnected={socketConnected} 
+                  targetUser={targetUser} // Pass targetUser from context
+                />
               </div>
             </div>
           </div>

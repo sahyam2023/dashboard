@@ -954,6 +954,9 @@ def get_user_conversations(db, user_id: int) -> list['sqlite3.Row']:
     Retrieves all conversations for a given user.
     Joins with the users table to get the other participant's username and profile picture.
     Orders conversations by the created_at of the most recent message in each conversation (descending).
+    
+    -- FIXED a bug where multiple messages with the same timestamp would cause duplicate conversations.
+    -- The subquery now uses MAX(id) as a tie-breaker to ensure exactly one last message is found.
     """
     try:
         cursor = db.execute(
@@ -974,11 +977,12 @@ def get_user_conversations(db, user_id: int) -> list['sqlite3.Row']:
                     WHEN c.user1_id = :user_id THEN u2.id
                     ELSE u1.id
                 END as other_user_id,
+                c.created_at as conversation_created_at, -- For sorting convos without messages
                 lm.last_message_content,
                 lm.last_message_created_at,
                 lm.last_message_sender_id,
-                lm.last_message_id,        -- Added
-                lm.last_message_is_read,   -- Added
+                lm.last_message_id,
+                lm.last_message_is_read,
                 (SELECT COUNT(*) FROM messages m_unread
                  WHERE m_unread.conversation_id = c.id
                  AND m_unread.recipient_id = :user_id
@@ -989,17 +993,19 @@ def get_user_conversations(db, user_id: int) -> list['sqlite3.Row']:
             LEFT JOIN (
                 SELECT
                     m.conversation_id,
-                    m.id as last_message_id,                -- Added
+                    m.id as last_message_id,
                     m.content as last_message_content,
                     m.created_at as last_message_created_at,
                     m.sender_id as last_message_sender_id,
-                    m.is_read as last_message_is_read      -- Added
+                    m.is_read as last_message_is_read
                 FROM messages m
+                -- This subquery now finds the single highest message ID for each conversation,
+                -- which is guaranteed to be unique and represents the last message sent.
                 INNER JOIN (
-                    SELECT conversation_id, MAX(created_at) as max_created_at
+                    SELECT conversation_id, MAX(id) as max_id
                     FROM messages
                     GROUP BY conversation_id
-                ) mm ON m.conversation_id = mm.conversation_id AND m.created_at = mm.max_created_at
+                ) mm ON m.id = mm.max_id
             ) lm ON c.id = lm.conversation_id
             WHERE c.user1_id = :user_id OR c.user2_id = :user_id
             ORDER BY lm.last_message_created_at DESC, c.created_at DESC
@@ -1010,7 +1016,7 @@ def get_user_conversations(db, user_id: int) -> list['sqlite3.Row']:
     except sqlite3.Error as e:
         print(f"DB_CONVERSATIONS: Error fetching conversations for user {user_id}: {e}")
         return []
-
+    
 def mark_messages_as_read(db, conversation_id: int, user_id: int) -> int:
     """
     Marks messages in a conversation as read for a specific user where they are the recipient.

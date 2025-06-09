@@ -51,10 +51,10 @@ export const ChatActionContextProvider: React.FC<ChatActionContextProviderProps>
   const openChatWithUser = useCallback((user: User | null) => {
     if (user) {
       setTargetUser(user);
-      console.log(`Chat modal opened for user: ${user.username} (ID: ${user.id})`);
+      // console.log(`Chat modal opened for user: ${user.username} (ID: ${user.id})`);
     } else {
       setTargetUser(null);
-      console.log("Chat modal opened without a specific target user.");
+      // console.log("Chat modal opened without a specific target user.");
     }
     setIsChatModalOpen(true);
     // In a real app, you might also want to trigger side effects here,

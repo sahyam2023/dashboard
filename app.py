@@ -39,7 +39,7 @@ from flask_jwt_extended import (
 )
 # For specific JWT exceptions - Updated
 from jwt.exceptions import DecodeError as PyJWTDecodeError, ExpiredSignatureError as PyJWTExpiredSignatureError
-from flask_jwt_extended.exceptions import InvalidTokenError # NoAuthorizationError might not be needed
+from flask_jwt_extended.exceptions import NoAuthorizationError, JWTDecodeError 
 from flask import current_app # For JWT_IDENTITY_CLAIM
 
 from werkzeug.utils import secure_filename
@@ -245,9 +245,6 @@ def authenticated_socket_event(f):
         return f(*new_args, **kwargs)
     return decorated_function
 # --- End Authenticated Socket Event Decorator ---
-
-# For specific JWT exceptions
-# from flask_jwt_extended.exceptions import ExpiredSignatureError, JWTDecodeError, InvalidTokenError # Moved up and updated
 
 # --- Import database functions for chat ---
 from database import (
@@ -6740,7 +6737,7 @@ def logout():
                     app.logger.error(f"Error converting last_seen for logout event (user {current_user_id}): {e_ts_conv}")
                     last_seen_timestamp_iso = datetime.now(timezone.utc).isoformat() # Fallback
 
-            socketio.emit('user_offline', {'user_id': current_user_id, 'last_seen': last_seen_timestamp_iso}, broadcast=True)
+            socketio.emit('user_offline', {'user_id': current_user_id, 'last_seen': last_seen_timestamp_iso})
         else:
             app.logger.warning(f"Logout: Failed to update online status for user {current_user_id} (user not found or no change).")
 
@@ -10866,11 +10863,11 @@ def handle_connect(auth=None):
             except PyJWTExpiredSignatureError: # Corrected Exception
                 app.logger.warning(f"SocketIO: Connection attempt with expired token from SID {sid} (auth payload).")
                 return False
-            except PyJWTDecodeError: # Corrected Exception (covers malformed tokens, signature mismatches)
-                app.logger.warning(f"SocketIO: Connection attempt with malformed or invalid signature token from SID {sid} (auth payload).")
+            except PyJWTDecodeError as e: # Corrected Exception (covers malformed tokens, signature mismatches)
+                app.logger.warning(f"SocketIO: Connection attempt with malformed or invalid signature token (PyJWTDecodeError) from SID {sid} (auth payload): {e}")
                 return False
-            except InvalidTokenError: # flask-jwt-extended specific
-                app.logger.warning(f"SocketIO: Connection attempt with invalid token (FJE error) from SID {sid} (auth payload).")
+            except JWTDecodeError as e: # flask-jwt-extended specific for broader decoding issues
+                app.logger.warning(f"SocketIO: Connection attempt with invalid token (JWTDecodeError) from SID {sid} (auth payload): {e}")
                 return False
             except ValueError: # For int conversion failure
                 app.logger.error(f"SocketIO connect: Invalid user ID format in token from auth payload. Identity: '{current_user_id_from_token_str}'. SID: {sid}")
@@ -10900,7 +10897,7 @@ def handle_connect(auth=None):
         except PyJWTExpiredSignatureError: # Corrected Exception
             app.logger.warning(f"SocketIO connect: Fallback JWT context token has expired. SID: {sid}")
             return False
-        except (PyJWTDecodeError, InvalidTokenError) as e: # Corrected Exceptions
+        except (PyJWTDecodeError, JWTDecodeError) as e: # Corrected Exceptions
             app.logger.warning(f"SocketIO connect: Fallback JWT context token is invalid/malformed: {e}. SID: {sid}")
             return False
         except ValueError: # For int conversion
@@ -10937,7 +10934,7 @@ def handle_connect(auth=None):
         )
         db.commit()
         app.logger.info(f"SocketIO connect: User {user_id_for_connect} status set to online and last_seen updated.")
-        socketio.emit('user_online', {'user_id': user_id_for_connect}, broadcast=True) # Broadcast user_online
+        socketio.emit('user_online', {'user_id': user_id_for_connect}) # Broadcast user_online
         emit_unread_chat_count(user_id_for_connect)
         emit_online_users_count()
     except Exception as e_status:

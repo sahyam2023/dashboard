@@ -99,14 +99,14 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
       // Check if user is currently authenticated to prevent multiple logout calls
       // if tokenData exists (which means logout hasn't fully processed yet from another trigger)
       if (tokenData) { 
-        console.log('[AuthContext] Received tokenExpired event from API, initiating logout.');
+        console.log('[AuthContext] Received tokenInvalidated event from API, initiating logout.');
         logout(true); // Call logout with the flag to indicate it's a session expiry
       }
     };
 
-    document.addEventListener('tokenExpired', handleApiTokenExpired);
+    document.addEventListener('tokenInvalidated', handleApiTokenExpired);
     return () => {
-      document.removeEventListener('tokenExpired', handleApiTokenExpired);
+      document.removeEventListener('tokenInvalidated', handleApiTokenExpired);
     };
   }, [logout, tokenData]); // Depend on logout and tokenData
 

@@ -294,7 +294,16 @@ const LinksView: React.FC = () => {
       const res = await bulkMoveItems(Array.from(selectedLinkIds), 'link', targetMetadata);
       showSuccessToast(res.msg || `${res.moved_count} link(s) moved.`);
       setSelectedLinkIds(new Set()); fetchAndSetLinks(1, true);
-    } catch (e: any) { showErrorToast(e.message || "Bulk move failed."); }
+    } catch (e: any) {
+      let userMessage = "Bulk move failed.";
+      if (e.message && typeof e.message === 'string' && e.message.includes("UNIQUE constraint failed")) {
+        userMessage = "A link with this title already exists for the target software/version. Please check for duplicates.";
+      } else if (e.message) {
+        userMessage = e.message;
+      }
+      showErrorToast(userMessage);
+      // Future: Add checks for other constraint errors here
+    }
     finally { setIsMovingSelected(false); setModalSelectedSoftwareId(null); setModalSelectedVersionId(undefined); }
   };
 

@@ -273,9 +273,21 @@ const role = user?.role; // Access role safely, as user can be null
       }
     } catch (err: any) {
       console.error("Error in AdminDocumentEntryForm onSubmit:", err);
-      const message = err.response?.data?.msg || err.message || `Failed to ${isEditMode && data.inputMode === 'url' ? 'update' : 'add'} document.`;
-      showErrorToast(message);
-      if (data.inputMode === 'upload') setIsUploading(false); // Also set isUploading to false on error
+      const backendMessage = err.response?.data?.msg || err.message;
+      let userMessage = `Failed to ${isEditMode && data.inputMode === 'url' ? 'update' : 'add'} document.`;
+
+      if (backendMessage && typeof backendMessage === 'string' && backendMessage.includes("UNIQUE constraint failed")) {
+        if (isEditMode) {
+          userMessage = "A document with this name already exists for this software. Please use a different name or check for duplicates.";
+        } else {
+          userMessage = "A document with this name already exists for this software. Please use a different name.";
+        }
+      } else if (backendMessage) {
+        userMessage = backendMessage;
+      }
+      // Future: Add checks for other constraint errors here if needed (e.g., NOT NULL, FOREIGN KEY)
+      showErrorToast(userMessage);
+      if (data.inputMode === 'upload') setIsUploading(false);
     } finally {
       console.log("AdminDocumentEntryForm onSubmit finally block reached.");
       setIsLoading(false);

@@ -375,9 +375,21 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
         setValue('typedVersionString', '');
       }
     } catch (err: any) {
-      const message = err.response?.data?.msg || err.message || `Failed to ${isEditMode && data.inputMode === 'url' ? 'update' : 'add'} link.`;
-      showErrorToast(message); // Standardized
-      if (data.inputMode === 'upload') setIsUploading(false); // Also set isUploading to false on error
+      const backendMessage = err.response?.data?.msg || err.message;
+      let userMessage = `Failed to ${isEditMode ? 'update' : 'add'} link.`;
+
+      if (backendMessage && typeof backendMessage === 'string' && backendMessage.includes("UNIQUE constraint failed")) {
+        if (isEditMode) {
+          userMessage = "A link with this title already exists for this software/version. Please use a different title or check for duplicates.";
+        } else {
+          userMessage = "A link with this title already exists for this software/version. Please use a different title.";
+        }
+      } else if (backendMessage) {
+        userMessage = backendMessage;
+      }
+      showErrorToast(userMessage);
+      // Future: Add checks for other constraint errors here
+      if (data.inputMode === 'upload') setIsUploading(false);
     }
     finally {
       setIsLoading(false);

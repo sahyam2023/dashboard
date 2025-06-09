@@ -256,7 +256,16 @@ const role = user?.role; // Access role safely, as user can be null
       const res = await bulkMoveItems(Array.from(selectedMiscFileIds), 'misc_file', { target_misc_category_id: modalSelectedCategoryId });
       showSuccessToast(res.msg || `${res.moved_count} file(s) moved.`);
       setSelectedMiscFileIds(new Set()); fetchAndSetMiscFiles(1, true);
-    } catch (e: any) { showErrorToast(e.message || "Bulk move failed."); }
+    } catch (e: any) {
+      let userMessage = "Bulk move failed.";
+      if (e.message && typeof e.message === 'string' && e.message.includes("UNIQUE constraint failed")) {
+        userMessage = "A file with this name already exists in the target category. Please check for duplicates.";
+      } else if (e.message) {
+        userMessage = e.message;
+      }
+      showErrorToast(userMessage);
+      // Future: Add checks for other constraint errors here
+    }
     finally { setIsMovingSelected(false); setModalSelectedCategoryId(null); }
   };
 

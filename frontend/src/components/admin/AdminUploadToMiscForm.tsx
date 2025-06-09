@@ -202,9 +202,17 @@ const role = user?.role; // Access role safely, as user can be null
         return;
       }
     } catch (err: any) {
-      const message = err.response?.data?.msg || err.message || `File operation failed.`;
-      showErrorToast(message); // Standardized
-      if (data.selectedFile) setIsUploading(false); // Also set isUploading to false on error
+      const backendMessage = err.response?.data?.msg || err.message;
+      let userMessage = "File operation failed.";
+
+      if (backendMessage && typeof backendMessage === 'string' && backendMessage.includes("UNIQUE constraint failed")) {
+        userMessage = "A file with this title or name already exists in this category. Please use a different title or check for duplicates.";
+      } else if (backendMessage) {
+        userMessage = backendMessage;
+      }
+      showErrorToast(userMessage);
+      // Future: Add checks for other constraint errors here
+      if (data.selectedFile) setIsUploading(false);
     } finally {
       setIsLoading(false);
       if (data.selectedFile) setIsUploading(false); // Ensure isUploading is reset

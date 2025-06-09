@@ -420,6 +420,20 @@ AFTER UPDATE ON notifications FOR EACH ROW BEGIN
     UPDATE notifications SET updated_at = (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')) WHERE id = OLD.id;
 END;
 
+-- User Feedback Table
+CREATE TABLE IF NOT EXISTS user_feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    message_content TEXT NOT NULL,
+    type TEXT NOT NULL CHECK(type IN ('bug', 'feedback')),
+    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
+    is_resolved BOOLEAN DEFAULT FALSE NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_feedback_user_id ON user_feedback (user_id);
+CREATE INDEX IF NOT EXISTS idx_user_feedback_type ON user_feedback (type);
+
 CREATE INDEX IF NOT EXISTS idx_conversations_user1_id ON conversations (user1_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_user2_id ON conversations (user2_id);
 CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages (conversation_id);

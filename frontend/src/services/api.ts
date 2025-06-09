@@ -2832,6 +2832,102 @@ export async function clearBatchConversations(conversationIds: number[]): Promis
 }
 // --- End Chat Batch Clear API Function ---
 
+// --- User Feedback API Functions ---
+export interface UserFeedback {
+  id: number;
+  user_id: number;
+  message_content: string;
+  type: 'bug' | 'feedback';
+  created_at: string; // ISO date string
+  is_resolved: boolean;
+  username?: string; // Joined from users table
+  profile_picture_filename?: string | null; // Joined from users table
+}
+
+export interface UserFeedbackSubmission {
+  message_content: string;
+  type: 'bug' | 'feedback';
+}
+
+// Generic PaginatedResponse (if not already defined elsewhere)
+export interface PaginatedResponse<T> {
+  feedback: T[]; // Renaming 'items' to 'feedback' to match backend key for this specific response
+  total_feedback: number;
+  total_pages: number;
+  page: number;
+  per_page: number;
+}
+
+export async function submitUserFeedback(payload: UserFeedbackSubmission): Promise<UserFeedback> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify(payload),
+    });
+    return handleApiError(response, 'Failed to submit user feedback');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error submitting user feedback:', error);
+    throw error;
+  }
+}
+
+export async function fetchAdminFeedback(params: {
+  page?: number;
+  perPage?: number;
+  resolved_status?: 'true' | 'false' | 'all';
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+}): Promise<PaginatedResponse<UserFeedback>> {
+  try {
+    const queryParams = new URLSearchParams();
+    if (params.page) queryParams.append('page', params.page.toString());
+    if (params.perPage) queryParams.append('per_page', params.perPage.toString());
+    if (params.resolved_status) queryParams.append('resolved_status', params.resolved_status);
+    if (params.sortBy) queryParams.append('sort_by', params.sortBy);
+    if (params.sortOrder) queryParams.append('sort_order', params.sortOrder);
+
+    const queryString = queryParams.toString();
+    const url = `${API_BASE_URL}/api/admin/feedback${queryString ? `?${queryString}` : ''}`;
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { ...getAuthHeader(), 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+    });
+    return handleApiError(response, 'Failed to fetch admin feedback');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error fetching admin feedback:', error);
+    throw error;
+  }
+}
+
+export async function updateAdminFeedbackStatus(feedbackId: number, isResolved: boolean): Promise<UserFeedback> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/admin/feedback/${feedbackId}/resolve`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ is_resolved: isResolved }),
+    });
+    return handleApiError(response, `Failed to update feedback status for ID ${feedbackId}`);
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error(`Error updating feedback status for ID ${feedbackId}:`, error);
+    throw error;
+  }
+}
+// --- End User Feedback API Functions ---
+
 export const getUserChatStatus = async (userId: number): Promise<{ is_online: boolean; last_seen: string | null }> => {
   try {
     const response = await fetch(`${API_BASE_URL}/api/chat/user_status/${userId}`, {

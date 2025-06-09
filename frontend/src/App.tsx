@@ -165,6 +165,7 @@ function AppContent() {
 import { AuthProvider } from './context/AuthContext'; // Import AuthProvider
 import { NotificationProvider } from './context/NotificationContext'; // Import NotificationProvider
 import { WatchProvider } from './context/WatchContext'; // Import WatchProvider
+import { ChatActionContextProvider } from './context/ChatActionContext'; // Import ChatActionContextProvider
 
 function App() {
   return (
@@ -172,7 +173,9 @@ function App() {
       <AuthProvider>
         <WatchProvider> {/* Add WatchProvider here */}
           <NotificationProvider>
-            <AppContent />
+            <ChatActionContextProvider> {/* Add ChatActionContextProvider here */}
+              <AppContent />
+            </ChatActionContextProvider>
           </NotificationProvider>
         </WatchProvider>
       </AuthProvider>

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Comment as CommentType, User } from '../../services/api'; // User type imported from api.ts
+import { useChatActions } from '../../context/ChatActionContext'; // Import useChatActions
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { MessageSquare, Edit3, Trash2, CornerDownRight, Send } from 'lucide-react'; // Added Send icon
 import { formatToISTLocaleString } from '../../utils'; // Updated import
@@ -16,6 +17,7 @@ interface CommentProps {
 }
 
 const Comment: React.FC<CommentProps> = ({ comment, onEdit, onDelete, onReply, currentUserId }) => {
+  const { openChatWithUser } = useChatActions(); // Call useChatActions
   const highlightMentions = (text: string) => {
     return text.replace(/@(\w+)/g, (match, username) => {
       return `<strong class="text-blue-500 font-semibold">${match}</strong>`;
@@ -52,12 +54,7 @@ const Comment: React.FC<CommentProps> = ({ comment, onEdit, onDelete, onReply, c
                       is_active: true, 
                     };
                     
-                    if ((window as any).triggerOpenChat) {
-                      (window as any).triggerOpenChat(userToChatWith);
-                    } else {
-                      showErrorToast("Chat functionality is currently unavailable.");
-                      console.error("window.triggerOpenChat is not defined.");
-                    }
+                    openChatWithUser(userToChatWith); // Use openChatWithUser
                   } catch (error) {
                     console.error('Failed to prepare data for chat:', error);
                     const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';

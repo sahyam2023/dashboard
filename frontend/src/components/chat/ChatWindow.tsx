@@ -200,6 +200,41 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     };
   }, [socket, socketConnected, selectedConversation]); // Rerun when selectedConversation changes to listen to correct new_message
 
+  // Effect to handle real-time message read updates
+  useEffect(() => {
+    if (!socket || !socketConnected || !selectedConversation || selectedConversation.conversation_id === null || !currentUserId) {
+      return;
+    }
+
+    const handleMessagesReadUpdate = (data: { conversation_id: string | number; reader_id: number; message_ids: number[] }) => {
+      console.log('SocketIO: messages_read_update received in ChatWindow', data);
+
+      // Ensure conversation_id types are consistent for comparison
+      const currentConversationId = selectedConversation.conversation_id;
+      const receivedConversationId = typeof data.conversation_id === 'string' ? parseInt(data.conversation_id, 10) : data.conversation_id;
+
+      if (currentConversationId === receivedConversationId) {
+        setMessages(prevMessages =>
+          prevMessages.map(msg => {
+            // Check if this message was sent by the current user and is in the list of read messages
+            if (data.message_ids.includes(msg.id) && msg.sender_id === currentUserId) {
+              return { ...msg, is_read: true };
+            }
+            return msg;
+          })
+        );
+      }
+    };
+
+    socket.on('messages_read_update', handleMessagesReadUpdate);
+    console.log(`ChatWindow: 'messages_read_update' listener attached for conv ${selectedConversation.conversation_id}.`);
+
+    return () => {
+      socket.off('messages_read_update', handleMessagesReadUpdate);
+      console.log(`ChatWindow: 'messages_read_update' listener detached for conv ${selectedConversation.conversation_id}.`);
+    };
+  }, [socket, socketConnected, selectedConversation, currentUserId, setMessages]); // setMessages added to dependencies as it's used in effect
+
   // Removed getFileType as file type is now determined by backend.
   // const getFileType = (fileType: string): Message['file_type'] => { ... };
 

@@ -1,13 +1,12 @@
 // frontend/src/components/chat/ConversationList.tsx
-import React, { useState, useEffect, useCallback } from 'react'; // <--- ADD useCallback here
-import { Conversation } from './types';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Conversation, Message } from './types'; // Message might be needed if we directly use its fields for last_message_id
 import { formatToISTLocaleString } from '../../utils/dateUtils'; // Import the utility
 // Placeholder for an API service
 // import { fetchConversations } from '../../services/api'; 
 
 import { Socket } from 'socket.io-client';
 import * as api from '../../services/api'; // Import your API service
-import { Message } from './types'; // Import Message type for socket payload
 import Spinner from './Spinner'; // Import Spinner
 import { useNotification } from '../../context/NotificationContext'; // Import useNotification
 
@@ -179,6 +178,29 @@ const ConversationList: React.FC<ConversationListProps> = ({
     socket.on('user_offline', handleUserOffline);
     console.log("ConversationList: 'user_online' and 'user_offline' listeners attached.");
 
+    const handleMessagesReadUpdate = (data: { conversation_id: string | number; reader_id: number; message_ids: number[] }) => {
+      console.log('ConversationList: messages_read_update received', data);
+      const targetConversationId = typeof data.conversation_id === 'string' ? parseInt(data.conversation_id, 10) : data.conversation_id;
+      
+      setConversations(prevConversations => 
+        prevConversations.map(convo => {
+          if (
+            convo.conversation_id === targetConversationId &&
+            convo.last_message_sender_id === currentUserId && // Message was sent by me
+            convo.last_message_id && // The conversation has a last_message_id tracked
+            data.message_ids.includes(convo.last_message_id) // And this specific last message is among those read
+          ) {
+            console.log(`ConversationList: Updating last message read status for conversation ${targetConversationId}`);
+            return { ...convo, last_message_is_read: true, unread_messages_count: 0 };
+          }
+          return convo;
+        })
+      );
+    };
+
+    socket.on('messages_read_update', handleMessagesReadUpdate);
+    console.log("ConversationList: 'messages_read_update' listener attached.");
+
     return () => {
       socket.off('new_message', handleNewMessage);
       socket.off('messages_read', handleMessagesRead);
@@ -186,9 +208,10 @@ const ConversationList: React.FC<ConversationListProps> = ({
       socket.off('new_conversation_started', handleNewConversationStarted);
       socket.off('user_online', handleUserOnline);
       socket.off('user_offline', handleUserOffline);
+      socket.off('messages_read_update', handleMessagesReadUpdate); // Detach the new listener
       console.log("ConversationList: All event listeners detached.");
     };
-  }, [socket, currentUserId, loadConversations, selectedConversationId, handleUserOnline, handleUserOffline]); // Added new handlers to dependency array
+  }, [socket, currentUserId, loadConversations, selectedConversationId, handleUserOnline, handleUserOffline, setConversations]); // Added setConversations
 
 
   if (loading) {
@@ -296,16 +319,27 @@ const ConversationList: React.FC<ConversationListProps> = ({
                     )}
                   </div>
                   <div className="flex justify-between items-center mt-1">
-                    <p className={`text-xs truncate ${
-                      selectionModeEnabled && isSelected
-                        ? 'text-gray-700 dark:text-gray-300'
-                        : selectedConversationId === conv.conversation_id 
-                        ? 'text-gray-600 dark:text-gray-300' 
-                        : 'text-gray-500 dark:text-gray-400'
-                    }`}>
-                      {conv.last_message_sender_id === currentUserId ? <span className="font-medium">You: </span> : ''}
-                      {conv.last_message_content || <span className="italic">No messages yet</span>}
-                    </p>
+                    <div className="flex items-center">
+                      {conv.last_message_sender_id === currentUserId && (
+                        <span className="mr-1">
+                          {conv.last_message_is_read ? (
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-500 dark:text-blue-400"><path d="M18 6 7 17l-5-5"/><path d="m22 10-7.5 7.5L13 16"/></svg>
+                          ) : (
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 dark:text-gray-500"><path d="M20 6 9 17l-5-5"/></svg>
+                          )}
+                        </span>
+                      )}
+                      <p className={`text-xs truncate ${
+                        selectionModeEnabled && isSelected
+                          ? 'text-gray-700 dark:text-gray-300'
+                          : selectedConversationId === conv.conversation_id 
+                          ? 'text-gray-600 dark:text-gray-300' 
+                          : 'text-gray-500 dark:text-gray-400'
+                      }`}>
+                        {conv.last_message_sender_id === currentUserId ? <span className="font-medium">You: </span> : ''}
+                        {conv.last_message_content || <span className="italic">No messages yet</span>}
+                      </p>
+                    </div>
                     {conv.unread_messages_count && conv.unread_messages_count > 0 && !(selectionModeEnabled && isSelected) && (
                       <span className="ml-2 bg-blue-500 text-white text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0">
                         {conv.unread_messages_count > 9 ? '9+' : conv.unread_messages_count}

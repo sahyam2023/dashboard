@@ -977,6 +977,8 @@ def get_user_conversations(db, user_id: int) -> list['sqlite3.Row']:
                 lm.last_message_content,
                 lm.last_message_created_at,
                 lm.last_message_sender_id,
+                lm.last_message_id,        -- Added
+                lm.last_message_is_read,   -- Added
                 (SELECT COUNT(*) FROM messages m_unread
                  WHERE m_unread.conversation_id = c.id
                  AND m_unread.recipient_id = :user_id
@@ -987,9 +989,11 @@ def get_user_conversations(db, user_id: int) -> list['sqlite3.Row']:
             LEFT JOIN (
                 SELECT
                     m.conversation_id,
+                    m.id as last_message_id,                -- Added
                     m.content as last_message_content,
                     m.created_at as last_message_created_at,
-                    m.sender_id as last_message_sender_id
+                    m.sender_id as last_message_sender_id,
+                    m.is_read as last_message_is_read      -- Added
                 FROM messages m
                 INNER JOIN (
                     SELECT conversation_id, MAX(created_at) as max_created_at
@@ -1010,10 +1014,23 @@ def get_user_conversations(db, user_id: int) -> list['sqlite3.Row']:
 def mark_messages_as_read(db, conversation_id: int, user_id: int) -> int:
     """
     Marks messages in a conversation as read for a specific user where they are the recipient.
-    Returns the number of messages marked as read.
+    Returns a tuple: (number of messages marked as read, list of {'id': message_id, 'sender_id': original_sender_id} for updated messages).
     """
     try:
-        cursor = db.execute(
+        # First, select the IDs and sender_ids of messages that will be updated
+        # user_id here is the recipient who is reading the messages
+        select_cursor = db.execute(
+            "SELECT id, sender_id FROM messages WHERE conversation_id = ? AND recipient_id = ? AND is_read = FALSE",
+            (conversation_id, user_id)
+        )
+        messages_to_update_details = [{'id': row[0], 'sender_id': row[1]} for row in select_cursor.fetchall()]
+
+        if not messages_to_update_details:
+            # No messages to update, return early
+            return 0, []
+
+        # Then, execute the update
+        update_cursor = db.execute(
             """
             UPDATE messages
             SET is_read = TRUE
@@ -1024,13 +1041,13 @@ def mark_messages_as_read(db, conversation_id: int, user_id: int) -> int:
             (conversation_id, user_id)
         )
         db.commit()
-        return cursor.rowcount
+        rows_updated = update_cursor.rowcount
+        
+        # Return the count of updated rows and the list of message details (id, sender_id)
+        return rows_updated, messages_to_update_details
     except sqlite3.Error as e:
         # print(f"DB_MESSAGES: Error marking messages as read for conversation {conversation_id}, user {user_id}: {e}")
-        # Optionally, rollback if the commit within the try block is the only one for this logical operation.
-        # However, if db is part of a larger transaction managed by the caller, rollback might be handled there.
-        # For now, just printing and returning 0 as per original subsequent function.
-        return 0
+        return 0, [] # Return empty list on error
 
 
 def get_total_unread_messages(db, user_id: int) -> int:

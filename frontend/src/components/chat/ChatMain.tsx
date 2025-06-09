@@ -1,6 +1,10 @@
 // frontend/src/components/chat/ChatMain.tsx
 import React, { useState, useEffect, useCallback } from 'react';
-import { User, Conversation } from './types';
+import { User, Conversation } from './types'; // User type is already imported
+import ChatActionContext from '../../context/ChatActionContext'; // Import context
+
+// REMOVED: module-level (window as any).triggerOpenChat = null;
+
 import UserList from './UserList';
 import ConversationList from './ConversationList';
 import ChatWindow from './ChatWindow';
@@ -21,6 +25,10 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // 
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const { user } = useAuth(); // Get user from AuthContext (tokenData not needed here directly for socket)
   const currentUserId = user?.id || null;
+
+  // States for "Start New Chat" confirmation (ensure these are present if subtask was reverted)
+  // For this subtask, we assume no confirmation modal is present as per prior revert.
+  // If confirmation modal logic was here, window.triggerOpenChat would also trigger it.
 
   const [selectionMode, setSelectionMode] = useState<boolean>(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -58,13 +66,20 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // 
     }
   }, [socket, socketConnected]);
 
-  const handleUserSelect = async (selectedUser: User) => {
-    if (!currentUserId) {
+  // Ensure showToastNotification is available (it is from useNotification hook)
+
+  // Wrap handleUserSelect with useCallback for stability when passed via context
+  const handleUserSelect = useCallback(async (selectedUser: User) => {
+    // user.id is used here, which is from useAuth()
+    // currentUserId (derived from user.id) is also available if preferred, but direct user.id is fine.
+    const currentUserIdFromHook = user?.id; 
+
+    if (!currentUserIdFromHook) { 
       console.error("Current user not set, cannot start conversation.");
       showToastNotification("Error: Current user not identified.", "error");
       return;
     }
-    if (selectedUser.id === currentUserId) {
+    if (selectedUser.id === currentUserIdFromHook) {
       showToastNotification("You cannot start a conversation with yourself.", "info");
       console.log("Cannot start a conversation with yourself.");
       return;
@@ -72,33 +87,26 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // 
 
     // Construct a provisional Conversation object
     const provisionalConversation: Conversation = {
-      conversation_id: null, // Key change: This is now null
-      user1_id: currentUserId, // Assuming currentUserId is user1
+      conversation_id: null,
+      user1_id: currentUserIdFromHook, // Uses the validated currentUserIdFromHook
       user2_id: selectedUser.id,
       other_user_id: selectedUser.id,
       other_username: selectedUser.username,
-      // Ensure selectedUser.profile_picture_url is available.
-      // The User type in ./types might need 'profile_picture_url?: string | null;'
-      // And UserList must provide this from its API call.
       other_profile_picture_url: selectedUser.profile_picture_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(selectedUser.username)}&background=random&color=fff`,
       last_message_content: null,
       last_message_created_at: null,
       last_message_sender_id: null,
       unread_messages_count: 0,
-      created_at: new Date().toISOString(), // Provisional creation time
-      // other_profile_picture is the filename, other_profile_picture_url is the full URL
-      // Assuming User type provides profile_picture_url. If it only provides filename, construct URL.
-      // For now, directly using selectedUser.profile_picture_url.
-      // This implies UserList fetches users with their profile_picture_url.
-      other_profile_picture: selectedUser.profile_picture_filename || null, // Add filename if available
+      created_at: new Date().toISOString(),
+      other_profile_picture: selectedUser.profile_picture_filename || null,
     };
 
     setSelectedConversation(provisionalConversation);
     setCurrentView('chat');
-    // No API call to createConversation here anymore.
-    // ConversationList will refresh on its own or via refreshKey if needed for other scenarios.
-  };
-  
+  }, [user, showToastNotification, setSelectedConversation, setCurrentView]); // Dependencies for useCallback
+
+  // REMOVED: useEffect hook that set up (window as any).triggerOpenChat
+
   const handleNewConversationStarted = (conversation: Conversation) => {
     setSelectedConversation(conversation);
     // Optionally, trigger a refresh of the conversation list if it doesn't pick up the new one automatically
@@ -199,11 +207,17 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // 
     setCurrentView('users');
   };
 
+  // The context value
+  const chatActionContextValue = {
+    openChatWithUser: handleUserSelect
+  };
+
   return (
-    // Changed h-screen to h-full to fit within modal constraints
-    <div className="flex h-full font-sans antialiased text-gray-800 dark:text-gray-100 bg-white dark:bg-gray-800">
-      {/* Sidebar for Conversation List or User List */}
-      <div className={`w-full md:w-1/3 lg:w-1/4 xl:w-1/5 border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex flex-col
+    <ChatActionContext.Provider value={chatActionContextValue}>
+      {/* Changed h-screen to h-full to fit within modal constraints */}
+      <div className="flex h-full font-sans antialiased text-gray-800 dark:text-gray-100 bg-white dark:bg-gray-800">
+        {/* Sidebar for Conversation List or User List */}
+        <div className={`w-full md:w-1/3 lg:w-1/4 xl:w-1/5 border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex flex-col
         ${(currentView === 'chat' && selectedConversation) ? 'hidden md:flex' : 'flex'}`}
       >
         {currentView === 'users' ? (
@@ -322,7 +336,8 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // 
         onCancel={cancelClearSelected}
         confirmButtonVariant="danger"
       />
-    </div>
+      </div>
+    </ChatActionContext.Provider>
   );
 };
 

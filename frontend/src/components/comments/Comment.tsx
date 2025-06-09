@@ -1,8 +1,9 @@
 import React from 'react';
-import { Comment as CommentType, createConversation } from '../../services/api'; // Import createConversation
+import { Comment as CommentType, User } from '../../services/api'; // User type imported from api.ts
 import { formatDistanceToNow, parseISO } from 'date-fns';
-import { MessageSquare, Edit3, Trash2, CornerDownRight } from 'lucide-react';
+import { MessageSquare, Edit3, Trash2, CornerDownRight, Send } from 'lucide-react'; // Added Send icon
 import { formatToISTLocaleString } from '../../utils'; // Updated import
+import { showErrorToast } from '../../utils/toastUtils'; // Import showErrorToast
 // It's good practice to import the type for the conversation if available
 // import { Conversation as ChatConversation } from '../chat/types'; // Assuming path
 
@@ -35,43 +36,45 @@ const Comment: React.FC<CommentProps> = ({ comment, onEdit, onDelete, onReply, c
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center">
           <MessageSquare className="w-5 h-5 text-gray-500 dark:text-gray-400 mr-2" />
-          <button
-            onClick={async () => {
-              if (currentUserId && currentUserId !== comment.user_id) {
-                if (window.confirm(`Start a chat with ${comment.username}?`)) {
+          <span className="relative inline-block group">
+            <span className="font-semibold text-blue-600 dark:text-blue-400">
+              {comment.username}
+            </span>
+            <button
+              onClick={async () => {
+                if (currentUserId && currentUserId !== comment.user_id) {
                   try {
-                    // console.log(`Attempting to create conversation with user ID: ${comment.user_id}`);
-                    const conversation = await createConversation(comment.user_id);
-                    console.log('Conversation created/retrieved:', conversation);
-                    // Attempt to navigate to the chat page for this conversation
-                    // This assumes a routing setup like /chat/:conversationId
-                    // If using react-router, useNavigate hook would be preferred here.
-                    if (conversation && conversation.conversation_id) {
-                       window.location.href = `/chat/${conversation.conversation_id}`;
+                    const userToChatWith: User = {
+                      id: comment.user_id,
+                      username: comment.username,
+                      email: null, 
+                      role: 'user', 
+                      is_active: true, 
+                    };
+                    
+                    if ((window as any).triggerOpenChat) {
+                      (window as any).triggerOpenChat(userToChatWith);
                     } else {
-                        console.error('Conversation created but conversation_id is missing.', conversation);
-                        alert('Could not navigate to chat: Conversation ID missing.');
+                      showErrorToast("Chat functionality is currently unavailable.");
+                      console.error("window.triggerOpenChat is not defined.");
                     }
                   } catch (error) {
-                    console.error('Failed to create conversation:', error);
+                    console.error('Failed to prepare data for chat:', error);
                     const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';
-                    alert(`Could not start chat: ${errorMessage}`);
+                    showErrorToast(`Could not start chat: ${errorMessage}`);
                   }
+                } else if (currentUserId === comment.user_id) {
+                  showErrorToast("You cannot start a chat with yourself.");
+                } else {
+                  showErrorToast("You must be logged in to start a chat.");
                 }
-              } else if (currentUserId === comment.user_id) {
-                console.log('User clicked on their own name. No action taken.');
-                // Optionally, inform the user they can't chat with themselves, though it might be obvious.
-                // alert("You cannot start a chat with yourself.");
-              } else {
-                console.log('Current user ID not available, cannot start chat.');
-                // alert("You must be logged in to start a chat.");
-              }
-            }}
-            className="font-semibold text-blue-600 dark:text-blue-400 hover:underline focus:outline-none cursor-pointer"
-            aria-label={`Start chat with ${comment.username}`}
-          >
-            {comment.username}
-          </button>
+              }}
+              className="absolute -right-6 top-1/2 -translate-y-1/2 p-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-blue-500 dark:text-blue-400 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity duration-150 hover:bg-gray-200 dark:hover:bg-gray-600"
+              aria-label={`Start chat with ${comment.username}`}
+            >
+              <Send size={14} />
+            </button>
+          </span>
           <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">{formattedTimestamp()}</span>
         </div>
         <div className="flex items-center space-x-2">

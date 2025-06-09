@@ -50,19 +50,19 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // 
   useEffect(() => {
     if (socket && socketConnected) {
       const handleOnlineUsersCount = (data: { count: number }) => {
-        console.log('ChatMain: Socket event "online_users_count" received:', data);
+        // console.log('ChatMain: Socket event "online_users_count" received:', data);
         setOnlineUsersCount(data.count);
       };
       socket.on('online_users_count', handleOnlineUsersCount);
-      console.log("ChatMain: 'online_users_count' listener attached.");
+      // console.log("ChatMain: 'online_users_count' listener attached.");
 
       return () => {
         socket.off('online_users_count', handleOnlineUsersCount);
-        console.log("ChatMain: 'online_users_count' listener detached.");
+        // console.log("ChatMain: 'online_users_count' listener detached.");
       };
     } else {
       setOnlineUsersCount(null); // Reset if socket is not available or connected
-      console.log('ChatMain: online_users_count listener - socket not available or not connected.');
+      // console.log('ChatMain: online_users_count listener - socket not available or not connected.');
     }
   }, [socket, socketConnected]);
 
@@ -81,7 +81,7 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // 
     }
     if (selectedUser.id === currentUserIdFromHook) {
       showToastNotification("You cannot start a conversation with yourself.", "info");
-      console.log("Cannot start a conversation with yourself.");
+      // console.log("Cannot start a conversation with yourself.");
       return;
     }
 
@@ -133,7 +133,7 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected }) => { // 
     if (selectedIds.size > 0) {
       setShowClearConfirmModal(true);
     } else {
-      console.log("No conversations selected to clear.");
+      // console.log("No conversations selected to clear.");
     }
   };
 

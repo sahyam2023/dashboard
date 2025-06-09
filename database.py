@@ -1128,3 +1128,120 @@ def clear_messages_for_user_in_conversation(db, conversation_id: int, user_id: i
         # print(f"DB_MESSAGES: Error clearing messages for conversation_id {conversation_id} (requested by user_id {user_id}): {e}")
         # Consider rolling back if part of a larger transaction, though commit is here.
         return 0
+
+# --- User Feedback Functions ---
+
+def add_user_feedback(db, user_id: int, message_content: str, type: str) -> int | None:
+    """Adds a new user feedback entry to the user_feedback table."""
+    try:
+        cursor = db.execute(
+            """
+            INSERT INTO user_feedback (user_id, message_content, type)
+            VALUES (?, ?, ?)
+            """,
+            (user_id, message_content, type)
+        )
+        db.commit()
+        return cursor.lastrowid
+    except sqlite3.Error as e:
+        print(f"DB_USER_FEEDBACK: Error adding user feedback for user {user_id}: {e}")
+        return None
+
+def get_user_feedback(db, page: int, per_page: int, resolved_status: str | None = None, sort_by: str = 'created_at', sort_order: str = 'desc'):
+    """
+    Retrieves user feedback with pagination, filtering, and sorting.
+    Joins with users table to include username and profile_picture_filename.
+    resolved_status can be 'true', 'false', or 'all' (or None, which means 'all').
+    Returns a tuple: (list of feedback items, total count of feedback items).
+    """
+    offset = (page - 1) * per_page
+
+    base_query = """
+    FROM user_feedback uf
+    JOIN users u ON uf.user_id = u.id
+    """
+
+    where_clauses = []
+    params = {}
+
+    if resolved_status == 'true':
+        where_clauses.append("uf.is_resolved = TRUE")
+    elif resolved_status == 'false':
+        where_clauses.append("uf.is_resolved = FALSE")
+    # If 'all' or None, no filter on is_resolved is added.
+
+    if where_clauses:
+        base_query += " WHERE " + " AND ".join(where_clauses)
+
+    # Validate sort_by column to prevent SQL injection
+    valid_sort_columns = ['created_at', 'type', 'username'] # Add more if needed
+    if sort_by not in valid_sort_columns:
+        sort_by = 'created_at' # Default to created_at if invalid column is provided
+
+    # Validate sort_order
+    if sort_order.lower() not in ['asc', 'desc']:
+        sort_order = 'desc' # Default to desc
+
+    order_by_clause = f"ORDER BY uf.{sort_by} {sort_order.upper()}"
+    if sort_by == 'username': # Sorting by username requires sorting by u.username
+        order_by_clause = f"ORDER BY u.username {sort_order.upper()}"
+
+
+    select_query = f"""
+    SELECT uf.id, uf.user_id, uf.message_content, uf.type, uf.created_at, uf.is_resolved,
+           u.username, u.profile_picture_filename
+    {base_query}
+    {order_by_clause}
+    LIMIT :limit OFFSET :offset
+    """
+    params.update({'limit': per_page, 'offset': offset})
+
+    count_query = f"SELECT COUNT(uf.id) {base_query}"
+
+    try:
+        # Fetch items for the current page
+        # print(f"Executing query: {select_query} with params {params}")
+        cursor = db.execute(select_query, params)
+        feedback_items = cursor.fetchall() # List of sqlite3.Row objects
+
+        # Fetch total count of items matching the filter
+        # print(f"Executing count query: {count_query} with params {params if where_clauses else {}}") # Count query might not need limit/offset
+        count_cursor = db.execute(count_query, {k: v for k, v in params.items() if k not in ['limit', 'offset']}) # Params for count query shouldn't include limit/offset
+        total_count_row = count_cursor.fetchone()
+        total_items = total_count_row[0] if total_count_row else 0
+
+        return feedback_items, total_items
+    except sqlite3.Error as e:
+        print(f"DB_USER_FEEDBACK: Error retrieving user feedback: {e}")
+        return [], 0
+
+def update_feedback_resolved_status(db, feedback_id: int, is_resolved: bool) -> bool:
+    """Updates the is_resolved status of a feedback item."""
+    try:
+        cursor = db.execute(
+            "UPDATE user_feedback SET is_resolved = ? WHERE id = ?",
+            (is_resolved, feedback_id)
+        )
+        db.commit()
+        return cursor.rowcount > 0 # True if a row was updated
+    except sqlite3.Error as e:
+        print(f"DB_USER_FEEDBACK: Error updating feedback status for ID {feedback_id}: {e}")
+        return False
+
+def get_feedback_by_id(db, feedback_id: int) -> 'sqlite3.Row | None':
+    """Fetches a single feedback item by its ID, including user details."""
+    try:
+        cursor = db.execute(
+            """
+            SELECT uf.id, uf.user_id, uf.message_content, uf.type, uf.created_at, uf.is_resolved,
+                   u.username, u.profile_picture_filename
+            FROM user_feedback uf
+            JOIN users u ON uf.user_id = u.id
+            WHERE uf.id = ?
+            """,
+            (feedback_id,)
+        )
+        return cursor.fetchone() # Returns sqlite3.Row or None
+    except sqlite3.Error as e:
+        print(f"DB_USER_FEEDBACK: Error fetching feedback by ID {feedback_id}: {e}")
+        return None

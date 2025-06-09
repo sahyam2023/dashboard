@@ -252,6 +252,7 @@ from database import (
     get_user_conversations, get_conversation_by_users,
     mark_messages_as_read, get_conversation_by_id, get_message_by_id,
     get_total_unread_messages, get_online_users_count,
+    add_user_feedback, get_user_feedback, update_feedback_resolved_status, get_feedback_by_id
 )
 from flask import Blueprint
 
@@ -11230,6 +11231,128 @@ def emit_online_users_count():
         app.logger.error(f"APP_SOCKET: Error emitting online_users_count: {e}")
 
 # --- End SocketIO Event Handlers ---
+
+# --- User Feedback Endpoints ---
+@app.route('/api/feedback', methods=['POST'])
+@active_user_required
+def user_submit_feedback():
+    current_user_id = int(get_jwt_identity())
+    data = request.get_json()
+
+    if not data:
+        return jsonify(msg="Missing JSON data"), 400
+
+    message_content = data.get('message_content')
+    feedback_type = data.get('type')
+
+    if not message_content or not isinstance(message_content, str) or not message_content.strip():
+        return jsonify(msg="message_content (string) is required."), 400
+    if not feedback_type or feedback_type not in ('bug', 'feedback'):
+        return jsonify(msg="type must be 'bug' or 'feedback'."), 400
+
+    db = get_db()
+    try:
+        feedback_id = database.add_user_feedback(db, current_user_id, message_content, feedback_type)
+        if feedback_id:
+            log_audit_action(
+                action_type='USER_SUBMITTED_FEEDBACK',
+                target_table='user_feedback',
+                target_id=feedback_id,
+                details={'type': feedback_type, 'message_snippet': message_content[:50]}
+            )
+            # Fetch the newly created feedback item to return in the response
+            new_feedback_raw = database.get_feedback_by_id(db, feedback_id)
+            if new_feedback_raw:
+                # Convert timestamp to ISO format for the response
+                new_feedback = convert_timestamps_to_ist_iso(dict(new_feedback_raw), ['created_at'])
+                return jsonify(new_feedback), 201
+            else:
+                # This case should ideally not happen if add_user_feedback returned an ID
+                app.logger.error(f"Failed to retrieve feedback {feedback_id} after creation.")
+                return jsonify(msg="Feedback submitted but failed to retrieve details."), 500
+        else:
+            return jsonify(msg="Failed to submit feedback due to a database error."), 500
+    except Exception as e:
+        app.logger.error(f"Error submitting user feedback: {e}", exc_info=True)
+        return jsonify(msg="An unexpected server error occurred while submitting feedback."), 500
+
+@app.route('/api/admin/feedback', methods=['GET'])
+@admin_required
+def admin_get_feedback():
+    page = request.args.get('page', default=1, type=int)
+    per_page = request.args.get('per_page', default=10, type=int)
+    resolved_status = request.args.get('resolved_status', default=None, type=str) # 'true', 'false', 'all'
+    sort_by = request.args.get('sort_by', default='created_at', type=str)
+    sort_order = request.args.get('sort_order', default='desc', type=str)
+
+    # Validate resolved_status
+    if resolved_status is not None and resolved_status.lower() not in ['true', 'false', 'all']:
+        return jsonify(msg="Invalid resolved_status. Must be 'true', 'false', or 'all'."), 400
+    if resolved_status is not None:
+        resolved_status = resolved_status.lower()
+
+
+    db = get_db()
+    try:
+        feedback_items_raw, total_feedback = database.get_user_feedback(
+            db, page, per_page, resolved_status, sort_by, sort_order
+        )
+
+        # Convert timestamps to ISO format for the response
+        feedback_items = [convert_timestamps_to_ist_iso(dict(item), ['created_at']) for item in feedback_items_raw]
+
+        total_pages = math.ceil(total_feedback / per_page) if total_feedback > 0 else 1
+
+        return jsonify({
+            "feedback": feedback_items,
+            "total_feedback": total_feedback,
+            "total_pages": total_pages,
+            "page": page,
+            "per_page": per_page
+        }), 200
+    except Exception as e:
+        app.logger.error(f"Error retrieving user feedback for admin: {e}", exc_info=True)
+        return jsonify(msg="An unexpected server error occurred while retrieving feedback."), 500
+
+@app.route('/api/admin/feedback/<int:feedback_id>/resolve', methods=['PUT'])
+@admin_required
+def admin_resolve_feedback(feedback_id):
+    data = request.get_json()
+    if not data or 'is_resolved' not in data or not isinstance(data['is_resolved'], bool):
+        return jsonify(msg="is_resolved (boolean) is required in JSON body."), 400
+
+    is_resolved = data['is_resolved']
+    db = get_db()
+
+    # Check if feedback item exists first
+    existing_feedback = database.get_feedback_by_id(db, feedback_id)
+    if not existing_feedback:
+        return jsonify(msg=f"Feedback item with ID {feedback_id} not found."), 404
+
+    try:
+        success = database.update_feedback_resolved_status(db, feedback_id, is_resolved)
+        if success:
+            log_audit_action(
+                action_type='ADMIN_UPDATED_FEEDBACK_STATUS',
+                target_table='user_feedback',
+                target_id=feedback_id,
+                details={'is_resolved': is_resolved}
+            )
+            # Fetch the updated feedback item to return
+            updated_feedback_raw = database.get_feedback_by_id(db, feedback_id)
+            if updated_feedback_raw:
+                updated_feedback = convert_timestamps_to_ist_iso(dict(updated_feedback_raw), ['created_at'])
+                return jsonify(updated_feedback), 200
+            else:
+                # Should not happen if update was successful
+                app.logger.error(f"Failed to retrieve feedback {feedback_id} after status update.")
+                return jsonify(msg="Feedback status updated but failed to retrieve details."), 500
+        else:
+            # This might happen if the rowcount was 0 for some reason other than not found (e.g., DB error not caught by exception)
+            return jsonify(msg="Failed to update feedback status."), 500
+    except Exception as e:
+        app.logger.error(f"Error updating feedback status for ID {feedback_id}: {e}", exc_info=True)
+        return jsonify(msg="An unexpected server error occurred while updating feedback status."), 500
 
 # --- Custom Silent Logger for Eventlet ---
 class SilentLogger:

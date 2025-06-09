@@ -408,9 +408,21 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
         setValue('typedVersionString', '');
       }
     } catch (err: any) {
-      const message = err.response?.data?.msg || err.message || `Failed to ${isEditMode && data.inputMode === 'url' ? 'update' : 'add'} patch.`;
-      showErrorToast(message); // Standardized
-      if (data.inputMode === 'upload') setIsUploading(false); // Also set isUploading to false on error
+      const backendMessage = err.response?.data?.msg || err.message;
+      let userMessage = `Failed to ${isEditMode ? 'update' : 'add'} patch.`;
+
+      if (backendMessage && typeof backendMessage === 'string' && backendMessage.includes("UNIQUE constraint failed")) {
+        if (isEditMode) {
+          userMessage = "A patch with this name already exists for this software/version. Please use a different name or check for duplicates.";
+        } else {
+          userMessage = "A patch with this name already exists for this software/version. Please use a different name.";
+        }
+      } else if (backendMessage) {
+        userMessage = backendMessage;
+      }
+      showErrorToast(userMessage);
+      // Future: Add checks for other constraint errors here
+      if (data.inputMode === 'upload') setIsUploading(false);
     } finally {
       setIsLoading(false);
       if (data.inputMode === 'upload') setIsUploading(false); // Ensure isUploading is reset

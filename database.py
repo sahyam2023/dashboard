@@ -374,7 +374,7 @@ def add_default_watch_preferences(db, user_id: int):
         except Exception as e: # Catch any unexpected error from add_watch_preference
             print(f"DB_WATCH_PREFS: Unexpected error adding default preference ({content_type}, {category}) for user {user_id}: {e}")
             
-    print(f"DB_WATCH_PREFS: Added {added_count} default watch preferences for user {user_id}.")
+    # print(f"DB_WATCH_PREFS: Added {added_count} default watch preferences for user {user_id}.")
     return added_count
 
 # --- Comment Management Functions ---

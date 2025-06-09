@@ -11034,11 +11034,13 @@ def handle_join_conversation(user_id, data): # user_id is now passed by the deco
     # Join user-specific room (for direct emits like new_conversation_started)
     user_room_name = f'user_{current_user_id}'
     join_room(user_room_name)
-    app.logger.info(f"SocketIO: User {current_user_id} (SID: {request.sid}) joined their user-specific room '{user_room_name}'")
+    app.logger.info(f"[CHAT_JOIN] User {current_user_id} (SID: {request.sid}) successfully joined user-specific room: {user_room_name}")
 
     # Join conversation-specific room
     join_room(room_name)
-    app.logger.info(f"SocketIO: User {current_user_id} (SID: {request.sid}) joined conversation room 'conversation_{room_name}' (actual room name: '{room_name}')")
+    # The existing log below is already quite good, but the new one is more specific to the action.
+    # app.logger.info(f"SocketIO: User {current_user_id} (SID: {request.sid}) joined conversation room 'conversation_{room_name}' (actual room name: '{room_name}')")
+    app.logger.info(f"[CHAT_JOIN] User {current_user_id} (SID: {request.sid}) successfully joined conversation-specific room: {room_name}")
     emit('joined_conversation_success', {'conversation_id': room_name}, room=request.sid)
 
 
@@ -11052,7 +11054,7 @@ def handle_mark_as_read(user_id, data): # user_id is now passed by the decorator
     # Token validation handled by decorator context
     # current_user_id_str is now user_id passed as function argument
 
-    current_user_id = user_id # Use the user_id from the decorator
+    current_user_id = user_id # Use the user_id from the decorator (the one reading messages)
 
     if not conversation_id: 
         app.logger.warning("SocketIO 'mark_as_read': conversation_id missing from event data.")
@@ -11068,35 +11070,51 @@ def handle_mark_as_read(user_id, data): # user_id is now passed by the decorator
         
     db = get_db()
     try:
-        # mark_messages_as_read now returns (rows_updated, messages_details_list)
-        # and handles its own commit.
+        # This function call should return details of messages that are now read by current_user_id.
+        # Importantly, for our purpose, it should include messages that were sent by the OTHER party.
         rows_updated, messages_details_list = mark_messages_as_read(db, conversation_id_int, current_user_id)
-        # db.commit() # Handled by mark_messages_as_read
+        # db.commit() # This should be handled within mark_messages_as_read or just after it if it doesn't commit itself. Assuming it's handled.
 
-        app.logger.info(f"SocketIO: Marked {rows_updated} messages as read for user {current_user_id} in conversation {conversation_id_int}.")
+        app.logger.info(f"SocketIO: Mark_as_read result for user {current_user_id} in conversation {conversation_id_int}: rows_updated={rows_updated}, messages_details_count={len(messages_details_list if messages_details_list else [])}.")
         
-        emit('unread_cleared', {'conversation_id': conversation_id_int, 'messages_marked_read': rows_updated}) # Emitting to request.sid by default
-        emit_unread_chat_count(current_user_id)
+        emit('unread_cleared', {'conversation_id': conversation_id_int, 'messages_marked_read': rows_updated}, room=request.sid)
+        emit_unread_chat_count(current_user_id) # For the user who just read
 
-        if rows_updated > 0 and messages_details_list:
-            sender_to_message_ids = {}
+        # Determine the other user in the conversation to notify them
+        conversation_details = get_conversation_by_id(db, conversation_id_int)
+        if not conversation_details:
+            app.logger.error(f"SocketIO 'mark_as_read': Conversation {conversation_id_int} not found after marking messages.")
+            return
+
+        other_user_id = None
+        if current_user_id == conversation_details['user1_id']:
+            other_user_id = conversation_details['user2_id']
+        else:
+            other_user_id = conversation_details['user1_id']
+        
+        # Now, prepare to notify this 'other_user_id' (the sender of the messages that were just read)
+        if other_user_id and messages_details_list:
+            message_ids_read_from_other_user = []
             for msg_detail in messages_details_list:
-                original_sender_id = msg_detail['sender_id']
-                message_id = msg_detail['id']
-                if original_sender_id != current_user_id: # Don't notify self
-                    if original_sender_id not in sender_to_message_ids:
-                        sender_to_message_ids[original_sender_id] = []
-                    sender_to_message_ids[original_sender_id].append(message_id)
+                # We only care about messages sent by the other_user_id that current_user_id just read
+                if msg_detail['sender_id'] == other_user_id:
+                     message_ids_read_from_other_user.append(msg_detail['id'])
             
-            for notified_sender_id, msg_ids_list in sender_to_message_ids.items():
+            if message_ids_read_from_other_user:
                 payload = {
                     'conversation_id': conversation_id_int,
-                    'reader_id': current_user_id,
-                    'message_ids': msg_ids_list
+                    'reader_id': current_user_id, # User who read the messages
+                    'message_ids': message_ids_read_from_other_user # IDs of messages sent by other_user_id that are now read
                 }
-                target_room = f'user_{notified_sender_id}'
+                target_room = f'user_{other_user_id}' # Notify the other user (original sender)
+                
+                app.logger.info(f"[CHAT_MARK_READ_EMIT] conversation_id: {conversation_id_int}, reader_id: {current_user_id}, notified_sender_id: {other_user_id}, target_room: {target_room}, payload: {payload}")
                 socketio.emit('messages_read_update', payload, room=target_room)
-                app.logger.info(f"SocketIO: Emitted 'messages_read_update' to user {notified_sender_id} (room {target_room}) for {len(msg_ids_list)} messages in conversation {conversation_id_int} read by {current_user_id}")
+                app.logger.info(f"SocketIO: Emitted 'messages_read_update' to user {other_user_id} (room {target_room}) for {len(message_ids_read_from_other_user)} messages in conversation {conversation_id_int} read by {current_user_id}.")
+            else:
+                app.logger.info(f"SocketIO 'mark_as_read': No messages from sender {other_user_id} found in messages_details_list to notify about for conversation {conversation_id_int}.")
+        elif other_user_id: # messages_details_list is empty or None
+            app.logger.info(f"SocketIO 'mark_as_read': messages_details_list is empty for conversation {conversation_id_int}. No 'messages_read_update' event to emit to user {other_user_id}.")
 
     except Exception as e:
         # db.rollback() # Rollback is handled within mark_messages_as_read if error occurs there,

@@ -1014,22 +1014,33 @@ def get_user_conversations(db, user_id: int) -> list['sqlite3.Row']:
 def mark_messages_as_read(db, conversation_id: int, user_id: int) -> int:
     """
     Marks messages in a conversation as read for a specific user where they are the recipient.
-    Returns a tuple: (number of messages marked as read, list of {'id': message_id, 'sender_id': original_sender_id} for updated messages).
+    Returns a tuple: (number of messages whose status was changed by this call, 
+                      list of {'id': message_id, 'sender_id': original_sender_id} for all messages from the other user that are now read).
     """
-    try:
-        # First, select the IDs and sender_ids of messages that will be updated
-        # user_id here is the recipient who is reading the messages
-        select_cursor = db.execute(
-            "SELECT id, sender_id FROM messages WHERE conversation_id = ? AND recipient_id = ? AND is_read = FALSE",
-            (conversation_id, user_id)
-        )
-        messages_to_update_details = [{'id': row[0], 'sender_id': row[1]} for row in select_cursor.fetchall()]
+    reader_user_id = user_id # Alias for clarity
 
-        if not messages_to_update_details:
-            # No messages to update, return early
+    try:
+        # Determine the other user_id in the conversation
+        conv_details_cursor = db.execute(
+            "SELECT user1_id, user2_id FROM conversations WHERE id = ?",
+            (conversation_id,)
+        )
+        conv_row = conv_details_cursor.fetchone()
+        if not conv_row:
+            print(f"DB_MESSAGES: Conversation ID {conversation_id} not found during mark_as_read.")
+            return 0, []
+        
+        other_user_id = None
+        if conv_row[0] == reader_user_id:
+            other_user_id = conv_row[1]
+        elif conv_row[1] == reader_user_id:
+            other_user_id = conv_row[0]
+        else:
+            # This should not happen if reader_user_id is part of the conversation
+            print(f"DB_MESSAGES: reader_user_id {reader_user_id} not part of conversation {conversation_id}.")
             return 0, []
 
-        # Then, execute the update
+        # Perform the UPDATE to mark messages as read
         update_cursor = db.execute(
             """
             UPDATE messages
@@ -1038,16 +1049,28 @@ def mark_messages_as_read(db, conversation_id: int, user_id: int) -> int:
               AND recipient_id = ?
               AND is_read = FALSE
             """,
-            (conversation_id, user_id)
+            (conversation_id, reader_user_id)
         )
-        db.commit()
-        rows_updated = update_cursor.rowcount
+        rows_updated_count = update_cursor.rowcount
+        db.commit() # Commit the update
+
+        # Now, SELECT all messages in this conversation sent by the other_user_id to the reader_user_id
+        # that are currently marked as read. This list will be used by app.py to notify the sender.
+        # This ensures that even if rows_updated_count is 0 (messages were already read by another means),
+        # we still gather the list of messages that the sender should be notified about.
+        # We are interested in messages *sent by the other user* that are now read by the reader.
+        select_read_messages_cursor = db.execute(
+            "SELECT id, sender_id FROM messages WHERE conversation_id = ? AND sender_id = ? AND recipient_id = ? AND is_read = TRUE ORDER BY created_at DESC",
+            (conversation_id, other_user_id, reader_user_id)
+        )
+        # The sender_id in these details will be other_user_id.
+        all_relevant_read_messages_details = [{'id': row[0], 'sender_id': row[1]} for row in select_read_messages_cursor.fetchall()]
         
-        # Return the count of updated rows and the list of message details (id, sender_id)
-        return rows_updated, messages_to_update_details
+        return rows_updated_count, all_relevant_read_messages_details
     except sqlite3.Error as e:
-        # print(f"DB_MESSAGES: Error marking messages as read for conversation {conversation_id}, user {user_id}: {e}")
-        return 0, [] # Return empty list on error
+        # print(f"DB_MESSAGES: Error marking messages as read for conversation {conversation_id}, user {reader_user_id}: {e}")
+        db.rollback() # Rollback on error
+        return 0, []
 
 
 def get_total_unread_messages(db, user_id: int) -> int:

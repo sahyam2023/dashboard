@@ -295,7 +295,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-center">
-                    <div className="flex items-center space-x-1">
+                    <div className="flex items-center space-x-1 min-w-0">
                       <p className={`text-sm font-semibold truncate ${
                         selectionModeEnabled && isSelected 
                           ? 'text-green-700 dark:text-green-300' 

@@ -68,34 +68,56 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected, targetUser
     }
   }, [socket, socketConnected]);
 
-  const handleUserSelect = useCallback(async (selectedUser: User) => {
-    const currentUserIdFromHook = user?.id;
-    if (!currentUserIdFromHook) {
-      console.error("Current user not set, cannot start conversation.");
-      showToastNotification("Error: Current user not identified.", "error");
-      return;
+const handleUserSelect = useCallback(async (selectedUser: User) => {
+  const currentUserIdFromHook = user?.id;
+  if (!currentUserIdFromHook) {
+    console.error("Current user not set, cannot start conversation.");
+    showToastNotification("Error: Current user not identified.", "error");
+    return;
+  }
+  if (selectedUser.id === currentUserIdFromHook) {
+    showToastNotification("You cannot start a conversation with yourself.", "info");
+    return;
+  }
+
+  try {
+    // console.log(`ChatMain: Attempting to find conversation with user ID: ${selectedUser.id}`);
+    const existingConversation = await api.findConversationByUserId(selectedUser.id);
+    // console.log('ChatMain: Result from findConversationByUserId:', existingConversation);
+
+    if (existingConversation && typeof existingConversation.conversation_id === 'number') {
+      // console.log('ChatMain: Existing conversation found, setting it:', existingConversation);
+      setSelectedConversation(existingConversation);
+      setCurrentView('chat');
+      return; 
+    } else if (existingConversation) {
+      // console.warn('ChatMain: findConversationByUserId returned a truthy but invalid object. Proceeding with provisional.', existingConversation);
     }
-    if (selectedUser.id === currentUserIdFromHook) {
-      showToastNotification("You cannot start a conversation with yourself.", "info");
-      return;
-    }
-    const provisionalConversation: Conversation = {
-      conversation_id: null,
-      user1_id: currentUserIdFromHook,
-      user2_id: selectedUser.id,
-      other_user_id: selectedUser.id,
-      other_username: selectedUser.username,
-      other_profile_picture_url: selectedUser.profile_picture_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(selectedUser.username)}&background=random&color=fff`,
-      last_message_content: null,
-      last_message_created_at: null,
-      last_message_sender_id: null,
-      unread_messages_count: 0,
-      created_at: new Date().toISOString(),
-      other_profile_picture: selectedUser.profile_picture_filename || null,
-    };
-    setSelectedConversation(provisionalConversation);
-    setCurrentView('chat');
-  }, [user, showToastNotification]); // Removed setSelectedConversation, setCurrentView from deps as they are stable state setters
+    // console.log('ChatMain: No valid existing conversation found, creating provisional.');
+
+  } catch (error: any) {
+    console.error('ChatMain: Error trying to find/validate existing conversation:', error);
+    showToastNotification("Could not check for existing conversations. Starting a new chat window.", "warning");
+  }
+
+  const provisionalConversation: Conversation = {
+    conversation_id: null,
+    user1_id: currentUserIdFromHook,
+    user2_id: selectedUser.id,
+    other_user_id: selectedUser.id,
+    other_username: selectedUser.username,
+    other_profile_picture_url: selectedUser.profile_picture_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(selectedUser.username)}&background=random&color=fff`,
+    last_message_content: null,
+    last_message_created_at: null,
+    last_message_sender_id: null,
+    unread_messages_count: 0,
+    created_at: new Date().toISOString(),
+    other_profile_picture: selectedUser.profile_picture_filename || null,
+  };
+  // console.log('ChatMain: Setting provisional conversation:', provisionalConversation);
+  setSelectedConversation(provisionalConversation);
+  setCurrentView('chat');
+}, [user, showToastNotification]); // Dependencies: user, showToastNotification. api assumed stable.
 
   // useEffect to handle targetUser prop changes
   useEffect(() => {
@@ -227,7 +249,7 @@ const ChatMain: React.FC<ChatMainProps> = ({ socket, socketConnected, targetUser
     // Changed h-screen to h-full to fit within modal constraints
     <div className="flex h-full font-sans antialiased text-gray-800 dark:text-gray-100 bg-white dark:bg-gray-800">
       {/* Sidebar for Conversation List or User List */}
-      <div className={`w-full md:w-1/3 lg:w-1/4 xl:w-1/5 border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex flex-col
+      <div className={`w-full md:w-2/5 lg:w-1/3 xl:w-1/4 border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex flex-col
       ${(currentView === 'chat' && selectedConversation) ? 'hidden md:flex' : 'flex'}`}
     >
       {currentView === 'users' ? (

@@ -646,6 +646,43 @@ export async function startConversationAndSendMessage(
     throw error;
   }
 }
+
+export async function findConversationByUserId(otherUserId: number): Promise<ChatConversation | null> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/chat/conversations/with_user/${otherUserId}`, {
+      method: 'GET',
+      headers: { ...getAuthHeader(), 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+    });
+
+    if (response.status === 404) {
+      try { await response.text(); } catch (e) { /* Consume body if any, ignore error */ }
+      setGlobalOfflineStatus(false); 
+      return null; 
+    }
+
+    const responseData = await handleApiError(response, `Finding conversation with user ${otherUserId}`);
+
+    if (response.ok) {
+      if (responseData && typeof responseData.conversation_id === 'number') {
+        return responseData as ChatConversation;
+      } else {
+        // console.warn('findConversationByUserId: Received OK response but data is not a valid conversation object:', responseData);
+        return null;
+      }
+    }
+    
+    // console.warn('findConversationByUserId: Unexpected state after handleApiError for non-OK response.');
+    return null; 
+
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    // console.error(`Error in findConversationByUserId for user ${otherUserId}:`, error); // Error will be logged by ChatMain
+    throw error; 
+  }
+}
 // --- End Chat API Functions ---
 
 // --- Super Admin File Permission Management Functions ---

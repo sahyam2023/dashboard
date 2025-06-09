@@ -4,10 +4,11 @@ import { User } from '../components/chat/types'; // User type from chat componen
 
 // Define the shape of the context
 interface ChatActionContextType {
-  openChatWithUser: (user: User) => void;
+  openChatWithUser: (user: User | null) => void;
   closeChatModal: () => void;
   isChatModalOpen: boolean;
   targetUser: User | null;
+  isDefault?: boolean;
 }
 
 // Create the context with default stub values
@@ -16,6 +17,7 @@ const ChatActionContext = createContext<ChatActionContextType>({
   closeChatModal: () => { console.warn("ChatActionContext: closeChatModal called on default context value."); },
   isChatModalOpen: false,
   targetUser: null,
+  isDefault: true,
 });
 
 export const useChatActions = () => {
@@ -28,7 +30,7 @@ export const useChatActions = () => {
   // which shouldn't happen if the default value is correctly typed and provided.
   // However, the default stubs are primarily for type-safety and basic fallback.
   // A more explicit check can be: if (context === ChatActionContext._currentValue) to see if it's the default.
-  if (context.openChatWithUser === ChatActionContext.defaultValue?.openChatWithUser) {
+  if (context.isDefault === true) {
      // This check is a bit fragile as it relies on comparing function references.
      // A more robust way might be to include a specific flag in the default context value, e.g. isDefault: true
      // Or simply ensure components handle the stubbed functions gracefully if they are ever invoked.
@@ -46,10 +48,15 @@ export const ChatActionContextProvider: React.FC<ChatActionContextProviderProps>
   const [isChatModalOpen, setIsChatModalOpen] = useState<boolean>(false);
   const [targetUser, setTargetUser] = useState<User | null>(null);
 
-  const openChatWithUser = useCallback((user: User) => {
-    setTargetUser(user);
+  const openChatWithUser = useCallback((user: User | null) => {
+    if (user) {
+      setTargetUser(user);
+      console.log(`Chat modal opened for user: ${user.username} (ID: ${user.id})`);
+    } else {
+      setTargetUser(null);
+      console.log("Chat modal opened without a specific target user.");
+    }
     setIsChatModalOpen(true);
-    console.log(`Chat modal opened for user: ${user.username} (ID: ${user.id})`);
     // In a real app, you might also want to trigger side effects here,
     // like fetching chat history for this user, etc.
   }, []); // No dependencies, as it only uses setters

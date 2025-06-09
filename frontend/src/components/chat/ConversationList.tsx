@@ -70,7 +70,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
 
   // Handler for user_online event
   const handleUserOnline = useCallback((data: { user_id: number }) => {
-    console.log('SocketIO: user_online event received in ConversationList', data);
+    // console.log('SocketIO: user_online event received in ConversationList', data);
     setConversations(prevConvs =>
       prevConvs.map(conv =>
         conv.other_user_id === data.user_id ? { ...conv, other_user_is_online: true, other_user_last_seen: null } : conv
@@ -80,7 +80,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
 
   // Handler for user_offline event
   const handleUserOffline = useCallback((data: { user_id: number; last_seen: string }) => {
-    console.log('SocketIO: user_offline event received in ConversationList', data);
+    // console.log('SocketIO: user_offline event received in ConversationList', data);
     setConversations(prevConvs =>
       prevConvs.map(conv =>
         conv.other_user_id === data.user_id ? { ...conv, other_user_is_online: false, other_user_last_seen: data.last_seen } : conv
@@ -92,7 +92,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
     if (!socket || !currentUserId) return;
 
     const handleNewMessage = (newMessage: Message) => {
-      console.log('SocketIO: new_message received in ConversationList', newMessage);
+      // console.log('SocketIO: new_message received in ConversationList', newMessage);
       setConversations(prevConvs => {
         const updatedConvs = prevConvs.map(conv => {
           if (conv.conversation_id === newMessage.conversation_id) {
@@ -122,7 +122,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
     };
 
     socket.on('new_message', handleNewMessage);
-    console.log("ConversationList: 'new_message' listener attached.");
+    // console.log("ConversationList: 'new_message' listener attached.");
 
     // Listener for when messages in a conversation are read by current user (e.g., by opening ChatWindow)
     // This is useful if ChatWindow marks messages as read and ConversationList needs to update unread count.
@@ -140,7 +140,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
     socket.on('messages_read', handleMessagesRead); // Assume 'messages_read' is emitted by client/server when read
 
     const handleUnreadCleared = (data: { conversation_id: number; messages_marked_read: number }) => {
-      console.log('SocketIO: unread_cleared received in ConversationList', data);
+      // console.log('SocketIO: unread_cleared received in ConversationList', data);
       if (data.conversation_id) {
         setConversations(prevConvs =>
           prevConvs.map(c =>
@@ -151,10 +151,10 @@ const ConversationList: React.FC<ConversationListProps> = ({
       }
     };
     socket.on('unread_cleared', handleUnreadCleared);
-    console.log("ConversationList: 'unread_cleared' listener attached.");
+    // console.log("ConversationList: 'unread_cleared' listener attached.");
 
     const handleNewConversationStarted = (newConversation: Conversation) => {
-      console.log('SocketIO: new_conversation_started received in ConversationList', newConversation);
+      // console.log('SocketIO: new_conversation_started received in ConversationList', newConversation);
       // Add to the beginning of the list and re-sort (though adding to beginning often implies newest)
       setConversations(prevConvs => {
         // Avoid adding duplicates if event is somehow received multiple times
@@ -171,15 +171,15 @@ const ConversationList: React.FC<ConversationListProps> = ({
       });
     };
     socket.on('new_conversation_started', handleNewConversationStarted);
-    console.log("ConversationList: 'new_conversation_started' listener attached.");
+    // console.log("ConversationList: 'new_conversation_started' listener attached.");
 
     // Listeners for global online/offline events
     socket.on('user_online', handleUserOnline);
     socket.on('user_offline', handleUserOffline);
-    console.log("ConversationList: 'user_online' and 'user_offline' listeners attached.");
+    // console.log("ConversationList: 'user_online' and 'user_offline' listeners attached.");
 
     const handleMessagesReadUpdate = (data: { conversation_id: string | number; reader_id: number; message_ids: number[] }) => {
-      console.log('ConversationList: messages_read_update received', data);
+      // console.log('ConversationList: messages_read_update received', data);
       const targetConversationId = typeof data.conversation_id === 'string' ? parseInt(data.conversation_id, 10) : data.conversation_id;
       
       setConversations(prevConversations => 
@@ -190,7 +190,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
             convo.last_message_id && // The conversation has a last_message_id tracked
             data.message_ids.includes(convo.last_message_id) // And this specific last message is among those read
           ) {
-            console.log(`ConversationList: Updating last message read status for conversation ${targetConversationId}`);
+            // console.log(`ConversationList: Updating last message read status for conversation ${targetConversationId}`);
             return { ...convo, last_message_is_read: true, unread_messages_count: 0 };
           }
           return convo;
@@ -199,7 +199,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
     };
 
     socket.on('messages_read_update', handleMessagesReadUpdate);
-    console.log("ConversationList: 'messages_read_update' listener attached.");
+    // console.log("ConversationList: 'messages_read_update' listener attached.");
 
     return () => {
       socket.off('new_message', handleNewMessage);
@@ -209,7 +209,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
       socket.off('user_online', handleUserOnline);
       socket.off('user_offline', handleUserOffline);
       socket.off('messages_read_update', handleMessagesReadUpdate); // Detach the new listener
-      console.log("ConversationList: All event listeners detached.");
+      // console.log("ConversationList: All event listeners detached.");
     };
   }, [socket, currentUserId, loadConversations, selectedConversationId, handleUserOnline, handleUserOffline, setConversations]); // Added setConversations
 

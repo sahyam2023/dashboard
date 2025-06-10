@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useForm, Controller, SubmitHandler, FieldErrors } from 'react-hook-form';
 import * as yup from 'yup';
 import { yupResolver } from '@hookform/resolvers/yup';
-import { showSuccessToast, showErrorToast } from '../../utils/toastUtils'; // Standardized toast
+import { showSuccessToast, showErrorToast, showWarningToast } from '../../utils/toastUtils'; // Standardized toast
 import {
   Software,
   Patch as PatchType,
@@ -17,7 +17,7 @@ import {
   addAdminPatchWithUrl,
   // uploadAdminPatchFile, // To be replaced
   editAdminPatchWithUrl,
-  // editAdminPatchFile, // To be replaced
+  editAdminPatchFile, // <<<< Ensure this is imported
   uploadFileInChunks // New chunked upload service
 } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
@@ -155,6 +155,21 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
     };
   }, [isUploading]);
 
+  // Effect to warn user if they change tabs during upload
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && isUploading) {
+        showWarningToast('Changing tabs or minimizing the window might interrupt the upload process.');
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [isUploading]); // Dependency array includes isUploading
+
   // Fetch software list for the product dropdown
   useEffect(() => {
     if (isAuthenticated && (role === 'admin' || role === 'super_admin')) {
@@ -175,7 +190,7 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
       setValue('typedVersionString', '');
 
       const selectedSoftware = softwareList.find(sw => sw.id.toString() === watchedSoftwareId);
-      if (selectedSoftware && (selectedSoftware.name === 'VMS' || selectedSoftware.name === 'VA')) {
+      if (selectedSoftware && selectedSoftware.name === 'VA') {
         setIsVmsOrVaSoftware(true);
         // Fetch VMS versions specifically for the multi-select
         const vmsSoftware = softwareList.find(sw => sw.name === 'VMS');
@@ -362,50 +377,74 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
           }
         }
       } else { // inputMode === 'upload'
-        if (!data.selectedFile) {
-          if (isEditMode && patchToEdit && !patchToEdit.is_external_link && !data.selectedFile) {
-            showErrorToast("To update metadata of an existing uploaded patch without re-uploading, use a different form/feature. To replace the file, select a new file.");
-            setIsLoading(false);
-            return;
-          }
-          if (!data.selectedFile && !isEditMode) { // Should be caught by yup
-             showErrorToast("No file selected for upload.");
-             setIsLoading(false);
-             return;
-          }
-          // Fallthrough: if selectedFile is null in edit mode for an existing uploaded file, and user didn't select a new one,
-          // this implies they might expect metadata-only update, which this path doesn't do.
-          // However, yup validation might require a file if inputMode is 'upload'.
-          // For now, if we reach here with data.selectedFile, we proceed to upload.
-        }
-
-        // Metadata for chunked upload
-        const chunkMetadata = {
-            software_id: data.selectedSoftwareId,
-            ...(finalVersionId && { version_id: finalVersionId.toString() }),
-            ...(finalTypedVersionString && { typed_version_string: finalTypedVersionString }),
-            patch_name: data.patchName.trim(),
-            ...(data.releaseDate && { release_date: data.releaseDate }),
-            description: data.description?.trim() || '',
-            patch_by_developer: data.patch_by_developer?.trim() || '',
-            // Add compatibleVmsVersionIds to chunkMetadata if software is VMS/VA
-            ...(isVmsOrVaSoftware && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0 &&
-              { compatible_vms_version_ids_json: JSON.stringify(data.compatibleVmsVersionIds) }),
+        const payloadForFileUpload: EditPatchPayloadFlexible = {
+          // software_id is crucial for context, esp. if creating a new version string
+          software_id: parseInt(data.selectedSoftwareId),
+          patch_name: data.patchName.trim(),
+          description: data.description?.trim() || undefined,
+          release_date: data.releaseDate || undefined,
+          patch_by_developer: data.patch_by_developer?.trim() || undefined,
+          version_id: finalVersionId,
+          typed_version_string: finalTypedVersionString,
+          // compatible_vms_version_ids_json will be stringified by editAdminPatchFile if it's an array
+          compatible_vms_version_ids: (isVmsOrVaSoftware && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0)
+            ? data.compatibleVmsVersionIds // Pass as array, service function will stringify
+            : undefined,
         };
 
-        resultPatch = await uploadFileInChunks(
-            data.selectedFile!, // Assert not null, yup should ensure it's present
-            'patch',
-            chunkMetadata,
-            (progress) => setUploadProgress(progress)
-        );
-
-        // As uploadFileInChunks always creates a new patch entry with the current backend:
-        showSuccessToast(`Patch "${resultPatch.patch_name}" added successfully via chunked upload!`);
-        if (onPatchAdded) onPatchAdded(resultPatch); // Treat as new patch added
-        resetFormDefaults(true); // Reset form
-        setValue('selectedVersionId', '');
-        setValue('typedVersionString', '');
+        if (isEditMode && patchToEdit) {
+          // Editing an existing patch, and inputMode is 'upload'.
+          // This covers:
+          // 1. Original was uploaded file: user might replace file or just update metadata.
+          // 2. Original was URL: user is switching to an uploaded file (data.selectedFile must be present).
+          if (!patchToEdit.is_external_link || (patchToEdit.is_external_link && data.selectedFile)) {
+            resultPatch = await editAdminPatchFile(
+              patchToEdit.id,
+              payloadForFileUpload,
+              data.selectedFile || null // Pass new file if selected, or null for metadata-only update of existing file
+            );
+            showSuccessToast(`Patch "${resultPatch.patch_name}" updated successfully!`);
+            if (onPatchUpdated) onPatchUpdated(resultPatch);
+          } else {
+            // Fallback: Should be caught by Yup if switching from URL to upload without a file.
+            showErrorToast("If switching from a URL to an uploaded file, please select a file.");
+            setIsLoading(false);
+            setIsUploading(false);
+            return;
+          }
+        } else { // Not edit mode, so adding a new patch with a file upload
+          if (data.selectedFile) {
+            // Metadata for new chunked upload (uploadFileInChunks stringifies some fields itself)
+            const chunkMetadata = {
+                software_id: data.selectedSoftwareId, // Keep as string for uploadFileInChunks
+                ...(finalVersionId && { version_id: finalVersionId.toString() }),
+                ...(finalTypedVersionString && { typed_version_string: finalTypedVersionString }),
+                patch_name: data.patchName.trim(),
+                ...(data.releaseDate && { release_date: data.releaseDate }),
+                description: data.description?.trim() || '',
+                patch_by_developer: data.patch_by_developer?.trim() || '',
+                ...(isVmsOrVaSoftware && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0 &&
+                  { compatible_vms_version_ids_json: JSON.stringify(data.compatibleVmsVersionIds) }),
+            };
+            resultPatch = await uploadFileInChunks(
+              data.selectedFile,
+              'patch',
+              chunkMetadata,
+              (progress) => setUploadProgress(progress)
+            );
+            showSuccessToast(`Patch "${resultPatch.patch_name}" added successfully via chunked upload!`);
+            if (onPatchAdded) onPatchAdded(resultPatch);
+            resetFormDefaults(true);
+            setValue('selectedVersionId', '');
+            setValue('typedVersionString', '');
+          } else {
+            // Should be caught by Yup validation (file is required for new uploads)
+            showErrorToast("No file selected for upload. Please select a file.");
+            setIsLoading(false);
+            setIsUploading(false);
+            return;
+          }
+        }
       }
     } catch (err: any) {
       const backendMessage = err.response?.data?.msg || err.message;

@@ -1,9 +1,10 @@
 // frontend/src/components/chat/MessageItem.tsx
-import React, { useState, useEffect } from 'react'; // Added useState, useEffect
+import React, { useState, useEffect } from 'react';
 import { Message } from './types';
-import { FileText, Download, Image as ImageIcon, Video as VideoIcon, Music as AudioIcon, ShieldQuestion } from 'lucide-react';
+import { FileText, Download, Image as ImageIcon, Video as VideoIcon, Music as AudioIcon, ShieldQuestion, Loader2 } from 'lucide-react'; // Added Loader2
 import { formatToISTLocaleString } from '../../utils/dateUtils';
 import * as api from '../../services/api'; // Import the api service
+import { downloadChatFile } from '../../services/api'; // Specific import for the new function
 
 interface MessageItemProps {
   message: Message;
@@ -15,6 +16,28 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, currentUserId }) => 
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [isLoadingImage, setIsLoadingImage] = useState<boolean>(false);
   const [imageError, setImageError] = useState<string | null>(null);
+  const [isDownloading, setIsDownloading] = useState<boolean>(false); // State for download status
+
+  // Handler for file downloads
+  const handleFileDownload = async (event: React.MouseEvent<HTMLAnchorElement>, fileUrlToDownload: string, fileNameToDownload: string) => {
+    event.preventDefault();
+    if (isDownloading) return; // Prevent multiple downloads
+
+    setIsDownloading(true);
+    console.log(`Starting download for: ${fileNameToDownload}`); // Placeholder for better UI feedback
+
+    try {
+      await downloadChatFile(fileUrlToDownload, fileNameToDownload);
+      // Consider showing a success toast here if a notification system is available
+      console.log(`${fileNameToDownload} download initiated successfully.`);
+    } catch (error: any) {
+      console.error(`Download failed for ${fileNameToDownload}:`, error.message || error);
+      // Consider showing an error toast here
+      alert(`Download failed for ${fileNameToDownload}: ${error.message || 'Unknown error'}`); // Simple alert for now
+    } finally {
+      setIsDownloading(false);
+    }
+  };
 
   useEffect(() => {
     let objectUrl: string | null = null;
@@ -64,33 +87,63 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, currentUserId }) => 
         }
         if (imageSrc) {
           return (
-            <a href={message.file_url} target="_blank" rel="noopener noreferrer" className="block mt-1"> {/* Link still points to original URL for open in new tab */}
+            <a 
+              href="#" 
+              onClick={(e) => handleFileDownload(e, message.file_url!, message.file_name || 'downloaded_image')}
+              className="block mt-1 relative"
+              title={isDownloading ? "Downloading..." : `Download ${message.file_name || 'image'}`}
+            >
               <img
-                src={imageSrc} // Use blob URL for display
+                src={imageSrc}
                 alt={message.file_name || 'Image attachment'}
-                className="max-w-md md:max-w-lg h-auto rounded-lg object-contain max-h-96"
+                className={`max-w-md md:max-w-lg h-auto rounded-lg object-contain max-h-96 ${isDownloading ? 'opacity-50' : ''}`}
               />
+              {isDownloading && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-25 rounded-lg">
+                  <Loader2 className="animate-spin text-white" size={32} />
+                </div>
+              )}
             </a>
           );
         }
-        return <p className="text-xs italic p-2">Image not available</p>; // Fallback if src is null but was expected
+        return <p className="text-xs italic p-2">Image not available</p>;
       case 'video':
         return (
           <div className="mt-1">
             <video src={message.file_url} controls className="max-w-full rounded-lg max-h-64 sm:max-h-80">
               Your browser does not support the video tag.
-              <a href={message.file_url} download={message.file_name} className={`${commonLinkClasses} ${linkColor}`}>Download video</a>
+              <a 
+                href="#" 
+                onClick={(e) => handleFileDownload(e, message.file_url!, message.file_name || 'downloaded_video')} 
+                className={`${commonLinkClasses} ${linkColor} ${isDownloading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                title={isDownloading ? "Downloading..." : `Download ${message.file_name || 'video'}`}
+              >
+                {isDownloading ? 'Downloading video...' : 'Download video'}
+              </a>
             </video>
+            {/* Optional: Add a separate download button/link if needed, styled consistently */}
           </div>
         );
       case 'audio':
         return (
           <div className="mt-1 flex flex-col items-start">
-             <audio controls src={message.file_url} className="w-full sm:w-auto">
+            <audio controls src={message.file_url} className="w-full sm:w-auto">
               Your browser does not support the audio element.
             </audio>
-            <a href={message.file_url} download={message.file_name} className={`mt-1.5 text-xs ${commonLinkClasses} ${linkColor}`}>
-              Download {message.file_name || 'audio file'}
+            <a 
+              href="#" 
+              onClick={(e) => handleFileDownload(e, message.file_url!, message.file_name || 'downloaded_audio')}
+              className={`mt-1.5 text-xs ${commonLinkClasses} ${linkColor} ${isDownloading ? 'opacity-50 cursor-not-allowed' : ''}`}
+              title={isDownloading ? "Downloading..." : `Download ${message.file_name || 'audio file'}`}
+            >
+              {isDownloading ? (
+                <>
+                  <Loader2 className="animate-spin inline-block mr-1" size={12} />
+                  Downloading...
+                </>
+              ) : (
+                `Download ${message.file_name || 'audio file'}`
+              )}
             </a>
           </div>
         );
@@ -105,18 +158,29 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, currentUserId }) => 
                    : ShieldQuestion; // Default for binary or unknown
         return (
           <div className="mt-1 p-2 rounded-lg bg-opacity-20 dark:bg-opacity-20 flex items-center space-x-2"
-               style={{ backgroundColor: isCurrentUserSender ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)'}}>
+               style={{ backgroundColor: isCurrentUserSender ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }}
+            >
             <Icon size={32} className={isCurrentUserSender ? "text-blue-100" : "text-gray-600 dark:text-gray-300"} />
-            <div className="flex-1 min-w-0"> {/* min-w-0 for text truncation */}
-              <p className="text-sm font-medium truncate" title={message.file_name || message.content}>
-                {message.file_name || message.content}
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium truncate" title={message.file_name || 'file'}>
+                {message.file_name || 'Attached File'}
               </p>
               <a
-                href={message.file_url}
-                download={message.file_name || message.content}
-                className={`text-xs ${commonLinkClasses} ${linkColor} flex items-center`}
+                href="#"
+                onClick={(e) => handleFileDownload(e, message.file_url!, message.file_name || 'downloaded_file')}
+                className={`text-xs ${commonLinkClasses} ${linkColor} flex items-center ${isDownloading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                title={isDownloading ? "Downloading..." : `Download ${message.file_name || 'file'}`}
               >
-                Download <Download size={14} className="ml-1" />
+                {isDownloading ? (
+                  <>
+                    <Loader2 className="animate-spin inline-block mr-1" size={12} />
+                    Downloading...
+                  </>
+                ) : (
+                  <>
+                    Download <Download size={14} className="ml-1" />
+                  </>
+                )}
               </a>
             </div>
           </div>

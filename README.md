@@ -216,3 +216,20 @@ All endpoints require JWT authentication unless otherwise noted. See code for fu
 - **How do I reset a user password?** Use the password reset API or ask a super admin.
 - **How do I enable maintenance mode?** Use the super admin dashboard or `/api/admin/maintenance_mode`.
 - **How do I restore a backup?** Use the admin API or replace the DB file in `instance/`.
+
+## Automated Message Deletion
+
+This application includes an automated task that periodically deletes old chat messages from the database to manage storage and performance.
+
+### How it Works
+- The task is managed by APScheduler.
+- By default, it runs daily.
+- It checks for messages older than a configurable retention period and deletes them.
+
+### Configuration
+The message retention period can be configured in `app.py`.
+- Find the line `app.config['MESSAGE_RETENTION_DAYS'] = 180` (or similar).
+- Change the value `180` to your desired number of days to keep messages. For example, to keep messages for 1 year, set it to `365`.
+
+---
+[end of README.md]

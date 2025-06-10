@@ -4,14 +4,14 @@ import { useForm, SubmitHandler, FieldErrors } from 'react-hook-form';
 import * as yup from 'yup';
 import { yupResolver } from '@hookform/resolvers/yup';
 // import { toast } from 'react-toastify'; // Replaced with utils
-import { showSuccessToast, showErrorToast } from '../../utils/toastUtils'; // Added utils
+import { showSuccessToast, showErrorToast, showWarningToast } from '../../utils/toastUtils'; // Added utils
 import { Software, Document as DocumentType, AddDocumentPayload, EditDocumentPayload } from '../../types'; // Added EditDocumentPayload
 import {
   fetchSoftware,
   addAdminDocumentWithUrl,
   // uploadAdminDocumentFile, // To be replaced by chunked upload
   editAdminDocumentWithUrl,
-  // editAdminDocumentFile, // To be replaced by chunked upload
+  editAdminDocumentFile, // <<<< Ensure this is imported
   uploadFileInChunks // New chunked upload service
 } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
@@ -117,6 +117,21 @@ const role = user?.role; // Access role safely, as user can be null
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [isUploading]);
+
+  // Effect to warn user if they change tabs during upload
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && isUploading) {
+        showWarningToast('Changing tabs or minimizing the window might interrupt the upload process.');
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [isUploading]); // Dependency array includes isUploading
 
   useEffect(() => {
     if (isAuthenticated && (role === 'admin' || role === 'super_admin')) {
@@ -225,50 +240,56 @@ const role = user?.role; // Access role safely, as user can be null
           if (!isEditMode) resetFormDefaults(true); // Reset only if it was a new add, not edit->url
         }
       } else { // inputMode === 'upload'
-        console.log("AdminDocumentEntryForm: inputMode is 'upload'. data.selectedFile before check:", data.selectedFile);
-        // Ensure a file is selected when inputMode is 'upload'.
-        // Yup validation should ideally prevent submission if a file is required but not provided.
-        if (data.selectedFile) {
-          console.log("AdminDocumentEntryForm: Attempting to upload file:", data.selectedFile);
-          console.log("AdminDocumentEntryForm: Calling uploadFileInChunks with metadata:", commonMetadata);
-          // If data.selectedFile is present, proceed with chunked upload.
-          // This will always create a NEW document entry as per current backend capabilities.
-          resultDocument = await uploadFileInChunks(
-            data.selectedFile, // No longer need non-null assertion if logic guarantees it here
-            'document',
-            commonMetadata,
-            (progress) => setUploadProgress(progress)
-          );
-          // Since uploadFileInChunks always creates a new document with current backend:
-          showSuccessToast(`Document "${resultDocument.doc_name}" added successfully via chunked upload!`);
-          if (onDocumentAdded) onDocumentAdded(resultDocument); // Treat as new document added
-          resetFormDefaults(true); // Reset form as it's a new entry
-        } else {
-          console.log("AdminDocumentEntryForm: No file selected for upload mode.");
-          // This block handles cases where inputMode is 'upload' but no file is selected.
-          // This should ideally be caught by Yup. If reached, it's a fallback.
-          if (isEditMode && documentToEdit && !documentToEdit.is_external_link) {
-            console.log("AdminDocumentEntryForm: No file selected for upload mode. Condition: Edit mode, no new file.");
-            // User is in edit mode, for a previously uploaded file, and did not select a new file.
-            // This implies they might want to update metadata only, which is not supported by this flow.
-            showErrorToast("No new file selected. If you intended to replace the existing file, please select one. Metadata-only updates for uploaded files are not supported via this form currently.");
-          } else if (!isEditMode) {
-            console.log("AdminDocumentEntryForm: No file selected for upload mode. Condition: New mode, no file.");
-            // New document submission in 'upload' mode without a file.
-            showErrorToast("No file selected for upload. Please select a file.");
+        const commonMetadataAsAddPayload: AddDocumentPayload = {
+          software_id: parseInt(data.selectedSoftwareId), // Ensure software_id is number
+          doc_name: commonMetadata.doc_name,
+          description: commonMetadata.description,
+          doc_type: commonMetadata.doc_type,
+          // download_link is not part of AddDocumentPayload for uploads, it's handled by the backend
+        };
+
+        if (isEditMode && documentToEdit) {
+          // Editing an existing document, and inputMode is 'upload'.
+          // This means either:
+          // 1. It was an uploaded file, and user might be replacing the file OR just updating metadata.
+          // 2. It was a URL link, and user is switching to an uploaded file.
+          if (!documentToEdit.is_external_link || (documentToEdit.is_external_link && data.selectedFile)) {
+            console.log("AdminDocumentEntryForm: Editing existing document (file or switching to file). File selected:", data.selectedFile);
+            resultDocument = await editAdminDocumentFile(
+              documentToEdit.id,
+              commonMetadataAsAddPayload, // Pass metadata
+              data.selectedFile || null    // Pass new file if selected, or null if not (for metadata-only update of existing file)
+            );
+            showSuccessToast(`Document "${resultDocument.doc_name}" updated successfully!`);
+            if (onDocumentUpdated) onDocumentUpdated(resultDocument);
           } else {
-            console.log("AdminDocumentEntryForm: No file selected for upload mode. Condition: Edit mode, switched from URL, no file.");
-            // Edge case: Edit mode, was URL, switched to 'upload' but no file provided.
-            showErrorToast("Switched to upload mode but no file selected. Please select a file or use the URL mode.");
+            // This case should ideally be caught by validation (e.g. if switching from URL to upload, a file should be required)
+            // However, as a fallback:
+            showErrorToast("If switching from a URL to an uploaded file, please select a file.");
+            setIsLoading(false);
+            setIsUploading(false);
+            return;
           }
-          setIsLoading(false);
-          // No return here, as we want to fall through to finally, but after setting loading false.
-          // The submit handler will exit due to lack of resultDocument or other conditions.
-          // However, for clarity and safety, explicit return might be better if not falling through to error handling.
-          // For now, let's ensure isLoading is false and an error is shown. The function will then go to finally.
-          // A 'return' here would be cleaner.
-          setIsUploading(false); // Also ensure this is reset
-          return; // Explicitly stop processing if no file in upload mode.
+        } else { // Not edit mode, so it's adding a new document with a file upload
+          if (data.selectedFile) {
+            console.log("AdminDocumentEntryForm: Adding new document with file. File selected:", data.selectedFile);
+            // Use uploadFileInChunks for adding new documents with files
+            resultDocument = await uploadFileInChunks(
+              data.selectedFile,
+              'document',
+              commonMetadata, // Original commonMetadata is fine here as uploadFileInChunks stringifies software_id
+              (progress) => setUploadProgress(progress)
+            );
+            showSuccessToast(`Document "${resultDocument.doc_name}" added successfully via chunked upload!`);
+            if (onDocumentAdded) onDocumentAdded(resultDocument);
+            resetFormDefaults(true);
+          } else {
+            // This should be caught by Yup validation (file is required for new uploads)
+            showErrorToast("No file selected for upload. Please select a file.");
+            setIsLoading(false);
+            setIsUploading(false);
+            return;
+          }
         }
       }
     } catch (err: any) {

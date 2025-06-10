@@ -64,7 +64,7 @@ export const ChatActionContextProvider: React.FC<ChatActionContextProviderProps>
   const closeChatModal = useCallback(() => {
     setIsChatModalOpen(false);
     setTargetUser(null);
-    console.log("Chat modal closed.");
+    // console.log("Chat modal closed.");
   }, []); // No dependencies
 
   const contextValue = {

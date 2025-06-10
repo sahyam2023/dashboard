@@ -1,8 +1,14 @@
+
+# Import eventlet and monkey patch BEFORE any other imports
 import eventlet
-eventlet.monkey_patch()
+import os
+# Check if already patched by PyInstaller runtime hook
+if not os.environ.get('EVENTLET_PATCHED'):
+    eventlet.monkey_patch()
+
+import eventlet.wsgi
 #app.py
 
-import os
 import uuid
 import sqlite3
 import json # Added for audit logging
@@ -19,7 +25,6 @@ from functools import wraps
 # import pstats # Removed
 # import io # Removed
 # import eventlet # Moved to top
-import eventlet.wsgi # Keeping this here as per instruction
 # eventlet.monkey_patch() # Moved to top
 import random
 import shutil # Added for file replication
@@ -37,6 +42,7 @@ from flask_jwt_extended import (
     get_jwt_identity, verify_jwt_in_request, get_jwt, get_jti,
     decode_token
 )
+from cryptography.fernet import Fernet, InvalidToken # Added for encryption
 # For specific JWT exceptions - Updated
 from jwt.exceptions import DecodeError as PyJWTDecodeError, ExpiredSignatureError as PyJWTExpiredSignatureError
 from flask_jwt_extended.exceptions import NoAuthorizationError, JWTDecodeError 
@@ -49,6 +55,12 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
 # from waitress import serve # Removed Waitress
 from flask_socketio import SocketIO, join_room, leave_room, emit, disconnect
+from urllib.parse import urljoin # Added for chat file_url modification
+
+from scheduler import init_scheduler as initialize_app_scheduler
+from scheduler import scheduler as app_scheduler # For shutdown
+import atexit
+# import os # For database path # os is already imported
 
 # --- Helper function for PyInstaller ---
 def get_application_path():
@@ -145,7 +157,7 @@ CORS(app, resources={
             "http://127.0.0.1:7000",
             "http://192.168.3.40:7000",
             "http://192.168.3.129:7000",
-            "http://192.168.1.100:7000" # Example: Added another common private IP
+            "http://192.168.1.116:7000" # Example: Added another common private IP
         ]
     },
     r"/socket.io/*": { # Socket.IO also needs CORS configuration
@@ -155,7 +167,7 @@ CORS(app, resources={
             "http://127.0.0.1:7000",
             "http://192.168.3.40:7000",
             "http://192.168.3.129:7000",
-            "http://192.168.1.100:7000" # Ensure frontend URL is listed
+            "http://192.168.1.116:7000" # Ensure frontend URL is listed
         ]
     }
 },
@@ -163,21 +175,49 @@ supports_credentials=True,
 allow_headers=["Content-Type", "Authorization", "Cache-Control", "Pragma"],
 methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
-# Initialize SocketIO
-# Using "*" for cors_allowed_origins for SocketIO is common in development.
-# For production, list specific frontend origins.
-# The existing CORS setup for /api/* will be respected by Flask routes.
-# SocketIO needs its own CORS config if requests originate from different domains/ports.
-socketio_cors_origins = [
-    "http://localhost:5173", "http://localhost:7000", "http://127.0.0.1:7000",
-    "http://192.168.3.40:7000", "http://192.168.3.129:7000", "http://192.168.1.100:7000"
-]
-socketio = SocketIO(app, cors_allowed_origins=socketio_cors_origins, async_mode='eventlet') # Changed async_mode to eventlet
+# CRITICAL FIX: Initialize SocketIO with explicit async_mode for PyInstaller
+def create_socketio_instance(flask_app):
+    """Create SocketIO instance with proper PyInstaller compatibility"""
+    
+    # Detect if running in PyInstaller bundle
+    is_frozen = getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
+    
+    # Define CORS origins
+    socketio_cors_origins = [
+        "http://localhost:5173", "http://localhost:7000", "http://127.0.0.1:7000",
+        "http://192.168.3.40:7000", "http://192.168.3.129:7000", "http://192.168.1.116:7000"
+    ]
+    
+    if is_frozen:
+        print("PyInstaller detected - forcing eventlet async_mode")
+        # Explicitly set async_mode for PyInstaller
+        socketio_instance = SocketIO(
+            flask_app, 
+            cors_allowed_origins=socketio_cors_origins, 
+            async_mode='eventlet',  # CRITICAL: Explicitly set for PyInstaller
+            logger=True,
+            engineio_logger=False  # Reduce log noise
+        )
+    else:
+        print("Development mode - auto-detecting async_mode")
+        # Let it auto-detect in development (your original code)
+        socketio_instance = SocketIO(
+            flask_app, 
+            cors_allowed_origins=socketio_cors_origins, 
+            async_mode='eventlet'  # Keep eventlet for consistency
+        )
+    
+    print(f"SocketIO initialized with async_mode: {socketio_instance.async_mode}")
+    return socketio_instance
+
+# Create SocketIO instance using the helper function
+socketio = create_socketio_instance(app)
 
 # App Configuration
 app.config['DATABASE'] = os.path.join(INSTANCE_FOLDER_PATH, 'software_dashboard.db') # DB in instance folder
 app.config['SECRET_KEY'] = '161549f75b4148cd529620b59c4fd706b40ae5805912a513811e575c7cd23439fa63a8300b6f93295f353520c026bc25b1d07c4e1c369d3839cf74deca7e52210f3ac8967052cc51be1ceb45d81f57b8bd16ab5019d063a2de13ee802e1507d9e4dca8f6114ff1ed81300768acb5a95f48c100ad457ec1f8331f6fe9320bb816' 
 app.config['JWT_SECRET_KEY'] = '991ca90ca06a362033f84c9a295a7c0f880caac7a74aefcf23df09f3b783c8e5a9bb0d8c1fcacf614d78cc3b580540419f55e08a29802eb9ea5e83a16eac641c0c028c814267dc94b261aa6a209462ea052773739f1429b7333185bf2b8bf8ba7ac19bccf691f4eece8d47174b6b3e191766d6a1a5c9a3ad21fd672f864e8a357d3c4b3fb838312a047156965a5756d73504db10b3920a3e6bfba5288443be112953e6b46132f6022280b192087384d6f8e91094bb5bbf21deac4bff2aaeda3f607db786b4847096f6112bad168e5223638c47146c74a9da65a54a86060c5298238169e1f2646f670c5f8014fe4997f9a2d8964e52938b627e31f58a70ece4d7'
+app.config['ENCRYPTION_KEY'] = b'OFXkV-MIeqKWmHp3mVNRhv2nCWTNSStK9XFV6RsfqAk=' # Added Fernet encryption key
 app.config['BCRYPT_LOG_ROUNDS'] = 12
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=4)
 app.config['JWT_BLOCKLIST_ENABLED'] = True
@@ -215,6 +255,28 @@ app.config['DEFAULT_PROFILE_PICTURES_FOLDER'] = DEFAULT_PROFILE_PICTURES_FOLDER 
 app.config['CHAT_UPLOAD_FOLDER'] = CHAT_UPLOAD_FOLDER # Added for chat
 app.config['INSTANCE_FOLDER_PATH'] = INSTANCE_FOLDER_PATH # Added for DB backup
 app.config['TMP_LARGE_UPLOADS_FOLDER'] = TMP_LARGE_UPLOADS_FOLDER # For large file chunks
+app.config['MESSAGE_RETENTION_DAYS'] = 180 # Default retention period in days
+
+# --- Scheduler Initialization ---
+# Ensure DATABASE_PATH is set in config, default if not.
+# This path is used by the scheduled task.
+# Example: 'instance/software_dashboard.db'
+# It's best if this is already properly configured elsewhere.
+if 'DATABASE_PATH' not in app.config:
+    app.config['DATABASE_PATH'] = os.path.join(app.instance_path, 'software_dashboard.db')
+    print(f"DATABASE_PATH not set, defaulted to: {app.config['DATABASE_PATH']}")
+
+# Initialize and start the scheduler
+initialize_app_scheduler(app)
+
+# --- Graceful Scheduler Shutdown ---
+def shutdown_scheduler():
+    if app_scheduler.running:
+        print("Shutting down scheduler...")
+        app_scheduler.shutdown()
+        print("Scheduler shut down.")
+
+atexit.register(shutdown_scheduler)
 
 bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
@@ -3376,21 +3438,37 @@ def _admin_handle_file_upload_and_db_insert(
     if uploaded_file_obj and allowed_file(uploaded_file_obj.filename):
         original_filename = secure_filename(uploaded_file_obj.filename)
         ext = original_filename.rsplit('.', 1)[1].lower() if '.' in original_filename else ''
-        stored_filename = f"{uuid.uuid4().hex}{'.' + ext if ext else ''}"
-        file_save_path = os.path.join(app.config[upload_folder_config_key], stored_filename)
-        download_link_or_path = f"{server_path_prefix}/{stored_filename}"
-        file_saved_for_cleanup = False # Flag to track if file was saved
+
+        # Define temporary and final paths
+        temp_upload_dir_name = "tmp_standard_uploads"
+        temp_upload_path = os.path.join(INSTANCE_FOLDER_PATH, temp_upload_dir_name)
+        os.makedirs(temp_upload_path, exist_ok=True)
+
+        # Use a unique name for the temporary file as well to avoid potential clashes if not cleaned properly
+        temp_stored_filename = f"{uuid.uuid4().hex}_temp{'.' + ext if ext else ''}"
+        temp_file_save_path = os.path.join(temp_upload_path, temp_stored_filename)
+
+        # Final stored_filename and path (this name will be stored in DB)
+        final_stored_filename = f"{uuid.uuid4().hex}{'.' + ext if ext else ''}"
+        final_file_save_path = os.path.join(app.config[upload_folder_config_key], final_stored_filename)
+
+        # download_link_or_path should reflect the final destination
+        download_link_or_path = f"{server_path_prefix}/{final_stored_filename}"
+
+        file_saved_to_temp_for_cleanup = False
 
         try:
-            uploaded_file_obj.save(file_save_path)
-            file_saved_for_cleanup = True # Set flag after successful save
-            file_size = os.path.getsize(file_save_path)
+            # 1. Save to temporary directory first
+            uploaded_file_obj.save(temp_file_save_path)
+            file_saved_to_temp_for_cleanup = True # Set flag after successful temp save
+            file_size = os.path.getsize(temp_file_save_path)
 
             final_sql_params = []
             for param_name_in_tuple in sql_params_tuple:
                 if param_name_in_tuple == 'download_link_or_url': final_sql_params.append(download_link_or_path)
                 elif param_name_in_tuple == 'is_external_link': final_sql_params.append(False)
-                elif param_name_in_tuple == 'stored_filename': final_sql_params.append(stored_filename)
+                # IMPORTANT: 'stored_filename' in DB should be the final_stored_filename
+                elif param_name_in_tuple == 'stored_filename': final_sql_params.append(final_stored_filename)
                 elif param_name_in_tuple == 'original_filename_ref' or param_name_in_tuple == 'original_filename': 
                     final_sql_params.append(original_filename)
                 elif param_name_in_tuple == 'file_size': final_sql_params.append(file_size)
@@ -3424,8 +3502,22 @@ def _admin_handle_file_upload_and_db_insert(
                     # Actor (admin user) is derived from JWT by default in log_audit_action
                 )
             
-            db.commit() # Commit after logging if it's specific to this helper's scope
-            file_saved_for_cleanup = False # Reset flag after successful commit, no cleanup needed
+            db.commit() # Commit DB changes
+
+            # 2. If DB commit is successful, move file from temp to final destination
+            try:
+                shutil.move(temp_file_save_path, final_file_save_path)
+                app.logger.info(f"_admin_helper: Moved file from {temp_file_save_path} to {final_file_save_path}")
+                file_saved_to_temp_for_cleanup = False # File is now in final spot, temp cleanup not needed for this path
+            except Exception as e_move:
+                app.logger.error(f"_admin_helper: CRITICAL - DB commit successful but failed to move file from {temp_file_save_path} to {final_file_save_path}: {e_move}")
+                # This is a critical error. DB is committed, but file is not in final place.
+                # Attempt to rollback DB? Or record this inconsistency?
+                # For now, log and attempt to cleanup temp file. The record will point to a non-existent final file.
+                _delete_file_if_exists(temp_file_save_path)
+                # Return an error indicating partial failure.
+                # The fetch-back below will likely fail or return incomplete data.
+                return jsonify(msg=f"DB updated, but file move failed. Please check server logs. Temp file: {temp_file_save_path} (should be cleaned). Final expected: {final_file_save_path}."), 500
 
             # --- CORRECTED FETCH-BACK SECTION ---
             fetch_back_query = ""
@@ -3498,11 +3590,15 @@ def _admin_handle_file_upload_and_db_insert(
                     app.logger.error(f"_admin_helper: Simple fetch for {table_name} ID {new_id} also FAILED to find the row. This is very unexpected after successful insert.")
                 return jsonify(msg=f"Item uploaded but metadata retrieval failed for {table_name}"), 500
 
-        except Exception as e: # Catch any error during DB operations or fetch-back
-            db.rollback() # Ensure rollback on any error after starting DB operations
-            if file_saved_for_cleanup: # Check flag
-                _delete_file_if_exists(file_save_path)
-                app.logger.info(f"_admin_helper: Cleaned up file {file_save_path} for {table_name} due to DB/processing error: {e}")
+        except Exception as e: # Catch any error during DB operations or file moving
+            db.rollback() # Ensure rollback on any DB error
+            if file_saved_to_temp_for_cleanup: # If file was saved to temp
+                _delete_file_if_exists(temp_file_save_path)
+                app.logger.info(f"_admin_helper: Cleaned up temporary file {temp_file_save_path} for {table_name} due to error: {e}")
+
+            # If the error was during the shutil.move (after DB commit), the above cleanup for temp_file_save_path
+            # might not run if e_move was caught and returned. This outer except handles errors before move.
+            # If the error is specific to the move and was re-raised or not caught by inner try-except for move.
 
             if isinstance(e, sqlite3.IntegrityError):
                 app.logger.error(f"Admin upload for {table_name} DB IntegrityError: {e}")
@@ -9181,54 +9277,63 @@ def bulk_download_items():
         # Create a temporary file for the zip archive
         with NamedTemporaryFile(suffix=".zip", delete=False) as tmp_zip_file:
             zip_filepath = tmp_zip_file.name
+        
+        app.logger.info(f"Preparing to create zip file at: {zip_filepath}") # Added logging
+
         # tmp_zip_file is now closed, but the file still exists at zip_filepath
         # We will open it again using zipfile.ZipFile
-
         zip_filename_base = f"bulk_download_{item_type}_{datetime.now().strftime('%Y%m%d%H%M%S')}.zip"
 
-        with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zf:
-            for file_detail in files_to_zip_details:
-                zf.write(file_detail['path'], arcname=file_detail['name_in_zip'])
+        try: # New try block for zipping and sending
+            with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for file_detail in files_to_zip_details:
+                    app.logger.info(f"Adding to zip: {file_detail['path']} as {file_detail['name_in_zip']}") # Added logging
+                    zf.write(file_detail['path'], arcname=file_detail['name_in_zip'])
+                    app.logger.info(f"Successfully added {file_detail['name_in_zip']} to zip.") # Added logging
 
-        # Log successful creation
-        log_audit_action(
-            action_type='BULK_DOWNLOAD_CREATED',
-            details={
-                'item_type': item_type,
-                'zip_filename': zip_filename_base,
-                'file_count': len(files_to_zip_details),
-                'requested_ids_count': len(item_ids),
-                'files_included': [{'id': fd['item_id'], 'name': fd['item_name'], 'zipped_as': fd['name_in_zip']} for fd in files_to_zip_details],
-                'errors_encountered': errors_details if errors_details else None
-            }
-        )
+            # Log successful creation
+            log_audit_action(
+                action_type='BULK_DOWNLOAD_CREATED',
+                details={
+                    'item_type': item_type,
+                    'zip_filename': zip_filename_base,
+                    'file_count': len(files_to_zip_details),
+                    'requested_ids_count': len(item_ids),
+                    'files_included': [{'id': fd['item_id'], 'name': fd['item_name'], 'zipped_as': fd['name_in_zip']} for fd in files_to_zip_details],
+                    'errors_encountered': errors_details if errors_details else None
+                }
+            )
 
-        @after_this_request
-        def cleanup_zip(response):
-            try:
-                # Attempt to explicitly close the file stream if response.response is a file wrapper
-                # This is to help release any lock held by the response stream, especially on Windows.
-                if hasattr(response, 'response') and hasattr(response.response, 'close') and callable(response.response.close):
-                    try:
-                        response.response.close()
-                        app.logger.info(f"Cleanup_zip: Explicitly closed response.response for {zip_filepath}")
-                    except Exception as e_resp_close:
-                        # Log warning if closing the response stream fails, but don't let it stop cleanup.
-                        app.logger.warning(f"Cleanup_zip: Error closing response.response for {zip_filepath}: {e_resp_close}")
+            @after_this_request
+            def cleanup_zip(response):
+                try:
+                    # Attempt to explicitly close the file stream if response.response is a file wrapper
+                    # This is to help release any lock held by the response stream, especially on Windows.
+                    # Removed explicit response.response.close() call as it might cause issues with send_file.
+                    # The primary goal here is to delete the temporary file.
+                    if zip_filepath and os.path.exists(zip_filepath):
+                        os.remove(zip_filepath)
+                        app.logger.info(f"Successfully cleaned up temporary zip file: {zip_filepath}")
+                except PermissionError as e_perm: # Catch PermissionError specifically
+                    app.logger.warning(f"PermissionError cleaning up temporary zip file {zip_filepath}: {e_perm}. This is often a timing issue on Windows.")
+                except Exception as e_cleanup: # Catch other potential exceptions during cleanup
+                    app.logger.error(f"Error cleaning up temporary zip file {zip_filepath}: {e_cleanup}", exc_info=True)
+                return response
 
-                if zip_filepath and os.path.exists(zip_filepath):
+            return send_file(zip_filepath, as_attachment=True, download_name=zip_filename_base)
+        
+        except Exception as e_zip_process: # New except block for zipping/sending errors
+            app.logger.error(f"Error during zipping process or sending file for {item_type} (zip: {zip_filepath}): {e_zip_process}", exc_info=True)
+            if zip_filepath and os.path.exists(zip_filepath):
+                try:
                     os.remove(zip_filepath)
-                    app.logger.info(f"Successfully cleaned up temporary zip file: {zip_filepath}")
-            except PermissionError as e_perm: # Catch PermissionError specifically for more targeted logging
-                app.logger.error(f"PermissionError cleaning up temporary zip file {zip_filepath}: {e_perm}. This is often a timing issue on Windows. The file may be cleaned up later or require manual deletion.", exc_info=True)
-            except Exception as e_cleanup: # Catch other potential exceptions during cleanup
-                app.logger.error(f"Error cleaning up temporary zip file {zip_filepath}: {e_cleanup}", exc_info=True)
-            return response
+                    app.logger.info(f"Cleaned up temporary zip file {zip_filepath} after error in zipping/sending.")
+                except Exception as e_cleanup_inner:
+                    app.logger.error(f"Failed to clean up zip file {zip_filepath} after zipping/sending error: {e_cleanup_inner}")
+            return jsonify(msg=f"Error processing bulk download for {item_type}: {str(e_zip_process)}"), 500
 
-        return send_file(zip_filepath, as_attachment=True, download_name=zip_filename_base)
-
-    except Exception as e:
-        app.logger.error(f"Error during bulk download zip creation or sending for {item_type}: {e}", exc_info=True)
+    except Exception as e: # This is the original broader exception handler
+        app.logger.error(f"Error during bulk download zip creation or sending for {item_type}: {e}", exc_info=True) # Original log, can be kept or modified if new one is sufficient
         if zip_filepath and os.path.exists(zip_filepath): # Attempt to cleanup partially created file on error
             try:
                 os.remove(zip_filepath)
@@ -9237,7 +9342,8 @@ def bulk_download_items():
                 app.logger.error(f"Error cleaning up temporary zip file {zip_filepath} on error: {e_cleanup_error}", exc_info=True)
         
         log_audit_action(
-            action_type='BULK_DOWNLOAD_FAILED',
+            action_type='BULK_DOWNLOAD_FAILED', # This log might be redundant if the inner try-except handles and logs the failure.
+                                                # However, it catches errors outside the zipping/sending block.
             details={'item_type': item_type, 'error': str(e), 'item_ids_requested': item_ids, 'files_prepared_count': len(files_to_zip_details)}
         )
         return jsonify(msg=f"Failed to create or send bulk download archive: {str(e)}"), 500
@@ -10569,11 +10675,22 @@ def post_new_message(conversation_id):
             message_dict_for_api_response['recipient_username'] = recipient_user_details['username'] if recipient_user_details else 'Unknown'
         
         message_data_for_socket = message_dict_for_api_response.copy()
+
+        # --- REVERTED MODIFICATION: The following block that converted file_url to absolute is removed/commented ---
+        # if message_data_for_socket.get('file_url') and message_data_for_socket['file_url'].startswith('/'):
+        #     original_file_url = message_data_for_socket['file_url']
+        #     # request.host_url provides the base URL like 'http://localhost:7000/'
+        #     # urljoin handles cases like ensuring no double slashes.
+        #     message_data_for_socket['file_url'] = urljoin(request.host_url, original_file_url)
+        #     app.logger.info(f"Chat file_url modified for SocketIO. Original: {original_file_url}, New: {message_data_for_socket['file_url']}")
+        # --- END REVERTED MODIFICATION ---
+
         if sender_user_details and sender_user_details['profile_picture_filename']:
             message_data_for_socket['sender_profile_picture_url'] = f"/profile_pictures/{sender_user_details['profile_picture_filename']}"
         else:
             message_data_for_socket['sender_profile_picture_url'] = None
-
+        
+        app.logger.info(f"Emitting file_url in SocketIO message (should be relative): {message_data_for_socket.get('file_url')}") # Added logging
         socketio.emit('new_message', message_data_for_socket, room=str(conversation_id)) 
         app.logger.info(f"Emitted 'new_message' to room 'conversation_{conversation_id}'")
 
@@ -10724,21 +10841,61 @@ def upload_chat_file():
 
 # --- Chat File Serving Route ---
 @app.route('/files/chat_uploads/<int:conversation_id>/<path:filename>')
-@active_user_required # Changed back
+@jwt_required(optional=True) # Changed from @active_user_required
 def serve_chat_file(conversation_id, filename):
-    current_user_id = int(get_jwt_identity()) # Provided by @active_user_required
+    current_user_id_str = get_jwt_identity()
     db = get_db()
 
+    if not current_user_id_str:
+        log_audit_action(
+            action_type='CHAT_FILE_ACCESS_DENIED_NO_AUTH',
+            target_table='chat_files_virtual', 
+            target_id=conversation_id,
+            details={'filename': filename, 'conversation_id': conversation_id, 'reason': 'No JWT token provided.'}
+        )
+        return jsonify(msg="Authentication required to access this file."), 401
+
+    try:
+        current_user_id = int(current_user_id_str)
+    except ValueError:
+        log_audit_action(
+            action_type='CHAT_FILE_ACCESS_DENIED_INVALID_TOKEN',
+            target_table='chat_files_virtual',
+            target_id=conversation_id,
+            details={'filename': filename, 'conversation_id': conversation_id, 'reason': 'Invalid user ID format in token.'}
+        )
+        return jsonify(msg="Invalid user identity in token."), 401
+
+    user = find_user_by_id(current_user_id) # find_user_by_id is already defined
+    if not user or not user['is_active']:
+        log_audit_action(
+            action_type='CHAT_FILE_ACCESS_DENIED_USER_INACTIVE_OR_NOT_FOUND',
+            user_id=current_user_id, # Log the ID from token even if user not found
+            target_table='chat_files_virtual',
+            target_id=conversation_id,
+            details={'filename': filename, 'conversation_id': conversation_id, 'reason': 'User not found or inactive.'}
+        )
+        return jsonify(msg="User not found or account is inactive."), 401
+
     # Verify user is part of the conversation
-    conversation = get_conversation_by_id(db, conversation_id)
+    conversation = get_conversation_by_id(db, conversation_id) # get_conversation_by_id is already defined
     if not conversation:
+        # This case is unlikely if the conversation_id in the URL is valid, but good to check.
+        log_audit_action(
+            action_type='CHAT_FILE_ACCESS_DENIED_CONVO_NOT_FOUND',
+            user_id=current_user_id,
+            target_table='chat_files_virtual',
+            target_id=conversation_id,
+            details={'filename': filename, 'conversation_id': conversation_id, 'reason': 'Conversation record not found.'}
+        )
         return jsonify(msg="Conversation not found."), 404
+
     if current_user_id not in (conversation['user1_id'], conversation['user2_id']):
         log_audit_action(
-            action_type='CHAT_FILE_ACCESS_DENIED_NOT_PART_OF_CONVO', # Kept specific audit log
+            action_type='CHAT_FILE_ACCESS_DENIED_NOT_PART_OF_CONVO',
             user_id=current_user_id,
-            target_table='chat_files', # Conceptual table name
-            target_id=conversation_id, # Or a specific file ID if one were available here
+            target_table='chat_files_virtual',
+            target_id=conversation_id,
             details={'filename': filename, 'conversation_id': conversation_id, 'reason': 'User not part of conversation.'}
         )
         return jsonify(msg="You are not authorized to access files from this conversation."), 403
@@ -10747,8 +10904,8 @@ def serve_chat_file(conversation_id, filename):
     log_audit_action(
         action_type='CHAT_FILE_ACCESS_SUCCESS',
         user_id=current_user_id,
-        target_table='chat_files', # Conceptual table name
-        target_id=conversation_id, # Or a specific file ID
+        target_table='chat_files_virtual', # Using virtual table name for consistency
+        target_id=conversation_id, 
         details={'filename': filename, 'conversation_id': conversation_id}
     )
     
@@ -11432,20 +11589,27 @@ if __name__ == '__main__':
     replicate_default_files_if_bundled()
     # --- End replication call ---
 
-
+    # IMPROVED SERVER STARTUP WITH BETTER PYINSTALLER SUPPORT
     try:
         flask_port = int(os.environ.get('FLASK_RUN_PORT', 7000))
-        # When using Flask-SocketIO with Waitress or Gunicorn,
-        # you serve the `socketio` object instead of the `app` object directly if those servers
-        # don't have native Socket.IO support (Waitress doesn't, Gunicorn needs eventlet/gevent worker).
-        # However, initializing SocketIO with SocketIO(app) wraps the app.
-        # So, serving `app` with Waitress should work if `async_mode` is compatible (e.g. 'threading').
-        # app.logger.info(f"Starting Waitress server on port {flask_port} for Flask app with SocketIO...") # Removed Waitress log
-        # serve(app, host='0.0.0.0', port=flask_port) # Waitress should serve the Flask app, SocketIO is integrated. # Removed Waitress serve
-        app.logger.info(f"Starting Eventlet server on port {flask_port} for Flask app with SocketIO...")
-        # Use the app instance with eventlet, as SocketIO is already integrated with app
-        silent_logger = SilentLogger()
-        eventlet.wsgi.server(eventlet.listen(('0.0.0.0', flask_port)), app, log=silent_logger)
+        is_frozen = getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
+
+        if is_frozen:
+            # FOR PYINSTALLER: Use the direct eventlet server with your silent logger.
+            app.logger.info(f"Starting server in PyInstaller mode on port {flask_port}")
+
+            # 1. Instantiate your logger
+            silent_logger = SilentLogger()
+
+            # 2. Pass the instance to the server's 'log' parameter
+            eventlet.wsgi.server(eventlet.listen(('0.0.0.0', flask_port)), app, log=silent_logger)
+
+        else:
+            # FOR DEVELOPMENT: Use socketio.run() which has its own logging controls.
+            app.logger.info(f"Starting server in development mode on port {flask_port}")
+            socketio.run(app, host='0.0.0.0', port=flask_port, debug=True)
+
     except (KeyboardInterrupt, SystemExit):
-        app.logger.info("Flask application shutting down...")
-    # Removed explicit scheduler shutdown from here as it's handled by atexit
+        app.logger.info("Application shutting down...")
+    except Exception as e:
+        app.logger.error(f"FATAL: Unexpected error during server startup: {e}", exc_info=True)

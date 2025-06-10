@@ -184,8 +184,8 @@ const RegisterForm: React.FC<RegisterFormProps> = ({ onAuthSuccess, onToggleView
         regData.profile_picture_url // Pass to auth context
       ); 
       
-      console.log('[RegisterForm] After auth.login - requiresReset:', requiresReset);
-      console.log('[RegisterForm] Auth context state after login:', JSON.stringify(auth.user)); // Log updated user state
+      // console.log('[RegisterForm] After auth.login - requiresReset:', requiresReset);
+      // console.log('[RegisterForm] Auth context state after login:', JSON.stringify(auth.user)); // Log updated user state
       
       showSuccessToast('Registration successful! Logging you in...');
       

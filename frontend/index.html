@@ -1,6 +1,22 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <script>
+      (function() {
+        try {
+          var mode = localStorage.getItem('themeMode');
+          if (mode === 'light') {
+            document.documentElement.classList.add('light');
+          } else { // Defaults to dark if mode is 'dark', null, or any other unexpected value
+            document.documentElement.classList.add('dark');
+          }
+        } catch (e) {
+          // In case of any error (e.g., localStorage not available), default to dark.
+          document.documentElement.classList.add('dark');
+          console.error('Error applying initial theme:', e);
+        }
+      })();
+    </script>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="dashboard.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />

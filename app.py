@@ -3438,21 +3438,37 @@ def _admin_handle_file_upload_and_db_insert(
     if uploaded_file_obj and allowed_file(uploaded_file_obj.filename):
         original_filename = secure_filename(uploaded_file_obj.filename)
         ext = original_filename.rsplit('.', 1)[1].lower() if '.' in original_filename else ''
-        stored_filename = f"{uuid.uuid4().hex}{'.' + ext if ext else ''}"
-        file_save_path = os.path.join(app.config[upload_folder_config_key], stored_filename)
-        download_link_or_path = f"{server_path_prefix}/{stored_filename}"
-        file_saved_for_cleanup = False # Flag to track if file was saved
+
+        # Define temporary and final paths
+        temp_upload_dir_name = "tmp_standard_uploads"
+        temp_upload_path = os.path.join(INSTANCE_FOLDER_PATH, temp_upload_dir_name)
+        os.makedirs(temp_upload_path, exist_ok=True)
+
+        # Use a unique name for the temporary file as well to avoid potential clashes if not cleaned properly
+        temp_stored_filename = f"{uuid.uuid4().hex}_temp{'.' + ext if ext else ''}"
+        temp_file_save_path = os.path.join(temp_upload_path, temp_stored_filename)
+
+        # Final stored_filename and path (this name will be stored in DB)
+        final_stored_filename = f"{uuid.uuid4().hex}{'.' + ext if ext else ''}"
+        final_file_save_path = os.path.join(app.config[upload_folder_config_key], final_stored_filename)
+
+        # download_link_or_path should reflect the final destination
+        download_link_or_path = f"{server_path_prefix}/{final_stored_filename}"
+
+        file_saved_to_temp_for_cleanup = False
 
         try:
-            uploaded_file_obj.save(file_save_path)
-            file_saved_for_cleanup = True # Set flag after successful save
-            file_size = os.path.getsize(file_save_path)
+            # 1. Save to temporary directory first
+            uploaded_file_obj.save(temp_file_save_path)
+            file_saved_to_temp_for_cleanup = True # Set flag after successful temp save
+            file_size = os.path.getsize(temp_file_save_path)
 
             final_sql_params = []
             for param_name_in_tuple in sql_params_tuple:
                 if param_name_in_tuple == 'download_link_or_url': final_sql_params.append(download_link_or_path)
                 elif param_name_in_tuple == 'is_external_link': final_sql_params.append(False)
-                elif param_name_in_tuple == 'stored_filename': final_sql_params.append(stored_filename)
+                # IMPORTANT: 'stored_filename' in DB should be the final_stored_filename
+                elif param_name_in_tuple == 'stored_filename': final_sql_params.append(final_stored_filename)
                 elif param_name_in_tuple == 'original_filename_ref' or param_name_in_tuple == 'original_filename': 
                     final_sql_params.append(original_filename)
                 elif param_name_in_tuple == 'file_size': final_sql_params.append(file_size)
@@ -3486,8 +3502,22 @@ def _admin_handle_file_upload_and_db_insert(
                     # Actor (admin user) is derived from JWT by default in log_audit_action
                 )
             
-            db.commit() # Commit after logging if it's specific to this helper's scope
-            file_saved_for_cleanup = False # Reset flag after successful commit, no cleanup needed
+            db.commit() # Commit DB changes
+
+            # 2. If DB commit is successful, move file from temp to final destination
+            try:
+                shutil.move(temp_file_save_path, final_file_save_path)
+                app.logger.info(f"_admin_helper: Moved file from {temp_file_save_path} to {final_file_save_path}")
+                file_saved_to_temp_for_cleanup = False # File is now in final spot, temp cleanup not needed for this path
+            except Exception as e_move:
+                app.logger.error(f"_admin_helper: CRITICAL - DB commit successful but failed to move file from {temp_file_save_path} to {final_file_save_path}: {e_move}")
+                # This is a critical error. DB is committed, but file is not in final place.
+                # Attempt to rollback DB? Or record this inconsistency?
+                # For now, log and attempt to cleanup temp file. The record will point to a non-existent final file.
+                _delete_file_if_exists(temp_file_save_path)
+                # Return an error indicating partial failure.
+                # The fetch-back below will likely fail or return incomplete data.
+                return jsonify(msg=f"DB updated, but file move failed. Please check server logs. Temp file: {temp_file_save_path} (should be cleaned). Final expected: {final_file_save_path}."), 500
 
             # --- CORRECTED FETCH-BACK SECTION ---
             fetch_back_query = ""
@@ -3560,11 +3590,15 @@ def _admin_handle_file_upload_and_db_insert(
                     app.logger.error(f"_admin_helper: Simple fetch for {table_name} ID {new_id} also FAILED to find the row. This is very unexpected after successful insert.")
                 return jsonify(msg=f"Item uploaded but metadata retrieval failed for {table_name}"), 500
 
-        except Exception as e: # Catch any error during DB operations or fetch-back
-            db.rollback() # Ensure rollback on any error after starting DB operations
-            if file_saved_for_cleanup: # Check flag
-                _delete_file_if_exists(file_save_path)
-                app.logger.info(f"_admin_helper: Cleaned up file {file_save_path} for {table_name} due to DB/processing error: {e}")
+        except Exception as e: # Catch any error during DB operations or file moving
+            db.rollback() # Ensure rollback on any DB error
+            if file_saved_to_temp_for_cleanup: # If file was saved to temp
+                _delete_file_if_exists(temp_file_save_path)
+                app.logger.info(f"_admin_helper: Cleaned up temporary file {temp_file_save_path} for {table_name} due to error: {e}")
+
+            # If the error was during the shutil.move (after DB commit), the above cleanup for temp_file_save_path
+            # might not run if e_move was caught and returned. This outer except handles errors before move.
+            # If the error is specific to the move and was re-raised or not caught by inner try-except for move.
 
             if isinstance(e, sqlite3.IntegrityError):
                 app.logger.error(f"Admin upload for {table_name} DB IntegrityError: {e}")

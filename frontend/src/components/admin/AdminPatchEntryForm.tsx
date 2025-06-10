@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useForm, Controller, SubmitHandler, FieldErrors } from 'react-hook-form';
 import * as yup from 'yup';
 import { yupResolver } from '@hookform/resolvers/yup';
-import { showSuccessToast, showErrorToast } from '../../utils/toastUtils'; // Standardized toast
+import { showSuccessToast, showErrorToast, showWarningToast } from '../../utils/toastUtils'; // Standardized toast
 import {
   Software,
   Patch as PatchType,
@@ -154,6 +154,21 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [isUploading]);
+
+  // Effect to warn user if they change tabs during upload
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && isUploading) {
+        showWarningToast('Changing tabs or minimizing the window might interrupt the upload process.');
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [isUploading]); // Dependency array includes isUploading
 
   // Fetch software list for the product dropdown
   useEffect(() => {

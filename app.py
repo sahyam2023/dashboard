@@ -57,6 +57,11 @@ import atexit
 from flask_socketio import SocketIO, join_room, leave_room, emit, disconnect
 from urllib.parse import urljoin # Added for chat file_url modification
 
+from scheduler import init_scheduler as initialize_app_scheduler
+from scheduler import scheduler as app_scheduler # For shutdown
+import atexit
+# import os # For database path # os is already imported
+
 # --- Helper function for PyInstaller ---
 def get_application_path():
     """Get the application path, accounting for PyInstaller."""
@@ -250,6 +255,28 @@ app.config['DEFAULT_PROFILE_PICTURES_FOLDER'] = DEFAULT_PROFILE_PICTURES_FOLDER 
 app.config['CHAT_UPLOAD_FOLDER'] = CHAT_UPLOAD_FOLDER # Added for chat
 app.config['INSTANCE_FOLDER_PATH'] = INSTANCE_FOLDER_PATH # Added for DB backup
 app.config['TMP_LARGE_UPLOADS_FOLDER'] = TMP_LARGE_UPLOADS_FOLDER # For large file chunks
+app.config['MESSAGE_RETENTION_DAYS'] = 180 # Default retention period in days
+
+# --- Scheduler Initialization ---
+# Ensure DATABASE_PATH is set in config, default if not.
+# This path is used by the scheduled task.
+# Example: 'instance/software_dashboard.db'
+# It's best if this is already properly configured elsewhere.
+if 'DATABASE_PATH' not in app.config:
+    app.config['DATABASE_PATH'] = os.path.join(app.instance_path, 'software_dashboard.db')
+    print(f"DATABASE_PATH not set, defaulted to: {app.config['DATABASE_PATH']}")
+
+# Initialize and start the scheduler
+initialize_app_scheduler(app)
+
+# --- Graceful Scheduler Shutdown ---
+def shutdown_scheduler():
+    if app_scheduler.running:
+        print("Shutting down scheduler...")
+        app_scheduler.shutdown()
+        print("Scheduler shut down.")
+
+atexit.register(shutdown_scheduler)
 
 bcrypt = Bcrypt(app)
 jwt = JWTManager(app)

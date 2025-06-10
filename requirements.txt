@@ -2,6 +2,7 @@ Flask
 flask-cors
 flask-bcrypt
 flask-jwt-extended
+flask_apscheduler
 python-dotenv
 requests
 SQLAlchemy

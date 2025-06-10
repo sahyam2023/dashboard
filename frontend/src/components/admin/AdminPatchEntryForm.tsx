@@ -190,7 +190,7 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
       setValue('typedVersionString', '');
 
       const selectedSoftware = softwareList.find(sw => sw.id.toString() === watchedSoftwareId);
-      if (selectedSoftware && (selectedSoftware.name === 'VMS' || selectedSoftware.name === 'VA')) {
+      if (selectedSoftware && selectedSoftware.name === 'VA') {
         setIsVmsOrVaSoftware(true);
         // Fetch VMS versions specifically for the multi-select
         const vmsSoftware = softwareList.find(sw => sw.name === 'VMS');

@@ -16,7 +16,7 @@ import {
   addAdminLinkWithUrl,
   // uploadAdminLinkFile, // To be replaced
   editAdminLinkWithUrl,
-  // editAdminLinkFile, // To be replaced
+  editAdminLinkFile, // <<<< Ensure this is imported
   uploadFileInChunks // New chunked upload service
 } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
@@ -61,12 +61,28 @@ const validationSchema = yup.object().shape({
     then: schema => schema.required('External URL is required for URL mode.').url('Please enter a valid URL (e.g., http://example.com).'),
     otherwise: schema => schema.optional().nullable(),
   }),
-  selectedFile: yup.mixed().when(['inputMode', 'isEditMode', 'existingFileName'], {
-    is: (inputMode: string, isEditMode: boolean, existingFileName: string | null | undefined) => 
-      inputMode === 'upload' && (!isEditMode || !existingFileName),
-    then: schema => schema.required('A file is required for new link uploads.').test('filePresent', 'A file is required for new link uploads.', value => !!value),
-    otherwise: schema => schema.nullable(),
-  }),
+  selectedFile: yup.mixed().when(
+    ['inputMode', '$isEditMode', '$isOriginallyFileBased'], 
+    {
+      is: (inputMode: string, isEditMode: boolean, isOriginallyFileBased: boolean) => {
+        // File is strictly required if:
+        // 1. Adding a new item in 'upload' mode.
+        if (inputMode === 'upload' && !isEditMode) return true;
+        // 2. Editing an item that was originally a URL, and user switched to 'upload' mode.
+        if (inputMode === 'upload' && isEditMode && !isOriginallyFileBased) return true;
+        
+        // In all other cases (e.g., editing an existing file-based link in 'upload' mode, 
+        // or if inputMode is 'url'), the file is optional by this specific rule.
+        return false;
+      },
+      then: schema => schema.required('A file is required for this operation.').test(
+        'filePresent', 
+        'A file is required.', 
+        value => !!value // Ensures a file object is present
+      ),
+      otherwise: schema => schema.nullable(),
+    }
+  ),
   description: yup.string().optional().max(1000, 'Description cannot exceed 1000 characters.'),
   compatibleVmsVersionIds: yup.array().of(yup.string().required()).optional(), // New validation
 });
@@ -82,7 +98,10 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
 
   const { register, handleSubmit, control, formState: { errors }, watch, setValue, reset } = useForm<LinkFormData>({
     resolver: yupResolver(validationSchema),
-    context: { isEditMode, existingFileName: linkToEdit?.original_filename_ref || (linkToEdit && !linkToEdit.is_external_link ? linkToEdit.url.split('/').pop() : null) }, // Pass context to yup
+    context: { 
+      isEditMode: isEditMode, 
+      isOriginallyFileBased: !!(isEditMode && linkToEdit && !linkToEdit.is_external_link) 
+    },
     defaultValues: { // Initialize with sensible defaults
       selectedSoftwareId: '',
       title: '',
@@ -337,42 +356,68 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
           }
         }
       } else { // data.inputMode === 'upload'
-        if (!data.selectedFile) {
-          if (isEditMode && linkToEdit && !linkToEdit.is_external_link && !data.selectedFile) {
-            showErrorToast("To update metadata of an existing uploaded file link without re-uploading, use a different form/feature. To replace the file, select a new file.");
-            setIsLoading(false);
-            return;
-          }
-           if (!data.selectedFile && !isEditMode) { // Should be caught by yup
-             showErrorToast("No file selected for upload.");
-             setIsLoading(false);
-             return;
-          }
-        }
-        
-        const chunkMetadata = {
-            software_id: data.selectedSoftwareId,
-            ...(finalVersionId && { version_id: finalVersionId.toString() }),
-            ...(finalTypedVersionString && { typed_version_string: finalTypedVersionString }),
-            link_title: data.title.trim(),
-            description: data.description?.trim() || '',
-            // Add compatibleVmsVersionIds to chunkMetadata if software is VMS/VA
-            ...(isVmsOrVaSoftware && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0 &&
-              { compatible_vms_version_ids_json: JSON.stringify(data.compatibleVmsVersionIds) }),
+        const payloadForFileUpload: EditLinkPayloadFlexible = {
+          software_id: parseInt(data.selectedSoftwareId),
+          title: data.title.trim(),
+          description: data.description?.trim() || undefined,
+          version_id: finalVersionId,
+          typed_version_string: finalTypedVersionString,
+          compatible_vms_version_ids: (isVmsOrVaSoftware && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0)
+            ? data.compatibleVmsVersionIds // Pass as array, service function will stringify
+            : undefined,
         };
 
-        resultLink = await uploadFileInChunks(
-            data.selectedFile!,
-            'link_file', // Use 'link_file' as itemType for backend differentiation if necessary
-            chunkMetadata,
-            (progress) => setUploadProgress(progress)
-        );
-        
-        showSuccessToast(`Link file "${resultLink.title}" added successfully via chunked upload!`);
-        if (onLinkAdded) onLinkAdded(resultLink);
-        resetFormDefaults(true);
-        setValue('selectedVersionId', '');
-        setValue('typedVersionString', '');
+        if (isEditMode && linkToEdit) {
+          // Editing an existing link, and inputMode is 'upload'.
+          // This covers:
+          // 1. Original was uploaded file: user might replace file or just update metadata.
+          // 2. Original was URL: user is switching to an uploaded file (data.selectedFile must be present).
+          if (!linkToEdit.is_external_link || (linkToEdit.is_external_link && data.selectedFile)) {
+            resultLink = await editAdminLinkFile(
+              linkToEdit.id,
+              payloadForFileUpload,
+              data.selectedFile || null // Pass new file if selected, or null for metadata-only update
+            );
+            showSuccessToast(`Link "${resultLink.title}" updated successfully!`);
+            if (onLinkUpdated) onLinkUpdated(resultLink);
+          } else {
+            // Fallback: Should be caught by Yup if switching from URL to upload without a file.
+            showErrorToast("If switching from a URL to an uploaded file, please select a file.");
+            setIsLoading(false);
+            setIsUploading(false);
+            return;
+          }
+        } else { // Not edit mode, so adding a new link with a file upload
+          if (data.selectedFile) {
+            // Metadata for new chunked upload
+            const chunkMetadata = {
+                software_id: data.selectedSoftwareId, // Keep as string for uploadFileInChunks
+                ...(finalVersionId && { version_id: finalVersionId.toString() }),
+                ...(finalTypedVersionString && { typed_version_string: finalTypedVersionString }),
+                title: data.title.trim(), // Ensure 'title' is used if uploadFileInChunks expects it, or 'link_title'
+                description: data.description?.trim() || '',
+                ...(isVmsOrVaSoftware && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0 &&
+                  { compatible_vms_version_ids_json: JSON.stringify(data.compatibleVmsVersionIds) }),
+            };
+            resultLink = await uploadFileInChunks(
+              data.selectedFile,
+              'link_file', // Use 'link_file' as itemType
+              chunkMetadata,
+              (progress) => setUploadProgress(progress)
+            );
+            showSuccessToast(`Link file "${resultLink.title}" added successfully via chunked upload!`);
+            if (onLinkAdded) onLinkAdded(resultLink);
+            resetFormDefaults(true);
+            setValue('selectedVersionId', '');
+            setValue('typedVersionString', '');
+          } else {
+            // Should be caught by Yup validation (file is required for new uploads)
+            showErrorToast("No file selected for upload. Please select a file.");
+            setIsLoading(false);
+            setIsUploading(false);
+            return;
+          }
+        }
       }
     } catch (err: any) {
       const backendMessage = err.response?.data?.msg || err.message;

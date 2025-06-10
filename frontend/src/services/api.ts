@@ -1569,6 +1569,18 @@ export async function fetchProtectedData(): Promise<any> {
 
 // --- Admin Document Functions ---
 
+// Payload type for editing documents, ensure this is defined in types.ts
+// For example:
+// export interface EditDocumentPayload {
+//   software_id: number;
+//   doc_name: string;
+//   description: string;
+//   doc_type: string;
+//   // any other metadata fields
+// }
+// Make sure AddDocumentPayload can be used or a specific EditDocumentPayload is created and imported.
+// For now, we will use AddDocumentPayload for data fields if suitable, or assume EditDocumentPayload exists.
+
 export async function addAdminDocumentWithUrl(payload: AddDocumentPayload): Promise<DocumentType> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/documents/add_with_url`, {
@@ -1793,11 +1805,24 @@ export async function editAdminDocumentWithUrl(documentId: number, payload: Part
   }
 }
 
-export async function editAdminDocumentFile(documentId: number, formData: FormData): Promise<DocumentType> {
+// Updated editAdminDocumentFile
+export async function editAdminDocumentFile(documentId: number, data: AddDocumentPayload, file?: File | null): Promise<DocumentType> {
   try {
+    const formData = new FormData();
+    // Append all fields from data to formData
+    Object.entries(data).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        formData.append(key, String(value)); // Ensure value is string
+      }
+    });
+
+    if (file) {
+      formData.append('file', file);
+    }
+
     const response = await fetch(`${API_BASE_URL}/api/admin/documents/${documentId}/edit_file`, {
       method: 'PUT',
-      headers: { ...getAuthHeader() },
+      headers: { ...getAuthHeader() }, // Content-Type is set automatically for FormData
       body: formData,
     });
     return handleApiError(response, 'Failed to update document with file');
@@ -1848,11 +1873,30 @@ export async function editAdminPatchWithUrl(patchId: number, payload: EditPatchP
   }
 }
 
-
-export async function editAdminPatchFile(patchId: number, formData: FormData): Promise<Patch> {
+// Updated editAdminPatchFile
+export async function editAdminPatchFile(patchId: number, data: EditPatchPayloadFlexible, file?: File | null): Promise<Patch> {
   try {
+    const formData = new FormData();
+    // Append all fields from data to formData
+    Object.entries(data).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        // Special handling for compatible_vms_version_ids_json as it's expected to be a JSON string
+        if (key === 'compatible_vms_version_ids_json' && Array.isArray(value)) {
+          formData.append(key, JSON.stringify(value));
+        } else {
+          formData.append(key, String(value));
+        }
+      }
+    });
+
+    if (file) {
+      formData.append('file', file);
+    }
+
     const response = await fetch(`${API_BASE_URL}/api/admin/patches/${patchId}/edit_file`, {
-      method: 'PUT', headers: { ...getAuthHeader() }, body: formData,
+      method: 'PUT',
+      headers: { ...getAuthHeader() }, // Content-Type is set automatically for FormData
+      body: formData,
     });
     return handleApiError(response, 'Failed to update patch with file');
   } catch (error: any) {
@@ -1900,10 +1944,30 @@ export async function editAdminLinkWithUrl(linkId: number, payload: EditLinkPayl
   }
 }
 
-export async function editAdminLinkFile(linkId: number, formData: FormData): Promise<Link> {
+// Updated editAdminLinkFile
+export async function editAdminLinkFile(linkId: number, data: EditLinkPayloadFlexible, file?: File | null): Promise<Link> {
   try {
+    const formData = new FormData();
+    // Append all fields from data to formData
+    Object.entries(data).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+         // Special handling for compatible_vms_version_ids_json as it's expected to be a JSON string
+        if (key === 'compatible_vms_version_ids_json' && Array.isArray(value)) {
+          formData.append(key, JSON.stringify(value));
+        } else {
+          formData.append(key, String(value));
+        }
+      }
+    });
+
+    if (file) {
+      formData.append('file', file);
+    }
+
     const response = await fetch(`${API_BASE_URL}/api/admin/links/${linkId}/edit_file`, {
-      method: 'PUT', headers: { ...getAuthHeader() }, body: formData,
+      method: 'PUT',
+      headers: { ...getAuthHeader() }, // Content-Type is set automatically for FormData
+      body: formData,
     });
     return handleApiError(response, 'Failed to update link with file');
   } catch (error: any) {

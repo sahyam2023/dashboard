@@ -2111,11 +2111,8 @@ def login():
         if 'password_reset_required' in user.keys():
             raw_password_reset_flag = user['password_reset_required']
             raw_password_reset_flag_type = type(user['password_reset_required']).__name__
-        app.logger.debug(f"[Login Debug] Raw user['password_reset_required']: {raw_password_reset_flag}")
-        app.logger.debug(f"[Login Debug] Type of user['password_reset_required']: {raw_password_reset_flag_type}")
         password_reset_required = user['password_reset_required'] if 'password_reset_required' in user.keys() and user['password_reset_required'] is not None else False
-        app.logger.debug(f"[Login Debug] Calculated password_reset_required for JSON response: {password_reset_required}")
-        app.logger.debug(f"[Login Debug] Type of calculated password_reset_required for JSON response: {type(password_reset_required).__name__}")
+        app.logger.debug("[Login Debug] Processed password_reset_required flag for JSON response.")
 
         profile_picture_url = None
         if user['profile_picture_filename']:

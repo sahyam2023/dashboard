@@ -83,6 +83,7 @@ def get_application_path():
 
 # BACKUP_DIR = os.path.join(INSTANCE_FOLDER_PATH, 'backups')
 MAX_BACKUP_AGE_DAYS = 30
+MAX_TEMP_UPLOAD_AGE_DAYS = 1 # For cleaning up TMP_LARGE_UPLOADS_FOLDER
 
 # --- Path Definitions using Helper ---
 APP_ROOT_PATH = get_application_path()
@@ -596,14 +597,57 @@ def initialize_scheduler_and_backups(current_app):
 
     scheduler = BackgroundScheduler(timezone='Asia/Kolkata') # Changed to Asia/Kolkata
     scheduler.add_job(perform_daily_backup_job, 'cron', hour=12, minute=0)
+    # Add job for cleaning temporary uploads
+    scheduler.add_job(delete_old_temporary_uploads, 'cron', hour=2, minute=0) # Runs daily at 2 AM
+    current_app.logger.info("Scheduled job for deleting old temporary uploads at 2:00 AM daily.")
+
     try:
         scheduler.start()
-        current_app.logger.info("Background scheduler started. Daily backup job scheduled for 12:00 PM UTC.")
+        current_app.logger.info("Background scheduler started. Daily backup job scheduled for 12:00 PM IST. Temp upload cleanup scheduled for 2:00 AM IST.")
         # Register scheduler shutdown
         atexit.register(lambda: scheduler.shutdown())
         current_app.logger.info("Scheduler shutdown registered with atexit.")
     except Exception as e:
         current_app.logger.error(f"Error starting background scheduler: {e}", exc_info=True)
+
+# --- Function to delete old temporary uploads ---
+def delete_old_temporary_uploads():
+    """Deletes temporary upload files older than MAX_TEMP_UPLOAD_AGE_DAYS."""
+    with app.app_context(): # Ensure app context for accessing app.config and app.logger
+        tmp_upload_folder = app.config.get('TMP_LARGE_UPLOADS_FOLDER')
+        max_age_days = app.config.get('MAX_TEMP_UPLOAD_AGE_DAYS', 1) # Default to 1 day
+
+        if not tmp_upload_folder or not os.path.exists(tmp_upload_folder):
+            app.logger.info("Temporary upload folder does not exist. No old temporary uploads to delete.")
+            return
+
+        app.logger.info(f"Starting cleanup of temporary uploads in {tmp_upload_folder} older than {max_age_days} day(s).")
+        now_ts = datetime.now().timestamp() # Current time as a timestamp
+        deleted_count = 0
+        retained_count = 0
+
+        for filename in os.listdir(tmp_upload_folder):
+            file_path = os.path.join(tmp_upload_folder, filename)
+            try:
+                if os.path.isfile(file_path): # Ensure it's a file
+                    file_mod_time_ts = os.path.getmtime(file_path)
+                    # Calculate age in days
+                    age_in_seconds = now_ts - file_mod_time_ts
+                    age_in_days = age_in_seconds / (24 * 60 * 60)
+
+                    if age_in_days > max_age_days:
+                        os.remove(file_path)
+                        app.logger.info(f"Deleted old temporary upload file: {filename} (Age: {age_in_days:.2f} days)")
+                        deleted_count += 1
+                    else:
+                        retained_count += 1
+            except FileNotFoundError:
+                # File might have been deleted by another process or the main upload process after listing
+                app.logger.warning(f"Could not process temporary file {filename}: File not found during iteration. Skipping.")
+            except Exception as e:
+                app.logger.error(f"Error processing temporary file {filename}: {e}")
+
+        app.logger.info(f"Temporary upload cleanup complete. Deleted: {deleted_count}, Retained: {retained_count}.")
 
 # Helper function to convert specific timestamp fields in a dictionary to IST ISO format
 def convert_timestamps_to_ist_iso(row_dict, timestamp_keys):
@@ -2597,8 +2641,29 @@ def get_all_documents_api():
         sort_order = 'asc'
 
     # Construct Base Query and Parameters for Filtering
-    base_query_select_fields = "d.id, d.software_id, d.doc_name, d.description, d.doc_type, d.is_external_link, d.download_link, d.stored_filename, d.original_filename_ref, d.file_size, d.file_type, d.created_by_user_id, u.username as uploaded_by_username, d.created_at, d.updated_by_user_id, upd_u.username as updated_by_username, d.updated_at, s.name as software_name, (SELECT COUNT(*) FROM comments c WHERE c.item_id = d.id AND c.item_type = 'document' AND c.parent_comment_id IS NULL) as comment_count"
-    base_query_from = "FROM documents d JOIN software s ON d.software_id = s.id LEFT JOIN users u ON d.created_by_user_id = u.id LEFT JOIN users upd_u ON d.updated_by_user_id = upd_u.id"
+    base_query_select_fields = """
+        d.id, d.software_id, d.doc_name, d.description, d.doc_type, d.is_external_link,
+        d.download_link, d.stored_filename, d.original_filename_ref, d.file_size, d.file_type,
+        d.created_by_user_id, u.username as uploaded_by_username, d.created_at,
+        d.updated_by_user_id, upd_u.username as updated_by_username, d.updated_at,
+        s.name as software_name,
+        (SELECT COUNT(*) FROM comments c WHERE c.item_id = d.id AND c.item_type = 'document' AND c.parent_comment_id IS NULL) as comment_count,
+        CASE
+            WHEN s.name = 'VA' THEN GROUP_CONCAT(DISTINCT vms_v_doc.version_number)
+            ELSE NULL
+        END as compatible_vms_versions
+    """
+    # Added s.name as software_name for clarity
+    base_query_from = """
+    FROM documents d
+    JOIN software s ON d.software_id = s.id
+    LEFT JOIN users u ON d.created_by_user_id = u.id
+    LEFT JOIN users upd_u ON d.updated_by_user_id = upd_u.id
+    LEFT JOIN document_vms_compatibility dvc ON d.id = dvc.document_id
+    LEFT JOIN versions vms_v_doc ON dvc.vms_version_id = vms_v_doc.id
+    """
+    # Note: s.name in CASE WHEN refers to the software of the document itself.
+    # vms_v_doc.version_number refers to the version numbers of the compatible VMS software.
     
     params = [] # Parameters for the WHERE clause
     user_id_param_for_join = [] # Parameter for the JOIN clause (user_id for favorites)
@@ -2615,37 +2680,26 @@ def get_all_documents_api():
     # app.logger.info(f"API Call - Logged in user ID: {logged_in_user_id}")
 
     # Base query components
-    base_query_select_fields_with_aliases = "d.id, d.software_id, d.doc_name, d.description, d.doc_type, d.is_external_link, d.download_link, d.stored_filename, d.original_filename_ref, d.file_size, d.file_type, d.created_by_user_id, u.username as uploaded_by_username, d.created_at, d.updated_by_user_id, upd_u.username as updated_by_username, d.updated_at, s.name as software_name, (SELECT COUNT(*) FROM comments c WHERE c.item_id = d.id AND c.item_type = 'document' AND c.parent_comment_id IS NULL) as comment_count"
+    # base_query_select_fields_with_aliases is now base_query_select_fields itself.
     
     # --- PERMISSION MODEL CHANGE ---
-    # SQL conditions based on "default allow, explicit deny"
-    # View: (fp.id IS NULL OR fp.can_view = 1)
-    # Download: (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download = 0 THEN 0 ELSE 1 END)
     if logged_in_user_id:
-        # Select favorite_id and is_downloadable based on the logged_in_user_id
-        select_clause = f"SELECT {base_query_select_fields_with_aliases}, uf.id AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download = 0 THEN 0 ELSE 1 END) AS is_downloadable"
+        select_clause = f"SELECT {base_query_select_fields}, uf.id AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download = 0 THEN 0 ELSE 1 END) AS is_downloadable"
     else:
-        # If no user is logged in, favorite_id is NULL.
-        # is_downloadable logic: if fp_dl.id is NULL, it defaults to 1 (true).
-        select_clause = f"SELECT {base_query_select_fields_with_aliases}, NULL AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download = 0 THEN 0 ELSE 1 END) AS is_downloadable"
+        select_clause = f"SELECT {base_query_select_fields}, NULL AS favorite_id, (CASE WHEN fp_dl.id IS NULL THEN 1 WHEN fp_dl.can_download = 0 THEN 0 ELSE 1 END) AS is_downloadable"
 
-    from_clause = "FROM documents d JOIN software s ON d.software_id = s.id LEFT JOIN users u ON d.created_by_user_id = u.id LEFT JOIN users upd_u ON d.updated_by_user_id = upd_u.id"
+    # from_clause will use base_query_from which already includes dvc and vms_v_doc joins
+    from_clause_for_main_query = base_query_from
     
-    params = [] # Params for WHERE clause filters (like software_id_filter)
-    # user_id_param_for_join is not used in this new logic structure for permissions directly.
-    # Instead, logged_in_user_id is added to specific param lists for joins.
-    permission_join_params = [logged_in_user_id] # Param for the LEFT JOIN fp.user_id = ?
-
+    params_for_where_filters = []
+    permission_join_params = [logged_in_user_id]
     filter_conditions = []
 
-    # Permission Join and Conditions
-    # --- PERMISSION MODEL CHANGE ---
-    # Default Allow, Explicit Deny
-    # LEFT JOIN file_permissions for view permission
-    from_clause += " LEFT JOIN file_permissions fp ON d.id = fp.file_id AND fp.file_type = 'document' AND fp.user_id = ?"
-    # The view condition is now part of the WHERE clause.
+    # Permission Join and Conditions for view
+    # The base_query_from already includes necessary joins for software, users, dvc, vms_v_doc.
+    # We add the file_permissions join for view permission here.
+    from_clause_for_main_query += " LEFT JOIN file_permissions fp ON d.id = fp.file_id AND fp.file_type = 'document' AND fp.user_id = ?"
     filter_conditions.append("(fp.id IS NULL OR fp.can_view = 1)")
-    # logged_in_user_id for the view permission join is part of `permission_join_params`
 
     # Existing Filters
     if software_id_filter:
@@ -2674,14 +2728,15 @@ def get_all_documents_api():
     if filter_conditions:
         where_clause = " WHERE " + " AND ".join(filter_conditions)
 
-    # Count Query (reflects permission filtering)
-    # For count_query, the logged_in_user_id for the permission join must also be included.
-    count_params = permission_join_params + params # Combine params for join and filters
-    count_query = f"SELECT COUNT(d.id) as count {from_clause}{where_clause}"
+    # Count Query
+    # The from_clause_for_main_query contains all necessary joins for filtering, including permission join.
+    # The where_clause also includes the permission condition.
+    # COUNT(DISTINCT d.id) is important due to LEFT JOINs (especially dvc) potentially multiplying rows before GROUP BY in main query.
+    count_query = f"SELECT COUNT(DISTINCT d.id) as count {from_clause_for_main_query}{where_clause}"
+    # Parameters for count query: permission join param + where filter params
+    count_params = permission_join_params + params_for_where_filters
     
     try:
-        # app.logger.info(f"Documents Count Query for user {logged_in_user_id}: {count_query}") # Removed
-        # app.logger.info(f"Documents Count Params: {tuple(count_params)}") # Removed
         total_documents_cursor = db.execute(count_query, tuple(count_params))
         total_documents = total_documents_cursor.fetchone()['count']
     except Exception as e:
@@ -2696,36 +2751,52 @@ def get_all_documents_api():
         offset = (page - 1) * per_page
     
     # Main Data Query
-    final_from_clause_for_data = from_clause 
-    # final_params_for_data = list(permission_join_params) 
-    # final_params_for_data.extend(params) 
+    # final_from_clause_for_data should be from_clause_for_main_query
+    final_from_clause_for_data_query = from_clause_for_main_query # This already has fp join for view
 
-    # New logic for assembling final_params_for_data
-    final_params_for_data = list(permission_join_params)  # Start with permission join params
+    final_params_for_data_query = list(permission_join_params) # Param for fp join
 
     if logged_in_user_id:
         # Add JOIN for favorite status
-        final_from_clause_for_data += " LEFT JOIN user_favorites uf ON d.id = uf.item_id AND uf.item_type = 'document' AND uf.user_id = ?"
-        final_params_for_data.append(logged_in_user_id) # Param for uf join
+        final_from_clause_for_data_query += " LEFT JOIN user_favorites uf ON d.id = uf.item_id AND uf.item_type = 'document' AND uf.user_id = ?"
+        final_params_for_data_query.append(logged_in_user_id) # Param for uf join
         
         # Add separate LEFT JOIN for download permission (fp_dl)
-        final_from_clause_for_data += " LEFT JOIN file_permissions fp_dl ON d.id = fp_dl.file_id AND fp_dl.file_type = 'document' AND fp_dl.user_id = ?"
-        final_params_for_data.append(logged_in_user_id) # Param for fp_dl join
+        # Note: base_query_from already has dvc and vms_v_doc. fp for view is in from_clause_for_main_query.
+        # We need to ensure fp_dl doesn't conflict if it's already implicitly part of base_query_from (it's not).
+        final_from_clause_for_data_query += " LEFT JOIN file_permissions fp_dl ON d.id = fp_dl.file_id AND fp_dl.file_type = 'document' AND fp_dl.user_id = ?"
+        final_params_for_data_query.append(logged_in_user_id) # Param for fp_dl join
     else:
         # Add fp_dl join for anonymous users as well
-        final_from_clause_for_data += " LEFT JOIN file_permissions fp_dl ON d.id = fp_dl.file_id AND fp_dl.file_type = 'document' AND fp_dl.user_id = ?"
-        final_params_for_data.append(None) # Param for fp_dl join (None for anonymous)
+        final_from_clause_for_data_query += " LEFT JOIN file_permissions fp_dl ON d.id = fp_dl.file_id AND fp_dl.file_type = 'document' AND fp_dl.user_id = ?"
+        final_params_for_data_query.append(None) # Param for fp_dl join (None for anonymous)
 
-    final_params_for_data.extend(params) # Add WHERE clause filter parameters
-    final_params_for_data.extend([per_page, offset]) # Add pagination params
+    final_params_for_data_query.extend(params_for_where_filters) # Add WHERE clause filter parameters
+
+    # Add GROUP BY clause here, before ORDER BY
+    # Group by all selected non-aggregated fields from documents d, software s, users u, users upd_u
+    # This is essential for GROUP_CONCAT (compatible_vms_versions) to work correctly.
+    group_by_columns = [
+        "d.id", "d.software_id", "d.doc_name", "d.description", "d.doc_type",
+        "d.is_external_link", "d.download_link", "d.stored_filename", "d.original_filename_ref",
+        "d.file_size", "d.file_type", "d.created_by_user_id", "u.username", "d.created_at",
+        "d.updated_by_user_id", "upd_u.username", "d.updated_at", "s.name"
+    ]
+    # Add favorite_id and is_downloadable to group by if they are selected and not aggregated
+    if logged_in_user_id:
+        group_by_columns.extend(["uf.id", "fp_dl.id", "fp_dl.can_download"])
+    else: # For anonymous, only fp_dl parts are relevant if they were added
+        group_by_columns.extend(["fp_dl.id", "fp_dl.can_download"])
+
+
+    group_by_clause = " GROUP BY " + ", ".join(group_by_columns)
     
-    final_query = f"{select_clause} {final_from_clause_for_data}{where_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
-    # app.logger.info(f"Final documents query: {final_query}")
-    # app.logger.info(f"Final documents params: {tuple(final_params_for_data)}")
+    final_params_for_data_query.extend([per_page, offset]) # Add pagination params
+
+    final_query = f"{select_clause} {final_from_clause_for_data_query}{where_clause}{group_by_clause} ORDER BY {sort_by_column} {sort_order.upper()} LIMIT ? OFFSET ?"
+
     try:
-        # app.logger.info(f"Documents Data Query for user {logged_in_user_id}: {final_query}") # Removed
-        # app.logger.info(f"Documents Data Params: {tuple(final_params_for_data)}") # Removed
-        documents_cursor = db.execute(final_query, tuple(final_params_for_data))
+        documents_cursor = db.execute(final_query, tuple(final_params_for_data_query))
         documents_list_raw = [dict(row) for row in documents_cursor.fetchall()]
         ts_keys = ['created_at', 'updated_at']
         documents_list = [convert_timestamps_to_ist_iso(doc, ts_keys) for doc in documents_list_raw]
@@ -3398,11 +3469,16 @@ def _admin_handle_file_upload_and_db_insert(
     metadata_fields, required_form_fields, sql_insert_query, sql_params_tuple,
     resolved_fks: dict = None
 ):
-    current_user_id = int(get_jwt_identity()) 
-    uploader_user = find_user_by_id(current_user_id) 
+    current_user_id = int(get_jwt_identity())
+    uploader_user = find_user_by_id(current_user_id)
     uploader_username = uploader_user['username'] if uploader_user else "Unknown User"
     if resolved_fks is None:
         resolved_fks = {}
+
+    # Extract compatible_vms_version_ids_json specifically for documents early on
+    compatible_vms_ids_json_str_for_doc = None
+    if table_name == 'documents':
+        compatible_vms_ids_json_str_for_doc = request.form.get('compatible_vms_version_ids_json')
 
     if 'file' not in request.files:
         app.logger.warning(f"_admin_helper: 'file' not in request.files for table {table_name}")
@@ -3486,7 +3562,36 @@ def _admin_handle_file_upload_and_db_insert(
                     # Actor (admin user) is derived from JWT by default in log_audit_action
                 )
             
-            db.commit() # Commit after logging if it's specific to this helper's scope
+            # Handle VMS compatibility for documents if software is 'VA'
+            if table_name == 'documents' and new_id:
+                doc_software_id_str = form_data.get('software_id') # From form_data
+                if doc_software_id_str:
+                    doc_software_id = int(doc_software_id_str)
+                    software_info = db.execute("SELECT name FROM software WHERE id = ?", (doc_software_id,)).fetchone()
+                    if software_info and software_info['name'] == 'VA':
+                        if compatible_vms_ids_json_str_for_doc:
+                            try:
+                                compatible_vms_ids = json.loads(compatible_vms_ids_json_str_for_doc)
+                                if isinstance(compatible_vms_ids, list) and compatible_vms_ids: # Ensure not empty list
+                                    vms_software_id_row = db.execute("SELECT id FROM software WHERE name = 'VMS'").fetchone()
+                                    vms_software_id = vms_software_id_row['id'] if vms_software_id_row else None
+                                    if vms_software_id:
+                                        for vms_ver_id_str in compatible_vms_ids:
+                                            try:
+                                                vms_ver_id_int = int(vms_ver_id_str)
+                                                vms_version_check = db.execute("SELECT id FROM versions WHERE id = ? AND software_id = ?", (vms_ver_id_int, vms_software_id)).fetchone()
+                                                if vms_version_check:
+                                                    db.execute("INSERT INTO document_vms_compatibility (document_id, vms_version_id) VALUES (?, ?)",
+                                                               (new_id, vms_ver_id_int))
+                                                    # Log individual VMS compat addition if needed
+                                                else: app.logger.warning(f"_admin_helper: Doc VMS compat (file) - VMS version ID {vms_ver_id_int} not valid for VMS software.")
+                                            except ValueError: app.logger.warning(f"_admin_helper: Doc VMS compat (file) - Invalid VMS version ID format: {vms_ver_id_str}")
+                                            # No rollback for individual VMS ID error in helper; main transaction will handle.
+                                    else: app.logger.warning("_admin_helper: Doc VMS compat (file) - 'VMS' software ID not found, cannot validate VMS version IDs.")
+                            except json.JSONDecodeError:
+                                app.logger.error(f"_admin_helper: Failed to parse compatible_vms_version_ids_json for document file upload: {compatible_vms_ids_json_str_for_doc}")
+
+            db.commit() # Commit all changes including VMS compatibility
             file_saved_for_cleanup = False # Reset flag after successful commit, no cleanup needed
 
             # --- CORRECTED FETCH-BACK SECTION ---
@@ -3516,10 +3621,16 @@ def _admin_handle_file_upload_and_db_insert(
                     WHERE mf.id = ?"""
             elif table_name == 'documents':
                  fetch_back_query = """
-                    SELECT d.*, s.name as software_name, u.username as uploaded_by_username
+                    SELECT d.*, s.name as software_name, u.username as uploaded_by_username,
+                           CASE WHEN s.name = 'VA' THEN (SELECT GROUP_CONCAT(DISTINCT v_vms.version_number)
+                                                         FROM document_vms_compatibility dvc
+                                                         JOIN versions v_vms ON dvc.vms_version_id = v_vms.id
+                                                         WHERE dvc.document_id = d.id)
+                                ELSE NULL
+                           END as compatible_vms_versions
                     FROM documents d
                     JOIN software s ON d.software_id = s.id
-                    JOIN users u ON d.created_by_user_id = u.id
+                    LEFT JOIN users u ON d.created_by_user_id = u.id
                     WHERE d.id = ?"""
             else:
                 # This default is a fallback, but ideally all tables handled by this helper
@@ -3643,15 +3754,19 @@ def _admin_add_item_with_external_link(
 
     # Prepare form_data by extracting relevant fields from the JSON payload (data)
     # This is crucial because sql_params_tuple refers to keys in form_data.
-    form_data = {} 
-    # Populate form_data with expected fields from data, including patch_by_developer if table is 'patches'
-    # This step ensures that 'patch_by_developer' (and other fields) are available if they are in sql_params_tuple.
-    for key in data: # Iterate over keys in the input JSON data
+    form_data = {}
+    # Populate form_data with expected fields from data
+    for key in data:
         form_data[key] = data[key]
 
-    # Ensure 'patch_by_developer' is in form_data if table_name is 'patches' and it's expected by sql_params_tuple
+    # Specific handling for patch_by_developer for 'patches' table
     if table_name == 'patches' and 'patch_by_developer' not in form_data:
-        form_data['patch_by_developer'] = data.get('patch_by_developer') # defaults to None if not in data
+        form_data['patch_by_developer'] = data.get('patch_by_developer')
+
+    # Specific handling for compatible_vms_version_ids for 'documents' table
+    # This field is handled after the main item insertion.
+    # We just note its presence here for now if needed, but it's not directly in sql_params_tuple for documents.
+    # compatible_vms_ids_for_doc = data.get('compatible_vms_version_ids') if table_name == 'documents' else None
 
     all_present = True
     missing_fields_list = []
@@ -3703,17 +3818,60 @@ def _admin_add_item_with_external_link(
 
     db = get_db()
     try:
+        db.execute("BEGIN") # Start transaction
         app.logger.info(f"ADMIN_HELPER_LINK: Attempting to insert into {table_name}. Params: {final_sql_params}")
         cursor = db.execute(sql_insert_query, tuple(final_sql_params))
-        db.commit()
+        # db.commit() # Commit after VMS compat logic
         new_id = cursor.lastrowid
-        app.logger.info(f"ADMIN_HELPER_LINK: Inserted into {table_name} with ID: {new_id}. Fetching back...")
+        app.logger.info(f"ADMIN_HELPER_LINK: Inserted into {table_name} with ID: {new_id}.")
+
+        # Handle VMS compatibility for documents if software is 'VA'
+        if table_name == 'documents' and new_id:
+            doc_software_id_str = data.get('software_id') # From original request data
+            if doc_software_id_str:
+                doc_software_id = int(doc_software_id_str)
+                software_info = db.execute("SELECT name FROM software WHERE id = ?", (doc_software_id,)).fetchone()
+                if software_info and software_info['name'] == 'VA':
+                    compatible_vms_ids = data.get('compatible_vms_version_ids') # From original request data
+                    if compatible_vms_ids and isinstance(compatible_vms_ids, list):
+                        vms_software_id_row = db.execute("SELECT id FROM software WHERE name = 'VMS'").fetchone()
+                        vms_software_id = vms_software_id_row['id'] if vms_software_id_row else None
+                        if vms_software_id:
+                            for vms_ver_id_str in compatible_vms_ids:
+                                try:
+                                    vms_ver_id_int = int(vms_ver_id_str)
+                                    vms_version_check = db.execute("SELECT id FROM versions WHERE id = ? AND software_id = ?", (vms_ver_id_int, vms_software_id)).fetchone()
+                                    if vms_version_check:
+                                        db.execute("INSERT INTO document_vms_compatibility (document_id, vms_version_id) VALUES (?, ?)",
+                                                   (new_id, vms_ver_id_int))
+                                        # Log individual VMS compat addition if needed
+                                    else: app.logger.warning(f"ADMIN_HELPER_LINK: Doc VMS compat - VMS version ID {vms_ver_id_int} not valid for VMS software.")
+                                except ValueError: app.logger.warning(f"ADMIN_HELPER_LINK: Doc VMS compat - Invalid VMS version ID format: {vms_ver_id_str}")
+                                # No rollback for individual VMS ID error in helper; main transaction will handle.
+                        else: app.logger.warning("ADMIN_HELPER_LINK: Doc VMS compat - 'VMS' software ID not found, cannot validate VMS version IDs.")
+
+        db.commit() # Commit all changes including VMS compatibility
+        app.logger.info(f"ADMIN_HELPER_LINK: Committed transaction for {table_name} ID {new_id}, including VMS compat if applicable.")
+
 
         # --- MODIFIED FETCH-BACK SECTION for _admin_add_item_with_external_link ---
         fetch_back_query = ""
         # Base select needs to be table-specific to use correct alias for created_by_user_id
         if table_name == 'documents':
-            fetch_back_query = "SELECT d.*, u.username as uploaded_by_username FROM documents d JOIN users u ON d.created_by_user_id = u.id WHERE d.id = ?"
+            # For documents, also fetch compatible_vms_versions if software is VA
+            fetch_back_query = """
+                SELECT d.*, u.username as uploaded_by_username, s.name as software_name,
+                       CASE WHEN s.name = 'VA' THEN (SELECT GROUP_CONCAT(DISTINCT v_vms.version_number)
+                                                     FROM document_vms_compatibility dvc
+                                                     JOIN versions v_vms ON dvc.vms_version_id = v_vms.id
+                                                     WHERE dvc.document_id = d.id)
+                            ELSE NULL
+                       END as compatible_vms_versions
+                FROM documents d
+                JOIN software s ON d.software_id = s.id
+                LEFT JOIN users u ON d.created_by_user_id = u.id
+                WHERE d.id = ?
+            """
         elif table_name == 'patches':
             fetch_back_query = "SELECT p.*, u.username as uploaded_by_username, p.patch_by_developer FROM patches p JOIN users u ON p.created_by_user_id = u.id WHERE p.id = ?"
         elif table_name == 'links':
@@ -4306,20 +4464,18 @@ def admin_edit_document_url(document_id):
     if not data:
         return jsonify(msg="Missing JSON data"), 400
 
-    # Fields that can be updated for a URL-based document
-    # software_id is typically not changed, but can be if needed.
-    # doc_name, description, doc_type, download_link (the external URL)
-    software_id = data.get('software_id', doc['software_id'])
+    software_id_from_payload = data.get('software_id', doc['software_id'])
     doc_name = data.get('doc_name', doc['doc_name'])
     description = data.get('description', doc['description'])
     doc_type = data.get('doc_type', doc['doc_type'])
-    download_link = data.get('download_link', doc['download_link']) # The external URL
+    download_link = data.get('download_link', doc['download_link'])
+    compatible_vms_ids = data.get('compatible_vms_version_ids') # New: list or None
 
     if not doc_name or not download_link:
         return jsonify(msg="Document name and download link are required"), 400
     
     try:
-        software_id = int(software_id)
+        software_id = int(software_id_from_payload)
     except (ValueError, TypeError):
         return jsonify(msg="Invalid software_id format"), 400
 
@@ -4329,16 +4485,12 @@ def admin_edit_document_url(document_id):
         _delete_file_if_exists(old_file_path)
 
     try:
-        # Log details before update
+        db.execute("BEGIN") # Start transaction
+
         log_details = {
             'updated_fields': ['doc_name', 'description', 'doc_type', 'download_link', 'software_id', 'is_external_link'],
-            'doc_name': doc_name,
-            'url': download_link,
-            'software_id': software_id,
-            'is_external_link': True # Explicitly setting to URL
+            'doc_name': doc_name, 'url': download_link, 'software_id': software_id, 'is_external_link': True
         }
-        # Potentially log old values if desired by fetching 'doc' again or comparing field by field
-        # For brevity, logging new values and indicating it's now a URL link.
 
         db.execute("""
             UPDATE documents
@@ -4347,8 +4499,29 @@ def admin_edit_document_url(document_id):
                 original_filename_ref = NULL, file_size = NULL, file_type = NULL,
                 updated_by_user_id = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
-        """, (software_id, doc_name, description, doc_type, download_link,
-              current_user_id, document_id))
+        """, (software_id, doc_name, description, doc_type, download_link, current_user_id, document_id))
+
+        # Handle VMS compatibility
+        db.execute("DELETE FROM document_vms_compatibility WHERE document_id = ?", (document_id,))
+        log_audit_action(action_type='CLEAR_DOCUMENT_VMS_COMPATIBILITY', target_table='document_vms_compatibility', target_id=document_id, details={'document_id': document_id, 'reason': 'Pre-update clear for edit_url'})
+
+        current_doc_software = db.execute("SELECT name FROM software WHERE id = ?", (software_id,)).fetchone()
+        if current_doc_software and current_doc_software['name'] == 'VA' and compatible_vms_ids and isinstance(compatible_vms_ids, list):
+            vms_software_id_row = db.execute("SELECT id FROM software WHERE name = 'VMS'").fetchone()
+            vms_software_id = vms_software_id_row['id'] if vms_software_id_row else None
+            if vms_software_id:
+                for vms_ver_id_str in compatible_vms_ids:
+                    try:
+                        vms_ver_id_int = int(vms_ver_id_str)
+                        vms_version_check = db.execute("SELECT id FROM versions WHERE id = ? AND software_id = ?", (vms_ver_id_int, vms_software_id)).fetchone()
+                        if vms_version_check:
+                           db.execute("INSERT INTO document_vms_compatibility (document_id, vms_version_id) VALUES (?, ?)", (document_id, vms_ver_id_int))
+                           log_audit_action(action_type='UPDATE_DOCUMENT_VMS_COMPATIBILITY', target_table='document_vms_compatibility', target_id=document_id, details={'document_id': document_id, 'vms_version_id_added': vms_ver_id_int, 'method': 'edit_url'})
+                        else: app.logger.warning(f"Skipping VMS compatibility for edited doc {document_id} (URL): VMS version ID {vms_ver_id_int} not valid for VMS software.")
+                    except ValueError: app.logger.warning(f"Invalid VMS version ID format (URL edit): {vms_ver_id_str} for document {document_id}")
+                    # No rollback for individual VMS ID error, just log. Overall transaction will handle major errors.
+            log_details['compatible_vms_version_ids_processed'] = True # Indicate that logic was run
+
         log_audit_action(
             action_type='UPDATE_DOCUMENT_URL',
             target_table='documents',
@@ -4359,22 +4532,31 @@ def admin_edit_document_url(document_id):
         
         updated_doc_row = db.execute("""
             SELECT d.*, s.name as software_name, 
-                   cr_u.username as uploaded_by_username, upd_u.username as updated_by_username
+                   cr_u.username as uploaded_by_username, upd_u.username as updated_by_username,
+                   CASE WHEN s.name = 'VA' THEN (SELECT GROUP_CONCAT(DISTINCT v_vms.version_number)
+                                                 FROM document_vms_compatibility dvc
+                                                 JOIN versions v_vms ON dvc.vms_version_id = v_vms.id
+                                                 WHERE dvc.document_id = d.id)
+                        ELSE NULL
+                   END as compatible_vms_versions
             FROM documents d 
             JOIN software s ON d.software_id = s.id
             LEFT JOIN users cr_u ON d.created_by_user_id = cr_u.id
             LEFT JOIN users upd_u ON d.updated_by_user_id = upd_u.id
             WHERE d.id = ?
         """, (document_id,)).fetchone()
+
+        processed_doc = None # Initialize processed_doc
         if updated_doc_row:
             processed_doc = convert_timestamps_to_ist_iso(dict(updated_doc_row), ['created_at', 'updated_at'])
-            return jsonify(processed_doc), 200
+            # return jsonify(processed_doc), 200 # Return moved to after notification logic
         else:
             app.logger.error(f"Failed to fetch document with ID {document_id} after edit_url.")
+            db.rollback() # Rollback if fetch failed
             return jsonify(msg="Document updated but failed to retrieve full details."), 500
         
         # --- Notification Logic for admin_edit_document_url ---
-        if updated_doc_row: # Check if update was successful and we have data
+        if processed_doc: # Check if update was successful and we have data (processed_doc will be None if fetch failed)
             try:
                 acting_user_id = int(get_jwt_identity())
                 acting_user_details = find_user_by_id(acting_user_id)
@@ -4463,6 +4645,7 @@ def admin_edit_document_file(document_id):
     doc_name = request.form.get('doc_name', doc['doc_name'])
     description = request.form.get('description', doc['description'])
     doc_type = request.form.get('doc_type', doc['doc_type'])
+    compatible_vms_ids_json_str = request.form.get('compatible_vms_version_ids_json') # New
 
     try:
         software_id = int(software_id_str)
@@ -4522,10 +4705,12 @@ def admin_edit_document_file(document_id):
             'software_id': software_id
         }
         if new_file and new_file.filename != '': # A new file was uploaded
-            action_type = 'UPDATE_DOCUMENT_FILE'
+            action_type_log = 'UPDATE_DOCUMENT_FILE' # Use action_type_log
             log_details['new_filename'] = new_original_filename
             log_details['updated_fields'].extend(['download_link', 'stored_filename', 'original_filename_ref', 'file_size', 'file_type', 'is_external_link'])
             log_details['is_external_link'] = False
+
+        db.execute("BEGIN") # Start transaction
 
         db.execute("""
             UPDATE documents
@@ -4537,8 +4722,36 @@ def admin_edit_document_file(document_id):
         """, (software_id, doc_name, description, doc_type,
               new_download_link, new_stored_filename, new_original_filename,
               new_file_size, new_file_type, current_user_id, document_id))
+
+        # Handle VMS compatibility
+        db.execute("DELETE FROM document_vms_compatibility WHERE document_id = ?", (document_id,))
+        log_audit_action(action_type='CLEAR_DOCUMENT_VMS_COMPATIBILITY', target_table='document_vms_compatibility', target_id=document_id, details={'document_id': document_id, 'reason': 'Pre-update clear for edit_file'})
+
+        current_doc_software = db.execute("SELECT name FROM software WHERE id = ?", (software_id,)).fetchone()
+        if current_doc_software and current_doc_software['name'] == 'VA' and compatible_vms_ids_json_str:
+            try:
+                compatible_vms_ids = json.loads(compatible_vms_ids_json_str)
+                if isinstance(compatible_vms_ids, list) and compatible_vms_ids:
+                    vms_software_id_row = db.execute("SELECT id FROM software WHERE name = 'VMS'").fetchone()
+                    vms_software_id = vms_software_id_row['id'] if vms_software_id_row else None
+                    if vms_software_id:
+                        for vms_ver_id_str in compatible_vms_ids:
+                            try:
+                                vms_ver_id_int = int(vms_ver_id_str)
+                                vms_version_check = db.execute("SELECT id FROM versions WHERE id = ? AND software_id = ?", (vms_ver_id_int, vms_software_id)).fetchone()
+                                if vms_version_check:
+                                    db.execute("INSERT INTO document_vms_compatibility (document_id, vms_version_id) VALUES (?, ?)", (document_id, vms_ver_id_int))
+                                    log_audit_action(action_type='UPDATE_DOCUMENT_VMS_COMPATIBILITY', target_table='document_vms_compatibility', target_id=document_id, details={'document_id': document_id, 'vms_version_id_added': vms_ver_id_int, 'method': 'edit_file'})
+                                else: app.logger.warning(f"Skipping VMS compatibility for edited doc {document_id} (file): VMS version ID {vms_ver_id_int} not valid for VMS software.")
+                            except ValueError: app.logger.warning(f"Invalid VMS version ID format (file edit): {vms_ver_id_str} for document {document_id}")
+                            # No rollback for individual VMS ID error. Main transaction handles.
+                    log_details['compatible_vms_version_ids_processed'] = True
+            except json.JSONDecodeError:
+                app.logger.error(f"Failed to parse compatible_vms_version_ids_json for document file edit: {compatible_vms_ids_json_str}")
+                # Potentially add to log_details or handle error more explicitly
+
         log_audit_action(
-            action_type=action_type,
+            action_type=action_type_log, # Use corrected variable name
             target_table='documents',
             target_id=document_id,
             details=log_details
@@ -4547,22 +4760,31 @@ def admin_edit_document_file(document_id):
         
         updated_doc_row = db.execute("""
             SELECT d.*, s.name as software_name, 
-                   cr_u.username as uploaded_by_username, upd_u.username as updated_by_username
+                   cr_u.username as uploaded_by_username, upd_u.username as updated_by_username,
+                   CASE WHEN s.name = 'VA' THEN (SELECT GROUP_CONCAT(DISTINCT v_vms.version_number)
+                                                 FROM document_vms_compatibility dvc
+                                                 JOIN versions v_vms ON dvc.vms_version_id = v_vms.id
+                                                 WHERE dvc.document_id = d.id)
+                        ELSE NULL
+                   END as compatible_vms_versions
             FROM documents d 
             JOIN software s ON d.software_id = s.id
             LEFT JOIN users cr_u ON d.created_by_user_id = cr_u.id
             LEFT JOIN users upd_u ON d.updated_by_user_id = upd_u.id
             WHERE d.id = ?
         """, (document_id,)).fetchone()
+
+        processed_doc = None # Initialize
         if updated_doc_row:
             processed_doc = convert_timestamps_to_ist_iso(dict(updated_doc_row), ['created_at', 'updated_at'])
-            return jsonify(processed_doc), 200
+            # return jsonify(processed_doc), 200 # Return moved to after notification logic
         else:
             app.logger.error(f"Failed to fetch document with ID {document_id} after edit_file.")
+            db.rollback() # Rollback if fetch failed
             return jsonify(msg="Document updated but failed to retrieve full details."), 500
         
         # --- Notification Logic for admin_edit_document_file ---
-        if updated_doc_row: # Check if update was successful and we have data
+        if processed_doc: # Check if update was successful and we have data
             try:
                 acting_user_id = int(get_jwt_identity())
                 acting_user_details = find_user_by_id(acting_user_id)
@@ -6186,6 +6408,12 @@ def _admin_handle_large_file_db_insert(
     final_filepath_for_cleanup = None # To store the path of the file after it's moved
     temp_part_filepath_for_cleanup = metadata.get('temp_part_filepath') # Passed from the calling route
 
+    # Extract compatible_vms_version_ids_json specifically for documents early on
+    compatible_vms_ids_json_str_for_doc_large_file = None
+    if item_type == 'document':
+        compatible_vms_ids_json_str_for_doc_large_file = metadata.get('compatible_vms_version_ids_json')
+
+
     server_path_prefix = ""
     # The 'mime_type' parameter received by this function is the client-provided/detected MIME type for the chunk.
     # We'll use this for the database 'file_type' column.
@@ -6288,15 +6516,59 @@ def _admin_handle_large_file_db_insert(
 
         cursor = db.execute(sql_insert_query, tuple(sql_params_list))
         new_id = cursor.lastrowid
-        db.commit()
-        app.logger.info(f"Large file DB insert: Successfully inserted {item_type} '{item_name_for_log}', new ID: {new_id}")
+        # db.commit() # Commit after VMS compat logic for documents
+        app.logger.info(f"Large file DB insert: Successfully prepared insert for {item_type} '{item_name_for_log}', new ID: {new_id}")
+
+        # Handle VMS compatibility for documents if software is 'VA' (for large file uploads)
+        if item_type == 'document' and new_id:
+            doc_software_id_str = metadata.get('software_id') # From metadata
+            if doc_software_id_str:
+                doc_software_id = int(doc_software_id_str)
+                software_info = db.execute("SELECT name FROM software WHERE id = ?", (doc_software_id,)).fetchone()
+                if software_info and software_info['name'] == 'VA':
+                    if compatible_vms_ids_json_str_for_doc_large_file:
+                        try:
+                            compatible_vms_ids = json.loads(compatible_vms_ids_json_str_for_doc_large_file)
+                            if isinstance(compatible_vms_ids, list) and compatible_vms_ids:
+                                vms_software_id_row = db.execute("SELECT id FROM software WHERE name = 'VMS'").fetchone()
+                                vms_software_id = vms_software_id_row['id'] if vms_software_id_row else None
+                                if vms_software_id:
+                                    for vms_ver_id_str in compatible_vms_ids:
+                                        try:
+                                            vms_ver_id_int = int(vms_ver_id_str)
+                                            vms_version_check = db.execute("SELECT id FROM versions WHERE id = ? AND software_id = ?", (vms_ver_id_int, vms_software_id)).fetchone()
+                                            if vms_version_check:
+                                                db.execute("INSERT INTO document_vms_compatibility (document_id, vms_version_id) VALUES (?, ?)",
+                                                           (new_id, vms_ver_id_int))
+                                                # Log individual VMS compat addition if needed
+                                            else: app.logger.warning(f"_admin_handle_large_file_db_insert: Doc VMS compat - VMS version ID {vms_ver_id_int} not valid for VMS software.")
+                                        except ValueError: app.logger.warning(f"_admin_handle_large_file_db_insert: Doc VMS compat - Invalid VMS version ID format: {vms_ver_id_str}")
+                                        # No rollback for individual VMS ID error here; main transaction will handle.
+                                else: app.logger.warning("_admin_handle_large_file_db_insert: Doc VMS compat - 'VMS' software ID not found, cannot validate VMS version IDs.")
+                        except json.JSONDecodeError:
+                            app.logger.error(f"_admin_handle_large_file_db_insert: Failed to parse compatible_vms_version_ids_json for document large file upload: {compatible_vms_ids_json_str_for_doc_large_file}")
+
+        db.commit() # Commit all changes including VMS compatibility
+        app.logger.info(f"Large file DB insert: Committed transaction for {item_type} ID {new_id}, including VMS compat if applicable.")
         # If commit is successful, the temp file should have already been deleted by the caller after successful move.
         # And the final file should remain. So, no cleanup needed here on success.
 
         # Fetch back the newly created item with joined data for response
         fetch_back_query = ""
         if table_name == 'documents':
-            fetch_back_query = "SELECT d.*, s.name as software_name, u.username as uploaded_by_username FROM documents d JOIN software s ON d.software_id = s.id LEFT JOIN users u ON d.created_by_user_id = u.id WHERE d.id = ?"
+            fetch_back_query = """
+                SELECT d.*, s.name as software_name, u.username as uploaded_by_username,
+                       CASE WHEN s.name = 'VA' THEN (SELECT GROUP_CONCAT(DISTINCT v_vms.version_number)
+                                                     FROM document_vms_compatibility dvc
+                                                     JOIN versions v_vms ON dvc.vms_version_id = v_vms.id
+                                                     WHERE dvc.document_id = d.id)
+                            ELSE NULL
+                       END as compatible_vms_versions
+                FROM documents d
+                JOIN software s ON d.software_id = s.id
+                LEFT JOIN users u ON d.created_by_user_id = u.id
+                WHERE d.id = ?
+            """
         elif table_name == 'patches':
             fetch_back_query = "SELECT p.*, s.name as software_name, v.version_number, u.username as uploaded_by_username FROM patches p JOIN versions v ON p.version_id = v.id JOIN software s ON v.software_id = s.id LEFT JOIN users u ON p.created_by_user_id = u.id WHERE p.id = ?"
         elif table_name == 'misc_files':
@@ -8658,8 +8930,12 @@ def admin_upload_large_file():
                 f.write(file_chunk.read())
         except IOError as e:
             app.logger.error(f"IOError appending to chunk file {temp_part_filepath}: {e}")
-            # Consider cleaning up temp_part_filepath if error occurs
+            _delete_file_if_exists(temp_part_filepath) # Cleanup on IOError
             return jsonify(msg="Error saving file chunk."), 500
+        except Exception as e_chunk_write: # Broader exception for unexpected errors during chunk write
+            app.logger.error(f"Unexpected error writing chunk file {temp_part_filepath}: {e_chunk_write}", exc_info=True)
+            _delete_file_if_exists(temp_part_filepath) # Cleanup on other unexpected errors
+            return jsonify(msg=f"Unexpected error saving file chunk: {str(e_chunk_write)}"), 500
         
         app.logger.info(f"User {current_user_id} uploaded chunk {chunk_number}/{total_chunks-1} for upload_id {upload_id}, file {original_filename} to {temp_part_filepath}")
 

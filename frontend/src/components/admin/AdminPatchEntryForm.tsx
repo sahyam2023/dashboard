@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useForm, Controller, SubmitHandler, FieldErrors } from 'react-hook-form';
 import * as yup from 'yup';
 import { yupResolver } from '@hookform/resolvers/yup';
-import { showSuccessToast, showErrorToast } from '../../utils/toastUtils'; // Standardized toast
+import { showSuccessToast, showErrorToast, showWarningToast } from '../../utils/toastUtils'; // Standardized toast
 import {
   Software,
   Patch as PatchType,
@@ -122,7 +122,7 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
   const [softwareList, setSoftwareList] = useState<Software[]>([]);
   const [versionsList, setVersionsList] = useState<SoftwareVersion[]>([]);
   const [vmsVersionsList, setVmsVersionsList] = useState<SoftwareVersion[]>([]); // State for VMS versions
-  const [isVmsOrVaSoftware, setIsVmsOrVaSoftware] = useState(false); // State to track if software is VMS/VA
+  const [isVaSoftwareOnly, setIsVaSoftwareOnly] = useState(false); // Renamed state
   const [existingFileName, setExistingFileName] = useState<string | null>(null);
 
   const [isLoading, setIsLoading] = useState(false);
@@ -144,16 +144,30 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       if (isUploading) {
         event.preventDefault();
-        event.returnValue = '';
+        event.returnValue = ''; // Standard for most browsers
       }
     };
 
-    window.addEventListener('beforeunload', handleBeforeUnload);
+    const handleVisibilityChange = () => {
+      if (document.hidden && isUploading) {
+        showWarningToast("File upload will be paused or stopped if you leave this tab.", { autoClose: 7000 });
+      }
+    };
+
+    if (isUploading) {
+      window.addEventListener('beforeunload', handleBeforeUnload);
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    } else {
+      // Clean up listeners if isUploading becomes false
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    }
 
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [isUploading]);
+  }, [isUploading]); // Dependency array includes isUploading
 
   // Fetch software list for the product dropdown
   useEffect(() => {
@@ -175,22 +189,26 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
       setValue('typedVersionString', '');
 
       const selectedSoftware = softwareList.find(sw => sw.id.toString() === watchedSoftwareId);
-      if (selectedSoftware && (selectedSoftware.name === 'VMS' || selectedSoftware.name === 'VA')) {
-        setIsVmsOrVaSoftware(true);
-        // Fetch VMS versions specifically for the multi-select
-        const vmsSoftware = softwareList.find(sw => sw.name === 'VMS');
-        if (vmsSoftware) {
+      // Condition updated to only 'VA'
+      if (selectedSoftware && selectedSoftware.name === 'VA') {
+        setIsVaSoftwareOnly(true);
+        // Fetch VMS versions specifically for the multi-select (still fetching VMS versions)
+        const vmsSoftwareForDropdown = softwareList.find(sw => sw.name === 'VMS');
+        if (vmsSoftwareForDropdown) {
           setIsFetchingVmsVersions(true);
-          fetchVersionsForSoftware(vmsSoftware.id)
+          fetchVersionsForSoftware(vmsSoftwareForDropdown.id)
             .then(setVmsVersionsList)
             .catch(() => showErrorToast('Failed to load VMS versions for compatibility.'))
             .finally(() => setIsFetchingVmsVersions(false));
         } else {
-          setVmsVersionsList([]); // Clear if VMS software itself not found
+          // This case implies VMS software itself isn't in the softwareList, which might be an issue
+          // or simply means no VMS versions can be offered for selection.
+          setVmsVersionsList([]);
+          app.logger.warn("AdminPatchEntryForm: VMS software not found in softwareList, cannot populate VMS compatibility dropdown.");
         }
       } else {
-        setIsVmsOrVaSoftware(false);
-        setVmsVersionsList([]); // Clear VMS versions if not VMS/VA software
+        setIsVaSoftwareOnly(false);
+        setVmsVersionsList([]); // Clear VMS versions if selected software is not 'VA'
       }
 
       // Fetch versions for the selected software for the main version dropdown
@@ -200,7 +218,7 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
         .finally(() => setIsFetchingSoftwareOrVersions(false));
     } else {
       setVersionsList([]);
-      setIsVmsOrVaSoftware(false);
+      setIsVaSoftwareOnly(false);
       setVmsVersionsList([]);
       setValue('selectedVersionId', '');
       setValue('typedVersionString', '');
@@ -209,10 +227,10 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
 
   // Pre-fill form when in edit mode
   useEffect(() => {
-    if (isEditMode && patchToEdit && softwareList.length > 0) { // Ensure softwareList is loaded for VMS/VA check
+    if (isEditMode && patchToEdit && softwareList.length > 0) { // Ensure softwareList is loaded
       const currentSelectedSoftware = softwareList.find(sw => sw.id === patchToEdit.software_id);
-      const isCurrentSoftwareVmsOrVa = !!currentSelectedSoftware && (currentSelectedSoftware.name === 'VMS' || currentSelectedSoftware.name === 'VA');
-      setIsVmsOrVaSoftware(isCurrentSoftwareVmsOrVa); // Set based on patchToEdit's software
+      const isCurrentSoftwareVaOnly = !!currentSelectedSoftware && currentSelectedSoftware.name === 'VA';
+      setIsVaSoftwareOnly(isCurrentSoftwareVaOnly); // Set based on patchToEdit's software
 
       const defaultValues: Partial<PatchFormData> = {
         selectedSoftwareId: (watchedSoftwareId && watchedSoftwareId !== patchToEdit.software_id.toString()) ? watchedSoftwareId : patchToEdit.software_id.toString(),
@@ -222,7 +240,7 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
         inputMode: patchToEdit.is_external_link ? 'url' : 'upload',
         externalUrl: patchToEdit.is_external_link ? patchToEdit.download_link : '',
         patch_by_developer: patchToEdit.patch_by_developer || '',
-        compatibleVmsVersionIds: isCurrentSoftwareVmsOrVa && patchToEdit.compatible_vms_versions
+        compatibleVmsVersionIds: isCurrentSoftwareVaOnly && patchToEdit.compatible_vms_versions // Use new state condition
                                   ? (typeof patchToEdit.compatible_vms_versions === 'string'
                                       ? (patchToEdit.compatible_vms_versions as string).split(',').map(s => s.trim()).filter(s => s)
                                       : Array.isArray(patchToEdit.compatible_vms_versions)
@@ -284,7 +302,7 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
     });
     setExistingFileName(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
-    // setIsVmsOrVaSoftware(false); // This will be reset by the useEffect on watchedSoftwareId
+    // setIsVaSoftwareOnly(false); // This will be reset by the useEffect on watchedSoftwareId
   };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -333,8 +351,8 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
     if (finalVersionId) basePayload.version_id = finalVersionId;
     if (finalTypedVersionString) basePayload.typed_version_string = finalTypedVersionString;
 
-    // Add VMS compatibility IDs if applicable
-    if (isVmsOrVaSoftware && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0) {
+    // Add VMS compatibility IDs if applicable (use new state name)
+    if (isVaSoftwareOnly && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0) {
         basePayload.compatible_vms_version_ids = data.compatibleVmsVersionIds;
     }
 
@@ -372,7 +390,7 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
           version_id: finalVersionId,
           typed_version_string: finalTypedVersionString,
           // compatible_vms_version_ids_json will be stringified by editAdminPatchFile if it's an array
-          compatible_vms_version_ids: (isVmsOrVaSoftware && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0)
+          compatible_vms_version_ids: (isVaSoftwareOnly && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0) // Use new state name
             ? data.compatibleVmsVersionIds // Pass as array, service function will stringify
             : undefined,
         };
@@ -408,7 +426,7 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
                 ...(data.releaseDate && { release_date: data.releaseDate }),
                 description: data.description?.trim() || '',
                 patch_by_developer: data.patch_by_developer?.trim() || '',
-                ...(isVmsOrVaSoftware && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0 &&
+                ...(isVaSoftwareOnly && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0 && // Use new state name
                   { compatible_vms_version_ids_json: JSON.stringify(data.compatibleVmsVersionIds) }),
             };
             resultPatch = await uploadFileInChunks(
@@ -564,11 +582,11 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
         {errors.patch_by_developer && <p className="mt-1 text-sm text-red-600">{errors.patch_by_developer.message}</p>}
       </div>
 
-      {/* VMS Compatibility Section */}
-      {isVmsOrVaSoftware && (
+      {/* VMS Compatibility Section - Rendered if isVaSoftwareOnly is true */}
+      {isVaSoftwareOnly && (
         <div>
           <label htmlFor="compatibleVmsVersionIds" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-            Compatible VMS Versions (for VMS/VA Patches)
+            Compatible VMS Versions (for VA Patches)
           </label>
           {isFetchingVmsVersions ? <p className="text-sm text-gray-500 dark:text-gray-400">Loading VMS versions...</p> : (
             <Controller

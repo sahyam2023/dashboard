@@ -1,13 +1,14 @@
 // src/components/admin/AdminDocumentEntryForm.tsx
 import React, { useState, useEffect, useRef } from 'react';
-import { useForm, SubmitHandler, FieldErrors } from 'react-hook-form';
+import { useForm, SubmitHandler, FieldErrors, Controller } from 'react-hook-form'; // Added Controller
 import * as yup from 'yup';
 import { yupResolver } from '@hookform/resolvers/yup';
 // import { toast } from 'react-toastify'; // Replaced with utils
-import { showSuccessToast, showErrorToast } from '../../utils/toastUtils'; // Added utils
-import { Software, Document as DocumentType, AddDocumentPayload, EditDocumentPayload } from '../../types'; // Added EditDocumentPayload
+import { showSuccessToast, showErrorToast, showWarningToast } from '../../utils/toastUtils'; // Added utils
+import { Software, Document as DocumentType, AddDocumentPayload, EditDocumentPayload, SoftwareVersion } from '../../types'; // Added EditDocumentPayload, SoftwareVersion
 import {
   fetchSoftware,
+  fetchVersionsForSoftware, // Added for VMS versions
   addAdminDocumentWithUrl,
   // uploadAdminDocumentFile, // To be replaced by chunked upload
   editAdminDocumentWithUrl,
@@ -35,6 +36,7 @@ interface DocumentFormData {
   inputMode: InputMode;
   externalUrl?: string;
   selectedFile?: File | null | undefined; // File, null (cleared), or undefined (initial)
+  compatibleVmsVersionIds?: string[]; // Added for VMS compatibility
 }
 
 // Yup validation schema
@@ -60,6 +62,7 @@ const documentValidationSchema = yup.object().shape({
       otherwise: schema => schema.nullable(),
     }),
   description: yup.string().optional().max(1000, "Description cannot exceed 1000 characters."),
+  compatibleVmsVersionIds: yup.array().of(yup.string().required()).optional(), // Added validation
 });
 
 
@@ -71,7 +74,7 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
 }) => {
   const isEditMode = !!documentToEdit;
 
-  const { register, handleSubmit, formState: { errors }, watch, setValue, reset } = useForm<DocumentFormData>({
+  const { register, handleSubmit, control, formState: { errors }, watch, setValue, reset } = useForm<DocumentFormData>({ // Added control
     resolver: yupResolver(documentValidationSchema),
     context: { // Pass context to yup schema
       isEditMode: isEditMode,
@@ -85,11 +88,16 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
       inputMode: 'url',
       externalUrl: '',
       selectedFile: null,
+      compatibleVmsVersionIds: [], // Initialize
     }
   });
 
   const [softwareList, setSoftwareList] = useState<Software[]>([]);
   const [existingFileName, setExistingFileName] = useState<string | null>(null); // For display in edit mode
+  const [isVaSoftwareOnly, setIsVaSoftwareOnly] = useState(false); // New state
+  const [vmsVersionsList, setVmsVersionsList] = useState<SoftwareVersion[]>([]); // New state
+  const [isFetchingVmsVersions, setIsFetchingVmsVersions] = useState(false); // New state
+
 
   const [isLoading, setIsLoading] = useState(false); // For API calls
   const [isFetchingSoftware, setIsFetchingSoftware] = useState(false); // For dropdown loading
@@ -99,24 +107,39 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { isAuthenticated, user } = useAuth();
-const role = user?.role; // Access role safely, as user can be null
+  const role = user?.role; // Access role safely, as user can be null
   const watchedInputMode = watch('inputMode');
   const watchedSelectedFile = watch('selectedFile');
+  const watchedSoftwareId = watch('selectedSoftwareId'); // Watch selected software
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       if (isUploading) {
         event.preventDefault();
-        event.returnValue = '';
+        event.returnValue = ''; // Standard for most browsers
       }
     };
 
-    window.addEventListener('beforeunload', handleBeforeUnload);
+    const handleVisibilityChange = () => {
+      if (document.hidden && isUploading) {
+        showWarningToast("File upload will be paused or stopped if you leave this tab.", { autoClose: 7000 });
+      }
+    };
+
+    if (isUploading) {
+      window.addEventListener('beforeunload', handleBeforeUnload);
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    } else {
+      // Clean up listeners if isUploading becomes false
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    }
 
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [isUploading]);
+  }, [isUploading]); // Dependency array includes isUploading
 
   useEffect(() => {
     if (isAuthenticated && (role === 'admin' || role === 'super_admin')) {
@@ -128,8 +151,40 @@ const role = user?.role; // Access role safely, as user can be null
     }
   }, [isAuthenticated, role]);
 
+  // Effect to manage isVaSoftwareOnly state and fetch VMS versions
   useEffect(() => {
-    if (isEditMode && documentToEdit) {
+    if (watchedSoftwareId && softwareList.length > 0) {
+      const selectedSoftware = softwareList.find(sw => sw.id.toString() === watchedSoftwareId);
+      if (selectedSoftware && selectedSoftware.name === 'VA') {
+        setIsVaSoftwareOnly(true);
+        const vmsSoftwareForDropdown = softwareList.find(sw => sw.name === 'VMS');
+        if (vmsSoftwareForDropdown) {
+          setIsFetchingVmsVersions(true);
+          fetchVersionsForSoftware(vmsSoftwareForDropdown.id)
+            .then(setVmsVersionsList)
+            .catch(() => showErrorToast('Failed to load VMS versions for compatibility.'))
+            .finally(() => setIsFetchingVmsVersions(false));
+        } else {
+          setVmsVersionsList([]);
+          // Optionally log a warning if VMS software itself isn't in softwareList
+        }
+      } else {
+        setIsVaSoftwareOnly(false);
+        setVmsVersionsList([]);
+      }
+    } else {
+      setIsVaSoftwareOnly(false);
+      setVmsVersionsList([]);
+    }
+  }, [watchedSoftwareId, softwareList]);
+
+
+  useEffect(() => {
+    if (isEditMode && documentToEdit && softwareList.length > 0) { // Ensure softwareList is loaded
+      const currentSelectedSoftware = softwareList.find(sw => sw.id === documentToEdit.software_id);
+      const isCurrentSoftwareVaOnly = !!currentSelectedSoftware && currentSelectedSoftware.name === 'VA';
+      setIsVaSoftwareOnly(isCurrentSoftwareVaOnly); // Set based on documentToEdit's software
+
       const defaultValues: Partial<DocumentFormData> = {
         selectedSoftwareId: documentToEdit.software_id?.toString() || '',
         docName: documentToEdit.doc_name,
@@ -137,6 +192,13 @@ const role = user?.role; // Access role safely, as user can be null
         description: documentToEdit.description || '',
         inputMode: documentToEdit.is_external_link ? 'url' : 'upload',
         externalUrl: documentToEdit.is_external_link ? documentToEdit.download_link : '',
+        compatibleVmsVersionIds: isCurrentSoftwareVaOnly && documentToEdit.compatible_vms_versions
+                                  ? (typeof documentToEdit.compatible_vms_versions === 'string'
+                                      ? (documentToEdit.compatible_vms_versions as string).split(',').map(s => s.trim()).filter(s => s)
+                                      : Array.isArray(documentToEdit.compatible_vms_versions)
+                                          ? documentToEdit.compatible_vms_versions.map(String)
+                                          : [])
+                                  : [],
       };
       reset(defaultValues);
 
@@ -152,7 +214,7 @@ const role = user?.role; // Access role safely, as user can be null
     } else {
       resetFormDefaults();
     }
-  }, [documentToEdit, isEditMode, reset, setValue]);
+  }, [documentToEdit, isEditMode, reset, setValue, softwareList]); // Added softwareList dependency
 
 
   const resetFormDefaults = (keepSoftware: boolean = false) => {
@@ -165,9 +227,11 @@ const role = user?.role; // Access role safely, as user can be null
       inputMode: 'url',
       externalUrl: '',
       selectedFile: null,
+      compatibleVmsVersionIds: [], // Reset this field
     });
     setExistingFileName(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
+    // isVaSoftwareOnly will be reset by its own useEffect when selectedSoftwareId changes
   };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -212,6 +276,9 @@ const role = user?.role; // Access role safely, as user can be null
           description: commonMetadata.description,
           doc_type: commonMetadata.doc_type,
           download_link: data.externalUrl!.trim(), // Validated by yup
+        compatible_vms_version_ids: (isVaSoftwareOnly && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0)
+                                      ? data.compatibleVmsVersionIds
+                                      : undefined,
         };
         if (isEditMode && documentToEdit) {
           // If editing and switching to/updating a URL, it's still an update to the existing document ID
@@ -225,13 +292,17 @@ const role = user?.role; // Access role safely, as user can be null
           if (!isEditMode) resetFormDefaults(true); // Reset only if it was a new add, not edit->url
         }
       } else { // inputMode === 'upload'
-        const commonMetadataAsAddPayload: AddDocumentPayload = {
-          software_id: parseInt(data.selectedSoftwareId), // Ensure software_id is number
-          doc_name: commonMetadata.doc_name,
-          description: commonMetadata.description,
-          doc_type: commonMetadata.doc_type,
-          // download_link is not part of AddDocumentPayload for uploads, it's handled by the backend
+        const payloadForFileUpload: EditDocumentPayload = { // Use EditDocumentPayload for consistency, even for add.
+            software_id: parseInt(data.selectedSoftwareId),
+            doc_name: commonMetadata.doc_name,
+            description: commonMetadata.description,
+            doc_type: commonMetadata.doc_type,
+            compatible_vms_version_ids: (isVaSoftwareOnly && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0)
+                                          ? data.compatibleVmsVersionIds
+                                          : undefined,
+            // download_link and other file-specific fields are handled by the backend or uploadFileInChunks
         };
+
 
         if (isEditMode && documentToEdit) {
           // Editing an existing document, and inputMode is 'upload'.
@@ -242,7 +313,7 @@ const role = user?.role; // Access role safely, as user can be null
             console.log("AdminDocumentEntryForm: Editing existing document (file or switching to file). File selected:", data.selectedFile);
             resultDocument = await editAdminDocumentFile(
               documentToEdit.id,
-              commonMetadataAsAddPayload, // Pass metadata
+            payloadForFileUpload, // Pass metadata, now includes VMS compat IDs
               data.selectedFile || null    // Pass new file if selected, or null if not (for metadata-only update of existing file)
             );
             showSuccessToast(`Document "${resultDocument.doc_name}" updated successfully!`);
@@ -259,10 +330,17 @@ const role = user?.role; // Access role safely, as user can be null
           if (data.selectedFile) {
             console.log("AdminDocumentEntryForm: Adding new document with file. File selected:", data.selectedFile);
             // Use uploadFileInChunks for adding new documents with files
+            // commonMetadata already includes software_id (as string), doc_name, description, doc_type
+            // Need to add compatible_vms_version_ids_json if applicable
+            const chunkMetadataForNewUpload = {
+                ...commonMetadata, // software_id, doc_name, description, doc_type
+                ...(isVaSoftwareOnly && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0 &&
+                  { compatible_vms_version_ids_json: JSON.stringify(data.compatibleVmsVersionIds) }),
+            };
             resultDocument = await uploadFileInChunks(
               data.selectedFile,
               'document',
-              commonMetadata, // Original commonMetadata is fine here as uploadFileInChunks stringifies software_id
+              chunkMetadataForNewUpload,
               (progress) => setUploadProgress(progress)
             );
             showSuccessToast(`Document "${resultDocument.doc_name}" added successfully via chunked upload!`);
@@ -356,6 +434,51 @@ const role = user?.role; // Access role safely, as user can be null
         />
         {errors.docName && <p className="mt-1 text-sm text-red-600">{errors.docName.message}</p>}
       </div>
+
+      {/* VMS Compatibility Section - Rendered if isVaSoftwareOnly is true */}
+      {isVaSoftwareOnly && (
+        <div>
+          <label htmlFor="compatibleVmsVersionIds" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            Compatible VMS Versions (for VA Documents)
+          </label>
+          {isFetchingVmsVersions ? <p className="text-sm text-gray-500 dark:text-gray-400">Loading VMS versions...</p> : (
+            <Controller
+              name="compatibleVmsVersionIds"
+              control={control}
+              defaultValue={[]}
+              render={({ field }) => (
+                <div className="mt-1 block w-full max-h-40 overflow-y-auto p-2 border border-gray-300 rounded-md bg-white dark:bg-gray-700 dark:border-gray-600">
+                  {vmsVersionsList.length === 0 ? (
+                     <p className="text-sm text-gray-500 dark:text-gray-400">No VMS versions available for selection.</p>
+                  ) : (
+                    vmsVersionsList.map(vmsVersion => (
+                      <label key={vmsVersion.id} className="flex items-center space-x-2 p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">
+                        <input
+                          type="checkbox"
+                          className="form-checkbox h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:focus:ring-blue-600"
+                          value={vmsVersion.id.toString()}
+                          checked={field.value?.includes(vmsVersion.id.toString())}
+                          onChange={(e) => {
+                            const selectedId = e.target.value;
+                            const newValue = e.target.checked
+                              ? [...(field.value || []), selectedId]
+                              : (field.value || []).filter((id: string) => id !== selectedId);
+                            field.onChange(newValue);
+                          }}
+                          disabled={isLoading || isFetchingVmsVersions}
+                        />
+                        <span className="text-sm text-gray-700 dark:text-gray-300">{vmsVersion.version_number}</span>
+                      </label>
+                    ))
+                  )}
+                </div>
+              )}
+            />
+          )}
+          {errors.compatibleVmsVersionIds && <p className="mt-1 text-sm text-red-600">{errors.compatibleVmsVersionIds.message}</p>}
+           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Select VMS versions this document is compatible with. Only applicable if the document is for 'VA' software.</p>
+        </div>
+      )}
 
       <div className="my-4">
         <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Document Source:</span>

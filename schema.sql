@@ -20,6 +20,7 @@ DROP TABLE IF EXISTS notifications;
 DROP TABLE IF EXISTS user_watch_preferences;
 DROP TABLE IF EXISTS messages;
 DROP TABLE IF EXISTS conversations;
+DROP TABLE IF EXISTS document_vms_compatibility;
 
 CREATE TABLE IF NOT EXISTS user_watch_preferences (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -439,3 +440,15 @@ CREATE INDEX IF NOT EXISTS idx_conversations_user2_id ON conversations (user2_id
 CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages (conversation_id);
 CREATE INDEX IF NOT EXISTS idx_messages_sender_id ON messages (sender_id);
 CREATE INDEX IF NOT EXISTS idx_messages_recipient_id ON messages (recipient_id);
+
+-- Table for VMS compatibility specific to documents
+CREATE TABLE document_vms_compatibility (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NOT NULL,
+    vms_version_id INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
+    FOREIGN KEY (vms_version_id) REFERENCES versions(id) ON DELETE CASCADE,
+    UNIQUE(document_id, vms_version_id)
+);
+CREATE INDEX idx_document_vms_compatibility_document_id ON document_vms_compatibility(document_id);

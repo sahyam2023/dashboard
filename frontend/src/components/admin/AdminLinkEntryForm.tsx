@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useForm, Controller, SubmitHandler, FieldErrors } from 'react-hook-form';
 import * as yup from 'yup';
 import { yupResolver } from '@hookform/resolvers/yup';
-import { showSuccessToast, showErrorToast } from '../../utils/toastUtils'; // Standardized toast
+import { showSuccessToast, showErrorToast, showWarningToast } from '../../utils/toastUtils'; // Standardized toast
 import {
   Software,
   Link as LinkType,
@@ -118,7 +118,7 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
   const [softwareList, setSoftwareList] = useState<Software[]>([]);
   const [versionsList, setVersionsList] = useState<SoftwareVersion[]>([]);
   const [vmsVersionsList, setVmsVersionsList] = useState<SoftwareVersion[]>([]); // State for VMS versions
-  const [isVmsOrVaSoftware, setIsVmsOrVaSoftware] = useState(false); // State to track if software is VMS/VA
+  const [isVaSoftwareOnly, setIsVaSoftwareOnly] = useState(false); // Renamed state
   const [existingFileName, setExistingFileName] = useState<string | null>(null);
 
 
@@ -146,16 +146,30 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       if (isUploading) {
         event.preventDefault();
-        event.returnValue = '';
+        event.returnValue = ''; // Standard for most browsers
       }
     };
 
-    window.addEventListener('beforeunload', handleBeforeUnload);
+    const handleVisibilityChange = () => {
+      if (document.hidden && isUploading) {
+        showWarningToast("File upload will be paused or stopped if you leave this tab.", { autoClose: 7000 });
+      }
+    };
+
+    if (isUploading) {
+      window.addEventListener('beforeunload', handleBeforeUnload);
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    } else {
+      // Clean up listeners if isUploading becomes false
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    }
 
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [isUploading]);
+  }, [isUploading]); // Dependency array includes isUploading
 
   useEffect(() => {
     if (isAuthenticated && (role === 'admin' || role === 'super_admin')) {
@@ -175,21 +189,25 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
       setValue('typedVersionString', '');
 
       const selectedSoftware = softwareList.find(sw => sw.id.toString() === watchedSoftwareId);
-      if (selectedSoftware && (selectedSoftware.name === 'VMS' || selectedSoftware.name === 'VA')) {
-        setIsVmsOrVaSoftware(true);
-        const vmsSoftware = softwareList.find(sw => sw.name === 'VMS');
-        if (vmsSoftware) {
+      // Condition updated to only 'VA'
+      if (selectedSoftware && selectedSoftware.name === 'VA') {
+        setIsVaSoftwareOnly(true);
+        // Fetch VMS versions specifically for the multi-select (still fetching VMS versions)
+        const vmsSoftwareForDropdown = softwareList.find(sw => sw.name === 'VMS');
+        if (vmsSoftwareForDropdown) {
           setIsFetchingVmsVersions(true);
-          fetchVersionsForSoftware(vmsSoftware.id)
+          fetchVersionsForSoftware(vmsSoftwareForDropdown.id)
             .then(setVmsVersionsList)
             .catch(() => showErrorToast('Failed to load VMS versions for compatibility.'))
             .finally(() => setIsFetchingVmsVersions(false));
         } else {
           setVmsVersionsList([]);
+          // Consider logging a warning if VMS software is not found, as it's needed for the dropdown
+          app.logger.warn("AdminLinkEntryForm: VMS software not found in softwareList, cannot populate VMS compatibility dropdown.");
         }
       } else {
-        setIsVmsOrVaSoftware(false);
-        setVmsVersionsList([]);
+        setIsVaSoftwareOnly(false);
+        setVmsVersionsList([]); // Clear VMS versions if selected software is not 'VA'
       }
 
       fetchVersionsForSoftware(parseInt(watchedSoftwareId))
@@ -198,7 +216,7 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
         .finally(() => setIsFetchingSoftwareOrVersions(false));
     } else {
       setVersionsList([]);
-      setIsVmsOrVaSoftware(false);
+      setIsVaSoftwareOnly(false);
       setVmsVersionsList([]);
       setValue('selectedVersionId', '');
       setValue('typedVersionString', '');
@@ -208,8 +226,8 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
   useEffect(() => {
     if (isEditMode && linkToEdit && softwareList.length > 0) {
       const currentSelectedSoftware = softwareList.find(sw => sw.id === linkToEdit.software_id);
-      const isCurrentSoftwareVmsOrVa = !!currentSelectedSoftware && (currentSelectedSoftware.name === 'VMS' || currentSelectedSoftware.name === 'VA');
-      setIsVmsOrVaSoftware(isCurrentSoftwareVmsOrVa);
+      const isCurrentSoftwareVaOnly = !!currentSelectedSoftware && currentSelectedSoftware.name === 'VA'; // Updated condition
+      setIsVaSoftwareOnly(isCurrentSoftwareVaOnly); // Use new state setter
 
       const defaultValues: Partial<LinkFormData> = {
         selectedSoftwareId: (watchedSoftwareId && watchedSoftwareId !== linkToEdit.software_id.toString()) ? watchedSoftwareId : linkToEdit.software_id.toString(),
@@ -217,7 +235,7 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
         description: linkToEdit.description || '',
         inputMode: linkToEdit.is_external_link ? 'url' : 'upload',
         externalUrl: linkToEdit.is_external_link ? linkToEdit.url : '',
-        compatibleVmsVersionIds: isCurrentSoftwareVmsOrVa && linkToEdit.compatible_vms_versions
+        compatibleVmsVersionIds: isCurrentSoftwareVaOnly && linkToEdit.compatible_vms_versions // Use new state condition
                                   ? (typeof linkToEdit.compatible_vms_versions === 'string'
                                       ? (linkToEdit.compatible_vms_versions as string).split(',').map(s => s.trim()).filter(s => s)
                                       : Array.isArray(linkToEdit.compatible_vms_versions)
@@ -277,7 +295,7 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
     });
     setExistingFileName(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
-    // setIsVmsOrVaSoftware(false); // This will be reset by the useEffect on watchedSoftwareId
+    // setIsVaSoftwareOnly(false); // This will be reset by the useEffect on watchedSoftwareId
     // Old setError(null) removed
   };
 
@@ -328,8 +346,8 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
     if (finalVersionId) basePayload.version_id = finalVersionId;
     if (finalTypedVersionString) basePayload.typed_version_string = finalTypedVersionString;
 
-    // Add VMS compatibility IDs if applicable
-    if (isVmsOrVaSoftware && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0) {
+    // Add VMS compatibility IDs if applicable (use new state name)
+    if (isVaSoftwareOnly && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0) {
         basePayload.compatible_vms_version_ids = data.compatibleVmsVersionIds;
     }
 
@@ -362,7 +380,7 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
           description: data.description?.trim() || undefined,
           version_id: finalVersionId,
           typed_version_string: finalTypedVersionString,
-          compatible_vms_version_ids: (isVmsOrVaSoftware && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0)
+          compatible_vms_version_ids: (isVaSoftwareOnly && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0) // Use new state name
             ? data.compatibleVmsVersionIds // Pass as array, service function will stringify
             : undefined,
         };
@@ -396,7 +414,7 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
                 ...(finalTypedVersionString && { typed_version_string: finalTypedVersionString }),
                 title: data.title.trim(), // Ensure 'title' is used if uploadFileInChunks expects it, or 'link_title'
                 description: data.description?.trim() || '',
-                ...(isVmsOrVaSoftware && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0 &&
+                ...(isVaSoftwareOnly && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0 && // Use new state name
                   { compatible_vms_version_ids_json: JSON.stringify(data.compatibleVmsVersionIds) }),
             };
             resultLink = await uploadFileInChunks(
@@ -531,11 +549,11 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
         {errors.title && <p className="mt-1 text-sm text-red-600">{errors.title.message}</p>}
       </div>
 
-      {/* VMS Compatibility Section */}
-      {isVmsOrVaSoftware && (
+      {/* VMS Compatibility Section - Rendered if isVaSoftwareOnly is true */}
+      {isVaSoftwareOnly && (
         <div>
           <label htmlFor="compatibleVmsVersionIds" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-            Compatible VMS Versions (for VMS/VA Links)
+            Compatible VMS Versions (for VA Links)
           </label>
           {isFetchingVmsVersions ? <p className="text-sm text-gray-500 dark:text-gray-400">Loading VMS versions...</p> : (
             <Controller

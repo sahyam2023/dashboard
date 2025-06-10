@@ -54,6 +54,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
 # from waitress import serve # Removed Waitress
 from flask_socketio import SocketIO, join_room, leave_room, emit, disconnect
+from urllib.parse import urljoin # Added for chat file_url modification
 
 # --- Helper function for PyInstaller ---
 def get_application_path():
@@ -9213,54 +9214,69 @@ def bulk_download_items():
         # Create a temporary file for the zip archive
         with NamedTemporaryFile(suffix=".zip", delete=False) as tmp_zip_file:
             zip_filepath = tmp_zip_file.name
+        
+        app.logger.info(f"Preparing to create zip file at: {zip_filepath}") # Added logging
+
         # tmp_zip_file is now closed, but the file still exists at zip_filepath
         # We will open it again using zipfile.ZipFile
-
         zip_filename_base = f"bulk_download_{item_type}_{datetime.now().strftime('%Y%m%d%H%M%S')}.zip"
 
-        with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zf:
-            for file_detail in files_to_zip_details:
-                zf.write(file_detail['path'], arcname=file_detail['name_in_zip'])
+        try: # New try block for zipping and sending
+            with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for file_detail in files_to_zip_details:
+                    app.logger.info(f"Adding to zip: {file_detail['path']} as {file_detail['name_in_zip']}") # Added logging
+                    zf.write(file_detail['path'], arcname=file_detail['name_in_zip'])
+                    app.logger.info(f"Successfully added {file_detail['name_in_zip']} to zip.") # Added logging
 
-        # Log successful creation
-        log_audit_action(
-            action_type='BULK_DOWNLOAD_CREATED',
-            details={
-                'item_type': item_type,
-                'zip_filename': zip_filename_base,
-                'file_count': len(files_to_zip_details),
-                'requested_ids_count': len(item_ids),
-                'files_included': [{'id': fd['item_id'], 'name': fd['item_name'], 'zipped_as': fd['name_in_zip']} for fd in files_to_zip_details],
-                'errors_encountered': errors_details if errors_details else None
-            }
-        )
+            # Log successful creation
+            log_audit_action(
+                action_type='BULK_DOWNLOAD_CREATED',
+                details={
+                    'item_type': item_type,
+                    'zip_filename': zip_filename_base,
+                    'file_count': len(files_to_zip_details),
+                    'requested_ids_count': len(item_ids),
+                    'files_included': [{'id': fd['item_id'], 'name': fd['item_name'], 'zipped_as': fd['name_in_zip']} for fd in files_to_zip_details],
+                    'errors_encountered': errors_details if errors_details else None
+                }
+            )
 
-        @after_this_request
-        def cleanup_zip(response):
-            try:
-                # Attempt to explicitly close the file stream if response.response is a file wrapper
-                # This is to help release any lock held by the response stream, especially on Windows.
-                if hasattr(response, 'response') and hasattr(response.response, 'close') and callable(response.response.close):
-                    try:
-                        response.response.close()
-                        app.logger.info(f"Cleanup_zip: Explicitly closed response.response for {zip_filepath}")
-                    except Exception as e_resp_close:
-                        # Log warning if closing the response stream fails, but don't let it stop cleanup.
-                        app.logger.warning(f"Cleanup_zip: Error closing response.response for {zip_filepath}: {e_resp_close}")
+            @after_this_request
+            def cleanup_zip(response):
+                try:
+                    # Attempt to explicitly close the file stream if response.response is a file wrapper
+                    # This is to help release any lock held by the response stream, especially on Windows.
+                    if hasattr(response, 'response') and hasattr(response.response, 'close') and callable(response.response.close):
+                        try:
+                            response.response.close()
+                            app.logger.info(f"Cleanup_zip: Explicitly closed response.response for {zip_filepath}")
+                        except Exception as e_resp_close:
+                            # Log warning if closing the response stream fails, but don't let it stop cleanup.
+                            app.logger.warning(f"Cleanup_zip: Error closing response.response for {zip_filepath}: {e_resp_close}")
 
-                if zip_filepath and os.path.exists(zip_filepath):
+                    if zip_filepath and os.path.exists(zip_filepath):
+                        os.remove(zip_filepath)
+                        app.logger.info(f"Successfully cleaned up temporary zip file: {zip_filepath}")
+                except PermissionError as e_perm: # Catch PermissionError specifically
+                    app.logger.warning(f"PermissionError cleaning up temporary zip file {zip_filepath}: {e_perm}. This is often a timing issue on Windows.")
+                except Exception as e_cleanup: # Catch other potential exceptions during cleanup
+                    app.logger.error(f"Error cleaning up temporary zip file {zip_filepath}: {e_cleanup}", exc_info=True)
+                return response
+
+            return send_file(zip_filepath, as_attachment=True, download_name=zip_filename_base)
+        
+        except Exception as e_zip_process: # New except block for zipping/sending errors
+            app.logger.error(f"Error during zipping process or sending file for {item_type} (zip: {zip_filepath}): {e_zip_process}", exc_info=True)
+            if zip_filepath and os.path.exists(zip_filepath):
+                try:
                     os.remove(zip_filepath)
-                    app.logger.info(f"Successfully cleaned up temporary zip file: {zip_filepath}")
-            except PermissionError as e_perm: # Catch PermissionError specifically for more targeted logging
-                app.logger.error(f"PermissionError cleaning up temporary zip file {zip_filepath}: {e_perm}. This is often a timing issue on Windows. The file may be cleaned up later or require manual deletion.", exc_info=True)
-            except Exception as e_cleanup: # Catch other potential exceptions during cleanup
-                app.logger.error(f"Error cleaning up temporary zip file {zip_filepath}: {e_cleanup}", exc_info=True)
-            return response
+                    app.logger.info(f"Cleaned up temporary zip file {zip_filepath} after error in zipping/sending.")
+                except Exception as e_cleanup_inner:
+                    app.logger.error(f"Failed to clean up zip file {zip_filepath} after zipping/sending error: {e_cleanup_inner}")
+            return jsonify(msg=f"Error processing bulk download for {item_type}: {str(e_zip_process)}"), 500
 
-        return send_file(zip_filepath, as_attachment=True, download_name=zip_filename_base)
-
-    except Exception as e:
-        app.logger.error(f"Error during bulk download zip creation or sending for {item_type}: {e}", exc_info=True)
+    except Exception as e: # This is the original broader exception handler
+        app.logger.error(f"Error during bulk download zip creation or sending for {item_type}: {e}", exc_info=True) # Original log, can be kept or modified if new one is sufficient
         if zip_filepath and os.path.exists(zip_filepath): # Attempt to cleanup partially created file on error
             try:
                 os.remove(zip_filepath)
@@ -9269,7 +9285,8 @@ def bulk_download_items():
                 app.logger.error(f"Error cleaning up temporary zip file {zip_filepath} on error: {e_cleanup_error}", exc_info=True)
         
         log_audit_action(
-            action_type='BULK_DOWNLOAD_FAILED',
+            action_type='BULK_DOWNLOAD_FAILED', # This log might be redundant if the inner try-except handles and logs the failure.
+                                                # However, it catches errors outside the zipping/sending block.
             details={'item_type': item_type, 'error': str(e), 'item_ids_requested': item_ids, 'files_prepared_count': len(files_to_zip_details)}
         )
         return jsonify(msg=f"Failed to create or send bulk download archive: {str(e)}"), 500
@@ -10601,11 +10618,22 @@ def post_new_message(conversation_id):
             message_dict_for_api_response['recipient_username'] = recipient_user_details['username'] if recipient_user_details else 'Unknown'
         
         message_data_for_socket = message_dict_for_api_response.copy()
+
+        # --- REVERTED MODIFICATION: The following block that converted file_url to absolute is removed/commented ---
+        # if message_data_for_socket.get('file_url') and message_data_for_socket['file_url'].startswith('/'):
+        #     original_file_url = message_data_for_socket['file_url']
+        #     # request.host_url provides the base URL like 'http://localhost:7000/'
+        #     # urljoin handles cases like ensuring no double slashes.
+        #     message_data_for_socket['file_url'] = urljoin(request.host_url, original_file_url)
+        #     app.logger.info(f"Chat file_url modified for SocketIO. Original: {original_file_url}, New: {message_data_for_socket['file_url']}")
+        # --- END REVERTED MODIFICATION ---
+
         if sender_user_details and sender_user_details['profile_picture_filename']:
             message_data_for_socket['sender_profile_picture_url'] = f"/profile_pictures/{sender_user_details['profile_picture_filename']}"
         else:
             message_data_for_socket['sender_profile_picture_url'] = None
-
+        
+        app.logger.info(f"Emitting file_url in SocketIO message (should be relative): {message_data_for_socket.get('file_url')}") # Added logging
         socketio.emit('new_message', message_data_for_socket, room=str(conversation_id)) 
         app.logger.info(f"Emitted 'new_message' to room 'conversation_{conversation_id}'")
 
@@ -10756,21 +10784,61 @@ def upload_chat_file():
 
 # --- Chat File Serving Route ---
 @app.route('/files/chat_uploads/<int:conversation_id>/<path:filename>')
-@active_user_required # Changed back
+@jwt_required(optional=True) # Changed from @active_user_required
 def serve_chat_file(conversation_id, filename):
-    current_user_id = int(get_jwt_identity()) # Provided by @active_user_required
+    current_user_id_str = get_jwt_identity()
     db = get_db()
 
+    if not current_user_id_str:
+        log_audit_action(
+            action_type='CHAT_FILE_ACCESS_DENIED_NO_AUTH',
+            target_table='chat_files_virtual', 
+            target_id=conversation_id,
+            details={'filename': filename, 'conversation_id': conversation_id, 'reason': 'No JWT token provided.'}
+        )
+        return jsonify(msg="Authentication required to access this file."), 401
+
+    try:
+        current_user_id = int(current_user_id_str)
+    except ValueError:
+        log_audit_action(
+            action_type='CHAT_FILE_ACCESS_DENIED_INVALID_TOKEN',
+            target_table='chat_files_virtual',
+            target_id=conversation_id,
+            details={'filename': filename, 'conversation_id': conversation_id, 'reason': 'Invalid user ID format in token.'}
+        )
+        return jsonify(msg="Invalid user identity in token."), 401
+
+    user = find_user_by_id(current_user_id) # find_user_by_id is already defined
+    if not user or not user['is_active']:
+        log_audit_action(
+            action_type='CHAT_FILE_ACCESS_DENIED_USER_INACTIVE_OR_NOT_FOUND',
+            user_id=current_user_id, # Log the ID from token even if user not found
+            target_table='chat_files_virtual',
+            target_id=conversation_id,
+            details={'filename': filename, 'conversation_id': conversation_id, 'reason': 'User not found or inactive.'}
+        )
+        return jsonify(msg="User not found or account is inactive."), 401
+
     # Verify user is part of the conversation
-    conversation = get_conversation_by_id(db, conversation_id)
+    conversation = get_conversation_by_id(db, conversation_id) # get_conversation_by_id is already defined
     if not conversation:
+        # This case is unlikely if the conversation_id in the URL is valid, but good to check.
+        log_audit_action(
+            action_type='CHAT_FILE_ACCESS_DENIED_CONVO_NOT_FOUND',
+            user_id=current_user_id,
+            target_table='chat_files_virtual',
+            target_id=conversation_id,
+            details={'filename': filename, 'conversation_id': conversation_id, 'reason': 'Conversation record not found.'}
+        )
         return jsonify(msg="Conversation not found."), 404
+
     if current_user_id not in (conversation['user1_id'], conversation['user2_id']):
         log_audit_action(
-            action_type='CHAT_FILE_ACCESS_DENIED_NOT_PART_OF_CONVO', # Kept specific audit log
+            action_type='CHAT_FILE_ACCESS_DENIED_NOT_PART_OF_CONVO',
             user_id=current_user_id,
-            target_table='chat_files', # Conceptual table name
-            target_id=conversation_id, # Or a specific file ID if one were available here
+            target_table='chat_files_virtual',
+            target_id=conversation_id,
             details={'filename': filename, 'conversation_id': conversation_id, 'reason': 'User not part of conversation.'}
         )
         return jsonify(msg="You are not authorized to access files from this conversation."), 403
@@ -10779,8 +10847,8 @@ def serve_chat_file(conversation_id, filename):
     log_audit_action(
         action_type='CHAT_FILE_ACCESS_SUCCESS',
         user_id=current_user_id,
-        target_table='chat_files', # Conceptual table name
-        target_id=conversation_id, # Or a specific file ID
+        target_table='chat_files_virtual', # Using virtual table name for consistency
+        target_id=conversation_id, 
         details={'filename': filename, 'conversation_id': conversation_id}
     )
     

@@ -3,3 +3,6 @@ node_modules/
 *.exe
 /build
 /instance
+/dist/instance
+instance/software_dashboard.db
+*.db

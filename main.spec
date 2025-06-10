@@ -28,6 +28,30 @@ a = Analysis(['app.py'],
                  'pytz',
                  'jinja2',
                  
+                 # Cryptography dependencies
+                 'cryptography',
+                 'cryptography.fernet',
+                 'cryptography.hazmat',
+                 'cryptography.hazmat.primitives',
+                 'cryptography.hazmat.backends',
+                 'cryptography.hazmat.backends.openssl',
+                 
+                 # Flask-APScheduler dependencies
+                 'flask_apscheduler',
+                 'apscheduler.schedulers.base',
+                 'apscheduler.schedulers.blocking',
+                 'apscheduler.executors',
+                 'apscheduler.executors.base',
+                 'apscheduler.executors.pool',
+                 'apscheduler.jobstores',
+                 'apscheduler.jobstores.base',
+                 'apscheduler.jobstores.memory',
+                 'apscheduler.triggers',
+                 'apscheduler.triggers.base',
+                 'apscheduler.triggers.date',
+                 'apscheduler.triggers.interval',
+                 'apscheduler.triggers.cron',
+                 
                  # Eventlet and SocketIO dependencies
                  'eventlet',
                  'eventlet.wsgi',

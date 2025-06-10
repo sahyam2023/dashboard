@@ -1,16 +1,16 @@
 // frontend/src/components/chat/ChatWindow.tsx
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Conversation, Message } from './types';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
-import { Socket } from 'socket.io-client'; // Import socket.io-client
-import * as api from '../../services/api'; // Import your API service
-import { useAuth } from '../../context/AuthContext'; // For token
-import Spinner from './Spinner'; // Import Spinner
-import { useNotification } from '../../context/NotificationContext'; // Import useNotification
-import { formatToISTLocaleString } from '../../utils/dateUtils'; // Import the utility
-
-import { ArrowLeft } from 'lucide-react'; // Import an icon
+import { Socket } from 'socket.io-client';
+import * as api from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
+import Spinner from './Spinner';
+import { useNotification } from '../../context/NotificationContext';
+import { formatToISTLocaleString } from '../../utils/dateUtils';
+import { ArrowLeft } from 'lucide-react';
 
 interface ChatWindowProps {
   selectedConversation: Conversation | null;
@@ -18,7 +18,7 @@ interface ChatWindowProps {
   socket: Socket | null;
   onGoBack: () => void;
   socketConnected?: boolean;
-  onNewConversationStarted: (conversation: Conversation) => void; // Added new prop
+  onNewConversationStarted: (conversation: Conversation) => void;
 }
 
 interface OtherUserStatus {
@@ -32,7 +32,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   socket,
   socketConnected,
   onGoBack,
-  onNewConversationStarted, // Destructure new prop
+  onNewConversationStarted,
 }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
@@ -41,47 +41,48 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const { showToastNotification } = useNotification();
   const [otherUserStatus, setOtherUserStatus] = useState<OtherUserStatus | null>(null);
   const selectedConversationRef = useRef<Conversation | null>(null);
-
-  // Pagination for messages
   const [currentPage, setCurrentPage] = useState(1);
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
-  const messagesPerPage = 50; // Or whatever your API default is
+  const messagesPerPage = 50;
+  const { tokenData } = useAuth();
 
-  const { tokenData } = useAuth(); // For getting the auth token
-  // Placeholder fetchMessages function is removed, will use api.getMessages
-  // Placeholder sendMessageAPI function is removed, will use api.sendMessage
+  // Helper function to mark messages as read
+  const markMessagesAsRead = useCallback(() => {
+    if (socket && socketConnected && tokenData?.token && selectedConversationRef.current?.conversation_id) {
+      socket.emit('mark_as_read', {
+        conversation_id: selectedConversationRef.current.conversation_id,
+        token: tokenData.token,
+      });
+    }
+  }, [socket, socketConnected, tokenData]);
 
   const loadMessages = useCallback(async (conversationId: number, page: number = 1, initialLoad = false) => {
-    if (initialLoad) {
-      setLoading(true);
-    } else {
-      setLoadingOlder(true);
-    }
-    // setError(null); // Removed as error state is removed
+    if (initialLoad) setLoading(true);
+    else setLoadingOlder(true);
+
     try {
       const fetchedMessages = await api.getMessages(conversationId, messagesPerPage, (page - 1) * messagesPerPage);
-
-      // API returns newest first, reverse for chronological display in UI (older at top)
       const newMessages = fetchedMessages.reverse();
 
       if (newMessages.length < messagesPerPage) {
         setHasMoreMessages(false);
       }
       setMessages(prevMessages => initialLoad ? newMessages : [...newMessages, ...prevMessages]);
-      if (initialLoad) setCurrentPage(1); // Reset current page on initial load
-    } catch (err: any) { // Explicitly type err
+      if (initialLoad) {
+        setCurrentPage(1);
+        // Mark messages as read after the initial load is successful
+        markMessagesAsRead();
+      }
+    } catch (err: any) {
       showToastNotification(`Error loading messages: ${err.message || 'Unknown error'}`, 'error');
     } finally {
-      if (initialLoad) {
-        setLoading(false);
-      } else {
-        setLoadingOlder(false);
-      }
+      if (initialLoad) setLoading(false);
+      else setLoadingOlder(false);
     }
-  }, [messagesPerPage, showToastNotification]);
+  }, [messagesPerPage, showToastNotification, markMessagesAsRead]);
 
   useEffect(() => {
-    selectedConversationRef.current = selectedConversation; // Update ref for listeners
+    selectedConversationRef.current = selectedConversation;
 
     if (selectedConversation && typeof selectedConversation.conversation_id === 'number') {
       setMessages([]);
@@ -90,7 +91,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       loadMessages(selectedConversation.conversation_id, 1, true);
 
       if (socket && socketConnected && tokenData?.token) {
-        // console.log(`ChatWindow: Emitting 'join_conversation' for ${selectedConversation.conversation_id}`);
         socket.emit('join_conversation', {
           conversation_id: selectedConversation.conversation_id,
           token: tokenData.token,
@@ -98,37 +98,27 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       }
 
       if (selectedConversation.other_user_id) {
-        const fetchStatus = async () => {
-          try {
-            const statusData = await api.getUserChatStatus(selectedConversation.other_user_id as number); // Cast as number
-            setOtherUserStatus(statusData);
-          } catch (err: any) {
+        api.getUserChatStatus(selectedConversation.other_user_id as number)
+          .then(setOtherUserStatus)
+          .catch(err => {
             console.error("Failed to fetch user status:", err);
             showToastNotification(err.message || 'Failed to load user status', 'error');
             setOtherUserStatus(null);
-          }
-        };
-        fetchStatus();
+          });
       } else {
         setOtherUserStatus(null);
       }
     } else if (selectedConversation && selectedConversation.conversation_id === null) {
-      // This is a provisional conversation, don't load messages from API yet.
       setMessages([]);
-      setHasMoreMessages(false); // No messages from API to load yet
+      setHasMoreMessages(false);
       setCurrentPage(1);
-      // Fetch status for the other user in the provisional conversation
       if (selectedConversation.other_user_id) {
-        const fetchStatus = async () => {
-          try {
-            const statusData = await api.getUserChatStatus(selectedConversation.other_user_id as number); // Cast as number
-            setOtherUserStatus(statusData);
-          } catch (err: any) {
+        api.getUserChatStatus(selectedConversation.other_user_id as number)
+          .then(setOtherUserStatus)
+          .catch(err => {
             console.error("Failed to fetch user status for provisional chat:", err);
-            setOtherUserStatus(null); // Still set to null on error
-          }
-        };
-        fetchStatus();
+            setOtherUserStatus(null);
+          });
       } else {
         setOtherUserStatus(null);
       }
@@ -140,29 +130,20 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     }
   }, [selectedConversation, socket, socketConnected, loadMessages, tokenData?.token, showToastNotification]);
 
-  useEffect(() => {
-    if (selectedConversation && typeof selectedConversation.conversation_id === 'number' && socket && socketConnected && !loading && messages.length > 0) {
-      // console.log(`ChatWindow: Emitting 'mark_as_read' for conversation ${selectedConversation.conversation_id}`);
-      socket.emit('mark_as_read', {
-        conversation_id: selectedConversation.conversation_id,
-        token: tokenData?.token
-      });
-    }
-  }, [selectedConversation, socket, socketConnected, loading, messages, tokenData?.token]);
+  // *** THIS IS THE MAIN FIX - THE LOOP IS REMOVED ***
+  // The old `useEffect` that emitted 'mark_as_read' and depended on `messages` is gone.
+  // We now call `markMessagesAsRead()` intentionally at the right times.
 
-  // Listen for real-time online/offline status updates
   useEffect(() => {
     if (!socket || !socketConnected) return;
 
     const handleUserOnline = (data: { user_id: number }) => {
-      // console.log("ChatWindow: user_online event", data, "current other_user_id:", selectedConversationRef.current?.other_user_id);
       if (data.user_id === selectedConversationRef.current?.other_user_id) {
         setOtherUserStatus(prevStatus => ({ ...prevStatus, is_online: true, last_seen: null }));
       }
     };
 
     const handleUserOffline = (data: { user_id: number; last_seen: string }) => {
-      // console.log("ChatWindow: user_offline event", data, "current other_user_id:", selectedConversationRef.current?.other_user_id);
       if (data.user_id === selectedConversationRef.current?.other_user_id) {
         setOtherUserStatus(prevStatus => ({ ...prevStatus, is_online: false, last_seen: data.last_seen }));
       }
@@ -170,116 +151,74 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
     socket.on('user_online', handleUserOnline);
     socket.on('user_offline', handleUserOffline);
-    // console.log(`ChatWindow: 'user_online'/'user_offline' listeners attached globally.`);
 
     return () => {
       socket.off('user_online', handleUserOnline);
       socket.off('user_offline', handleUserOffline);
-      // console.log(`ChatWindow: 'user_online'/'user_offline' listeners detached.`);
     };
-  }, [socket, socketConnected]); // Depends only on socket, selectedConversationRef is used to check current relevance
+  }, [socket, socketConnected]);
 
   useEffect(() => {
     if (!socket || !socketConnected || !selectedConversation) return;
 
     const handleNewMessage = (newMessage: Message) => {
-      // console.log('SocketIO: new_message received in ChatWindow', newMessage);
-      if (newMessage.conversation_id === selectedConversation.conversation_id) {
+      if (newMessage.conversation_id === selectedConversationRef.current?.conversation_id) {
         setMessages((prevMessages) => [...prevMessages, newMessage]);
-        // Potentially mark as read if user is viewing this conversation
-        // This is complex if message is from current user; backend handles `is_read` for recipient
+        // When a new message arrives, mark it as read.
+        markMessagesAsRead();
       }
     };
 
     socket.on('new_message', handleNewMessage);
-    // console.log(`ChatWindow: 'new_message' listener attached for conv ${selectedConversation.conversation_id}.`);
 
     return () => {
       socket.off('new_message', handleNewMessage);
-      // console.log(`ChatWindow: 'new_message' listener detached for conv ${selectedConversation.conversation_id}.`);
     };
-  }, [socket, socketConnected, selectedConversation]); // Rerun when selectedConversation changes to listen to correct new_message
+  }, [socket, socketConnected, selectedConversation, markMessagesAsRead]); // Added markMessagesAsRead dependency
 
-  // Effect to handle real-time message read updates
   useEffect(() => {
-    if (!socket || !socketConnected || !selectedConversation || selectedConversation.conversation_id === null || !currentUserId) {
-      return;
-    }
-    
-    // const conversationIdForLog = selectedConversation.conversation_id; // Capture for cleanup log
+    if (!socket || !socketConnected || !currentUserId) return;
 
     const handleMessagesReadUpdate = (data: { conversation_id: string | number; reader_id: number; message_ids: number[] }) => {
-      // console.log('[CW_MRU_DEBUG] Full data object received:', data);
-      // Ensure selectedConversation is accessed safely, perhaps from a ref or by checking its current value if it can change during the handler's life
-      // const currentComponentConvId = selectedConversationRef.current?.conversation_id; // Using ref for safety within callback
-      // console.log('[CW_MRU_DEBUG] Component currentConversationId (from ref):', currentComponentConvId, 'currentUserId:', currentUserId);
-
-      // Ensure conversation_id types are consistent for comparison
-      // Use selectedConversationRef.current for safety within the async callback
       const currentConversationId = selectedConversationRef.current?.conversation_id;
-      if (currentConversationId === null || currentConversationId === undefined) {
-        // console.log('[CW_MRU_DEBUG] selectedConversationRef.current.conversation_id is null or undefined in handleMessagesReadUpdate. Skipping.');
-        return;
-      }
+      if (currentConversationId === null || currentConversationId === undefined) return;
+      
       const receivedConversationId = typeof data.conversation_id === 'string' ? parseInt(data.conversation_id, 10) : data.conversation_id;
       
-      // console.log('[CW_MRU_DEBUG] Before setMessages - receivedConversationId:', receivedConversationId, 'currentConversationId (from ref):', currentConversationId, 'Comparison result (received === current):', receivedConversationId === currentConversationId);
-
       if (currentConversationId === receivedConversationId) {
         setMessages(prevMessages =>
-          prevMessages.map(msg => {
-            // console.log('[CW_MRU_DEBUG] Processing msg.id:', msg.id, 'msg.sender_id:', msg.sender_id);
-            const isMessageIncluded = data.message_ids.includes(msg.id);
-            // console.log('[CW_MRU_DEBUG] data.message_ids.includes(msg.id):', isMessageIncluded);
-            const isSenderCurrentUser = msg.sender_id === currentUserId; // currentUserId is from useEffect's scope, should be stable unless it's a prop that changes the effect
-            // console.log('[CW_MRU_DEBUG] msg.sender_id === currentUserId:', isSenderCurrentUser);
-            const conditionMet = isMessageIncluded && isSenderCurrentUser;
-            // console.log('[CW_MRU_DEBUG] Entire condition (isMessageIncluded && isSenderCurrentUser) is:', conditionMet);
-
-            if (conditionMet) {
-              // console.log('[CW_MRU_DEBUG] Setting is_read to true for msg.id:', msg.id);
-              return { ...msg, is_read: true };
-            }
-            return msg;
-          })
+          prevMessages.map(msg => 
+            data.message_ids.includes(msg.id) && msg.sender_id === currentUserId 
+            ? { ...msg, is_read: true } 
+            : msg
+          )
         );
       }
     };
     
-    // console.log('[CW_LISTENER_SETUP] Attempting to attach "messages_read_update" listener for conversation ID:', conversationIdForLog);
     socket.on('messages_read_update', handleMessagesReadUpdate);
-    // The existing log below is fine, or can be removed if the new one is preferred. Keeping it for now.
-    // console.log(`ChatWindow: 'messages_read_update' listener attached for conv ${conversationIdForLog}.`);
 
     return () => {
-      // console.log('[CW_LISTENER_SETUP] Detaching "messages_read_update" listener for conversation ID:', conversationIdForLog);
       socket.off('messages_read_update', handleMessagesReadUpdate);
-      // The existing log below is fine, or can be removed. Keeping it for now.
-      // console.log(`ChatWindow: 'messages_read_update' listener detached for conv ${conversationIdForLog}.`);
     };
-  }, [socket, socketConnected, selectedConversation, currentUserId, setMessages]); // setMessages added to dependencies as it's used in effect
-
-  // Removed getFileType as file type is now determined by backend.
-  // const getFileType = (fileType: string): Message['file_type'] => { ... };
+  }, [socket, socketConnected, currentUserId]); // Removed messages from dependencies
 
   const handleSendMessage = async (messageText: string) => {
     if (!selectedConversation || !currentUserId || !messageText.trim()) return;
     setSending(true);
     try {
       if (selectedConversation.conversation_id === null) {
-        // This is a new conversation
         if (!selectedConversation.other_user_id) {
-            showToastNotification("Error: Recipient user ID is missing for new conversation.", "error");
+            showToastNotification("Error: Recipient user ID is missing.", "error");
             setSending(false);
             return;
         }
         const returnedConversation = await api.startConversationAndSendMessage(
-          selectedConversation.other_user_id, // This must be a number
+          selectedConversation.other_user_id,
           messageText.trim()
         );
-        onNewConversationStarted(returnedConversation); // Update parent state
+        onNewConversationStarted(returnedConversation);
       } else {
-        // Existing conversation
         await api.sendMessage(selectedConversation.conversation_id, messageText.trim());
       }
     } catch (err: any) {
@@ -296,28 +235,22 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
     try {
       if (selectedConversation.conversation_id === null) {
-        // New conversation: use startConversationAndSendMessage with file
         if (!selectedConversation.other_user_id) {
-            showToastNotification("Error: Recipient user ID is missing for new conversation.", "error");
+            showToastNotification("Error: Recipient user ID is missing.", "error");
             setSending(false);
             return;
         }
-        // Re-adjusting to current api.ts: upload first, then call startConversationAndSendMessage with URLs
-        const uploadResponse = await api.uploadChatFile(file, selectedConversation.other_user_id as number); // Temporarily pass other_user_id for upload path
-        showToastNotification(`${file.name} uploaded. Starting conversation...`, 'info');
+        const uploadResponse = await api.uploadChatFile(file, selectedConversation.other_user_id as number);
         const returnedConversation = await api.startConversationAndSendMessage(
             selectedConversation.other_user_id as number,
-            file.name, // Content of the message (e.g., filename)
+            file.name,
             uploadResponse.file_url,
             uploadResponse.file_name,
             uploadResponse.file_type
         );
         onNewConversationStarted(returnedConversation);
-
       } else {
-        // Existing conversation
         const uploadResponse = await api.uploadChatFile(file, selectedConversation.conversation_id);
-        showToastNotification(`${file.name} uploaded. Sending message...`, 'info');
         await api.sendMessage(
           selectedConversation.conversation_id,
           file.name,
@@ -327,7 +260,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         );
       }
     } catch (err: any) {
-      console.error("Error in handleSendFile:", err);
       showToastNotification(`Error sending file ${file.name}: ${err.message || 'Unknown error'}`, 'error');
     } finally {
       setSending(false);
@@ -337,22 +269,13 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const handleLoadOlder = () => {
     if (selectedConversation && typeof selectedConversation.conversation_id === 'number' && hasMoreMessages && !loadingOlder) {
       const nextPage = currentPage + 1;
-      loadMessages(selectedConversation.conversation_id, nextPage, false); // initialLoad = false
-      setCurrentPage(nextPage); // Update current page state
+      loadMessages(selectedConversation.conversation_id, nextPage, false);
+      setCurrentPage(nextPage);
     }
   };
 
-  if (!selectedConversation) {
-    return (
-      <div className="flex-1 flex items-center justify-center h-full bg-gray-100 dark:bg-gray-800">
-        <p className="text-gray-500 dark:text-gray-400 text-lg">Select a conversation to start chatting.</p>
-      </div>
-    );
-  }
-
-  // Determine if the header should show provisional state or actual data
-  const headerUsername = selectedConversation.other_username || "New Chat";
-  const headerProfilePic = selectedConversation.other_profile_picture_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(headerUsername)}&background=random&size=40&color=fff`;
+  const headerUsername = selectedConversation?.other_username || "New Chat";
+  const headerProfilePic = selectedConversation?.other_profile_picture_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(headerUsername)}&background=random&size=40&color=fff`;
 
   return (
     <div className="flex flex-col h-full bg-white dark:bg-gray-800 shadow-md">
@@ -360,49 +283,38 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         <div className="flex items-center space-x-2 sm:space-x-3">
           <button
             onClick={onGoBack}
-            className="p-1.5 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            aria-label="Go back to conversation list"
+            className="p-1.5 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"
+            aria-label="Go back"
           >
-            <ArrowLeft size={20} className="sm:w-5 sm:h-5" />
+            <ArrowLeft size={20} />
           </button>
           <img
             src={headerProfilePic}
             alt={headerUsername}
             className="w-8 h-8 sm:w-10 sm:h-10 rounded-full object-cover"
           />
-          <div className="flex flex-col">
+          <div>
             <h2 className="text-base sm:text-lg font-semibold text-gray-800 dark:text-gray-100 truncate">
               {headerUsername}
             </h2>
             {otherUserStatus && (
-              <div className="flex items-center space-x-1">
+              <div className="flex items-center space-x-1 text-xs text-gray-500 dark:text-gray-400">
                 <span className={`h-2 w-2 rounded-full ${otherUserStatus.is_online ? 'bg-green-500' : 'bg-gray-400'}`}></span>
-                <p className="text-xs text-gray-500 dark:text-gray-400">
+                <span>
                   {otherUserStatus.is_online ? 'Online' : (otherUserStatus.last_seen ? `Last seen ${formatToISTLocaleString(otherUserStatus.last_seen)}` : 'Offline')}
-                </p>
+                </span>
               </div>
             )}
           </div>
         </div>
       </header>
 
-      {/* Content Area - This div should be flex-1 to take available space */}
       <div className="flex-1 overflow-y-auto">
-        {loading && messages.length === 0 && selectedConversation.conversation_id !== null && (
-          <div className="flex-1 flex items-center justify-center">
-            <Spinner size="lg" />
-          </div>
-        )}
-        {selectedConversation.conversation_id === null && messages.length === 0 && !loading && (
-          <div className="flex-1 flex items-center justify-center p-4">
-            <p className="text-gray-400 dark:text-gray-300 text-md text-center">
-              Type your first message to start the conversation with {headerUsername}.
-            </p>
-          </div>
-        )}
-        {messages.length > 0 && (
+        {loading ? (
+          <div className="flex-1 flex items-center justify-center h-full"><Spinner size="lg" /></div>
+        ) : (
           <MessageList
-            key={selectedConversation.conversation_id ?? 'provisional-' + selectedConversation.other_user_id}
+            key={selectedConversation?.conversation_id ?? 'provisional-' + selectedConversation?.other_user_id}
             messages={messages}
             currentUserId={currentUserId}
             onLoadOlderMessages={handleLoadOlder}
@@ -410,17 +322,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             isLoadingOlder={loadingOlder}
           />
         )}
-        {/* Placeholder for empty, non-provisional, non-loading chat */}
-        {!loading && messages.length === 0 && selectedConversation.conversation_id !== null && (
-           <div className="flex-1 flex items-center justify-center p-4">
-              <p className="text-gray-400 dark:text-gray-300 text-md text-center">
-                  No messages yet in this conversation. Send a message to get started!
-              </p>
-          </div>
-        )}
       </div>
 
-      {/* Input Area - Should always be visible if a conversation is selected */}
       {selectedConversation && (
         <ChatInput
           onSendMessage={handleSendMessage}

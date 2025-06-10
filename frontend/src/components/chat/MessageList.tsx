@@ -21,16 +21,15 @@ const MessageList: React.FC<MessageListProps> = ({
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLUListElement>(null);
-  
-  // Ref to store the scrollHeight before older messages are prepended
   const scrollHeightBeforeUpdate = useRef(0);
   
-  // **THE FIX - PART 1: A ref to track if the user has manually scrolled up.**
-  // We initialize it to false, assuming we start at the bottom.
+  // This ref tracks if the user has manually scrolled up.
   const userHasScrolledUpRef = useRef(false);
+  
+  // This ref helps determine if a truly new message has been added.
+  const lastMessageIdRef = useRef<number | null>(null);
 
-  // This layout effect is for maintaining scroll position when loading OLDER messages.
-  // It captures the scroll height *before* the new (older) messages are rendered.
+  // This effect handles preserving scroll position when loading OLDER messages.
   useLayoutEffect(() => {
     const container = messagesContainerRef.current;
     if (container && isLoadingOlder) {
@@ -38,48 +37,61 @@ const MessageList: React.FC<MessageListProps> = ({
     }
   }, [isLoadingOlder]);
 
-  // This is our main scrolling logic effect.
+  // This is the main effect for handling all scrolling logic.
   useEffect(() => {
     const container = messagesContainerRef.current;
     if (!container) return;
 
-    // Case 1: Finished loading OLDER messages.
-    // Restore the scroll position so it doesn't jump to the top.
+    // First, handle restoring scroll position after loading older messages.
     if (!isLoadingOlder && scrollHeightBeforeUpdate.current > 0) {
       const newScrollHeight = container.scrollHeight;
       container.scrollTop = newScrollHeight - scrollHeightBeforeUpdate.current;
-      scrollHeightBeforeUpdate.current = 0; // Reset for the next load
-      return; // We've handled the scroll, so we're done.
-    }
-
-    // Case 2: A new message arrived or the chat was opened for the first time.
-    // We only scroll down if the user has NOT manually scrolled up.
-    if (!userHasScrolledUpRef.current) {
-      // Use 'auto' behavior for initial load for instant scroll, and 'smooth' for new messages.
-      // Since we can't easily distinguish, 'smooth' is a good compromise. 'auto' also works well.
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      scrollHeightBeforeUpdate.current = 0;
+      return;
     }
     
-  }, [messages, isLoadingOlder]); // Depend on messages and isLoadingOlder
+    // *** THE CORE FIX: Smarter Scroll Logic Starts Here ***
 
-  // **THE FIX - PART 2: Update the ref based on user's scroll actions.**
+    const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
+
+    // Determine if we should scroll. Default to scrolling if the user is at the bottom.
+    // This also handles the initial load.
+    let shouldScroll = !userHasScrolledUpRef.current;
+
+    // **Crucial override:** If the last message is from the current user,
+    // we MUST scroll down, regardless of where they were scrolled.
+    if (lastMessage && lastMessage.sender_id === currentUserId) {
+        const isNewMessageFromSelf = lastMessage.id !== lastMessageIdRef.current;
+        if (isNewMessageFromSelf) {
+            shouldScroll = true;
+        }
+    }
+    
+    if (shouldScroll) {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+    
+    // Update the ref to the latest message ID after processing.
+    if(lastMessage) {
+        lastMessageIdRef.current = lastMessage.id;
+    }
+    
+  }, [messages, isLoadingOlder, currentUserId]); // We need messages and currentUserId
+
   const handleScroll = (event: UIEvent<HTMLUListElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
-    const scrollThreshold = 100; // How many pixels from the bottom to be considered "at the bottom"
+    const scrollThreshold = 150; // A good buffer to be considered "at the bottom"
 
-    // Check if user is at the top to load older messages
+    // Load older messages when scrolled to the top
     if (scrollTop === 0 && hasMoreOlderMessages && !isLoadingOlder && onLoadOlderMessages) {
       onLoadOlderMessages();
     }
 
-    // Determine if the user has scrolled up.
-    // If their scroll position is further from the bottom than our threshold,
-    // we set the ref to true.
+    // Update our scroll-lock ref. If the user scrolls up, lock auto-scrolling.
+    // If they scroll back down, unlock it.
     if (scrollHeight - scrollTop - clientHeight > scrollThreshold) {
       userHasScrolledUpRef.current = true;
     } else {
-      // If they scroll back down to the bottom, we set it back to false,
-      // which re-enables auto-scrolling for new messages.
       userHasScrolledUpRef.current = false;
     }
   };
@@ -89,14 +101,10 @@ const MessageList: React.FC<MessageListProps> = ({
       ref={messagesContainerRef}
       onScroll={handleScroll}
       className="flex-1 p-3 sm:p-4 space-y-3 overflow-y-auto bg-gray-50 dark:bg-gray-700"
-      aria-live="polite" // Good for accessibility
     >
-      {/* Loading indicator for older messages */}
       {isLoadingOlder && (
         <div className="text-center py-2 text-gray-500 dark:text-gray-400">Loading older messages...</div>
       )}
-
-      {/* Button to load older messages */}
       {hasMoreOlderMessages && !isLoadingOlder && (
          <div className="text-center py-2">
             <button
@@ -109,12 +117,10 @@ const MessageList: React.FC<MessageListProps> = ({
         </div>
       )}
       
-      {/* Render all messages */}
       {messages.map((msg) => (
         <MessageItem key={msg.id} message={msg} currentUserId={currentUserId} />
       ))}
 
-      {/* Message shown at the very beginning of a conversation */}
       {!hasMoreOlderMessages && messages.length === 0 && !isLoadingOlder && (
         <div className="flex-1 flex flex-col items-center justify-center h-full text-center">
             <p className="text-gray-500 dark:text-gray-400">
@@ -123,7 +129,6 @@ const MessageList: React.FC<MessageListProps> = ({
         </div>
       )}
 
-      {/* Invisible div at the end to scroll to */}
       <div ref={messagesEndRef} />
     </ul>
   );

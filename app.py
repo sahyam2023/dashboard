@@ -151,7 +151,7 @@ CORS(app, resources={
             "http://127.0.0.1:7000",
             "http://192.168.3.40:7000",
             "http://192.168.3.129:7000",
-            "http://192.168.1.100:7000" # Example: Added another common private IP
+            "http://192.168.1.116:7000" # Example: Added another common private IP
         ]
     },
     r"/socket.io/*": { # Socket.IO also needs CORS configuration
@@ -161,7 +161,7 @@ CORS(app, resources={
             "http://127.0.0.1:7000",
             "http://192.168.3.40:7000",
             "http://192.168.3.129:7000",
-            "http://192.168.1.100:7000" # Ensure frontend URL is listed
+            "http://192.168.1.116:7000" # Ensure frontend URL is listed
         ]
     }
 },
@@ -179,7 +179,7 @@ def create_socketio_instance(flask_app):
     # Define CORS origins
     socketio_cors_origins = [
         "http://localhost:5173", "http://localhost:7000", "http://127.0.0.1:7000",
-        "http://192.168.3.40:7000", "http://192.168.3.129:7000", "http://192.168.1.100:7000"
+        "http://192.168.3.40:7000", "http://192.168.3.129:7000", "http://192.168.1.116:7000"
     ]
     
     if is_frozen:

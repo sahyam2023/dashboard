@@ -685,6 +685,55 @@ export async function findConversationByUserId(otherUserId: number): Promise<Cha
 }
 // --- End Chat API Functions ---
 
+// --- Chat File Download Function ---
+export async function downloadChatFile(fileUrl: string, originalFilename: string): Promise<void> {
+  const fullUrl = `${API_BASE_URL}${fileUrl}`;
+  let objectUrl: string | null = null;
+
+  try {
+    const response = await fetch(fullUrl, {
+      method: 'GET',
+      headers: { ...getAuthHeader() },
+    });
+
+    if (!response.ok) {
+      // Use handleApiError to parse a potential JSON error response and throw an error.
+      // handleApiError is expected to throw an error here.
+      await handleApiError(response, `Failed to download file ${originalFilename}`);
+      // As a fallback, if handleApiError doesn't throw for some reason (e.g. future modification)
+      // ensure an error is thrown.
+      throw new Error(`Download failed for ${originalFilename} with status ${response.status}`);
+    }
+
+    // If response.ok, connection is fine.
+    setGlobalOfflineStatus(false);
+    const blob = await response.blob();
+
+    objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = originalFilename;
+    document.body.appendChild(a); // Append to body to ensure clickability in some browsers
+    a.click();
+    document.body.removeChild(a); // Clean up by removing the element
+
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    // Log the error, as it might be an error from handleApiError or a network error.
+    console.error(`Error downloading file ${originalFilename} from ${fileUrl}:`, error);
+    // Re-throw the error so the calling component can handle it (e.g., show a specific UI message)
+    throw error;
+  } finally {
+    if (objectUrl) {
+      URL.revokeObjectURL(objectUrl);
+    }
+  }
+}
+// --- End Chat File Download Function ---
+
 // --- Super Admin File Permission Management Functions ---
 
 export async function getUserFilePermissions(userId: number): Promise<FilePermission[]> {

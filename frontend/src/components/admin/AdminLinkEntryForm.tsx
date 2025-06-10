@@ -190,7 +190,7 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
       setValue('typedVersionString', '');
 
       const selectedSoftware = softwareList.find(sw => sw.id.toString() === watchedSoftwareId);
-      if (selectedSoftware && (selectedSoftware.name === 'VMS' || selectedSoftware.name === 'VA')) {
+      if (selectedSoftware && selectedSoftware.name === 'VA') {
         setIsVmsOrVaSoftware(true);
         const vmsSoftware = softwareList.find(sw => sw.name === 'VMS');
         if (vmsSoftware) {

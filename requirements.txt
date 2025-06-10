@@ -10,6 +10,7 @@ Werkzeug
 APScheduler
 click
 eventlet
+cryptography
 thefuzz
 python-Levenshtein
 flask-socketio

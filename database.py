@@ -1,6 +1,8 @@
 # database.py
 import sqlite3
 import os
+from flask import current_app # For accessing app.config for encryption key
+from encryption_utils import encrypt_message, decrypt_message # For message encryption/decryption
 import sys # Added for PyInstaller path handling
 import pytz
 from datetime import datetime, timezone # ensure timezone is imported if needed
@@ -877,6 +879,9 @@ def get_conversation_by_id(db, conversation_id: int) -> 'sqlite3.Row | None':
 def send_message(db, conversation_id: int, sender_id: int, recipient_id: int, content: str, file_name: str = None, file_url: str = None, file_type: str = None) -> 'sqlite3.Row | None':
     """Inserts a new message into the messages table and returns the newly created message."""
     try:
+        key = current_app.config['ENCRYPTION_KEY']
+        encrypted_content = encrypt_message(content) if content else None
+
         # Initial logging of received parameters
         # print(f"DB_MESSAGES: send_message called with file_name='{file_name}', file_url='{file_url}'")
 
@@ -902,7 +907,7 @@ def send_message(db, conversation_id: int, sender_id: int, recipient_id: int, co
         cursor = db.execute(
             """INSERT INTO messages (conversation_id, sender_id, recipient_id, content, file_name, file_url, file_type)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (conversation_id, sender_id, recipient_id, content, db_file_name_to_store, file_url, file_type)
+            (conversation_id, sender_id, recipient_id, encrypted_content, db_file_name_to_store, file_url, file_type)
         )
         db.commit()
         new_message_id = cursor.lastrowid
@@ -919,12 +924,19 @@ def get_message_by_id(db, message_id: int) -> 'sqlite3.Row | None':
             "SELECT id, conversation_id, sender_id, recipient_id, content, created_at, is_read, file_name, file_url, file_type FROM messages WHERE id = ?",
             (message_id,)
         )
-        return cursor.fetchone()
+        row = cursor.fetchone()
+        if row:
+            message_dict = dict(row)
+            if message_dict['content']:
+                key = current_app.config['ENCRYPTION_KEY']
+                message_dict['content'] = decrypt_message(message_dict['content'])
+            return message_dict # Return as dict after potential decryption
+        return None
     except sqlite3.Error as e:
         # print(f"DB_MESSAGES: Error fetching message by ID {message_id}: {e}")
         return None
 
-def get_messages(db, conversation_id: int, limit: int = 50, offset: int = 0) -> list['sqlite3.Row']:
+def get_messages(db, conversation_id: int, limit: int = 50, offset: int = 0) -> list[dict]:
     """
     Retrieves messages for a given conversation, ordered by created_at (descending).
     Implements pagination using limit and offset.
@@ -944,12 +956,20 @@ def get_messages(db, conversation_id: int, limit: int = 50, offset: int = 0) -> 
             """,
             (conversation_id, limit, offset)
         )
-        return cursor.fetchall()
+        rows = cursor.fetchall()
+        messages = []
+        key = current_app.config['ENCRYPTION_KEY']
+        for row in rows:
+            message_dict = dict(row)
+            if message_dict['content']:
+                message_dict['content'] = decrypt_message(message_dict['content'])
+            messages.append(message_dict)
+        return messages
     except sqlite3.Error as e:
         # print(f"DB_MESSAGES: Error fetching messages for conversation {conversation_id}: {e}")
         return []
 
-def get_user_conversations(db, user_id: int) -> list['sqlite3.Row']:
+def get_user_conversations(db, user_id: int) -> list[dict]:
     """
     Retrieves all conversations for a given user.
     Joins with the users table to get the other participant's username and profile picture.
@@ -1012,12 +1032,20 @@ def get_user_conversations(db, user_id: int) -> list['sqlite3.Row']:
             """,
             {"user_id": user_id}
         )
-        return cursor.fetchall()
+        rows = cursor.fetchall()
+        conversations = []
+        key = current_app.config['ENCRYPTION_KEY']
+        for row in rows:
+            convo_dict = dict(row)
+            if convo_dict['last_message_content']:
+                convo_dict['last_message_content'] = decrypt_message(convo_dict['last_message_content'])
+            conversations.append(convo_dict)
+        return conversations
     except sqlite3.Error as e:
         print(f"DB_CONVERSATIONS: Error fetching conversations for user {user_id}: {e}")
         return []
     
-def mark_messages_as_read(db, conversation_id: int, user_id: int) -> int:
+def mark_messages_as_read(db, conversation_id: int, user_id: int) -> tuple[int, list[dict]]:
     """
     Marks messages in a conversation as read for a specific user where they are the recipient.
     Returns a tuple: (number of messages whose status was changed by this call, 

@@ -9275,14 +9275,8 @@ def bulk_download_items():
                 try:
                     # Attempt to explicitly close the file stream if response.response is a file wrapper
                     # This is to help release any lock held by the response stream, especially on Windows.
-                    if hasattr(response, 'response') and hasattr(response.response, 'close') and callable(response.response.close):
-                        try:
-                            response.response.close()
-                            app.logger.info(f"Cleanup_zip: Explicitly closed response.response for {zip_filepath}")
-                        except Exception as e_resp_close:
-                            # Log warning if closing the response stream fails, but don't let it stop cleanup.
-                            app.logger.warning(f"Cleanup_zip: Error closing response.response for {zip_filepath}: {e_resp_close}")
-
+                    # Removed explicit response.response.close() call as it might cause issues with send_file.
+                    # The primary goal here is to delete the temporary file.
                     if zip_filepath and os.path.exists(zip_filepath):
                         os.remove(zip_filepath)
                         app.logger.info(f"Successfully cleaned up temporary zip file: {zip_filepath}")

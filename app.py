@@ -1,8 +1,14 @@
+
+# Import eventlet and monkey patch BEFORE any other imports
 import eventlet
-eventlet.monkey_patch()
+import os
+# Check if already patched by PyInstaller runtime hook
+if not os.environ.get('EVENTLET_PATCHED'):
+    eventlet.monkey_patch()
+
+import eventlet.wsgi
 #app.py
 
-import os
 import uuid
 import sqlite3
 import json # Added for audit logging
@@ -19,7 +25,6 @@ from functools import wraps
 # import pstats # Removed
 # import io # Removed
 # import eventlet # Moved to top
-import eventlet.wsgi # Keeping this here as per instruction
 # eventlet.monkey_patch() # Moved to top
 import random
 import shutil # Added for file replication
@@ -163,16 +168,43 @@ supports_credentials=True,
 allow_headers=["Content-Type", "Authorization", "Cache-Control", "Pragma"],
 methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
-# Initialize SocketIO
-# Using "*" for cors_allowed_origins for SocketIO is common in development.
-# For production, list specific frontend origins.
-# The existing CORS setup for /api/* will be respected by Flask routes.
-# SocketIO needs its own CORS config if requests originate from different domains/ports.
-socketio_cors_origins = [
-    "http://localhost:5173", "http://localhost:7000", "http://127.0.0.1:7000",
-    "http://192.168.3.40:7000", "http://192.168.3.129:7000", "http://192.168.1.100:7000"
-]
-socketio = SocketIO(app, cors_allowed_origins=socketio_cors_origins, async_mode='eventlet') # Changed async_mode to eventlet
+# CRITICAL FIX: Initialize SocketIO with explicit async_mode for PyInstaller
+def create_socketio_instance(flask_app):
+    """Create SocketIO instance with proper PyInstaller compatibility"""
+    
+    # Detect if running in PyInstaller bundle
+    is_frozen = getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
+    
+    # Define CORS origins
+    socketio_cors_origins = [
+        "http://localhost:5173", "http://localhost:7000", "http://127.0.0.1:7000",
+        "http://192.168.3.40:7000", "http://192.168.3.129:7000", "http://192.168.1.100:7000"
+    ]
+    
+    if is_frozen:
+        print("PyInstaller detected - forcing eventlet async_mode")
+        # Explicitly set async_mode for PyInstaller
+        socketio_instance = SocketIO(
+            flask_app, 
+            cors_allowed_origins=socketio_cors_origins, 
+            async_mode='eventlet',  # CRITICAL: Explicitly set for PyInstaller
+            logger=True,
+            engineio_logger=False  # Reduce log noise
+        )
+    else:
+        print("Development mode - auto-detecting async_mode")
+        # Let it auto-detect in development (your original code)
+        socketio_instance = SocketIO(
+            flask_app, 
+            cors_allowed_origins=socketio_cors_origins, 
+            async_mode='eventlet'  # Keep eventlet for consistency
+        )
+    
+    print(f"SocketIO initialized with async_mode: {socketio_instance.async_mode}")
+    return socketio_instance
+
+# Create SocketIO instance using the helper function
+socketio = create_socketio_instance(app)
 
 # App Configuration
 app.config['DATABASE'] = os.path.join(INSTANCE_FOLDER_PATH, 'software_dashboard.db') # DB in instance folder
@@ -11432,20 +11464,27 @@ if __name__ == '__main__':
     replicate_default_files_if_bundled()
     # --- End replication call ---
 
-
+    # IMPROVED SERVER STARTUP WITH BETTER PYINSTALLER SUPPORT
     try:
         flask_port = int(os.environ.get('FLASK_RUN_PORT', 7000))
-        # When using Flask-SocketIO with Waitress or Gunicorn,
-        # you serve the `socketio` object instead of the `app` object directly if those servers
-        # don't have native Socket.IO support (Waitress doesn't, Gunicorn needs eventlet/gevent worker).
-        # However, initializing SocketIO with SocketIO(app) wraps the app.
-        # So, serving `app` with Waitress should work if `async_mode` is compatible (e.g. 'threading').
-        # app.logger.info(f"Starting Waitress server on port {flask_port} for Flask app with SocketIO...") # Removed Waitress log
-        # serve(app, host='0.0.0.0', port=flask_port) # Waitress should serve the Flask app, SocketIO is integrated. # Removed Waitress serve
-        app.logger.info(f"Starting Eventlet server on port {flask_port} for Flask app with SocketIO...")
-        # Use the app instance with eventlet, as SocketIO is already integrated with app
-        silent_logger = SilentLogger()
-        eventlet.wsgi.server(eventlet.listen(('0.0.0.0', flask_port)), app, log=silent_logger)
+        is_frozen = getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
+
+        if is_frozen:
+            # FOR PYINSTALLER: Use the direct eventlet server with your silent logger.
+            app.logger.info(f"Starting server in PyInstaller mode on port {flask_port}")
+
+            # 1. Instantiate your logger
+            silent_logger = SilentLogger()
+
+            # 2. Pass the instance to the server's 'log' parameter
+            eventlet.wsgi.server(eventlet.listen(('0.0.0.0', flask_port)), app, log=silent_logger)
+
+        else:
+            # FOR DEVELOPMENT: Use socketio.run() which has its own logging controls.
+            app.logger.info(f"Starting server in development mode on port {flask_port}")
+            socketio.run(app, host='0.0.0.0', port=flask_port, debug=True)
+
     except (KeyboardInterrupt, SystemExit):
-        app.logger.info("Flask application shutting down...")
-    # Removed explicit scheduler shutdown from here as it's handled by atexit
+        app.logger.info("Application shutting down...")
+    except Exception as e:
+        app.logger.error(f"FATAL: Unexpected error during server startup: {e}", exc_info=True)

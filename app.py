@@ -196,7 +196,9 @@ def create_socketio_instance(flask_app):
             cors_allowed_origins=socketio_cors_origins, 
             async_mode='eventlet',  # CRITICAL: Explicitly set for PyInstaller
             logger=True,
-            engineio_logger=False  # Reduce log noise
+            engineio_logger=False,  # Reduce log noise
+            ping_timeout=20,
+            ping_interval=25
         )
     else:
         print("Development mode - auto-detecting async_mode")
@@ -204,10 +206,12 @@ def create_socketio_instance(flask_app):
         socketio_instance = SocketIO(
             flask_app, 
             cors_allowed_origins=socketio_cors_origins, 
-            async_mode='eventlet'  # Keep eventlet for consistency
+            async_mode='eventlet',  # Keep eventlet for consistency
+            ping_timeout=20,
+            ping_interval=25
         )
     
-    print(f"SocketIO initialized with async_mode: {socketio_instance.async_mode}")
+    print(f"SocketIO initialized with async_mode: {socketio_instance.async_mode}, ping_timeout=20, ping_interval=25 (as passed to constructor)")
     return socketio_instance
 
 # Create SocketIO instance using the helper function
@@ -7070,18 +7074,40 @@ def serve_official_doc_file(filename):
     if doc_details and doc_details['original_filename_ref']:
         download_as_name = doc_details['original_filename_ref']
 
-    file_ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
-    mimetype_to_use = None
-    if file_ext in INLINE_PRONE_EXTENSIONS:
-        mimetype_to_use = 'application/octet-stream'
+    try:
+        _log_download_activity(filename, 'document', db) # Log before serving
+    except Exception as e:
+        app.logger.error(f"Error during download logging for doc '{filename}': {e}")
+        # Do not necessarily prevent download if logging fails, but log the logging error.
     
-    return send_from_directory(
-        app.config['DOC_UPLOAD_FOLDER'], 
-        filename, # This is the stored_filename on disk
-        as_attachment=True,
-        download_name=download_as_name,
-        mimetype=mimetype_to_use
-    )
+    # Fetch the original filename to use for the download
+    doc_details = db.execute("SELECT original_filename_ref FROM documents WHERE id = ?", (file_id,)).fetchone()
+    download_as_name = filename # Fallback to stored name
+    if doc_details and doc_details['original_filename_ref']:
+        download_as_name = doc_details['original_filename_ref']
+
+    try:
+        file_ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+        mimetype_to_use = None
+        if file_ext in INLINE_PRONE_EXTENSIONS:
+            mimetype_to_use = 'application/octet-stream'
+        
+        return send_from_directory(
+            app.config['DOC_UPLOAD_FOLDER'], 
+            filename, # This is the stored_filename on disk
+            as_attachment=True,
+            download_name=download_as_name,
+            mimetype=mimetype_to_use
+        )
+    except FileNotFoundError:
+        app.logger.error(f"Official doc file not found (FileNotFoundError): {filename} for file_id {file_id}", exc_info=True)
+        return jsonify(msg="File not found."), 404
+    except (IOError, OSError) as e_io:
+        app.logger.error(f"IO/OS error serving official doc file {filename} for file_id {file_id}: {e_io}", exc_info=True)
+        return jsonify(msg="Error serving file.", error=str(e_io)), 500
+    except Exception as e:
+        app.logger.error(f"Unexpected error serving official doc file {filename} for file_id {file_id}: {e}", exc_info=True)
+        return jsonify(msg="An unexpected error occurred.", error=str(e)), 500
 
 @app.route('/official_uploads/patches/<path:filename>')
 @jwt_required(optional=True)
@@ -7126,18 +7152,38 @@ def serve_official_patch_file(filename):
     if patch_details and patch_details['original_filename_ref']:
         download_as_name = patch_details['original_filename_ref']
 
-    file_ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
-    mimetype_to_use = None
-    if file_ext in INLINE_PRONE_EXTENSIONS:
-        mimetype_to_use = 'application/octet-stream'
+    try:
+        _log_download_activity(filename, 'patch', db)
+    except Exception as e:
+        app.logger.error(f"Error during download logging for patch '{filename}': {e}")
 
-    return send_from_directory(
-        app.config['PATCH_UPLOAD_FOLDER'], 
-        filename, 
-        as_attachment=True,
-        download_name=download_as_name,
-        mimetype=mimetype_to_use
-    )
+    patch_details = db.execute("SELECT original_filename_ref FROM patches WHERE id = ?", (file_id,)).fetchone()
+    download_as_name = filename
+    if patch_details and patch_details['original_filename_ref']:
+        download_as_name = patch_details['original_filename_ref']
+
+    try:
+        file_ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+        mimetype_to_use = None
+        if file_ext in INLINE_PRONE_EXTENSIONS:
+            mimetype_to_use = 'application/octet-stream'
+
+        return send_from_directory(
+            app.config['PATCH_UPLOAD_FOLDER'], 
+            filename, 
+            as_attachment=True,
+            download_name=download_as_name,
+            mimetype=mimetype_to_use
+        )
+    except FileNotFoundError:
+        app.logger.error(f"Official patch file not found (FileNotFoundError): {filename} for file_id {file_id}", exc_info=True)
+        return jsonify(msg="File not found."), 404
+    except (IOError, OSError) as e_io:
+        app.logger.error(f"IO/OS error serving official patch file {filename} for file_id {file_id}: {e_io}", exc_info=True)
+        return jsonify(msg="Error serving file.", error=str(e_io)), 500
+    except Exception as e:
+        app.logger.error(f"Unexpected error serving official patch file {filename} for file_id {file_id}: {e}", exc_info=True)
+        return jsonify(msg="An unexpected error occurred.", error=str(e)), 500
 
 @app.route('/official_uploads/links/<path:filename>') 
 @jwt_required(optional=True)
@@ -7184,18 +7230,38 @@ def serve_official_link_file(filename): # Only for uploaded files via "Links"
     if link_details and link_details['original_filename_ref']:
         download_as_name = link_details['original_filename_ref']
 
-    file_ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
-    mimetype_to_use = None
-    if file_ext in INLINE_PRONE_EXTENSIONS:
-        mimetype_to_use = 'application/octet-stream'
-        
-    return send_from_directory(
-        app.config['LINK_UPLOAD_FOLDER'], 
-        filename, 
-        as_attachment=True,
-        download_name=download_as_name,
-        mimetype=mimetype_to_use
-    )
+    try:
+        _log_download_activity(filename, 'link_file', db)
+    except Exception as e:
+        app.logger.error(f"Error during download logging for link file '{filename}': {e}")
+
+    link_details = db.execute("SELECT original_filename_ref FROM links WHERE id = ?", (file_id,)).fetchone()
+    download_as_name = filename
+    if link_details and link_details['original_filename_ref']:
+        download_as_name = link_details['original_filename_ref']
+
+    try:
+        file_ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+        mimetype_to_use = None
+        if file_ext in INLINE_PRONE_EXTENSIONS:
+            mimetype_to_use = 'application/octet-stream'
+            
+        return send_from_directory(
+            app.config['LINK_UPLOAD_FOLDER'], 
+            filename, 
+            as_attachment=True,
+            download_name=download_as_name,
+            mimetype=mimetype_to_use
+        )
+    except FileNotFoundError:
+        app.logger.error(f"Official link file not found (FileNotFoundError): {filename} for file_id {file_id}", exc_info=True)
+        return jsonify(msg="File not found."), 404
+    except (IOError, OSError) as e_io:
+        app.logger.error(f"IO/OS error serving official link file {filename} for file_id {file_id}: {e_io}", exc_info=True)
+        return jsonify(msg="Error serving file.", error=str(e_io)), 500
+    except Exception as e:
+        app.logger.error(f"Unexpected error serving official link file {filename} for file_id {file_id}: {e}", exc_info=True)
+        return jsonify(msg="An unexpected error occurred.", error=str(e)), 500
 
 @app.route('/misc_uploads/<path:filename>')
 @jwt_required(optional=True)
@@ -7240,18 +7306,38 @@ def serve_misc_file(filename):
     if misc_details and misc_details['original_filename']:
         download_as_name = misc_details['original_filename']
 
-    file_ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
-    mimetype_to_use = None
-    if file_ext in INLINE_PRONE_EXTENSIONS:
-        mimetype_to_use = 'application/octet-stream'
+    try:
+        _log_download_activity(filename, 'misc_file', db)
+    except Exception as e:
+        app.logger.error(f"Error during download logging for misc file '{filename}': {e}")
 
-    return send_from_directory(
-        app.config['MISC_UPLOAD_FOLDER'], 
-        filename, 
-        as_attachment=True,
-        download_name=download_as_name,
-        mimetype=mimetype_to_use
-    )
+    misc_details = db.execute("SELECT original_filename FROM misc_files WHERE id = ?", (file_id,)).fetchone()
+    download_as_name = filename
+    if misc_details and misc_details['original_filename']:
+        download_as_name = misc_details['original_filename']
+
+    try:
+        file_ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+        mimetype_to_use = None
+        if file_ext in INLINE_PRONE_EXTENSIONS:
+            mimetype_to_use = 'application/octet-stream'
+
+        return send_from_directory(
+            app.config['MISC_UPLOAD_FOLDER'], 
+            filename, 
+            as_attachment=True,
+            download_name=download_as_name,
+            mimetype=mimetype_to_use
+        )
+    except FileNotFoundError:
+        app.logger.error(f"Misc file not found (FileNotFoundError): {filename} for file_id {file_id}", exc_info=True)
+        return jsonify(msg="File not found."), 404
+    except (IOError, OSError) as e_io:
+        app.logger.error(f"IO/OS error serving misc file {filename} for file_id {file_id}: {e_io}", exc_info=True)
+        return jsonify(msg="Error serving file.", error=str(e_io)), 500
+    except Exception as e:
+        app.logger.error(f"Unexpected error serving misc file {filename} for file_id {file_id}: {e}", exc_info=True)
+        return jsonify(msg="An unexpected error occurred.", error=str(e)), 500
 
 @app.route('/api/search', methods=['GET'])
 @jwt_required(optional=True)
@@ -10597,6 +10683,11 @@ def get_conversation_messages(conversation_id):
 
     return jsonify(messages_processed), 200
 
+# Added Response for streaming
+from flask import Flask, request, g, jsonify, send_from_directory, has_request_context, Response
+
+# ... (other imports) ...
+
 @chat_bp.route('/conversations/<int:conversation_id>/messages', methods=['POST'])
 @active_user_required
 def post_new_message(conversation_id):
@@ -10676,25 +10767,15 @@ def post_new_message(conversation_id):
         
         message_data_for_socket = message_dict_for_api_response.copy()
 
-        # --- REVERTED MODIFICATION: The following block that converted file_url to absolute is removed/commented ---
-        # if message_data_for_socket.get('file_url') and message_data_for_socket['file_url'].startswith('/'):
-        #     original_file_url = message_data_for_socket['file_url']
-        #     # request.host_url provides the base URL like 'http://localhost:7000/'
-        #     # urljoin handles cases like ensuring no double slashes.
-        #     message_data_for_socket['file_url'] = urljoin(request.host_url, original_file_url)
-        #     app.logger.info(f"Chat file_url modified for SocketIO. Original: {original_file_url}, New: {message_data_for_socket['file_url']}")
-        # --- END REVERTED MODIFICATION ---
-
         if sender_user_details and sender_user_details['profile_picture_filename']:
             message_data_for_socket['sender_profile_picture_url'] = f"/profile_pictures/{sender_user_details['profile_picture_filename']}"
         else:
             message_data_for_socket['sender_profile_picture_url'] = None
         
-        app.logger.info(f"Emitting file_url in SocketIO message (should be relative): {message_data_for_socket.get('file_url')}") # Added logging
+        app.logger.info(f"Emitting file_url in SocketIO message (should be relative): {message_data_for_socket.get('file_url')}") 
         socketio.emit('new_message', message_data_for_socket, room=str(conversation_id)) 
         app.logger.info(f"Emitted 'new_message' to room 'conversation_{conversation_id}'")
 
-        # Emit unread chat count for the recipient
         emit_unread_chat_count(recipient_id)
 
         return jsonify(message_dict_for_api_response), 201
@@ -10703,7 +10784,7 @@ def post_new_message(conversation_id):
         return jsonify(msg="Failed to send message."), 500
 
 @chat_bp.route('/user_status/<int:target_user_id>', methods=['GET'])
-@active_user_required # Ensure only authenticated users can request status
+@active_user_required 
 def get_user_chat_status(target_user_id):
     db = get_db()
     user_status = db.execute(
@@ -10714,7 +10795,6 @@ def get_user_chat_status(target_user_id):
         return jsonify(msg="User not found."), 404
 
     status_dict = dict(user_status)
-    # Convert last_seen to ISO format
     if status_dict.get('last_seen'):
         try:
             naive_dt = datetime.strptime(status_dict['last_seen'], '%Y-%m-%d %H:%M:%S')
@@ -10725,9 +10805,8 @@ def get_user_chat_status(target_user_id):
     
     return jsonify(status_dict), 200
 
-# --- Chat File Upload Route ---
 @chat_bp.route('/upload_file', methods=['POST'])
-@active_user_required # Ensures user is logged in and active
+@active_user_required 
 def upload_chat_file():
     current_user_id = int(get_jwt_identity())
     db = get_db()
@@ -10739,8 +10818,6 @@ def upload_chat_file():
     if file.filename == '':
         return jsonify(msg="No file selected for uploading."), 400
 
-    # This is the ID passed from the frontend. It could be an actual conversation_id
-    # or (for a new chat) the other_user_id.
     id_from_form_str = request.form.get('conversation_id')
     if not id_from_form_str:
         return jsonify(msg="conversation_id (or recipient_id for new chats) is required in form data."), 400
@@ -10753,28 +10830,24 @@ def upload_chat_file():
     path_segment_id_for_folder = None
     is_provisional_upload = False
 
-    # Try to fetch as an existing conversation
     conversation = get_conversation_by_id(db, id_from_form)
 
     if conversation:
-        # It's an existing conversation
         if current_user_id not in (conversation['user1_id'], conversation['user2_id']):
             return jsonify(msg="You are not authorized to upload files to this conversation."), 403
-        path_segment_id_for_folder = id_from_form # Use the actual conversation_id for the path
+        path_segment_id_for_folder = id_from_form 
         app.logger.info(f"Chat file upload: Existing conversation {path_segment_id_for_folder}. User {current_user_id} authorized.")
     else:
-        # Conversation not found, assume id_from_form is a recipient_id for a new chat
         is_provisional_upload = True
         recipient_id_for_provisional = id_from_form
 
-        # Validate the recipient_id
         recipient_user = find_user_by_id(recipient_id_for_provisional)
         if not recipient_user or not recipient_user['is_active']:
             return jsonify(msg="Recipient user for provisional chat not found or is inactive."), 404
         if current_user_id == recipient_id_for_provisional:
              return jsonify(msg="Cannot use self as recipient_id for provisional chat file upload."), 400
 
-        path_segment_id_for_folder = recipient_id_for_provisional # Use recipient_id for the path
+        path_segment_id_for_folder = recipient_id_for_provisional 
         app.logger.info(f"Chat file upload: Provisional chat. User {current_user_id} uploading for recipient {path_segment_id_for_folder}.")
 
 
@@ -10783,7 +10856,6 @@ def upload_chat_file():
         file_extension = original_filename.rsplit('.', 1)[1].lower() if '.' in original_filename else ''
         unique_filename = f"{uuid.uuid4().hex[:12]}_{original_filename}"
 
-        # Path uses path_segment_id_for_folder (either actual conv_id or recipient_id)
         conversation_specific_upload_path = os.path.join(app.config['CHAT_UPLOAD_FOLDER'], str(path_segment_id_for_folder))
         if not os.path.exists(conversation_specific_upload_path):
             os.makedirs(conversation_specific_upload_path, exist_ok=True)
@@ -10794,7 +10866,7 @@ def upload_chat_file():
             file.save(file_save_path)
 
             mime_type = file.mimetype
-            file_type_category = 'binary' # Default
+            file_type_category = 'binary' 
             if mime_type:
                 if mime_type.startswith('image/'): file_type_category = 'image'
                 elif mime_type.startswith('video/'): file_type_category = 'video'
@@ -10805,13 +10877,12 @@ def upload_chat_file():
                 elif mime_type.startswith('application/') and ('doc' in mime_type or 'word' in mime_type or 'sheet' in mime_type or 'excel' in mime_type or 'powerpoint' in mime_type):
                     file_type_category = 'doc'
 
-            # The URL returned will use the path_segment_id_for_folder
             file_url_to_return = f"/files/chat_uploads/{path_segment_id_for_folder}/{unique_filename}"
 
             log_audit_action(
-                action_type='CHAT_FILE_UPLOADED_TO_PATH', # More specific audit log
-                target_table='chat_files_virtual', # Virtual table name for logging
-                target_id=path_segment_id_for_folder, # Log against the folder ID used
+                action_type='CHAT_FILE_UPLOADED_TO_PATH', 
+                target_table='chat_files_virtual', 
+                target_id=path_segment_id_for_folder, 
                 details={
                     'filename': original_filename,
                     'stored_as': unique_filename,
@@ -10824,8 +10895,8 @@ def upload_chat_file():
 
             return jsonify({
                 "message": "File uploaded successfully",
-                "file_url": file_url_to_return, # This URL is now based on recipient_id if provisional
-                "file_name": original_filename, # Original name for display
+                "file_url": file_url_to_return, 
+                "file_name": original_filename, 
                 "file_type": file_type_category,
                 "file_extension": file_extension
             }), 201
@@ -10841,7 +10912,7 @@ def upload_chat_file():
 
 # --- Chat File Serving Route ---
 @app.route('/files/chat_uploads/<int:conversation_id>/<path:filename>')
-@jwt_required(optional=True) # Changed from @active_user_required
+@jwt_required(optional=True)
 def serve_chat_file(conversation_id, filename):
     current_user_id_str = get_jwt_identity()
     db = get_db()
@@ -10849,7 +10920,7 @@ def serve_chat_file(conversation_id, filename):
     if not current_user_id_str:
         log_audit_action(
             action_type='CHAT_FILE_ACCESS_DENIED_NO_AUTH',
-            target_table='chat_files_virtual', 
+            target_table='chat_files_virtual',
             target_id=conversation_id,
             details={'filename': filename, 'conversation_id': conversation_id, 'reason': 'No JWT token provided.'}
         )
@@ -10866,21 +10937,19 @@ def serve_chat_file(conversation_id, filename):
         )
         return jsonify(msg="Invalid user identity in token."), 401
 
-    user = find_user_by_id(current_user_id) # find_user_by_id is already defined
+    user = find_user_by_id(current_user_id)
     if not user or not user['is_active']:
         log_audit_action(
             action_type='CHAT_FILE_ACCESS_DENIED_USER_INACTIVE_OR_NOT_FOUND',
-            user_id=current_user_id, # Log the ID from token even if user not found
+            user_id=current_user_id,
             target_table='chat_files_virtual',
             target_id=conversation_id,
             details={'filename': filename, 'conversation_id': conversation_id, 'reason': 'User not found or inactive.'}
         )
         return jsonify(msg="User not found or account is inactive."), 401
 
-    # Verify user is part of the conversation
-    conversation = get_conversation_by_id(db, conversation_id) # get_conversation_by_id is already defined
+    conversation = get_conversation_by_id(db, conversation_id)
     if not conversation:
-        # This case is unlikely if the conversation_id in the URL is valid, but good to check.
         log_audit_action(
             action_type='CHAT_FILE_ACCESS_DENIED_CONVO_NOT_FOUND',
             user_id=current_user_id,
@@ -10899,26 +10968,134 @@ def serve_chat_file(conversation_id, filename):
             details={'filename': filename, 'conversation_id': conversation_id, 'reason': 'User not part of conversation.'}
         )
         return jsonify(msg="You are not authorized to access files from this conversation."), 403
-
-    # Log successful access
-    log_audit_action(
-        action_type='CHAT_FILE_ACCESS_SUCCESS',
-        user_id=current_user_id,
-        target_table='chat_files_virtual', # Using virtual table name for consistency
-        target_id=conversation_id, 
-        details={'filename': filename, 'conversation_id': conversation_id}
-    )
     
-    directory_path = os.path.join(app.config['CHAT_UPLOAD_FOLDER'], str(conversation_id))
+    full_file_path = os.path.join(app.config['CHAT_UPLOAD_FOLDER'], str(conversation_id), filename)
 
-    # Security: Basic check to prevent path traversal, though send_from_directory handles it well.
-    if ".." in filename or filename.startswith("/"):
+    if ".." in filename or filename.startswith("/"): # Basic path traversal check
+        log_audit_action(
+            action_type='CHAT_FILE_ACCESS_DENIED_INVALID_FILENAME',
+            user_id=current_user_id, target_table='chat_files_virtual', target_id=conversation_id,
+            details={'filename': filename, 'reason': 'Invalid filename pattern.'}
+        )
         return jsonify(msg="Invalid filename."), 400
 
-    if not os.path.exists(os.path.join(directory_path, filename)):
-        return jsonify(msg="File not found on server."), 404
+    try:
+        full_file_path = os.path.join(app.config['CHAT_UPLOAD_FOLDER'], str(conversation_id), filename)
+
+        if not os.path.exists(full_file_path) or not os.path.isfile(full_file_path): # Ensure it's a file
+            log_audit_action(
+                action_type='CHAT_FILE_ACCESS_ERROR_NOT_FOUND_OR_NOT_FILE',
+                user_id=current_user_id, target_table='chat_files_virtual', target_id=conversation_id,
+                details={'filename': filename, 'calculated_path': full_file_path, 'reason': 'File not found or is not a regular file.'}
+            )
+            return jsonify(msg="File not found on server."), 404
+
+        db_message_file = db.execute(
+            "SELECT file_name FROM messages WHERE conversation_id = ? AND file_url LIKE ?",
+            (conversation_id, f"%/{filename}")
+        ).fetchone()
         
-    return send_from_directory(directory_path, filename, as_attachment=False)
+        download_display_name = filename
+        if db_message_file and db_message_file['file_name']:
+            download_display_name = db_message_file['file_name']
+
+        file_size = os.path.getsize(full_file_path)
+        
+        range_header = request.headers.get('Range', None)
+        
+        start_byte = 0
+        end_byte = file_size - 1
+        status_code = 200 
+        
+        response_headers = {
+            'Content-Disposition': f'attachment; filename="{download_display_name}"',
+            'Content-Type': 'application/octet-stream',
+            'Accept-Ranges': 'bytes' 
+        }
+
+        if range_header:
+            try:
+                range_unit, range_value = range_header.split('=')
+                if range_unit.strip().lower() != 'bytes':
+                    raise ValueError("Invalid range unit")
+
+                parts = range_value.split('-')
+                req_start = parts[0].strip()
+                req_end = parts[1].strip()
+
+                if req_start == "" and req_end: 
+                    suffix_length = int(req_end)
+                    if suffix_length <= 0: raise ValueError("Suffix length must be positive")
+                    start_byte = file_size - suffix_length
+                    end_byte = file_size - 1
+                elif req_start and req_end == "": 
+                    start_byte = int(req_start)
+                elif req_start and req_end: 
+                    start_byte = int(req_start)
+                    end_byte = int(req_end)
+                else: 
+                    raise ValueError("Malformed range value")
+
+                if start_byte < 0: start_byte = 0
+                if end_byte >= file_size: end_byte = file_size - 1
+                if start_byte > end_byte or start_byte >= file_size:
+                    response_headers['Content-Range'] = f'bytes */{file_size}'
+                    return jsonify(msg="Range Not Satisfiable"), 416, response_headers
+                
+                status_code = 206
+                response_headers['Content-Range'] = f'bytes {start_byte}-{end_byte}/{file_size}'
+                response_headers['Content-Length'] = str(end_byte - start_byte + 1)
+                
+            except ValueError as e_range:
+                app.logger.warning(f"Malformed Range header '{range_header}': {e_range}. Serving full file.")
+                start_byte = 0
+                end_byte = file_size - 1
+                status_code = 200
+                response_headers.pop('Content-Range', None)
+                response_headers['Content-Length'] = str(file_size)
+
+        if status_code == 200:
+            response_headers['Content-Length'] = str(file_size)
+        
+        def generate_file_chunks(file_path_gen, start_gen, length_to_read_gen, chunk_size_gen=8192):
+            bytes_sent_gen = 0
+            with open(file_path_gen, 'rb') as f_gen:
+                f_gen.seek(start_gen)
+                while True:
+                    bytes_to_send_this_chunk_gen = min(chunk_size_gen, length_to_read_gen - bytes_sent_gen)
+                    if bytes_to_send_this_chunk_gen <= 0:
+                        break
+                    chunk_gen = f_gen.read(bytes_to_send_this_chunk_gen)
+                    if not chunk_gen:
+                        break
+                    yield chunk_gen
+                    bytes_sent_gen += len(chunk_gen)
+
+        bytes_to_read = end_byte - start_byte + 1
+        response_stream = generate_file_chunks(full_file_path, start_byte, bytes_to_read)
+        
+        response = Response(response_stream, status=status_code, headers=response_headers)
+        
+        log_audit_action(
+            action_type='CHAT_FILE_DOWNLOAD_SUCCESS',
+            user_id=current_user_id, target_table='chat_files_virtual', target_id=conversation_id,
+            details={
+                'filename': filename, 'downloaded_as': download_display_name, 'conversation_id': conversation_id,
+                'status_code': status_code, 'range_requested': range_header if range_header else "None",
+                'content_range_served': response_headers.get('Content-Range', "Full file")
+            }
+        )
+        return response
+
+    except FileNotFoundError:
+        app.logger.error(f"Chat file not found (FileNotFoundError) at path: {full_file_path if 'full_file_path' in locals() else 'unknown'} for conversation {conversation_id}, filename {filename}", exc_info=True)
+        return jsonify(msg="File not found."), 404
+    except (IOError, OSError) as e_io:
+        app.logger.error(f"IO/OS error serving chat file {filename} for conversation {conversation_id}: {e_io}", exc_info=True)
+        return jsonify(msg="Error serving file.", error=str(e_io)), 500
+    except Exception as e:
+        app.logger.error(f"Unexpected error serving chat file {filename} for conversation {conversation_id}: {e}", exc_info=True)
+        return jsonify(msg="An unexpected error occurred.", error=str(e)), 500
 
 @chat_bp.route('/conversations/start_and_send', methods=['POST'])
 @active_user_required
@@ -11602,12 +11779,14 @@ if __name__ == '__main__':
             silent_logger = SilentLogger()
 
             # 2. Pass the instance to the server's 'log' parameter
-            eventlet.wsgi.server(eventlet.listen(('0.0.0.0', flask_port)), app, log=silent_logger)
+            eventlet.wsgi.server(eventlet.listen(('0.0.0.0', flask_port)), app, log=silent_logger, socket_timeout=600)
 
         else:
             # FOR DEVELOPMENT: Use socketio.run() which has its own logging controls.
+            # socketio.run() does not directly expose eventlet's socket_timeout.
+            # The ping_timeout and ping_interval for SocketIO itself are more relevant here.
             app.logger.info(f"Starting server in development mode on port {flask_port}")
-            socketio.run(app, host='0.0.0.0', port=flask_port, debug=True)
+            socketio.run(app, host='0.0.0.0', port=flask_port, debug=False)
 
     except (KeyboardInterrupt, SystemExit):
         app.logger.info("Application shutting down...")

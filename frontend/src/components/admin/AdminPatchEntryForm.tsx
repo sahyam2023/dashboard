@@ -21,7 +21,7 @@ import {
   uploadFileInChunks // New chunked upload service
 } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
-import { UploadCloud, Link as LinkIconLucide, FileText as FileIconLucide, X } from 'lucide-react';
+import { UploadCloud, Link as LinkIconLucide, FileText as FileIconLucide, X, MinusCircle } from 'lucide-react';
 
 const getTodayDateString = () => {
   const today = new Date();
@@ -484,8 +484,13 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
           {isEditMode ? 'Edit Patch' : 'Add New Patch'}
         </h3>
         {isEditMode && onCancelEdit && (
-          <button type="button" onClick={onCancelEdit} className="text-sm text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200">
-            Cancel
+          <button type="button" onClick={onCancelEdit} className="text-sm text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200" disabled={isLoading}>
+            {/* This button's main styling is handled further down in the form structure, this is just the top cancel text.
+                The task asks to change the main button at the bottom of the form.
+                The text "Cancel" here is for a less prominent cancel operation at the top of the form.
+                The instructions likely refer to the main form action button.
+            */}
+            Cancel Edit
           </button>
         )}
       </div>
@@ -721,9 +726,9 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
                 type="button" 
                 onClick={onCancelEdit} 
                 disabled={isLoading} 
-                className="flex-1 inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 dark:border-gray-500 dark:text-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600"
+                className="flex-1 inline-flex items-center justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50"
             >
-            Cancel
+            <MinusCircle size={18} className="mr-2" />Cancel Edit
             </button>
         )}
       </div>

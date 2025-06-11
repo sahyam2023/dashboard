@@ -20,7 +20,7 @@ import {
   uploadFileInChunks // New chunked upload service
 } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
-import { UploadCloud, Link as LinkIconLucide, FileText as FileIconLucide, X } from 'lucide-react';
+import { UploadCloud, Link as LinkIconLucide, FileText as FileIconLucide, X, MinusCircle } from 'lucide-react';
 
 interface AdminLinkEntryFormProps {
   linkToEdit?: LinkType | null;
@@ -471,7 +471,7 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
       <div className="flex justify-between items-center"> 
         <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-100"> {isEditMode ? 'Edit Link' : 'Add New Link'} </h3> 
         {isEditMode && onCancelEdit && ( 
-            <button type="button" onClick={onCancelEdit} className="text-sm text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"> Cancel </button> 
+            <button type="button" onClick={onCancelEdit} className="text-sm text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200" disabled={isLoading}> Cancel Edit </button>
         )} 
       </div> 
       {/* Old global error/success message divs removed */}
@@ -700,9 +700,9 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
                 type="button" 
                 onClick={onCancelEdit} 
                 disabled={isLoading} 
-                className="flex-1 inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 dark:border-gray-500 dark:text-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600"
+                className="flex-1 inline-flex items-center justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50"
             >
-                Cancel
+                <MinusCircle size={18} className="mr-2" />Cancel Edit
             </button>
         )}
       </div>

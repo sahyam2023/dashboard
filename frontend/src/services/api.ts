@@ -452,6 +452,30 @@ export async function fetchChatImageBlob(fileUrl: string): Promise<Blob> {
   }
 }
 
+export async function fetchChatMediaBlob(fileUrl: string): Promise<Blob> {
+  try {
+    // Ensure API_BASE_URL is prepended if fileUrl is relative
+    const fullUrl = `${API_BASE_URL}${fileUrl}`;
+    
+    const response = await fetch(fullUrl, {
+      method: 'GET',
+      headers: { ...getAuthHeader() }, // Crucial for auth
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to fetch media: ${response.status} ${response.statusText}. Body: ${errorText.substring(0,100)}`);
+    }
+    return response.blob();
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true); 
+      showErrorToast(OFFLINE_MESSAGE); 
+    }
+    console.error('Error fetching chat media blob:', fileUrl, error);
+    throw error; // Re-throw to be caught by the calling component
+  }
+}
+
 // --- Chat API Functions ---
 // Assuming types like User, Conversation, Message, PaginatedUsersResponse are imported from '../components/chat/types'
 // If not, they should be imported or defined here.

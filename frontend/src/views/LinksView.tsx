@@ -336,7 +336,7 @@ const LinksView: React.FC = () => {
         return <div className="text-center">{content}</div>;
       }
     },
-    { key: 'description', header: 'Description', render: l => <span className="text-sm text-gray-600 block max-w-xs truncate" title={l.description || ''}>{l.description || '-'}</span> },
+    { key: 'description', header: 'Description', render: l => <span className="text-sm block max-w-xs truncate" title={l.description || ''}>{l.description || '-'}</span> },
     {
       key: 'url',
       header: 'Link',

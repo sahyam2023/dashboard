@@ -99,7 +99,7 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { isAuthenticated, user } = useAuth();
-const role = user?.role; // Access role safely, as user can be null
+  const role = user?.role; // Access role safely, as user can be null
   const watchedInputMode = watch('inputMode');
   const watchedSelectedFile = watch('selectedFile');
 
@@ -188,7 +188,7 @@ const role = user?.role; // Access role safely, as user can be null
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files[0]) {
       setValue('selectedFile', event.target.files[0], { shouldValidate: true, shouldDirty: true });
-      setExistingFileName(null); 
+      setExistingFileName(null);
     } else {
       setValue('selectedFile', null, { shouldValidate: true, shouldDirty: true });
     }
@@ -318,7 +318,7 @@ const role = user?.role; // Access role safely, as user can be null
       // setTimeout(() => setUploadProgress(0), 2000);
     }
   };
-  
+
   const onFormError = (formErrors: FieldErrors<DocumentFormData>) => {
     console.error("Form validation errors (onFormError) in AdminDocumentEntryForm:", formErrors);
     console.log("AdminDocumentEntryForm onFormError, active element:", document.activeElement);
@@ -337,12 +337,13 @@ const role = user?.role; // Access role safely, as user can be null
         </h3>
         {isEditMode && onCancelEdit && (
           <button
-              type="button"
-              onClick={onCancelEdit}
-              disabled={isLoading}
-              className="text-sm text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
+            type="button"
+            onClick={onCancelEdit}
+            disabled={isLoading}
+            // This className string is the correct one for the small, styled button.
+            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
           >
-            {/* This button is modified further down in the form structure */}
+            <MinusCircle size={18} className="mr-2" />
             Cancel Edit
           </button>
         )}
@@ -352,9 +353,9 @@ const role = user?.role; // Access role safely, as user can be null
       <div>
         <label htmlFor="selectedSoftwareId" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Software*</label>
         {isFetchingSoftware ? <p className="text-sm text-gray-500 dark:text-gray-400">Loading software...</p> : (
-          <select 
-            id="selectedSoftwareId" 
-            {...register("selectedSoftwareId")} 
+          <select
+            id="selectedSoftwareId"
+            {...register("selectedSoftwareId")}
             disabled={isLoading || isFetchingSoftware}
             className={`mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md ${errors.selectedSoftwareId ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600`}
           >
@@ -362,18 +363,18 @@ const role = user?.role; // Access role safely, as user can be null
             {softwareList.map(sw => <option key={sw.id} value={sw.id.toString()}>{sw.name}</option>)}
           </select>
         )}
-        
+
         {errors.selectedSoftwareId && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{errors.selectedSoftwareId.message}</p>}
       </div>
 
       <div>
         <label htmlFor="docName" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Document Name*</label>
-        <input 
-            type="text" 
-            id="docName" 
-            {...register("docName")} 
-            disabled={isLoading}
-            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.docName ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400`}
+        <input
+          type="text"
+          id="docName"
+          {...register("docName")}
+          disabled={isLoading}
+          className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.docName ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400`}
         />
         {errors.docName && <p className="mt-1 text-sm text-red-600">{errors.docName.message}</p>}
       </div>
@@ -382,12 +383,12 @@ const role = user?.role; // Access role safely, as user can be null
         <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Document Source:</span>
         <div className="flex items-center space-x-4">
           <label className="flex items-center space-x-2 cursor-pointer">
-            <input type="radio" {...register("inputMode")} value="url" className="form-radio h-4 w-4 text-blue-600" disabled={isLoading}/>
-            <span className="flex items-center dark:text-gray-300"><LinkIconLucide size={16} className="mr-1 text-gray-600 dark:text-gray-400"/>Provide External Link</span>
+            <input type="radio" {...register("inputMode")} value="url" className="form-radio h-4 w-4 text-blue-600" disabled={isLoading} />
+            <span className="flex items-center dark:text-gray-300"><LinkIconLucide size={16} className="mr-1 text-gray-600 dark:text-gray-400" />Provide External Link</span>
           </label>
           <label className="flex items-center space-x-2 cursor-pointer">
-            <input type="radio" {...register("inputMode")} value="upload" className="form-radio h-4 w-4 text-blue-600" disabled={isLoading}/>
-            <span className="flex items-center dark:text-gray-300"><UploadCloud size={16} className="mr-1 text-gray-600 dark:text-gray-400"/>Upload File</span>
+            <input type="radio" {...register("inputMode")} value="upload" className="form-radio h-4 w-4 text-blue-600" disabled={isLoading} />
+            <span className="flex items-center dark:text-gray-300"><UploadCloud size={16} className="mr-1 text-gray-600 dark:text-gray-400" />Upload File</span>
           </label>
         </div>
         {errors.inputMode && <p className="mt-1 text-sm text-red-600">{errors.inputMode.message}</p>}
@@ -396,11 +397,11 @@ const role = user?.role; // Access role safely, as user can be null
       {watchedInputMode === 'url' && (
         <div>
           <label htmlFor="externalUrl" className="block text-sm font-medium text-gray-700 dark:text-gray-300">External Download URL*</label>
-          <input 
-            type="url" 
-            id="externalUrl" 
+          <input
+            type="url"
+            id="externalUrl"
             {...register("externalUrl")}
-            placeholder="https://example.com/document.pdf" 
+            placeholder="https://example.com/document.pdf"
             disabled={isLoading}
             className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.externalUrl ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400`}
           />
@@ -415,40 +416,40 @@ const role = user?.role; // Access role safely, as user can be null
           </label>
           <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md hover:border-blue-500 dark:border-gray-600 dark:hover:border-blue-400 transition-colors">
             <div className="space-y-1 text-center">
-                <FileIconLucide className="mx-auto h-12 w-12 text-gray-400 dark:text-gray-500" />
-                <div className="flex text-sm text-gray-600 dark:text-gray-400">
+              <FileIconLucide className="mx-auto h-12 w-12 text-gray-400 dark:text-gray-500" />
+              <div className="flex text-sm text-gray-600 dark:text-gray-400">
                 <label htmlFor="doc-file-upload-input" className="relative cursor-pointer bg-white dark:bg-gray-800 rounded-md font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-blue-500">
-                    <span>{watchedSelectedFile ? 'Change file' : 'Upload a file'}</span>
-                    <input 
-                        id="doc-file-upload-input" 
-                        name="doc-file-input" // Name for the input element
-                        type="file" 
-                        className="sr-only"
-                        onChange={handleFileChange} 
-                        ref={fileInputRef} 
-                        disabled={isLoading} 
-                    />
+                  <span>{watchedSelectedFile ? 'Change file' : 'Upload a file'}</span>
+                  <input
+                    id="doc-file-upload-input"
+                    name="doc-file-input" // Name for the input element
+                    type="file"
+                    className="sr-only"
+                    onChange={handleFileChange}
+                    ref={fileInputRef}
+                    disabled={isLoading}
+                  />
                 </label>
                 <p className="pl-1">or drag and drop</p>
-                </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400">PDF, DOCX, PNG, JPG, ZIP etc.</p>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">PDF, DOCX, PNG, JPG, ZIP etc.</p>
             </div>
           </div>
           {(watchedSelectedFile || existingFileName) && (
             <div className="mt-3 flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md">
-                <div className='flex items-center space-x-2 overflow-hidden'>
-                    <FileIconLucide size={18} className="text-gray-500 dark:text-gray-400 flex-shrink-0" />
-                    <span className="text-sm text-gray-700 dark:text-gray-300 truncate">
-                      {watchedSelectedFile ? (watchedSelectedFile as File).name : existingFileName}
-                    </span>
-                    {isEditMode && existingFileName && !watchedSelectedFile && <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">(current)</span>}
-                </div>
-                {watchedSelectedFile && (
-                  <button type="button" onClick={clearFileSelection} disabled={isLoading}
-                          className="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-200 dark:text-gray-500 dark:hover:text-gray-300 dark:hover:bg-gray-600">
-                      <X size={16} />
-                  </button>
-                )}
+              <div className='flex items-center space-x-2 overflow-hidden'>
+                <FileIconLucide size={18} className="text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                <span className="text-sm text-gray-700 dark:text-gray-300 truncate">
+                  {watchedSelectedFile ? (watchedSelectedFile as File).name : existingFileName}
+                </span>
+                {isEditMode && existingFileName && !watchedSelectedFile && <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">(current)</span>}
+              </div>
+              {watchedSelectedFile && (
+                <button type="button" onClick={clearFileSelection} disabled={isLoading}
+                  className="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-200 dark:text-gray-500 dark:hover:text-gray-300 dark:hover:bg-gray-600">
+                  <X size={16} />
+                </button>
+              )}
             </div>
           )}
           {errors.selectedFile && <p className="mt-1 text-sm text-red-600">{errors.selectedFile.message}</p>}
@@ -457,11 +458,11 @@ const role = user?.role; // Access role safely, as user can be null
 
       <div>
         <label htmlFor="docType" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Document Type</label>
-        <select 
-            id="docType" 
-            {...register("docType")} 
-            disabled={isLoading}
-            className={`mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md ${errors.docType ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600`}
+        <select
+          id="docType"
+          {...register("docType")}
+          disabled={isLoading}
+          className={`mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md ${errors.docType ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600`}
         >
           <option value="">Select Type (Optional)</option>
           {documentTypes.map(type => <option key={type} value={type}>{type}</option>)}
@@ -471,34 +472,24 @@ const role = user?.role; // Access role safely, as user can be null
 
       <div>
         <label htmlFor="description" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Description</label>
-        <textarea 
-            id="description" 
-            rows={3} 
-            {...register("description")}
-            disabled={isLoading} 
-            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.description ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400`}
+        <textarea
+          id="description"
+          rows={3}
+          {...register("description")}
+          disabled={isLoading}
+          className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.description ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400`}
         />
         {errors.description && <p className="mt-1 text-sm text-red-600">{errors.description.message}</p>}
       </div>
 
       <div className="flex space-x-3">
-        <button 
-            type="submit" 
-            disabled={isLoading || isFetchingSoftware}
-            className="flex-1 inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+        <button
+          type="submit"
+          disabled={isLoading || isFetchingSoftware}
+          className="flex-1 inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
         >
           {isLoading ? (isEditMode ? 'Updating...' : 'Adding...') : (isEditMode ? 'Update Document' : 'Add Document')}
         </button>
-        {isEditMode && onCancelEdit && (
-            <button 
-                type="button" 
-                onClick={onCancelEdit} 
-                disabled={isLoading}
-                className="flex-1 inline-flex items-center justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50"
-            >
-                <MinusCircle size={18} className="mr-2" />Cancel Edit
-            </button>
-        )}
       </div>
 
       {/* Upload Progress Bar */}

@@ -438,7 +438,7 @@ useEffect(() => {
   const columns: ColumnDef<DocumentType>[] = [
     { key: 'doc_name', header: 'Name', sortable: true }, { key: 'doc_type', header: 'Type', sortable: true },
     { key: 'software_name', header: 'Software', sortable: true },
-    { key: 'description', header: 'Description', render: (d: DocumentType) => <span className="text-sm text-gray-600 block max-w-xs truncate" title={d.description||''}>{d.description||'-'}</span> },
+    { key: 'description', header: 'Description', render: (d: DocumentType) => <span className="text-sm block max-w-xs truncate" title={d.description||''}>{d.description||'-'}</span> },
     { 
       key: 'download_link', 
       header: 'Download', 

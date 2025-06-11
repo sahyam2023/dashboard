@@ -409,7 +409,7 @@ const PatchesView: React.FC = () => {
         return <div className="text-center">{content}</div>;
       }
     },
-    { key: 'description', header: 'Description', render: p => <span className="text-sm text-gray-600 block max-w-xs truncate" title={p.description || ''}>{p.description || '-'}</span> },
+    { key: 'description', header: 'Description', render: p => <span className="text-sm block max-w-xs truncate" title={p.description || ''}>{p.description || '-'}</span> },
     { key: 'release_date', header: 'Release Date', sortable: true, render: (item: PatchType) => formatDateDisplay(item.release_date) }, // Stays the same
     {
       key: 'download_link',

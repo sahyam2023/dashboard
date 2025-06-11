@@ -484,15 +484,17 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
           {isEditMode ? 'Edit Patch' : 'Add New Patch'}
         </h3>
         {isEditMode && onCancelEdit && (
-          <button type="button" onClick={onCancelEdit} className="text-sm text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200" disabled={isLoading}>
-            {/* This button's main styling is handled further down in the form structure, this is just the top cancel text.
-                The task asks to change the main button at the bottom of the form.
-                The text "Cancel" here is for a less prominent cancel operation at the top of the form.
-                The instructions likely refer to the main form action button.
-            */}
-            Cancel Edit
-          </button>
-        )}
+                  <button
+                    type="button"
+                    onClick={onCancelEdit}
+                    disabled={isLoading}
+                    // This className string is the correct one for the small, styled button.
+                    className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                  >
+                    <MinusCircle size={18} className="mr-2" />
+                    Cancel Edit
+                  </button>
+                )}
       </div>
       {/* Global error/success messages removed */}
 
@@ -721,16 +723,6 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
         >
             {isLoading ? (isEditMode ? 'Updating...' : 'Adding...') : (isEditMode ? 'Update Patch' : 'Add Patch')}
         </button>
-        {isEditMode && onCancelEdit && (
-            <button 
-                type="button" 
-                onClick={onCancelEdit} 
-                disabled={isLoading} 
-                className="flex-1 inline-flex items-center justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50"
-            >
-            <MinusCircle size={18} className="mr-2" />Cancel Edit
-            </button>
-        )}
       </div>
 
       {/* Upload Progress Bar */}

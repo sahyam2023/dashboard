@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useForm, Controller, SubmitHandler, FieldErrors } from 'react-hook-form';
 import * as yup from 'yup';
+import { yupIsValidUrl } from '../../utils/validationUtils';
 import { yupResolver } from '@hookform/resolvers/yup';
 import { showSuccessToast, showErrorToast, showWarningToast } from '../../utils/toastUtils'; // Standardized toast
 import {
@@ -70,8 +71,8 @@ const patchValidationSchema = yup.object().shape({
   inputMode: yup.string().oneOf(['url', 'upload']).required("Input mode must be selected."),
   externalUrl: yup.string().when('inputMode', {
     is: 'url',
-    then: schema => schema.required("External Download URL is required.").url("Please enter a valid URL."),
-    otherwise: schema => schema.optional().nullable(),
+    then: schema => yupIsValidUrl().required("External Download URL is required."),
+    otherwise: schema => yup.string().optional().nullable(),
   }),
   selectedFile: yup.mixed()
     .when(['inputMode', '$isEditMode', '$patchToEditIsExternal'], { // Context variables prefixed with $

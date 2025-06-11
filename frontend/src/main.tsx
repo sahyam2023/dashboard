@@ -1,16 +1,15 @@
-// src/main.tsx (or index.tsx)
+// src/main.tsx (or index.tsx) - CORRECTED
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import { AuthProvider } from './context/AuthContext';
 import './index.css'; 
-import { ToastContainer } from 'react-toastify';
+// ToastContainer is no longer needed here because it's rendered in App.tsx
+// import { ToastContainer } from 'react-toastify'; 
 import 'react-toastify/dist/ReactToastify.css';
 import { ThemeProvider as MuiThemeProvider, createTheme } from '@mui/material/styles'; // Renamed for clarity
 import CssBaseline from '@mui/material/CssBaseline';
-// import theme from './theme'; // Old static theme, will be replaced by dynamic palettes
 import { ThemeContextProvider, useTheme } from './context/ThemeContext';
-// Assuming theme.ts will export these after the next step
 import { lightPalette, darkPalette, typographySettings } from './theme'; 
 
 const AppWithProviders: React.FC = () => {
@@ -26,20 +25,10 @@ const AppWithProviders: React.FC = () => {
       <CssBaseline />
       <AuthProvider>
         <App />
-        <ToastContainer
-          position="top-right"
-          autoClose={5000}
-          hideProgressBar={false}
-          newestOnTop={false}
-          closeOnClick
-          rtl={false}
-          pauseOnFocusLoss
-          draggable
-          pauseOnHover
-          // Toast theme will adapt based on MUI theme through CSS or context in future if needed
-          // For now, it might remain light or dark based on its own prop, or be styled globally
-          theme={themeMode} // Simple adaptation for react-toastify
-        />
+        {/* 
+          The <ToastContainer /> that was previously here has been removed.
+          The single <ToastContainer /> inside App.tsx will now handle all toasts.
+        */}
       </AuthProvider>
     </MuiThemeProvider>
   );

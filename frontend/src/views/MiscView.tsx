@@ -17,7 +17,7 @@ import AdminUploadToMiscForm from '../components/admin/AdminUploadToMiscForm'; /
 import AdminMiscCategoryForm from '../components/admin/AdminMiscCategoryForm';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
 import Modal from '../components/shared/Modal';
-import { Download, FileText as FileIconLucide, PlusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Archive as ArchiveIcon, Move, AlertTriangle, MessageSquare } from 'lucide-react'; // Added MessageSquare
+import { Download, FileText as FileIconLucide, PlusCircle, MinusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Archive as ArchiveIcon, Move, AlertTriangle, MessageSquare } from 'lucide-react'; // Added MessageSquare
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils'; 
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7000'; // Not actively used for constructing URLs here
@@ -174,7 +174,7 @@ const role = user?.role; // Access role safely, as user can be null
     // If it was moved to a new category, and that category is not active, the user might need to change filters.
     // For simplicity, we don't auto-switch the category filter here.
   };
-  const handleCategoryOperationSuccess = (message: string) => { setShowCategoryForm(false); setEditingCategory(null); showSuccessToast(message); loadMiscCategories(); };
+  const handleCategoryOperationSuccess = (message: string) => { setShowCategoryForm(false); setEditingCategory(null); loadMiscCategories(); };
   
   const openAddOrEditFileForm = (file?: MiscFile) => { setEditingMiscFile(file || null); setShowAddOrEditForm(true); setShowCategoryForm(false); if (file) { window.scrollTo({ top: 0, behavior: 'smooth' }); } };
   const closeAdminFileForm = () => { setEditingMiscFile(null); setShowAddOrEditForm(false); };
@@ -401,20 +401,26 @@ const role = user?.role; // Access role safely, as user can be null
         {isAuthenticated && (role === 'admin' || role === 'super_admin') && (
           <div className="flex space-x-3 mt-4 sm:mt-0">
             <button 
-  onClick={showCategoryForm && !editingCategory ? closeCategoryForm : openAddCategoryForm} 
-  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
->
-  <PlusCircle size={18} className="mr-2"/>
-  {showCategoryForm && !editingCategory ? 'Cancel' : 'Add/Edit Category'}
-</button>
+              onClick={showCategoryForm && !editingCategory ? closeCategoryForm : openAddCategoryForm}
+              className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white focus:outline-none focus:ring-2 focus:ring-offset-2
+                ${showCategoryForm && !editingCategory
+                  ? 'bg-red-600 hover:bg-red-700 focus:ring-red-500'
+                  : 'bg-blue-600 hover:bg-blue-700 focus:ring-blue-500'}`}
+            >
+              {showCategoryForm && !editingCategory ? <MinusCircle size={18} className="mr-2"/> : <PlusCircle size={18} className="mr-2"/>}
+              {showCategoryForm && !editingCategory ? 'Cancel' : 'Add/Edit Category'}
+            </button>
 
-<button 
-  onClick={showAddOrEditForm && !editingMiscFile ? closeAdminFileForm : () => openAddOrEditFileForm()} 
-  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
->
-  <PlusCircle size={18} className="mr-2"/>
-  {showAddOrEditForm && !editingMiscFile ? 'Cancel' : 'Upload New File'}
-</button>
+            <button
+              onClick={showAddOrEditForm && !editingMiscFile ? closeAdminFileForm : () => openAddOrEditFileForm()}
+              className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white focus:outline-none focus:ring-2 focus:ring-offset-2
+                ${showAddOrEditForm && !editingMiscFile
+                  ? 'bg-red-600 hover:bg-red-700 focus:ring-red-500'
+                  : 'bg-blue-600 hover:bg-blue-700 focus:ring-blue-500'}`}
+            >
+              {showAddOrEditForm && !editingMiscFile ? <MinusCircle size={18} className="mr-2"/> : <PlusCircle size={18} className="mr-2"/>}
+              {showAddOrEditForm && !editingMiscFile ? 'Cancel' : 'Upload New File'}
+            </button>
           </div>
         )}
       </div>

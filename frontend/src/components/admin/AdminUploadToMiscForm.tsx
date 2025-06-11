@@ -12,7 +12,7 @@ import {
   uploadFileInChunks // New chunked upload service
 } from '../../services/api';
 import { MiscCategory, MiscFile } from '../../types';
-import { UploadCloud, FileText as FileIconLucide, X } from 'lucide-react';
+import { UploadCloud, FileText as FileIconLucide, X, MinusCircle } from 'lucide-react';
 
 interface AdminUploadToMiscFormProps {
   fileToEdit?: MiscFile | null;
@@ -251,10 +251,17 @@ const role = user?.role; // Access role safely, as user can be null
           {isEditMode ? 'Edit Miscellaneous File' : 'Upload File to Misc Category'}
         </h3>
         {isEditMode && onCancelEdit && (
-          <button type="button" onClick={onCancelEdit} className="text-sm text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200">
-            Cancel Edit
-          </button>
-        )}
+                  <button
+                    type="button"
+                    onClick={onCancelEdit}
+                    disabled={isLoading}
+                    // This className string is the correct one for the small, styled button.
+                    className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                  >
+                    <MinusCircle size={18} className="mr-2" />
+                    Cancel Edit
+                  </button>
+                )}
       </div>
       {/* Global error/success messages removed */}
 
@@ -351,12 +358,6 @@ const role = user?.role; // Access role safely, as user can be null
                 className="flex-1 inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50">
           {isLoading ? (isEditMode ? 'Updating...' : 'Uploading...') : (isEditMode ? 'Update File Details' : 'Upload to Misc')}
         </button>
-        {isEditMode && onCancelEdit && (
-            <button type="button" onClick={onCancelEdit} disabled={isLoading}
-                    className="flex-1 inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 dark:border-gray-500 dark:text-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600">
-                Cancel
-            </button>
-        )}
       </div>
 
       {/* Upload Progress Bar */}

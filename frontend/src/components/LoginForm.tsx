@@ -22,6 +22,9 @@ const LoginForm: React.FC<LoginFormProps> = ({ onAuthSuccess, onToggleView }) =>
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLoading) {
+      return; 
+    }
     // setError(null) is removed
     setIsLoading(true);
 

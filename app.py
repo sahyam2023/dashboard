@@ -2241,7 +2241,7 @@ def change_password():
         return jsonify(msg="Missing current_password or new_password"), 400
 
     if not bcrypt.check_password_hash(user['password_hash'], current_password):
-        return jsonify(msg="Incorrect current password."), 401
+        return jsonify(msg="Incorrect current password.", error_code="INCORRECT_CURRENT_PASSWORD"), 403
 
     # Password strength check for the new password
     is_strong, strength_msg = is_password_strong(new_password)
@@ -2297,7 +2297,7 @@ def update_email():
         return jsonify(msg="New email cannot be empty."), 400
 
     if not bcrypt.check_password_hash(user['password_hash'], password):
-        return jsonify(msg="Incorrect password."), 401
+        return jsonify(msg="Incorrect password.", error_code="INCORRECT_CURRENT_PASSWORD"), 403
 
     existing_user_with_email = find_user_by_email(new_email)
     if existing_user_with_email and existing_user_with_email['id'] != current_user_id:
@@ -2346,7 +2346,7 @@ def update_username():
             action_type='UPDATE_USERNAME_FAILED', target_table='users', target_id=current_user_id,
             details={'reason': 'Incorrect password', 'attempted_new_username': new_username}
         )
-        return jsonify(msg="Incorrect password."), 401
+        return jsonify(msg="Incorrect password.", error_code="INCORRECT_CURRENT_PASSWORD"), 403
 
     # Check username availability (case-insensitive)
     db = get_db()

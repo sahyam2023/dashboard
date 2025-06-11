@@ -105,8 +105,12 @@ const UserProfilePage: React.FC = () => {
       }
       setNewUsername(''); 
     } catch (error: any) {
+      if (error.isPasswordMismatchError === true) {
+        setUsernameError(error.message || 'Incorrect current password.');
+      } else {
+        setUsernameError(error.message || 'Failed to update username.');
+      }
       showErrorToast(error.message || 'Failed to update username.');
-      setUsernameError(error.message || 'Failed to update username.');
     } finally {
       setCurrentPasswordForUsername(''); 
       setIsUpdatingUsername(false);
@@ -171,13 +175,17 @@ const UserProfilePage: React.FC = () => {
       setConfirmNewPassword('');
       setNewPasswordError(''); 
     } catch (error: any) {
-      const backendMsg = error.message?.toLowerCase() || '';
-      if (backendMsg.includes("password must") || backendMsg.includes("password should")) {
-        setNewPasswordError(error.message); 
+      if (error.isPasswordMismatchError === true) {
+        setPasswordError(error.message || 'Incorrect current password.');
       } else {
-        setPasswordError(error.message || 'Failed to change password.');
+        const backendMsg = error.message?.toLowerCase() || '';
+        if (backendMsg.includes("password must") || backendMsg.includes("password should")) {
+          setNewPasswordError(error.message); 
+        } else {
+          setPasswordError(error.message || 'Failed to change password.');
+        }
       }
-      showErrorToast(error.message || 'Failed to change password.'); // Use toast
+      showErrorToast(error.message || 'Failed to change password.');
     }
   };
 

@@ -65,8 +65,25 @@ const SuperAdminCreateUserForm: React.FC<SuperAdminCreateUserFormProps> = ({ onU
   const [error, setError] = useState<string | null>(null);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [passwordStrengthMessage, setPasswordStrengthMessage] = useState<string>('');
+  const [passwordMatchMessage, setPasswordMatchMessage] = useState<string>('');
   const [isSecurityQuestionsExpanded, setIsSecurityQuestionsExpanded] = useState<boolean>(true);
 
+
+  useEffect(() => {
+    if (confirmPassword) { // Only validate if confirmPassword has been touched
+      if (password === confirmPassword) {
+        setFormErrors(prevErrors => ({ ...prevErrors, confirmPassword: '' })); // Clear specific error
+        setPasswordMatchMessage('Passwords match.'); // Set positive message
+      } else {
+        setFormErrors(prevErrors => ({ ...prevErrors, confirmPassword: 'Passwords do not match.' }));
+        setPasswordMatchMessage(''); // Clear positive message
+      }
+    } else {
+      // If confirmPassword is empty, clear both messages related to confirmPassword field state.
+      setFormErrors(prevErrors => ({ ...prevErrors, confirmPassword: '' }));
+      setPasswordMatchMessage('');
+    }
+  }, [password, confirmPassword]); // Dependencies: password and confirmPassword
 
   useEffect(() => {
     const loadQuestions = async () => {
@@ -239,6 +256,7 @@ const SuperAdminCreateUserForm: React.FC<SuperAdminCreateUserFormProps> = ({ onU
           required
         />
         {formErrors.confirmPassword && <p className="mt-1 text-xs text-red-500">{formErrors.confirmPassword}</p>}
+        {passwordMatchMessage && !formErrors.confirmPassword && <p className="mt-1 text-xs text-green-500">{passwordMatchMessage}</p>}
       </div>
 
       <div>

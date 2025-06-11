@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useOutletContext, useLocation } from 'react-router-dom';
-import { ExternalLink, PlusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Download, Move, AlertTriangle, FileText, MessageSquare } from 'lucide-react'; 
+import { ExternalLink, PlusCircle, MinusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Download, Move, AlertTriangle, FileText, MessageSquare } from 'lucide-react';
 import { 
   fetchDocuments, 
   fetchSoftware, 
@@ -303,11 +303,11 @@ useEffect(() => {
   }, [fetchAndSetDocuments]);
 
   const handleDocumentAdded = (newDocument: DocumentType) => {
-    setShowAddDocumentForm(false); showSuccessToast(`Document "${newDocument.doc_name}" added.`);
+    setShowAddDocumentForm(false);
     fetchAndSetDocuments(1, true);
   };
   const handleDocumentUpdated = (updatedDocument: DocumentType) => {
-    setEditingDocument(null); showSuccessToast(`Document "${updatedDocument.doc_name}" updated.`);
+    setEditingDocument(null);
     fetchAndSetDocuments(1, true);
   };
 
@@ -551,9 +551,12 @@ useEffect(() => {
           <p className="text-gray-600 mt-1 dark:text-gray-300">Browse and manage official documents and resources.</p>
         </div>
         {isAuthenticated && (role === 'admin' || role === 'super_admin') && !editingDocument && (
-          <button onClick={() => { setShowAddDocumentForm(p => !p); setEditingDocument(null);}}
-            className="mt-4 sm:mt-0 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-            <PlusCircle size={18} className="mr-2" />{showAddDocumentForm ? 'Cancel' : 'Add New Document'}
+          <button
+            onClick={() => { setShowAddDocumentForm(p => !p); setEditingDocument(null);}}
+            className={`mt-4 sm:mt-0 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white ${showAddDocumentForm ? 'bg-red-600 hover:bg-red-700 focus:ring-red-500' : 'bg-blue-600 hover:bg-blue-700 focus:ring-blue-500'} focus:outline-none focus:ring-2 focus:ring-offset-2`}
+          >
+            {showAddDocumentForm ? <MinusCircle size={18} className="mr-2" /> : <PlusCircle size={18} className="mr-2" />}
+            {showAddDocumentForm ? 'Cancel' : 'Add New Document'}
           </button>
         )}
       </div>

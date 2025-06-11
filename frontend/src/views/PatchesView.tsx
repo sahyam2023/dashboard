@@ -1,7 +1,7 @@
 // src/views/PatchesView.tsx
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useOutletContext, useLocation } from 'react-router-dom';
-import { ExternalLink, PlusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Download, Move, AlertTriangle, Package as PackageIcon, MessageSquare } from 'lucide-react';
+import { ExternalLink, PlusCircle, MinusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Download, Move, AlertTriangle, Package as PackageIcon, MessageSquare } from 'lucide-react';
 import {
   fetchPatches,
   fetchSoftware,
@@ -524,8 +524,15 @@ const PatchesView: React.FC = () => {
       <div className="flex justify-between items-start sm:items-center mb-6 flex-col sm:flex-row">
         <div> <h2 className="text-2xl font-bold text-gray-800 dark:text-white">Patches</h2> <p className="text-gray-600 mt-1 dark:text-gray-300">Browse and manage software patches.</p> </div>
         {isAuthenticated && (role === 'admin' || role === 'super_admin') && !editingPatch && (
-          <button onClick={showAddOrEditForm ? closeAdminForm : openAddForm} className="mt-4 sm:mt-0 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-            <PlusCircle size={18} className="mr-2" /> {showAddOrEditForm ? 'Cancel' : 'Add New Patch'}
+          <button
+            onClick={showAddOrEditForm && !editingPatch ? closeAdminForm : openAddForm}
+            className={`mt-4 sm:mt-0 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white focus:outline-none focus:ring-2 focus:ring-offset-2
+              ${showAddOrEditForm && !editingPatch
+                ? 'bg-red-600 hover:bg-red-700 focus:ring-red-500'
+                : 'bg-blue-600 hover:bg-blue-700 focus:ring-blue-500'}`}
+          >
+            {showAddOrEditForm && !editingPatch ? <MinusCircle size={18} className="mr-2" /> : <PlusCircle size={18} className="mr-2" />}
+            {showAddOrEditForm && !editingPatch ? 'Cancel' : 'Add New Patch'}
           </button>
         )}
       </div>

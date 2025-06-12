@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useForm, Controller, SubmitHandler, FieldErrors } from 'react-hook-form';
 import * as yup from 'yup';
+import { yupIsValidUrl } from '../../utils/validationUtils';
 import { yupResolver } from '@hookform/resolvers/yup';
 import { showSuccessToast, showErrorToast, showWarningToast } from '../../utils/toastUtils'; // Standardized toast
 import {
@@ -20,7 +21,7 @@ import {
   uploadFileInChunks // New chunked upload service
 } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
-import { UploadCloud, Link as LinkIconLucide, FileText as FileIconLucide, X } from 'lucide-react';
+import { UploadCloud, Link as LinkIconLucide, FileText as FileIconLucide, X, MinusCircle } from 'lucide-react';
 
 interface AdminLinkEntryFormProps {
   linkToEdit?: LinkType | null;
@@ -56,13 +57,15 @@ const validationSchema = yup.object().shape({
     otherwise: schema => schema.transform(value => value === '' ? undefined : value).optional().nullable(),
   }),
   inputMode: yup.string().oneOf(['url', 'upload']).required('Input mode must be selected.'),
-  externalUrl: yup.string().when('inputMode', {
-    is: 'url',
-    then: schema => schema.required('External URL is required for URL mode.').url('Please enter a valid URL (e.g., http://example.com).'),
-    otherwise: schema => schema.optional().nullable(),
+  externalUrl: yup.string().when('inputMode', (inputModeValues: any, schema: any) => {
+    const mode = Array.isArray(inputModeValues) ? inputModeValues[0] : inputModeValues;
+    if (mode === 'url') {
+      return yupIsValidUrl().required('External URL is required for URL mode.');
+    }
+    return yup.string().optional().nullable();
   }),
   selectedFile: yup.mixed().when(
-    ['inputMode', '$isEditMode', '$isOriginallyFileBased'], 
+    ['inputMode', '$isEditMode', '$isOriginallyFileBased'],
     {
       is: (inputMode: string, isEditMode: boolean, isOriginallyFileBased: boolean) => {
         // File is strictly required if:
@@ -70,14 +73,14 @@ const validationSchema = yup.object().shape({
         if (inputMode === 'upload' && !isEditMode) return true;
         // 2. Editing an item that was originally a URL, and user switched to 'upload' mode.
         if (inputMode === 'upload' && isEditMode && !isOriginallyFileBased) return true;
-        
+
         // In all other cases (e.g., editing an existing file-based link in 'upload' mode, 
         // or if inputMode is 'url'), the file is optional by this specific rule.
         return false;
       },
       then: schema => schema.required('A file is required for this operation.').test(
-        'filePresent', 
-        'A file is required.', 
+        'filePresent',
+        'A file is required.',
         value => !!value // Ensures a file object is present
       ),
       otherwise: schema => schema.nullable(),
@@ -98,9 +101,9 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
 
   const { register, handleSubmit, control, formState: { errors }, watch, setValue, reset } = useForm<LinkFormData>({
     resolver: yupResolver(validationSchema),
-    context: { 
-      isEditMode: isEditMode, 
-      isOriginallyFileBased: !!(isEditMode && linkToEdit && !linkToEdit.is_external_link) 
+    context: {
+      isEditMode: isEditMode,
+      isOriginallyFileBased: !!(isEditMode && linkToEdit && !linkToEdit.is_external_link)
     },
     defaultValues: { // Initialize with sensible defaults
       selectedSoftwareId: '',
@@ -136,7 +139,7 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
   const watchedInputMode = watch('inputMode'); // RHF watch
   const watchedSelectedFile = watch('selectedFile'); // RHF watch
   // This state is now derived directly in JSX or from watchedSelectedVersionId
-  const showTypeVersionInput = watchedSelectedVersionId === CREATE_NEW_VERSION_SENTINEL; 
+  const showTypeVersionInput = watchedSelectedVersionId === CREATE_NEW_VERSION_SENTINEL;
 
   // Old state variables for individual fields are removed (title, description, etc.)
   // Old error and successMessage states are removed
@@ -233,28 +236,28 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
         inputMode: linkToEdit.is_external_link ? 'url' : 'upload',
         externalUrl: linkToEdit.is_external_link ? linkToEdit.url : '',
         compatibleVmsVersionIds: isCurrentSoftwareVmsOrVa && linkToEdit.compatible_vms_versions
-                                  ? (typeof linkToEdit.compatible_vms_versions === 'string'
-                                      ? (linkToEdit.compatible_vms_versions as string).split(',').map(s => s.trim()).filter(s => s)
-                                      : Array.isArray(linkToEdit.compatible_vms_versions)
-                                          ? linkToEdit.compatible_vms_versions.map(String)
-                                          : [])
-                                  : [],
+          ? (typeof linkToEdit.compatible_vms_versions === 'string'
+            ? (linkToEdit.compatible_vms_versions as string).split(',').map(s => s.trim()).filter(s => s)
+            : Array.isArray(linkToEdit.compatible_vms_versions)
+              ? linkToEdit.compatible_vms_versions.map(String)
+              : [])
+          : [],
       };
-      
+
       // Only prefill version details if the software context is still the original one
       if (watchedSoftwareId === linkToEdit.software_id.toString()) {
         if (linkToEdit.version_id && versionsList.length > 0) { // versionsList here is for the original software
-            const existingVersionInList = versionsList.find(v => v.id === linkToEdit.version_id);
-            if (existingVersionInList) {
-                defaultValues.selectedVersionId = linkToEdit.version_id.toString();
-                // defaultValues.typedVersionString = linkToEdit.version_name; // Keep original version name if version is selected
-            } else {
-                defaultValues.selectedVersionId = CREATE_NEW_VERSION_SENTINEL;
-                defaultValues.typedVersionString = linkToEdit.version_name;
-            }
-        } else if (linkToEdit.version_name) { // No version_id, but there was a version_name
+          const existingVersionInList = versionsList.find(v => v.id === linkToEdit.version_id);
+          if (existingVersionInList) {
+            defaultValues.selectedVersionId = linkToEdit.version_id.toString();
+            // defaultValues.typedVersionString = linkToEdit.version_name; // Keep original version name if version is selected
+          } else {
             defaultValues.selectedVersionId = CREATE_NEW_VERSION_SENTINEL;
             defaultValues.typedVersionString = linkToEdit.version_name;
+          }
+        } else if (linkToEdit.version_name) { // No version_id, but there was a version_name
+          defaultValues.selectedVersionId = CREATE_NEW_VERSION_SENTINEL;
+          defaultValues.typedVersionString = linkToEdit.version_name;
         }
       }
       // If watchedSoftwareId is different, selectedVersionId and typedVersionString would have been
@@ -280,15 +283,15 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
     const currentSoftwareId = keepSoftware ? watch('selectedSoftwareId') : '';
     // RHF reset
     reset({
-        selectedSoftwareId: currentSoftwareId,
-        title: '',
-        selectedVersionId: '',
-        typedVersionString: '',
-        inputMode: 'url',
-        externalUrl: '',
-        selectedFile: null,
-        description: '',
-        compatibleVmsVersionIds: [], // Reset VMS compat IDs
+      selectedSoftwareId: currentSoftwareId,
+      title: '',
+      selectedVersionId: '',
+      typedVersionString: '',
+      inputMode: 'url',
+      externalUrl: '',
+      selectedFile: null,
+      description: '',
+      compatibleVmsVersionIds: [], // Reset VMS compat IDs
     });
     setExistingFileName(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -309,7 +312,7 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
     setValue('selectedFile', null, { shouldValidate: true, shouldDirty: true }); // RHF setValue
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
-  
+
   // handleVersionSelectionChange is no longer needed, RHF handles select changes via register or Controller
 
   // RHF Submit Handler
@@ -345,7 +348,7 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
 
     // Add VMS compatibility IDs if applicable
     if (isVmsOrVaSoftware && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0) {
-        basePayload.compatible_vms_version_ids = data.compatibleVmsVersionIds;
+      basePayload.compatible_vms_version_ids = data.compatibleVmsVersionIds;
     }
 
     try {
@@ -406,13 +409,13 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
           if (data.selectedFile) {
             // Metadata for new chunked upload
             const chunkMetadata = {
-                software_id: data.selectedSoftwareId, // Keep as string for uploadFileInChunks
-                ...(finalVersionId && { version_id: finalVersionId.toString() }),
-                ...(finalTypedVersionString && { typed_version_string: finalTypedVersionString }),
-                title: data.title.trim(), // Ensure 'title' is used if uploadFileInChunks expects it, or 'link_title'
-                description: data.description?.trim() || '',
-                ...(isVmsOrVaSoftware && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0 &&
-                  { compatible_vms_version_ids_json: JSON.stringify(data.compatibleVmsVersionIds) }),
+              software_id: data.selectedSoftwareId, // Keep as string for uploadFileInChunks
+              ...(finalVersionId && { version_id: finalVersionId.toString() }),
+              ...(finalTypedVersionString && { typed_version_string: finalTypedVersionString }),
+              title: data.title.trim(), // Ensure 'title' is used if uploadFileInChunks expects it, or 'link_title'
+              description: data.description?.trim() || '',
+              ...(isVmsOrVaSoftware && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0 &&
+                { compatible_vms_version_ids_json: JSON.stringify(data.compatibleVmsVersionIds) }),
             };
             resultLink = await uploadFileInChunks(
               data.selectedFile,
@@ -456,7 +459,7 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
       if (data.inputMode === 'upload') setIsUploading(false); // Ensure isUploading is reset
     }
   };
-  
+
   const onFormError = (formErrors: FieldErrors<LinkFormData>) => {
     console.error("Form validation errors:", formErrors);
     showErrorToast("Please correct the errors highlighted in the form."); // Standardized
@@ -468,19 +471,28 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
   return (
     // Use RHF handleSubmit, pass onSubmit and optional onFormError
     <form onSubmit={handleSubmit(onSubmit, onFormError)} className="space-y-6 bg-white dark:bg-gray-800 dark:border-gray-700 p-6 rounded-lg shadow-md border border-gray-200">
-      <div className="flex justify-between items-center"> 
-        <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-100"> {isEditMode ? 'Edit Link' : 'Add New Link'} </h3> 
-        {isEditMode && onCancelEdit && ( 
-            <button type="button" onClick={onCancelEdit} className="text-sm text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"> Cancel </button> 
-        )} 
-      </div> 
+      <div className="flex justify-between items-center">
+        <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-100"> {isEditMode ? 'Edit Link' : 'Add New Link'} </h3>
+        {isEditMode && onCancelEdit && (
+          <button
+            type="button"
+            onClick={onCancelEdit}
+            disabled={isLoading}
+            // This className string is the correct one for the small, styled button.
+            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+          >
+            <MinusCircle size={18} className="mr-2" />
+            Cancel Edit
+          </button>
+        )}
+      </div>
       {/* Old global error/success message divs removed */}
 
       <div>
         <label htmlFor="selectedSoftwareId" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Software Product*</label>
         {isFetchingSoftwareOrVersions && !softwareList.length ? <p className="text-sm text-gray-500 dark:text-gray-400">Loading software...</p> : (
-          <select 
-            id="selectedSoftwareId" 
+          <select
+            id="selectedSoftwareId"
             {...register("selectedSoftwareId")} // RHF register
             disabled={isLoading || (isFetchingSoftwareOrVersions && !softwareList.length)}
             className={`mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md ${errors.selectedSoftwareId ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600`}
@@ -489,7 +501,7 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
             {softwareList.map(sw => <option key={sw.id} value={sw.id.toString()}>{sw.name}</option>)}
           </select>
         )}
-        
+
         {errors.selectedSoftwareId && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{errors.selectedSoftwareId.message}</p>}
       </div>
 
@@ -512,7 +524,7 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
           </select>
         </div>
         {/* Use showTypeVersionInput (derived from watchedSelectedVersionId) */}
-        {showTypeVersionInput && ( 
+        {showTypeVersionInput && (
           <div className="mt-2">
             <label htmlFor="typedVersionString" className="block text-xs font-medium text-gray-600 dark:text-gray-400">
               {/* Label simplified as typedVersionString is only for new versions */}
@@ -524,7 +536,7 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
               {...register("typedVersionString")} // RHF register
               placeholder="e.g., 1.2.4-final"
               className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.typedVersionString ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400`}
-              // `required` attribute removed, yup handles it
+            // `required` attribute removed, yup handles it
             />
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">This version will be created for the selected software if it doesn't exist.</p>
           </div>
@@ -533,15 +545,15 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
         {errors.selectedVersionId && !showTypeVersionInput && <p className="mt-1 text-sm text-red-600">{errors.selectedVersionId.message}</p>}
         {errors.typedVersionString && showTypeVersionInput && <p className="mt-1 text-sm text-red-600">{errors.typedVersionString.message}</p>}
       </div>
-      
+
       <div>
         <label htmlFor="title" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Link Title*</label>
-        <input 
-            type="text" 
-            id="title" 
-            {...register("title")} // RHF register
-            disabled={isLoading} 
-            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.title ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400`}
+        <input
+          type="text"
+          id="title"
+          {...register("title")} // RHF register
+          disabled={isLoading}
+          className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.title ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400`}
         />
         {errors.title && <p className="mt-1 text-sm text-red-600">{errors.title.message}</p>}
       </div>
@@ -588,123 +600,113 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
             />
           )}
           {errors.compatibleVmsVersionIds && <p className="mt-1 text-sm text-red-600">{errors.compatibleVmsVersionIds.message}</p>}
-           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Select VMS versions this link is compatible with. Only applicable if the link is for 'VMS' or 'VA' software.</p>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Select VMS versions this link is compatible with. Only applicable if the link is for 'VMS' or 'VA' software.</p>
         </div>
       )}
 
       <div className="my-4">
         <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Link Source:</span>
         <div className="flex items-center space-x-4">
-            <label className="flex items-center space-x-2 cursor-pointer">
-                <input type="radio" {...register("inputMode")} value="url" className="form-radio h-4 w-4 text-blue-600" disabled={isLoading}/>
-                <span className="flex items-center dark:text-gray-300"><LinkIconLucide size={16} className="mr-1 text-gray-600 dark:text-gray-400"/>Provide External URL</span>
-            </label>
-            <label className="flex items-center space-x-2 cursor-pointer">
-                <input type="radio" {...register("inputMode")} value="upload" className="form-radio h-4 w-4 text-blue-600" disabled={isLoading}/>
-                <span className="flex items-center dark:text-gray-300"><UploadCloud size={16} className="mr-1 text-gray-600 dark:text-gray-400"/>Upload File for this Link</span>
-            </label>
+          <label className="flex items-center space-x-2 cursor-pointer">
+            <input type="radio" {...register("inputMode")} value="url" className="form-radio h-4 w-4 text-blue-600" disabled={isLoading} />
+            <span className="flex items-center dark:text-gray-300"><LinkIconLucide size={16} className="mr-1 text-gray-600 dark:text-gray-400" />Provide External URL</span>
+          </label>
+          <label className="flex items-center space-x-2 cursor-pointer">
+            <input type="radio" {...register("inputMode")} value="upload" className="form-radio h-4 w-4 text-blue-600" disabled={isLoading} />
+            <span className="flex items-center dark:text-gray-300"><UploadCloud size={16} className="mr-1 text-gray-600 dark:text-gray-400" />Upload File for this Link</span>
+          </label>
         </div>
         {errors.inputMode && <p className="mt-1 text-sm text-red-600">{errors.inputMode.message}</p>}
       </div>
 
       {watchedInputMode === 'url' && (
         <div>
-            <label htmlFor="externalUrl" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Link URL*</label>
-            <input 
-                type="url" 
-                id="externalUrl" 
-                {...register("externalUrl")} // RHF register
-                placeholder="https://example.com/resource" 
-                disabled={isLoading} 
-                className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.externalUrl ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400`}
-            />
-            {errors.externalUrl && <p className="mt-1 text-sm text-red-600">{errors.externalUrl.message}</p>}
+          <label htmlFor="externalUrl" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Link URL*</label>
+          <input
+            type="url"
+            id="externalUrl"
+            {...register("externalUrl")} // RHF register
+            placeholder="https://example.com/resource"
+            disabled={isLoading}
+            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.externalUrl ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400`}
+          />
+          {errors.externalUrl && <p className="mt-1 text-sm text-red-600">{errors.externalUrl.message}</p>}
         </div>
       )}
 
       {watchedInputMode === 'upload' && (
         <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                {/* Use watchedSelectedFile from RHF */}
-                {isEditMode && existingFileName && !watchedSelectedFile ? 'Replace File (Optional)' : 'Select File to Upload*'}
-            </label>
-            <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md hover:border-blue-500 dark:border-gray-600 dark:hover:border-blue-400 transition-colors">
-                <div className="space-y-1 text-center">
-                    <FileIconLucide className="mx-auto h-12 w-12 text-gray-400 dark:text-gray-500" />
-                    <div className="flex text-sm text-gray-600 dark:text-gray-400">
-                        <label htmlFor="link-file-upload-input" className="relative cursor-pointer bg-white dark:bg-gray-800 rounded-md font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-blue-500">
-                            <span>{watchedSelectedFile ? 'Change file' : 'Upload a file'}</span>
-                             {/* File input itself. RHF doesn't directly register file inputs in the same way.
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            {/* Use watchedSelectedFile from RHF */}
+            {isEditMode && existingFileName && !watchedSelectedFile ? 'Replace File (Optional)' : 'Select File to Upload*'}
+          </label>
+          <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md hover:border-blue-500 dark:border-gray-600 dark:hover:border-blue-400 transition-colors">
+            <div className="space-y-1 text-center">
+              <FileIconLucide className="mx-auto h-12 w-12 text-gray-400 dark:text-gray-500" />
+              <div className="flex text-sm text-gray-600 dark:text-gray-400">
+                <label htmlFor="link-file-upload-input" className="relative cursor-pointer bg-white dark:bg-gray-800 rounded-md font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-blue-500">
+                  <span>{watchedSelectedFile ? 'Change file' : 'Upload a file'}</span>
+                  {/* File input itself. RHF doesn't directly register file inputs in the same way.
                                  onChange is handled by handleFileChange which uses setValue.
                                  The 'name' attribute here is for the input element itself, not necessarily for RHF registration.
                              */}
-                            <input 
-                                id="link-file-upload-input" 
-                                name="file-input-element" // Clarified name
-                                type="file" 
-                                className="sr-only" 
-                                onChange={handleFileChange} 
-                                ref={fileInputRef} 
-                                // `required` attribute removed, yup handles it
-                                disabled={isLoading} 
-                            />
-                        </label>
-                        <p className="pl-1">or drag and drop</p>
-                    </div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">Any file type relevant for links.</p>
-                </div>
+                  <input
+                    id="link-file-upload-input"
+                    name="file-input-element" // Clarified name
+                    type="file"
+                    className="sr-only"
+                    onChange={handleFileChange}
+                    ref={fileInputRef}
+                    // `required` attribute removed, yup handles it
+                    disabled={isLoading}
+                  />
+                </label>
+                <p className="pl-1">or drag and drop</p>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Any file type relevant for links.</p>
             </div>
-            {(watchedSelectedFile || (isEditMode && existingFileName)) && (
-                <div className="mt-3 flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md">
-                    <div className='flex items-center space-x-2 overflow-hidden'>
-                        <FileIconLucide size={18} className="text-gray-500 dark:text-gray-400 flex-shrink-0" />
-                        <span className="text-sm text-gray-700 dark:text-gray-300 truncate">
-                            {/* Display name of watchedSelectedFile or existingFileName */}
-                            {watchedSelectedFile ? (watchedSelectedFile as File).name : existingFileName}
-                        </span>
-                        {isEditMode && existingFileName && !watchedSelectedFile && <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">(current)</span>}
-                    </div>
-                    {watchedSelectedFile && (
-                        <button type="button" onClick={clearFileSelection} disabled={isLoading} className="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-200 dark:text-gray-500 dark:hover:text-gray-300 dark:hover:bg-gray-600">
-                            <X size={16} />
-                        </button>
-                    )}
-                </div>
-            )}
-            {/* Display error for selectedFile (name used in LinkFormData and yup schema) */}
-            {errors.selectedFile && <p className="mt-1 text-sm text-red-600">{errors.selectedFile.message}</p>}
+          </div>
+          {(watchedSelectedFile || (isEditMode && existingFileName)) && (
+            <div className="mt-3 flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md">
+              <div className='flex items-center space-x-2 overflow-hidden'>
+                <FileIconLucide size={18} className="text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                <span className="text-sm text-gray-700 dark:text-gray-300 truncate">
+                  {/* Display name of watchedSelectedFile or existingFileName */}
+                  {watchedSelectedFile ? (watchedSelectedFile as File).name : existingFileName}
+                </span>
+                {isEditMode && existingFileName && !watchedSelectedFile && <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">(current)</span>}
+              </div>
+              {watchedSelectedFile && (
+                <button type="button" onClick={clearFileSelection} disabled={isLoading} className="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-200 dark:text-gray-500 dark:hover:text-gray-300 dark:hover:bg-gray-600">
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+          )}
+          {/* Display error for selectedFile (name used in LinkFormData and yup schema) */}
+          {errors.selectedFile && <p className="mt-1 text-sm text-red-600">{errors.selectedFile.message}</p>}
         </div>
-    )}
+      )}
       <div>
         <label htmlFor="description" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Description</label>
-        <textarea 
-            id="description" 
-            rows={3} 
-            {...register("description")} // RHF register
-            disabled={isLoading} 
-            className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.description ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400`}
+        <textarea
+          id="description"
+          rows={3}
+          {...register("description")} // RHF register
+          disabled={isLoading}
+          className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.description ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400`}
         />
         {errors.description && <p className="mt-1 text-sm text-red-600">{errors.description.message}</p>}
       </div>
 
       <div className="flex space-x-3">
-        <button 
-            type="submit" 
-            disabled={isLoading || isFetchingSoftwareOrVersions}  // Also disable if fetching dropdown data
-            className="flex-1 inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+        <button
+          type="submit"
+          disabled={isLoading || isFetchingSoftwareOrVersions}  // Also disable if fetching dropdown data
+          className="flex-1 inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
         >
-            {isLoading ? (isEditMode ? 'Updating...' : 'Adding...') : (isEditMode ? 'Update Link' : 'Add Link')}
+          {isLoading ? (isEditMode ? 'Updating...' : 'Adding...') : (isEditMode ? 'Update Link' : 'Add Link')}
         </button>
-        {isEditMode && onCancelEdit && (
-            <button 
-                type="button" 
-                onClick={onCancelEdit} 
-                disabled={isLoading} 
-                className="flex-1 inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 dark:border-gray-500 dark:text-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600"
-            >
-                Cancel
-            </button>
-        )}
       </div>
 
       {/* Upload Progress Bar */}

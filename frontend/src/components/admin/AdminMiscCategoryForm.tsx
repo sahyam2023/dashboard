@@ -8,6 +8,7 @@ import { showSuccessToast, showErrorToast } from '../../utils/toastUtils';
 import { MiscCategory, AddCategoryPayload, EditCategoryPayload } from '../../types';
 import { addAdminMiscCategory, editAdminMiscCategory } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
+import { MinusCircle } from 'lucide-react';
 
 interface AdminMiscCategoryFormProps {
   categoryToEdit?: MiscCategory | null;
@@ -179,9 +180,10 @@ const role = user?.role; // Access role safely, as user can be null
             type="button"
             onClick={onCancel}
             disabled={isLoading}
-            className="inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 dark:border-gray-500 dark:text-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600"
+            className="inline-flex items-center justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-60"
           >
-            Cancel
+            <MinusCircle size={18} className="mr-2" />
+            {isEditMode ? 'Cancel Edit' : 'Cancel'}
           </button>
         )}
       </div>

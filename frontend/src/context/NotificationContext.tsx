@@ -206,6 +206,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
       {children}
       {/* Conceptual: Rendering toast notifications */}
       {/* This part would typically be a separate component that consumes toastNotifications state */}
+      {/*
       <div className="fixed bottom-4 right-4 z-50 space-y-2">
         {toastNotifications.map(toast => (
           <div
@@ -221,6 +222,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
           </div>
         ))}
       </div>
+      */}
     </NotificationContext.Provider>
   );
 };

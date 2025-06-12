@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useForm, Controller, SubmitHandler, FieldErrors } from 'react-hook-form';
 import * as yup from 'yup';
+import { yupIsValidUrl } from '../../utils/validationUtils';
 import { yupResolver } from '@hookform/resolvers/yup';
 import { showSuccessToast, showErrorToast, showWarningToast } from '../../utils/toastUtils'; // Standardized toast
 import {
@@ -21,7 +22,7 @@ import {
   uploadFileInChunks // New chunked upload service
 } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
-import { UploadCloud, Link as LinkIconLucide, FileText as FileIconLucide, X } from 'lucide-react';
+import { UploadCloud, Link as LinkIconLucide, FileText as FileIconLucide, X, MinusCircle } from 'lucide-react';
 
 const getTodayDateString = () => {
   const today = new Date();
@@ -68,10 +69,12 @@ const patchValidationSchema = yup.object().shape({
   patchName: yup.string().required("Patch Name is required.").max(255, "Patch Name cannot exceed 255 characters."),
   releaseDate: yup.string().transform(value => value === '' ? undefined : value).optional().nullable(),
   inputMode: yup.string().oneOf(['url', 'upload']).required("Input mode must be selected."),
-  externalUrl: yup.string().when('inputMode', {
-    is: 'url',
-    then: schema => schema.required("External Download URL is required.").url("Please enter a valid URL."),
-    otherwise: schema => schema.optional().nullable(),
+  externalUrl: yup.string().when('inputMode', (inputModeValues: any, schema: any) => {
+    const mode = Array.isArray(inputModeValues) ? inputModeValues[0] : inputModeValues;
+    if (mode === 'url') {
+      return yupIsValidUrl().required("External Download URL is required.");
+    }
+    return yup.string().optional().nullable();
   }),
   selectedFile: yup.mixed()
     .when(['inputMode', '$isEditMode', '$patchToEditIsExternal'], { // Context variables prefixed with $
@@ -484,10 +487,17 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
           {isEditMode ? 'Edit Patch' : 'Add New Patch'}
         </h3>
         {isEditMode && onCancelEdit && (
-          <button type="button" onClick={onCancelEdit} className="text-sm text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200">
-            Cancel
-          </button>
-        )}
+                  <button
+                    type="button"
+                    onClick={onCancelEdit}
+                    disabled={isLoading}
+                    // This className string is the correct one for the small, styled button.
+                    className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                  >
+                    <MinusCircle size={18} className="mr-2" />
+                    Cancel Edit
+                  </button>
+                )}
       </div>
       {/* Global error/success messages removed */}
 
@@ -642,7 +652,7 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
         <div>
             <label htmlFor="externalUrl" className="block text-sm font-medium text-gray-700 dark:text-gray-300">External Download URL*</label>
             <input 
-                type="url" 
+                type="text" 
                 id="externalUrl" 
                 {...register("externalUrl")} 
                 placeholder="https://example.com/patch.exe" 
@@ -716,16 +726,6 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
         >
             {isLoading ? (isEditMode ? 'Updating...' : 'Adding...') : (isEditMode ? 'Update Patch' : 'Add Patch')}
         </button>
-        {isEditMode && onCancelEdit && (
-            <button 
-                type="button" 
-                onClick={onCancelEdit} 
-                disabled={isLoading} 
-                className="flex-1 inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 dark:border-gray-500 dark:text-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600"
-            >
-            Cancel
-            </button>
-        )}
       </div>
 
       {/* Upload Progress Bar */}

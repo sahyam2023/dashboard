@@ -98,7 +98,6 @@ function AppContent() {
     <> {/* Use Fragment instead of BrowserRouter here, as it's already provided by App */}
       <ToastContainer
         position="top-right"
-        autoClose={5000}
         hideProgressBar={false}
         newestOnTop={false}
         closeOnClick

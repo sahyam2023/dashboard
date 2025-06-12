@@ -363,22 +363,35 @@ const handleApiError = async (response: Response, defaultMessage: string, isLogi
 
     // Check for 401 Unauthorized and if a token was likely used (i.e., not a login attempt itself)
     if (response.status === 401 && !isLoginAttempt && localStorage.getItem('tokenData')) {
-      // Dispatch a custom event for token invalidation (e.g. blacklisted or expired)
-      // This event should be listened to by AuthContext to handle logout and redirect
-      document.dispatchEvent(new CustomEvent('tokenInvalidated'));
-      
-      // We don't throw an error here because the event handler will navigate away.
-      // Returning a promise that never resolves can prevent further processing in the calling function.
-      // Or, ensure calling functions are robust to this. For now, we'll let it proceed to throw,
-      // but the UI should be redirected by the event.
-      // A more robust solution might involve a dedicated error type that calling code can ignore.
-      // For now, we throw to ensure the calling code's catch block is triggered if it needs to cleanup,
-      // but the UI should be redirected by the event.
-      const message = errorData?.msg || `Session expired or unauthorized: ${response.status}`;
-      const error: any = new Error(message);
-      error.response = { data: errorData, status: response.status };
-      error.isTokenExpirationError = true; // Custom flag
-      throw error;
+      // Check for specific password mismatch messages
+      if (errorData?.msg === "Incorrect current password." || errorData?.msg === "Incorrect password.") {
+        const specificError: any = new Error(errorData.msg);
+        specificError.isPasswordMismatchError = true;
+        specificError.response = { data: errorData, status: response.status };
+        throw specificError;
+      } else {
+        // Dispatch a custom event for token invalidation (e.g. blacklisted or expired)
+        // This event should be listened to by AuthContext to handle logout and redirect
+        document.dispatchEvent(new CustomEvent('tokenInvalidated'));
+        
+        const message = errorData?.msg || `Session expired or unauthorized: ${response.status}`;
+        const error: any = new Error(message);
+        error.response = { data: errorData, status: response.status };
+        error.isTokenExpirationError = true; // Custom flag
+        throw error;
+      }
+    } else if (response.status === 403) {
+      if (errorData?.error_code === "INCORRECT_CURRENT_PASSWORD") {
+        const specificError: any = new Error(errorData.msg || 'Incorrect current password.');
+        specificError.isPasswordMismatchError = true;
+        specificError.response = { data: errorData, status: response.status };
+        throw specificError;
+      } else {
+        // Generic 403 error (Forbidden)
+        const generic403Error: any = new Error(errorData?.msg || 'Forbidden');
+        generic403Error.response = { data: errorData, status: response.status };
+        throw generic403Error;
+      }
     }
 
     const message = errorData?.msg || `${defaultMessage}: ${response.status}`;
@@ -448,6 +461,30 @@ export async function fetchChatImageBlob(fileUrl: string): Promise<Blob> {
       showErrorToast(OFFLINE_MESSAGE); // Use your existing toast utility
     }
     console.error('Error fetching chat image blob:', fileUrl, error);
+    throw error; // Re-throw to be caught by the calling component
+  }
+}
+
+export async function fetchChatMediaBlob(fileUrl: string): Promise<Blob> {
+  try {
+    // Ensure API_BASE_URL is prepended if fileUrl is relative
+    const fullUrl = `${API_BASE_URL}${fileUrl}`;
+    
+    const response = await fetch(fullUrl, {
+      method: 'GET',
+      headers: { ...getAuthHeader() }, // Crucial for auth
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to fetch media: ${response.status} ${response.statusText}. Body: ${errorText.substring(0,100)}`);
+    }
+    return response.blob();
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true); 
+      showErrorToast(OFFLINE_MESSAGE); 
+    }
+    console.error('Error fetching chat media blob:', fileUrl, error);
     throw error; // Re-throw to be caught by the calling component
   }
 }

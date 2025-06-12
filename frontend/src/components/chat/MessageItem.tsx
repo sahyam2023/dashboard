@@ -3,8 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Message } from './types';
 import { FileText, Download, Image as ImageIcon, Video as VideoIcon, Music as AudioIcon, ShieldQuestion, Loader2 } from 'lucide-react'; // Added Loader2
 import { formatToISTLocaleString } from '../../utils/dateUtils';
-import * as api from '../../services/api'; // Import the api service
-import { downloadChatFile } from '../../services/api'; // Specific import for the new function
+import { fetchChatMediaBlob, downloadChatFile } from '../../services/api'; // Specific import for the new function
 
 interface MessageItemProps {
   message: Message;
@@ -16,6 +15,15 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, currentUserId }) => 
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [isLoadingImage, setIsLoadingImage] = useState<boolean>(false);
   const [imageError, setImageError] = useState<string | null>(null);
+
+  const [videoSrc, setVideoSrc] = useState<string | null>(null);
+  const [isLoadingVideo, setIsLoadingVideo] = useState<boolean>(false);
+  const [videoError, setVideoError] = useState<string | null>(null);
+
+  const [audioSrc, setAudioSrc] = useState<string | null>(null);
+  const [isLoadingAudio, setIsLoadingAudio] = useState<boolean>(false);
+  const [audioError, setAudioError] = useState<string | null>(null);
+
   const [isDownloading, setIsDownloading] = useState<boolean>(false); // State for download status
 
   // Handler for file downloads
@@ -41,30 +49,61 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, currentUserId }) => 
 
   useEffect(() => {
     let objectUrl: string | null = null;
-    // Reset states when message.file_url or message.file_type changes
-    setImageSrc(null);
-    setIsLoadingImage(false);
-    setImageError(null);
+    const currentFileType = message.file_type;
+    const currentFileUrl = message.file_url;
+    const currentMessageId = message.id;
 
-    if (message.file_type === 'image' && message.file_url) {
-      setIsLoadingImage(true);
-      api.fetchChatImageBlob(message.file_url)
-        .then(blob => {
-          objectUrl = URL.createObjectURL(blob);
-          setImageSrc(objectUrl);
-          setIsLoadingImage(false);
-        })
-        .catch(err => {
-          console.error("Failed to load image blob for message:", message.id, err);
-          setImageError("Failed to load image");
-          setIsLoadingImage(false);
-        });
+    // Reset all media states
+    setImageSrc(null); setIsLoadingImage(false); setImageError(null);
+    setVideoSrc(null); setIsLoadingVideo(false); setVideoError(null);
+    setAudioSrc(null); setIsLoadingAudio(false); setAudioError(null);
+
+    if (currentFileUrl) {
+      if (currentFileType === 'image') {
+        setIsLoadingImage(true);
+        fetchChatMediaBlob(currentFileUrl)
+          .then(blob => {
+            objectUrl = URL.createObjectURL(blob);
+            setImageSrc(objectUrl);
+            setIsLoadingImage(false);
+          })
+          .catch(err => {
+            console.error("Failed to load image blob for message:", currentMessageId, err);
+            setImageError("Failed to load image");
+            setIsLoadingImage(false);
+          });
+      } else if (currentFileType === 'video' || (currentFileType === 'binary' && currentFileUrl.endsWith('.mkv'))) {
+        setIsLoadingVideo(true);
+        fetchChatMediaBlob(currentFileUrl)
+          .then(blob => {
+            objectUrl = URL.createObjectURL(blob);
+            setVideoSrc(objectUrl);
+            setIsLoadingVideo(false);
+          })
+          .catch(err => {
+            console.error("Failed to load video blob for message:", currentMessageId, err);
+            setVideoError("Failed to load video");
+            setIsLoadingVideo(false);
+          });
+      } else if (currentFileType === 'audio') {
+        setIsLoadingAudio(true);
+        fetchChatMediaBlob(currentFileUrl)
+          .then(blob => {
+            objectUrl = URL.createObjectURL(blob);
+            setAudioSrc(objectUrl);
+            setIsLoadingAudio(false);
+          })
+          .catch(err => {
+            console.error("Failed to load audio blob for message:", currentMessageId, err);
+            setAudioError("Failed to load audio");
+            setIsLoadingAudio(false);
+          });
+      }
     }
 
     return () => {
       if (objectUrl) {
         URL.revokeObjectURL(objectUrl);
-        // console.log("Revoked object URL:", objectUrl, "for message:", message.id); // For debugging
       }
     };
   }, [message.file_url, message.file_type, message.id]);
@@ -76,11 +115,13 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, currentUserId }) => 
     const commonLinkClasses = "hover:underline focus:outline-none focus:ring-2 focus:ring-opacity-50";
     const linkColor = isCurrentUserSender ? "text-blue-100 hover:text-blue-50 dark:text-blue-300 dark:hover:text-blue-200 focus:ring-blue-300"
                                           : "text-gray-700 hover:text-black dark:text-gray-300 dark:hover:text-white focus:ring-gray-500";
+    
+    const effectiveFileType = (message.file_type === 'binary' && message.file_url && message.file_url.endsWith('.mkv')) ? 'video' : message.file_type;
 
-    switch (message.file_type) {
+    switch (effectiveFileType) {
       case 'image':
         if (isLoadingImage) {
-          return <p className="text-xs italic p-2">Loading image...</p>;
+          return <div className="p-2 flex items-center justify-center"><Loader2 className="animate-spin" size={24} /><p className="ml-2 text-xs italic">Loading image...</p></div>;
         }
         if (imageError) {
           return <p className="text-xs italic p-2 text-red-500">{imageError}</p>;
@@ -106,47 +147,57 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, currentUserId }) => 
             </a>
           );
         }
-        return <p className="text-xs italic p-2">Image not available</p>;
+        return <p className="text-xs italic p-2">Image preview not available. <a href="#" onClick={(e) => handleFileDownload(e, message.file_url!, message.file_name || 'downloaded_image')} className={`${commonLinkClasses} ${linkColor}`}>Download</a></p>;
       case 'video':
-        return (
-          <div className="mt-1">
-            <video src={message.file_url} controls className="max-w-full rounded-lg max-h-64 sm:max-h-80">
-              Your browser does not support the video tag.
-              <a 
-                href="#" 
-                onClick={(e) => handleFileDownload(e, message.file_url!, message.file_name || 'downloaded_video')} 
-                className={`${commonLinkClasses} ${linkColor} ${isDownloading ? 'opacity-50 cursor-not-allowed' : ''}`}
+        if (isLoadingVideo) {
+          return <div className="p-2 flex items-center justify-center"><Loader2 className="animate-spin" size={24} /><p className="ml-2 text-xs italic">Loading video...</p></div>;
+        }
+        if (videoError) {
+          return <p className="text-xs italic p-2 text-red-500">{videoError}. <a href="#" onClick={(e) => handleFileDownload(e, message.file_url!, message.file_name || 'downloaded_video')} className={`${commonLinkClasses} ${linkColor}`}>Download video</a></p>;
+        }
+        if (videoSrc) {
+          return (
+            <div className="mt-1">
+              <video src={videoSrc} controls className="max-w-full rounded-lg max-h-64 sm:max-h-80">
+                Your browser does not support the video tag.
+              </video>
+              <a
+                href="#"
+                onClick={(e) => handleFileDownload(e, message.file_url!, message.file_name || 'downloaded_video')}
+                className={`mt-1.5 text-xs ${commonLinkClasses} ${linkColor} ${isDownloading ? 'opacity-50 cursor-not-allowed' : ''}`}
                 title={isDownloading ? "Downloading..." : `Download ${message.file_name || 'video'}`}
               >
-                {isDownloading ? 'Downloading video...' : 'Download video'}
+                {isDownloading ? <><Loader2 className="animate-spin inline-block mr-1" size={12} />Downloading...</> : `Download ${message.file_name || 'video'}`}
               </a>
-            </video>
-            {/* Optional: Add a separate download button/link if needed, styled consistently */}
-          </div>
-        );
+            </div>
+          );
+        }
+        return <p className="text-xs italic p-2">Video preview not available. <a href="#" onClick={(e) => handleFileDownload(e, message.file_url!, message.file_name || 'downloaded_video')} className={`${commonLinkClasses} ${linkColor}`}>Download video</a></p>;
       case 'audio':
-        return (
-          <div className="mt-1 flex flex-col items-start">
-            <audio controls src={message.file_url} className="w-full sm:w-auto">
-              Your browser does not support the audio element.
-            </audio>
-            <a 
-              href="#" 
-              onClick={(e) => handleFileDownload(e, message.file_url!, message.file_name || 'downloaded_audio')}
-              className={`mt-1.5 text-xs ${commonLinkClasses} ${linkColor} ${isDownloading ? 'opacity-50 cursor-not-allowed' : ''}`}
-              title={isDownloading ? "Downloading..." : `Download ${message.file_name || 'audio file'}`}
-            >
-              {isDownloading ? (
-                <>
-                  <Loader2 className="animate-spin inline-block mr-1" size={12} />
-                  Downloading...
-                </>
-              ) : (
-                `Download ${message.file_name || 'audio file'}`
-              )}
-            </a>
-          </div>
-        );
+        if (isLoadingAudio) {
+          return <div className="p-2 flex items-center"><Loader2 className="animate-spin" size={20} /><p className="ml-2 text-xs italic">Loading audio...</p></div>;
+        }
+        if (audioError) {
+          return <p className="text-xs italic p-2 text-red-500">{audioError}. <a href="#" onClick={(e) => handleFileDownload(e, message.file_url!, message.file_name || 'downloaded_audio')} className={`${commonLinkClasses} ${linkColor}`}>Download audio</a></p>;
+        }
+        if (audioSrc) {
+          return (
+            <div className="mt-1 flex flex-col items-start">
+              <audio controls src={audioSrc} className="w-full sm:w-auto">
+                Your browser does not support the audio element.
+              </audio>
+              <a
+                href="#"
+                onClick={(e) => handleFileDownload(e, message.file_url!, message.file_name || 'downloaded_audio')}
+                className={`mt-1.5 text-xs ${commonLinkClasses} ${linkColor} ${isDownloading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                title={isDownloading ? "Downloading..." : `Download ${message.file_name || 'audio file'}`}
+              >
+                {isDownloading ? <><Loader2 className="animate-spin inline-block mr-1" size={12} />Downloading...</> : `Download ${message.file_name || 'audio file'}`}
+              </a>
+            </div>
+          );
+        }
+        return <p className="text-xs italic p-2">Audio preview not available. <a href="#" onClick={(e) => handleFileDownload(e, message.file_url!, message.file_name || 'downloaded_audio')} className={`${commonLinkClasses} ${linkColor}`}>Download audio</a></p>;
       case 'pdf':
       case 'archive':
       case 'doc':
@@ -204,7 +255,7 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, currentUserId }) => 
         )}
         {/* Render file content if available, otherwise text content */}
         {message.file_url && message.file_type ? renderFileContent() : (
-          <p className="text-sm leading-snug">{message.content}</p>
+          <p className="text-sm leading-snug break-all">{message.content}</p>
         )}
 
         {/* Timestamp and Read Status */}

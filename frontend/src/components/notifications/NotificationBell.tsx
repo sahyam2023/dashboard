@@ -1,6 +1,6 @@
 // src/components/notifications/NotificationBell.tsx
 import React, { useState, useEffect, useRef } from 'react';
-import { Bell, CheckCheck, XCircle, MailQuestion } from 'lucide-react'; // MailQuestion for empty state
+import { Bell, CheckCheck, XCircle, MailQuestion, Megaphone } from 'lucide-react'; // MailQuestion for empty state, Megaphone for announcements
 import { useNotification } from '../../context/NotificationContext';
 import type { Notification } from '../../types'; // Ensure path is correct
 import { formatDistanceToNow } from 'date-fns'; // For relative time
@@ -89,7 +89,7 @@ const NotificationBell: React.FC = () => {
       loadNotifications(currentPage + 1);
     }
   };
-  
+
   // Function to generate a link for a notification
   const getNotificationLink = (notification: Notification): string | undefined => {
     if (!notification.type) return undefined; // No type, no specific link
@@ -114,7 +114,7 @@ const NotificationBell: React.FC = () => {
             console.warn(`Unknown content_type for new_content_posted notification: ${notification.content_type}`);
             return undefined; // Or a general link
         }
-        
+
         let queryParams = `?item_id=${notification.item_id}`;
         if (notification.category) {
           // Assuming category in notification corresponds to a filter key, e.g., 'doc_type' for documents, or 'software_name' for patches/links
@@ -155,24 +155,24 @@ const NotificationBell: React.FC = () => {
         return undefined;
       }
     }
-    
+
     // Fallback for older direct item notifications if any (or other types)
     // This logic might need to be deprecated or adjusted if all notifications adopt the new structure.
     if (notification.item_type && notification.item_id) {
-        let basePath = '';
-        switch (notification.item_type) {
-            case 'document': basePath = '/documents'; break;
-            case 'patch': basePath = '/patches'; break;
-            case 'link': basePath = '/links'; break;
-            case 'misc_file': basePath = '/misc'; break;
-            case 'software': basePath = '/software'; break;
-            case 'version': basePath = '/versions'; break;
-            // Ensure 'announcement' is not in this switch
-            default: 
-                console.warn(`Unhandled item_type in fallback: ${notification.item_type}`);
-                return undefined;
-        }
-        return `${basePath}?item_id=${notification.item_id}`;
+      let basePath = '';
+      switch (notification.item_type) {
+        case 'document': basePath = '/documents'; break;
+        case 'patch': basePath = '/patches'; break;
+        case 'link': basePath = '/links'; break;
+        case 'misc_file': basePath = '/misc'; break;
+        case 'software': basePath = '/software'; break;
+        case 'version': basePath = '/versions'; break;
+        // Ensure 'announcement' is not in this switch
+        default:
+          console.warn(`Unhandled item_type in fallback: ${notification.item_type}`);
+          return undefined;
+      }
+      return `${basePath}?item_id=${notification.item_id}`;
     }
 
     console.warn(`Could not determine link for notification:`, notification);
@@ -205,7 +205,7 @@ const NotificationBell: React.FC = () => {
 
           {isLoading && currentNotifications.length === 0 && <div className="p-4 text-center text-gray-500 dark:text-gray-400">Loading...</div>}
           {error && <div className="p-4 text-center text-red-500">Error: {error.message}</div>}
-          
+
           {!isLoading && !error && currentNotifications.length === 0 && (
             <div className="p-6 text-center text-gray-500 dark:text-gray-400 flex flex-col items-center">
               <MailQuestion size={48} className="mb-3 text-gray-400 dark:text-gray-500" />
@@ -215,35 +215,47 @@ const NotificationBell: React.FC = () => {
 
           {currentNotifications.length > 0 && (
             <ul className="divide-y divide-gray-200 dark:divide-gray-700 overflow-y-auto flex-grow">
-              {currentNotifications.map(notification => (
-                <li key={notification.id} className={`p-3 hover:bg-gray-50 dark:hover:bg-gray-700 ${notification.is_read ? 'opacity-70' : ''}`}>
-                  <a 
-                    href={getNotificationLink(notification) || '#'} 
-                    onClick={(e) => {
-                      if (!notification.is_read) {
-                        handleMarkAsRead(notification.id);
-                      }
-                      // If getNotificationLink returns '#', prevent default to avoid page jump
-                      if (getNotificationLink(notification) === '#') e.preventDefault();
-                    }}
-                    className="block"
-                    target="_self" // Always open in the same tab for internal navigation
-                    // rel attribute removed as it's not needed for _self
-                  >
-                    <div className="flex justify-between items-start">
-                      <p className="text-sm text-gray-700 dark:text-gray-300 break-words mr-2">{notification.message}</p>
-                      {!notification.is_read && (
-                        <span className="mt-1 h-2 w-2 rounded-full bg-blue-500 flex-shrink-0" aria-label="Unread"></span>
-                      )}
-                    </div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                      {formatDistanceToNow(new Date(notification.created_at), { addSuffix: true })}
-                    </p>
-                  </a>
-                </li>
-              ))}
-               {isFetchingMore && <li className="p-3 text-center text-sm text-gray-500 dark:text-gray-400">Loading more...</li>}
-               {!isFetchingMore && currentPage < totalPages && (
+              {currentNotifications.map(notification => {
+                const isAnnouncement = notification.type === 'announcement';
+                const liClassName = `p-3 hover:bg-gray-50 dark:hover:bg-gray-700 ${notification.is_read ? 'opacity-70' : ''} ${isAnnouncement ? 'bg-blue-50 dark:bg-blue-900/30' : ''}`;
+
+                return (
+                  <li key={notification.id} className={liClassName}>
+                    <a
+                      href={getNotificationLink(notification) || '#'}
+                      onClick={(e) => {
+                        if (!notification.is_read) {
+                          handleMarkAsRead(notification.id);
+                        }
+                        if (getNotificationLink(notification) === '#') e.preventDefault();
+                      }}
+                      className="block"
+                      target="_self"
+                    >
+                      <div className="flex items-start"> {/* Ensure items align nicely with icon */}
+                        {isAnnouncement && (
+                          <Megaphone size={20} className="mr-3 mt-0.5 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                        )}
+                        <div className="flex-grow min-w-0"> {/* Add min-w-0 here */}
+                          <div className="flex justify-between items-start">
+                            <p className={`text-sm ${isAnnouncement ? 'font-semibold text-blue-800 dark:text-blue-200' : 'text-gray-700 dark:text-gray-300'} break-all mr-2`}>
+                              {notification.message}
+                            </p>
+                            {!notification.is_read && (
+                              <span className="mt-1 h-2 w-2 rounded-full bg-blue-500 flex-shrink-0" aria-label="Unread"></span>
+                            )}
+                          </div>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            {formatDistanceToNow(new Date(notification.created_at), { addSuffix: true })}
+                          </p>
+                        </div>
+                      </div>
+                    </a>
+                  </li>
+                );
+              })}
+              {isFetchingMore && <li className="p-3 text-center text-sm text-gray-500 dark:text-gray-400">Loading more...</li>}
+              {!isFetchingMore && currentPage < totalPages && (
                 <li className="p-2 text-center">
                   <button
                     onClick={handleLoadMore}
@@ -255,7 +267,7 @@ const NotificationBell: React.FC = () => {
               )}
             </ul>
           )}
-          
+
           {currentNotifications.length > 0 && (
             <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
               <div className="flex justify-between items-center">

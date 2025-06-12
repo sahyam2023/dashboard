@@ -7612,26 +7612,28 @@ def create_announcement():
         )
         new_announcement_id = cursor.lastrowid
 
+        # Fetch the username of the superadmin who created the announcement
+        superadmin_details_cursor = db.execute("SELECT username FROM users WHERE id = ?", (superadmin_user_id,))
+        superadmin_details = superadmin_details_cursor.fetchone()
+        superadmin_username = superadmin_details['username'] if superadmin_details else "Unknown SuperAdmin"
+
+        # Construct the new notification message
+        notification_message_for_users = f"Announcement from {superadmin_username}: {announcement_message}"
+
         # Fetch all active user IDs to create notifications
         active_users_cursor = db.execute("SELECT id FROM users WHERE is_active = TRUE")
         active_user_ids = [row['id'] for row in active_users_cursor.fetchall()]
 
         notification_type = 'announcement' # Consistent type for these notifications
-        # The message for the notification can be the announcement message itself, or a summary
-        notification_message_for_users = announcement_message # Using full message
 
         for user_id_to_notify in active_user_ids:
-            # Ensure create_notification is called correctly
-            # def create_notification(db, user_id, type, message, item_id=None, item_type=None, content_type=None, category=None):
             database.create_notification(
-                db, # Pass the database connection
+                db,
                 user_id=user_id_to_notify,
                 type=notification_type,
-                message=notification_message_for_users,
+                message=notification_message_for_users, # Use the new message
                 item_id=new_announcement_id,
-                item_type='announcement' # Refers to the item type of item_id (announcements table)
-                # content_type and category are not strictly needed for 'announcement' type notifications
-                # unless you want to categorize announcements further, which is not in the current scope.
+                item_type='announcement'
             )
 
         # Log the audit action

@@ -41,7 +41,7 @@ interface DocumentFormData {
 // Yup validation schema
 const documentValidationSchema = yup.object().shape({
   selectedSoftwareId: yup.string().required("Software selection is required."),
-  docName: yup.string().required("Document Name is required.").max(255, "Document Name cannot exceed 255 characters."),
+  docName: yup.string().trim().min(1, 'Document Name cannot be empty and must contain non-space characters.').max(255, "Document Name cannot exceed 255 characters."),
   docType: yup.string().transform(value => value === '' ? undefined : value).nullable().optional(),
   inputMode: yup.string().oneOf(['url', 'upload']).required("Input mode must be selected."),
   externalUrl: yup.string().when('inputMode', (inputModeValues: any, schema: any) => {

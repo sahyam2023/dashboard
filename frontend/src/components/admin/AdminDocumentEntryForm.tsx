@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useForm, SubmitHandler, FieldErrors } from 'react-hook-form';
 import * as yup from 'yup';
+import { yupIsValidUrl } from '../../utils/validationUtils';
 import { yupResolver } from '@hookform/resolvers/yup';
 // import { toast } from 'react-toastify'; // Replaced with utils
 import { showSuccessToast, showErrorToast, showWarningToast } from '../../utils/toastUtils'; // Added utils
@@ -43,10 +44,15 @@ const documentValidationSchema = yup.object().shape({
   docName: yup.string().required("Document Name is required.").max(255, "Document Name cannot exceed 255 characters."),
   docType: yup.string().transform(value => value === '' ? undefined : value).nullable().optional(),
   inputMode: yup.string().oneOf(['url', 'upload']).required("Input mode must be selected."),
-  externalUrl: yup.string().when('inputMode', {
-    is: 'url',
-    then: schema => schema.required("External Download URL is required.").url("Please enter a valid URL (e.g., http://example.com)."),
-    otherwise: schema => schema.optional().nullable(),
+  externalUrl: yup.string().when('inputMode', (inputModeValues: any, schema: any) => {
+    // inputModeValues will be an array in some Yup versions, string in others.
+    // For simplicity, handle both by checking inputModeValues or inputModeValues[0]
+    const mode = Array.isArray(inputModeValues) ? inputModeValues[0] : inputModeValues;
+    if (mode === 'url') {
+      return yupIsValidUrl().required("External Download URL is required.");
+    }
+    // Ensure we return a compatible string schema for 'otherwise'
+    return yup.string().optional().nullable(); 
   }),
   selectedFile: yup.mixed()
     .when(['inputMode', '$isEditMode', '$documentToEditIsExternal'], { // Pass context via $ prefix
@@ -398,7 +404,7 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
         <div>
           <label htmlFor="externalUrl" className="block text-sm font-medium text-gray-700 dark:text-gray-300">External Download URL*</label>
           <input
-            type="url"
+            type="text"
             id="externalUrl"
             {...register("externalUrl")}
             placeholder="https://example.com/document.pdf"

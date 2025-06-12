@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useForm, Controller, SubmitHandler, FieldErrors } from 'react-hook-form';
 import * as yup from 'yup';
+import { yupIsValidUrl } from '../../utils/validationUtils';
 import { yupResolver } from '@hookform/resolvers/yup';
 import { showSuccessToast, showErrorToast, showWarningToast } from '../../utils/toastUtils'; // Standardized toast
 import {
@@ -56,10 +57,12 @@ const validationSchema = yup.object().shape({
     otherwise: schema => schema.transform(value => value === '' ? undefined : value).optional().nullable(),
   }),
   inputMode: yup.string().oneOf(['url', 'upload']).required('Input mode must be selected.'),
-  externalUrl: yup.string().when('inputMode', {
-    is: 'url',
-    then: schema => schema.required('External URL is required for URL mode.').url('Please enter a valid URL (e.g., http://example.com).'),
-    otherwise: schema => schema.optional().nullable(),
+  externalUrl: yup.string().when('inputMode', (inputModeValues: any, schema: any) => {
+    const mode = Array.isArray(inputModeValues) ? inputModeValues[0] : inputModeValues;
+    if (mode === 'url') {
+      return yupIsValidUrl().required('External URL is required for URL mode.');
+    }
+    return yup.string().optional().nullable();
   }),
   selectedFile: yup.mixed().when(
     ['inputMode', '$isEditMode', '$isOriginallyFileBased'],

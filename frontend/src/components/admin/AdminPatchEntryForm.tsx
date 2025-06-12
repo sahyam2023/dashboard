@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useForm, Controller, SubmitHandler, FieldErrors } from 'react-hook-form';
 import * as yup from 'yup';
+import { yupIsValidUrl } from '../../utils/validationUtils';
 import { yupResolver } from '@hookform/resolvers/yup';
 import { showSuccessToast, showErrorToast, showWarningToast } from '../../utils/toastUtils'; // Standardized toast
 import {
@@ -68,10 +69,12 @@ const patchValidationSchema = yup.object().shape({
   patchName: yup.string().required("Patch Name is required.").max(255, "Patch Name cannot exceed 255 characters."),
   releaseDate: yup.string().transform(value => value === '' ? undefined : value).optional().nullable(),
   inputMode: yup.string().oneOf(['url', 'upload']).required("Input mode must be selected."),
-  externalUrl: yup.string().when('inputMode', {
-    is: 'url',
-    then: schema => schema.required("External Download URL is required.").url("Please enter a valid URL."),
-    otherwise: schema => schema.optional().nullable(),
+  externalUrl: yup.string().when('inputMode', (inputModeValues: any, schema: any) => {
+    const mode = Array.isArray(inputModeValues) ? inputModeValues[0] : inputModeValues;
+    if (mode === 'url') {
+      return yupIsValidUrl().required("External Download URL is required.");
+    }
+    return yup.string().optional().nullable();
   }),
   selectedFile: yup.mixed()
     .when(['inputMode', '$isEditMode', '$patchToEditIsExternal'], { // Context variables prefixed with $
@@ -649,7 +652,7 @@ const AdminPatchEntryForm: React.FC<AdminPatchEntryFormProps> = ({
         <div>
             <label htmlFor="externalUrl" className="block text-sm font-medium text-gray-700 dark:text-gray-300">External Download URL*</label>
             <input 
-                type="url" 
+                type="text" 
                 id="externalUrl" 
                 {...register("externalUrl")} 
                 placeholder="https://example.com/patch.exe" 

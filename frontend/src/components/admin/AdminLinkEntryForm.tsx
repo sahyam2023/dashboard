@@ -623,7 +623,7 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
         <div>
           <label htmlFor="externalUrl" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Link URL*</label>
           <input
-            type="url"
+            type="text"
             id="externalUrl"
             {...register("externalUrl")} // RHF register
             placeholder="https://example.com/resource"

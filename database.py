@@ -361,8 +361,7 @@ def add_default_watch_preferences(db, user_id: int):
         # Content Type, Category (None for all categories of that content type or general)
         ('documents', 'general'), # General documents
         ('patches', None),         # All patches
-        ('links', None),           # All links
-        ('misc', None)       # All misc_files (or a common category if defined)
+        ('links', None)           # All links
         # ('comments', 'reply') # Example: if users could opt-in to all replies by default
     ]
     

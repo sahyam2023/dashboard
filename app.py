@@ -2757,6 +2757,7 @@ def get_all_patches_api():
 
     # Get existing filter parameters
     software_id_filter = request.args.get('software_id', type=int)
+    version_id_filter = request.args.get('version_id', type=int)
 
     # Get new filter parameters
     release_from_filter = request.args.get('release_from', type=str)
@@ -2857,6 +2858,9 @@ def get_all_patches_api():
     if software_id_filter:
         filter_conditions.append("s.id = ?") 
         params.append(software_id_filter)
+    if version_id_filter is not None:
+        filter_conditions.append("p.version_id = ?")
+        params.append(version_id_filter)
     if release_from_filter:
         filter_conditions.append("date(p.release_date) >= date(?)")
         params.append(release_from_filter)

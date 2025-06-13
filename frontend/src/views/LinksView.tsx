@@ -17,7 +17,7 @@ import { useAuth } from '../context/AuthContext';
 import AdminLinkEntryForm from '../components/admin/AdminLinkEntryForm';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
 import Modal from '../components/shared/Modal';
-import { PlusCircle, MinusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Link as LinkIconLucide, Download, Move, AlertTriangle, MessageSquare } from 'lucide-react'; // Added MessageSquare
+import { PlusCircle, MinusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Link as LinkIconLucide, Download, Move, AlertTriangle, MessageSquare, ExternalLink } from 'lucide-react'; // Added MessageSquare
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils';
 
 interface OutletContextType {
@@ -347,7 +347,7 @@ const LinksView: React.FC = () => {
         const displayText = 'Link';
 
         // The icon will now always be Download, just like in PatchesView
-        const IconComponent = Download;
+        const IconComponent = l.is_external_link ? ExternalLink : Download;
 
         if (!isEffectivelyDownloadable && !l.is_external_link) { // Uploaded file, not downloadable
           return (

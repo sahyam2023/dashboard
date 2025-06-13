@@ -469,7 +469,7 @@ useEffect(() => {
             }}
             title={canDirectlyDownload ? (d.is_external_link ? "Open external link" : "Download file") : "Download not permitted"}
           >
-            <Download size={14} className="mr-1"/>Link
+            {d.is_external_link ? <ExternalLink size={14} className="mr-1"/> : <Download size={14} className="mr-1"/>}Link
           </a>
         );
       } 

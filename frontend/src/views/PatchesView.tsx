@@ -435,7 +435,7 @@ const PatchesView: React.FC = () => {
             }}
             title={isEffectivelyDownloadable ? (p.is_external_link ? "Open external link" : "Download patch") : "Download not permitted"}
           >
-            <Download size={14} className="mr-1" />Link
+            {p.is_external_link ? <ExternalLink size={14} className="mr-1" /> : <Download size={14} className="mr-1" />}Link
           </a>
         );
       }

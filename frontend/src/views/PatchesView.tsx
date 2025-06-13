@@ -1,6 +1,6 @@
 // src/views/PatchesView.tsx
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useOutletContext, useLocation } from 'react-router-dom';
+import { useOutletContext, useLocation, useSearchParams } from 'react-router-dom'; // Added useSearchParams
 import { ExternalLink, PlusCircle, MinusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Download, Move, AlertTriangle, Package as PackageIcon, MessageSquare } from 'lucide-react';
 import {
   fetchPatches,
@@ -90,6 +90,8 @@ const PatchesView: React.FC = () => {
   const [selectedPatchForComments, setSelectedPatchForComments] = useState<PatchType | null>(null);
   const commentSectionRef = useRef<HTMLDivElement>(null);
   const location = useLocation(); // Added useLocation
+  const [searchParams] = useSearchParams(); // Added for page/highlight
+  const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null); // Added for highlight
 
   const filtersAreActive = useMemo(() => {
     return (
@@ -103,6 +105,7 @@ const PatchesView: React.FC = () => {
   }, [selectedSoftwareId, activeVersionId, releaseFromFilter, releaseToFilter, patchedByDeveloperFilter, searchTerm]);
 
   const handleClearAllFiltersAndSearch = useCallback(() => {
+    setHighlightedItemId(null); // Clear highlight
     setSelectedSoftwareId(null);
     setActiveVersionId(null);
     setReleaseFromFilter('');
@@ -110,7 +113,7 @@ const PatchesView: React.FC = () => {
     setPatchedByDeveloperFilter('');
     if (setSearchTerm) setSearchTerm('');
     // Note: fetchAndSetPatches(1, true) will be called by useEffect due to filter state changes.
-  }, [setSearchTerm]);
+  }, [setSearchTerm, setHighlightedItemId]);
 
   const handleApplyAdvancedFilters = () => {
     fetchAndSetPatches(1, true);
@@ -168,26 +171,50 @@ const PatchesView: React.FC = () => {
 
   // Debounce effects for filter inputs
   useEffect(() => {
+    setHighlightedItemId(null); // Clear highlight
     const handler = setTimeout(() => setDebouncedReleaseFromFilter(releaseFromFilter), 500);
     return () => clearTimeout(handler);
-  }, [releaseFromFilter]);
+  }, [releaseFromFilter, setHighlightedItemId]);
 
   useEffect(() => {
+    setHighlightedItemId(null); // Clear highlight
     const handler = setTimeout(() => setDebouncedReleaseToFilter(releaseToFilter), 500);
     return () => clearTimeout(handler);
-  }, [releaseToFilter]);
+  }, [releaseToFilter, setHighlightedItemId]);
 
   useEffect(() => {
+    setHighlightedItemId(null); // Clear highlight
     const handler = setTimeout(() => setDebouncedPatchedByDeveloperFilter(patchedByDeveloperFilter), 500);
     return () => clearTimeout(handler);
-  }, [patchedByDeveloperFilter]);
+  }, [patchedByDeveloperFilter, setHighlightedItemId]);
 
   useEffect(() => {
+    // This effect handles fetching data when primary filters or searchTerm change.
+    setHighlightedItemId(null); // Clear highlight
     if (isAuthenticated) fetchAndSetPatches(1, true);
     else { setPatches([]); setIsLoadingInitial(false); }
-  }, [isAuthenticated, selectedSoftwareId, activeVersionId, sortBy, sortOrder, debouncedReleaseFromFilter, debouncedReleaseToFilter, debouncedPatchedByDeveloperFilter, searchTerm, fetchAndSetPatches]); // Added activeVersionId
+  }, [isAuthenticated, selectedSoftwareId, activeVersionId, sortBy, sortOrder, debouncedReleaseFromFilter, debouncedReleaseToFilter, debouncedPatchedByDeveloperFilter, searchTerm, fetchAndSetPatches, setHighlightedItemId]); 
 
   // Effect to handle focusing on a comment if item_id and comment_id are in URL
+  useEffect(() => {
+    const pageFromUrlStr = searchParams.get('page');
+    const highlightIdFromUrl = searchParams.get('highlight');
+
+    if (pageFromUrlStr) {
+      const pageNumber = parseInt(pageFromUrlStr, 10);
+      if (!isNaN(pageNumber) && pageNumber > 0 && pageNumber !== currentPage) {
+        setCurrentPage(pageNumber);
+        fetchAndSetPatches(pageNumber, true);
+      }
+    }
+
+    if (highlightIdFromUrl) {
+      setHighlightedItemId(highlightIdFromUrl);
+    } else {
+      setHighlightedItemId(null);
+    }
+  }, [searchParams, currentPage, setCurrentPage, fetchAndSetPatches]);
+
   useEffect(() => {
     const queryParams = new URLSearchParams(location.search);
     const itemIdStr = queryParams.get('item_id');
@@ -255,18 +282,28 @@ const PatchesView: React.FC = () => {
   const handleFilterChange = (id: number | null) => {
     setSelectedSoftwareId(id);
     // Reset version filter when software changes
+    setHighlightedItemId(null); // Clear highlight
     setActiveVersionId(null);
     setCurrentPage(1); // Reset pagination
   };
 
   const handleVersionFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setHighlightedItemId(null); // Clear highlight
     const value = e.target.value ? parseInt(e.target.value, 10) : null;
     setActiveVersionId(value);
     setCurrentPage(1); // Reset pagination when version filter changes
   };
 
-  const handleSort = (key: string) => { setSortBy(key); setSortOrder(prev => (sortBy === key && prev === 'asc' ? 'desc' : 'asc')); };
-  const handlePageChange = (newPage: number) => fetchAndSetPatches(newPage, true);
+  const handleSort = (key: string) => { 
+    setHighlightedItemId(null); // Clear highlight
+    setSortBy(key); 
+    setSortOrder(prev => (sortBy === key && prev === 'asc' ? 'desc' : 'asc')); 
+    // setCurrentPage(1) implicitly handled by main useEffect
+  };
+  const handlePageChange = (newPage: number) => {
+    setHighlightedItemId(null); // Clear highlight
+    fetchAndSetPatches(newPage, true);
+  };
 
   const handleOperationSuccess = (message: string) => {
     setShowAddOrEditForm(false); setEditingPatch(null); /* showSuccessToast(message); */ fetchAndSetPatches(1, true);
@@ -641,7 +678,7 @@ const PatchesView: React.FC = () => {
           {filtersAreActive && (<button onClick={handleClearAllFiltersAndSearch} className="mt-6 btn-primary text-sm">Clear All Filters & Search</button>)}
         </div>
       ) : (
-        <DataTable columns={columns} data={filteredPatchesBySearch} rowClassName="group" isLoading={isLoadingInitial || isProcessingSingleItem} currentPage={currentPage} totalPages={totalPages} onPageChange={handlePageChange} itemsPerPage={itemsPerPage} totalItems={totalPatches} sortColumn={sortBy} sortOrder={sortOrder} onSort={handleSort} isSelectionEnabled={true} selectedItemIds={selectedPatchIds} onSelectItem={handleSelectItem} onSelectAllItems={handleSelectAllItems} />
+        <DataTable columns={columns} data={filteredPatchesBySearch} highlightedRowId={highlightedItemId} rowClassName="group" isLoading={isLoadingInitial || isProcessingSingleItem} currentPage={currentPage} totalPages={totalPages} onPageChange={handlePageChange} itemsPerPage={itemsPerPage} totalItems={totalPatches} sortColumn={sortBy} sortOrder={sortOrder} onSort={handleSort} isSelectionEnabled={true} selectedItemIds={selectedPatchIds} onSelectItem={handleSelectItem} onSelectAllItems={handleSelectAllItems} />
       )}
 
       {showDeleteConfirm && patchToDelete && (<ConfirmationModal isOpen={showDeleteConfirm} title="Delete Patch" message={`Delete "${patchToDelete.patch_name}"?`} onConfirm={handleDeleteConfirm} onCancel={closeDeleteConfirm} isConfirming={isProcessingSingleItem} confirmButtonText="Delete" confirmButtonVariant="danger" />)}

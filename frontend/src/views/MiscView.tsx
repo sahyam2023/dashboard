@@ -1,6 +1,6 @@
 // src/views/MiscView.tsx
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'; // Added useRef
-import { useOutletContext, useLocation } from 'react-router-dom';
+import { useOutletContext, useLocation, useSearchParams } from 'react-router-dom'; // Added useSearchParams
 import { useAuth } from '../context/AuthContext';
 import {
   fetchMiscCategories, fetchMiscFiles, deleteAdminMiscCategory, deleteAdminMiscFile,
@@ -76,55 +76,12 @@ const role = user?.role; // Access role safely, as user can be null
   const [selectedMiscFileForComments, setSelectedMiscFileForComments] = useState<MiscFile | null>(null);
   const commentSectionRef = useRef<HTMLDivElement>(null);
   const location = useLocation(); // Added useLocation
+  const [searchParams] = useSearchParams(); // Added for page/highlight
+  const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null); // Added for highlight
 
   const filtersAreActive = useMemo(() => {
     return activeCategoryId !== null || searchTerm !== '';
   }, [activeCategoryId, searchTerm]);
-
-  const handleClearAllFiltersAndSearch = useCallback(() => {
-    setActiveCategoryId(null);
-    if (setSearchTerm) setSearchTerm('');
-    setCurrentPage(1); 
-  }, [setSearchTerm]);
-
-  const loadMiscCategories = useCallback(async () => {
-    setIsLoadingCategories(true); setErrorCategories(null);
-    try {
-      const data = await fetchMiscCategories(); setCategories(data);
-    } catch (err: any) {
-      setCategories([]); const msg = err.response?.data?.msg || err.message || 'Failed to load categories.';
-      setErrorCategories(msg); showErrorToast(msg);
-    } finally { setIsLoadingCategories(false); }
-  }, []);
-
-  useEffect(() => { if (isAuthenticated) loadMiscCategories(); else setCategories([]); }, [isAuthenticated, loadMiscCategories]);
-
-  // Effect to handle focusing on a comment if item_id and comment_id are in URL
-  useEffect(() => {
-    const queryParams = new URLSearchParams(location.search);
-    const itemIdStr = queryParams.get('item_id');
-    const commentIdStr = queryParams.get('comment_id');
-
-    if (itemIdStr && commentIdStr && miscFiles.length > 0) {
-      const targetMiscFileId = parseInt(itemIdStr, 10);
-
-      if (!isNaN(targetMiscFileId)) {
-        const targetMiscFile = miscFiles.find(file => file.id === targetMiscFileId);
-
-        if (targetMiscFile) {
-          if (!selectedMiscFileForComments || selectedMiscFileForComments.id !== targetMiscFile.id) {
-            setSelectedMiscFileForComments(targetMiscFile);
-          }
-          setTimeout(() => {
-            commentSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }, 100);
-        } else {
-          console.warn(`MiscView: MiscFile with item_id ${targetMiscFileId} not found in the current list.`);
-        }
-      }
-    }
-  }, [location.search, miscFiles, selectedMiscFileForComments]);
-
 
   const fetchAndSetMiscFiles = useCallback(async (pageToLoad: number, isNewQuery: boolean = false) => {
     if (isNewQuery) setIsLoadingInitial(true);
@@ -153,18 +110,98 @@ const role = user?.role; // Access role safely, as user can be null
     }
   }, [activeCategoryId, itemsPerPage, sortBy, sortOrder, isAuthenticated, searchTerm]); // Added searchTerm to dependency array
 
+  const handleClearAllFiltersAndSearch = useCallback(() => {
+    setHighlightedItemId(null); // Clear highlight
+    setActiveCategoryId(null);
+    if (setSearchTerm) setSearchTerm('');
+    setCurrentPage(1); 
+  }, [setSearchTerm, setHighlightedItemId]);
+
+  const loadMiscCategories = useCallback(async () => {
+    setIsLoadingCategories(true); setErrorCategories(null);
+    try {
+      const data = await fetchMiscCategories(); setCategories(data);
+    } catch (err: any) {
+      setCategories([]); const msg = err.response?.data?.msg || err.message || 'Failed to load categories.';
+      setErrorCategories(msg); showErrorToast(msg);
+    } finally { setIsLoadingCategories(false); }
+  }, []);
+
+  useEffect(() => { if (isAuthenticated) loadMiscCategories(); else setCategories([]); }, [isAuthenticated, loadMiscCategories]);
+
   useEffect(() => {
+    const pageFromUrlStr = searchParams.get('page');
+    const highlightIdFromUrl = searchParams.get('highlight');
+
+    if (pageFromUrlStr) {
+      const pageNumber = parseInt(pageFromUrlStr, 10);
+      if (!isNaN(pageNumber) && pageNumber > 0 && pageNumber !== currentPage) {
+        setCurrentPage(pageNumber);
+        fetchAndSetMiscFiles(pageNumber, true);
+      }
+    }
+
+    if (highlightIdFromUrl) {
+      setHighlightedItemId(highlightIdFromUrl);
+    } else {
+      setHighlightedItemId(null);
+    }
+  }, [searchParams, currentPage, setCurrentPage, fetchAndSetMiscFiles]);
+
+  // Effect to handle focusing on a comment if item_id and comment_id are in URL
+  useEffect(() => {
+    const queryParams = new URLSearchParams(location.search);
+    const itemIdStr = queryParams.get('item_id');
+    const commentIdStr = queryParams.get('comment_id');
+
+    if (itemIdStr && commentIdStr && miscFiles.length > 0) {
+      const targetMiscFileId = parseInt(itemIdStr, 10);
+
+      if (!isNaN(targetMiscFileId)) {
+        const targetMiscFile = miscFiles.find(file => file.id === targetMiscFileId);
+
+        if (targetMiscFile) {
+          if (!selectedMiscFileForComments || selectedMiscFileForComments.id !== targetMiscFile.id) {
+            setSelectedMiscFileForComments(targetMiscFile);
+          }
+          setTimeout(() => {
+            commentSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }, 100);
+        } else {
+          console.warn(`MiscView: MiscFile with item_id ${targetMiscFileId} not found in the current list.`);
+        }
+      }
+    }
+  }, [location.search, miscFiles, selectedMiscFileForComments]);
+
+
+  
+
+  useEffect(() => {
+    // This effect handles fetching data when primary filters or searchTerm change.
+    setHighlightedItemId(null); // Clear highlight
     if (isAuthenticated) fetchAndSetMiscFiles(1, true);
     else { setMiscFiles([]); setIsLoadingInitial(false); }
-  }, [isAuthenticated, activeCategoryId, sortBy, sortOrder, searchTerm, fetchAndSetMiscFiles]); // Added searchTerm to fetchAndSetMiscFiles call
+  }, [isAuthenticated, activeCategoryId, sortBy, sortOrder, searchTerm, fetchAndSetMiscFiles, setHighlightedItemId]); 
   
   useEffect(() => { setSelectedMiscFileIds(new Set()); }, [activeCategoryId, sortBy, sortOrder, searchTerm, currentPage]);
 
   const handleCategoryFilterChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-    setActiveCategoryId(event.target.value ? parseInt(event.target.value) : null); setCurrentPage(1);
+    setHighlightedItemId(null); // Clear highlight
+    setActiveCategoryId(event.target.value ? parseInt(event.target.value) : null); 
+    setCurrentPage(1);
   };
-  const handlePageChange = (newPage: number) => { setCurrentPage(newPage); fetchAndSetMiscFiles(newPage, true);};
-  const handleSort = (key: string) => { setSortBy(key); setSortOrder(prev => (sortBy === key && prev === 'asc' ? 'desc' : 'asc')); setCurrentPage(1); };
+  const handlePageChange = (newPage: number) => { 
+    setHighlightedItemId(null); // Clear highlight
+    setCurrentPage(newPage); 
+    fetchAndSetMiscFiles(newPage, true);
+  };
+  const handleSort = (key: string) => { 
+    setHighlightedItemId(null); // Clear highlight
+    setSortBy(key); 
+    setSortOrder(prev => (sortBy === key && prev === 'asc' ? 'desc' : 'asc')); 
+    setCurrentPage(1); 
+  };
 
   const handleMiscFileAddedOrUpdated = (file: MiscFile, isEdit: boolean) => {
     setShowAddOrEditForm(false); setEditingMiscFile(null);
@@ -465,7 +502,7 @@ const role = user?.role; // Access role safely, as user can be null
             {filtersAreActive && (<button onClick={handleClearAllFiltersAndSearch} className="mt-6 btn-primary text-sm">Clear All Filters & Search</button>)}
           </div>
         ) : (
-        <DataTable columns={columns} data={miscFiles} rowClassName="group" isLoading={isLoadingInitial || isProcessingSingleItem} currentPage={currentPage} totalPages={totalPages} onPageChange={handlePageChange} itemsPerPage={itemsPerPage} totalItems={totalMiscFiles} sortColumn={sortBy} sortOrder={sortOrder} onSort={handleSort} isSelectionEnabled={true} selectedItemIds={selectedMiscFileIds} onSelectItem={handleSelectItem} onSelectAllItems={handleSelectAllItems} />
+        <DataTable columns={columns} data={miscFiles} highlightedRowId={highlightedItemId} rowClassName="group" isLoading={isLoadingInitial || isProcessingSingleItem} currentPage={currentPage} totalPages={totalPages} onPageChange={handlePageChange} itemsPerPage={itemsPerPage} totalItems={totalMiscFiles} sortColumn={sortBy} sortOrder={sortOrder} onSort={handleSort} isSelectionEnabled={true} selectedItemIds={selectedMiscFileIds} onSelectItem={handleSelectItem} onSelectAllItems={handleSelectAllItems} />
       )}
 
       {showDeleteCategoryConfirm && categoryToDelete && (<ConfirmationModal isOpen={showDeleteCategoryConfirm} title="Delete Category" message={`Delete category "${categoryToDelete.name}"? Files in it won't be deleted but will become uncategorized.`} onConfirm={handleDeleteCategoryConfirm} onCancel={closeDeleteCategoryConfirm} isConfirming={isProcessingCategory} confirmButtonText="Delete" confirmButtonVariant="danger"/>)}

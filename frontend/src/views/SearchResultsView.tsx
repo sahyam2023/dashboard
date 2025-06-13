@@ -26,6 +26,7 @@ interface SearchResultItem {
   is_downloadable?: boolean;
   is_favorited?: boolean; // Added
   favorite_id?: number; // Added
+  page_number?: number; // Added for internal navigation
   // Add other fields that might appear in search results
 }
 
@@ -117,11 +118,11 @@ const SearchResultsView: React.FC = () => {
 
     switch (result.type) {
       case 'document':
-        linkTo = `/documents?highlight=${result.id}`; 
+        linkTo = `/documents?page=${result.page_number || 1}&highlight=${result.id}`;
         // Downloadability for documents in search results is handled by DocumentsView
         break;
       case 'patch':
-        linkTo = `/patches?highlight=${result.id}`; 
+        linkTo = `/patches?page=${result.page_number || 1}&highlight=${result.id}`;
         // Downloadability for patches in search results is handled by PatchesView
         break;
       case 'software':
@@ -131,18 +132,21 @@ const SearchResultsView: React.FC = () => {
         linkTo = `/patches?software_id=${result.software_id}`;
         break;
       case 'link':
-        if (result.is_external_link && result.url) {
+        if (result.page_number && result.id) { // Prioritize internal navigation
+          linkTo = `/links?page=${result.page_number}&highlight=${result.id}`;
+        } else if (result.is_external_link && result.url) { // External link
           linkTo = result.url;
           isExternal = true;
-          // External links are always "downloadable" (clickable)
-        } else if (result.stored_filename) {
+        } else if (result.stored_filename) { // Fallback to download for internal files if no page_number (should be rare)
           downloadUrl = `/official_uploads/links/${result.stored_filename}`;
           isDownload = true;
           isEffectivelyDownloadable = result.is_downloadable !== false;
         }
         break;
       case 'misc_file':
-        if (result.stored_filename) {
+        if (result.page_number && result.id) { // Prioritize internal navigation
+          linkTo = `/misc?page=${result.page_number}&highlight=${result.id}`; // Assuming /misc route
+        } else if (result.stored_filename) { // Fallback to download
           downloadUrl = `/misc_uploads/${result.stored_filename}`;
           isDownload = true;
           isEffectivelyDownloadable = result.is_downloadable !== false;

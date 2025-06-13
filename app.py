@@ -7346,6 +7346,7 @@ def serve_misc_file(filename):
 @app.route('/api/search', methods=['GET'])
 @jwt_required(optional=True)
 def search_api():
+    ITEMS_PER_PAGE = 10
     query_term = request.args.get('q', '').strip()
     results = []
     db = get_db()
@@ -7518,7 +7519,100 @@ def search_api():
         
     results.extend([dict(row) for row in db.execute(sql_versions_query, tuple(final_version_params)).fetchall()])
 
-    return jsonify(results)
+  # Calculate page_number for relevant items
+    for item in results:
+        item['page_number'] = 1 # Default page number
+        current_item_id = item.get('id')
+        # current_item_name is specific to each type and fetched within the if block
+
+        if not current_item_id: # Name can sometimes be None (e.g. misc_file user_provided_title)
+            app.logger.debug(f"Search result item ID {current_item_id} is missing, skipping page_number calculation.")
+            continue
+
+        rank_query = None
+        rank_params = []
+
+        if item.get('type') == 'document':
+            current_item_name = item.get('name') # doc_name for documents
+            if not current_item_name:
+                app.logger.debug(f"Document item ID {current_item_id} missing name, skipping page_number.")
+                continue
+            rank_query = """
+                SELECT COUNT(d_rank.id) FROM documents d_rank
+                LEFT JOIN file_permissions fp_rank ON d_rank.id = fp_rank.file_id AND fp_rank.file_type = 'document' AND fp_rank.user_id = ?
+                WHERE (fp_rank.id IS NULL OR fp_rank.can_view IS NOT FALSE)
+                AND (LOWER(d_rank.doc_name) < LOWER(?) OR (LOWER(d_rank.doc_name) = LOWER(?) AND d_rank.id < ?))
+            """
+            rank_params = (logged_in_user_id, current_item_name, current_item_name, current_item_id)
+        
+        elif item.get('type') == 'patch':
+            current_item_name = item.get('name') # patch_name for patches
+            if not current_item_name:
+                app.logger.debug(f"Patch item ID {current_item_id} missing name, skipping page_number.")
+                continue
+            rank_query = """
+                SELECT COUNT(p_rank.id) FROM patches p_rank
+                LEFT JOIN file_permissions fp_rank ON p_rank.id = fp_rank.file_id AND fp_rank.file_type = 'patch' AND fp_rank.user_id = ?
+                WHERE (fp_rank.id IS NULL OR fp_rank.can_view IS NOT FALSE)
+                AND (LOWER(p_rank.patch_name) < LOWER(?) OR (LOWER(p_rank.patch_name) = LOWER(?) AND p_rank.id < ?))
+            """
+            rank_params = (logged_in_user_id, current_item_name, current_item_name, current_item_id)
+
+        elif item.get('type') == 'link':
+            current_item_name = item.get('name') # title for links
+            if not current_item_name:
+                app.logger.debug(f"Link item ID {current_item_id} missing name, skipping page_number.")
+                continue
+            rank_query = """
+                SELECT COUNT(l_rank.id) FROM links l_rank
+                LEFT JOIN file_permissions fp_rank ON l_rank.id = fp_rank.file_id AND fp_rank.file_type = 'link' AND fp_rank.user_id = ?
+                WHERE (fp_rank.id IS NULL OR fp_rank.can_view IS NOT FALSE)
+                AND (LOWER(l_rank.title) < LOWER(?) OR (LOWER(l_rank.title) = LOWER(?) AND l_rank.id < ?))
+            """
+            rank_params = (logged_in_user_id, current_item_name, current_item_name, current_item_id)
+
+        elif item.get('type') == 'misc_file':
+            # For misc_file, 'name' in search result is user_provided_title.
+            # 'original_filename' is also available in the search result dict.
+            current_item_user_title = item.get('name') 
+            current_item_orig_name = item.get('original_filename')
+            # COALESCE in query handles if user_provided_title is NULL
+            if not current_item_user_title and not current_item_orig_name:
+                app.logger.debug(f"Misc_file item ID {current_item_id} missing both user_provided_title and original_filename, skipping page_number.")
+                continue
+
+            rank_query = """
+                SELECT COUNT(mf_rank.id) FROM misc_files mf_rank
+                LEFT JOIN file_permissions fp_rank ON mf_rank.id = fp_rank.file_id AND fp_rank.file_type = 'misc_file' AND fp_rank.user_id = ?
+                WHERE (fp_rank.id IS NULL OR fp_rank.can_view IS NOT FALSE)
+                AND (
+                    (LOWER(COALESCE(mf_rank.user_provided_title, mf_rank.original_filename)) < LOWER(COALESCE(?, ?))) OR
+                    (
+                        LOWER(COALESCE(mf_rank.user_provided_title, mf_rank.original_filename)) = LOWER(COALESCE(?, ?)) AND
+                        mf_rank.id < ?
+                    )
+                )
+            """
+            # Pass both, COALESCE in SQL will pick the non-null one or the first if both exist.
+            # For the < and = comparisons, it's crucial that the COALESCE logic matches how the search results are ordered.
+            # The search results themselves sort by COALESCE(user_provided_title, original_filename).
+            rank_params = (logged_in_user_id, 
+                        current_item_user_title, current_item_orig_name, # For first COALESCE in <
+                        current_item_user_title, current_item_orig_name, # For second COALESCE in =
+                        current_item_id)
+
+        if rank_query:
+            try:
+                rank_cursor = db.execute(rank_query, rank_params)
+                rank_result = rank_cursor.fetchone()
+                if rank_result and rank_result[0] is not None:
+                    rank = rank_result[0]
+                    item['page_number'] = (rank // ITEMS_PER_PAGE) + 1
+            except Exception as e:
+                app.logger.error(f"Error calculating rank for item ID {current_item_id}, type {item.get('type')}: {e}")
+                item['page_number'] = 1 # Default to 1 on error
+
+        return jsonify(results)
 
 # --- CLI Command ---
 @app.cli.command('init-db')

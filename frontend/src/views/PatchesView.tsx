@@ -42,6 +42,8 @@ const PatchesView: React.FC = () => {
   const [patches, setPatches] = useState<PatchType[]>([]);
   const [softwareList, setSoftwareList] = useState<Software[]>([]);
   const [selectedSoftwareId, setSelectedSoftwareId] = useState<number | null>(null);
+  const [versionList, setVersionList] = useState<SoftwareVersion[]>([]);
+  const [activeVersionId, setActiveVersionId] = useState<number | null>(null);
 
   const [releaseFromFilter, setReleaseFromFilter] = useState<string>('');
   const [releaseToFilter, setReleaseToFilter] = useState<string>('');
@@ -92,15 +94,17 @@ const PatchesView: React.FC = () => {
   const filtersAreActive = useMemo(() => {
     return (
       selectedSoftwareId !== null ||
+      activeVersionId !== null ||
       releaseFromFilter !== '' ||
       releaseToFilter !== '' ||
       patchedByDeveloperFilter !== '' ||
       searchTerm !== ''
     );
-  }, [selectedSoftwareId, releaseFromFilter, releaseToFilter, patchedByDeveloperFilter, searchTerm]);
+  }, [selectedSoftwareId, activeVersionId, releaseFromFilter, releaseToFilter, patchedByDeveloperFilter, searchTerm]);
 
   const handleClearAllFiltersAndSearch = useCallback(() => {
     setSelectedSoftwareId(null);
+    setActiveVersionId(null);
     setReleaseFromFilter('');
     setReleaseToFilter('');
     setPatchedByDeveloperFilter('');
@@ -125,7 +129,12 @@ const PatchesView: React.FC = () => {
 
     try {
       const response: PaginatedPatchesResponse = await fetchPatches(
-        selectedSoftwareId ?? undefined, pageToLoad, itemsPerPage, sortBy, sortOrder,
+        selectedSoftwareId ?? undefined,
+        activeVersionId ?? undefined, // Pass activeVersionId
+        pageToLoad,
+        itemsPerPage,
+        sortBy,
+        sortOrder,
         debouncedReleaseFromFilter || undefined,
         debouncedReleaseToFilter || undefined,
         debouncedPatchedByDeveloperFilter || undefined,
@@ -152,9 +161,9 @@ const PatchesView: React.FC = () => {
       if (isNewQuery) setIsLoadingInitial(false);
     }
   }, [
-    selectedSoftwareId, itemsPerPage, sortBy, sortOrder,
+    selectedSoftwareId, activeVersionId, itemsPerPage, sortBy, sortOrder,
     debouncedReleaseFromFilter, debouncedReleaseToFilter, debouncedPatchedByDeveloperFilter,
-    isAuthenticated, searchTerm // Added searchTerm to dependency array
+    isAuthenticated, searchTerm
   ]);
 
   // Debounce effects for filter inputs
@@ -176,7 +185,7 @@ const PatchesView: React.FC = () => {
   useEffect(() => {
     if (isAuthenticated) fetchAndSetPatches(1, true);
     else { setPatches([]); setIsLoadingInitial(false); }
-  }, [isAuthenticated, selectedSoftwareId, sortBy, sortOrder, debouncedReleaseFromFilter, debouncedReleaseToFilter, debouncedPatchedByDeveloperFilter, searchTerm, fetchAndSetPatches]); // Added searchTerm
+  }, [isAuthenticated, selectedSoftwareId, activeVersionId, sortBy, sortOrder, debouncedReleaseFromFilter, debouncedReleaseToFilter, debouncedPatchedByDeveloperFilter, searchTerm, fetchAndSetPatches]); // Added activeVersionId
 
   // Effect to handle focusing on a comment if item_id and comment_id are in URL
   useEffect(() => {
@@ -205,7 +214,7 @@ const PatchesView: React.FC = () => {
   }, [location.search, patches, selectedPatchForComments]); // Added selectedPatchForComments to dependencies to re-evaluate if it changes externally
 
   useEffect(() => { setSelectedPatchIds(new Set()); },
-    [selectedSoftwareId, sortBy, sortOrder, debouncedReleaseFromFilter, debouncedReleaseToFilter, debouncedPatchedByDeveloperFilter, searchTerm, currentPage]
+    [selectedSoftwareId, activeVersionId, sortBy, sortOrder, debouncedReleaseFromFilter, debouncedReleaseToFilter, debouncedPatchedByDeveloperFilter, searchTerm, currentPage]
   );
 
   useEffect(() => {
@@ -213,6 +222,23 @@ const PatchesView: React.FC = () => {
       fetchSoftware().then(setSoftwareList).catch(err => showErrorToast("Failed to load software list."));
     }
   }, [isAuthenticated]);
+
+  // Fetch versions for the main filter dropdown
+  useEffect(() => {
+    if (selectedSoftwareId) {
+      // Consider adding a loading state for the version dropdown if the fetch is slow
+      fetchVersionsForSoftware(selectedSoftwareId)
+        .then(setVersionList)
+        .catch(err => {
+          showErrorToast(err.response?.data?.msg || err.message || "Failed to fetch versions.");
+          setVersionList([]); // Clear versions on error
+        });
+    } else {
+      setVersionList([]); // Clear versions if no software is selected
+      setActiveVersionId(null); // Also reset active version
+    }
+  }, [selectedSoftwareId]);
+
 
   useEffect(() => {
     if (modalSelectedSoftwareId) {
@@ -226,7 +252,19 @@ const PatchesView: React.FC = () => {
     }
   }, [modalSelectedSoftwareId]);
 
-  const handleFilterChange = (id: number | null) => setSelectedSoftwareId(id);
+  const handleFilterChange = (id: number | null) => {
+    setSelectedSoftwareId(id);
+    // Reset version filter when software changes
+    setActiveVersionId(null);
+    setCurrentPage(1); // Reset pagination
+  };
+
+  const handleVersionFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value ? parseInt(e.target.value, 10) : null;
+    setActiveVersionId(value);
+    setCurrentPage(1); // Reset pagination when version filter changes
+  };
+
   const handleSort = (key: string) => { setSortBy(key); setSortOrder(prev => (sortBy === key && prev === 'asc' ? 'desc' : 'asc')); };
   const handlePageChange = (newPage: number) => fetchAndSetPatches(newPage, true);
 
@@ -550,7 +588,32 @@ const PatchesView: React.FC = () => {
         </div>
       )}
 
-      {softwareList.length > 0 && <FilterTabs software={softwareList} selectedSoftwareId={selectedSoftwareId} onSelectFilter={handleFilterChange} />}
+      <div className="flex flex-col md:flex-row md:items-center md:gap-4 mb-4">
+        {softwareList.length > 0 && (
+          <div className="w-fit flex-shrink-0">
+            <FilterTabs software={softwareList} selectedSoftwareId={selectedSoftwareId} onSelectFilter={handleFilterChange} />
+          </div>
+        )}
+        {selectedSoftwareId && (
+          <div className="flex items-center gap-2 min-w-[200px] mt-4 md:mt-0 flex-shrink-0">
+            {/* Label removed for consistency with LinksView.tsx */}
+            <select
+              id="versionFilterPatches"
+              value={activeVersionId || ''}
+              onChange={handleVersionFilterChange}
+              className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-200"
+              disabled={versionList.length === 0}
+            >
+              <option value="">Version</option>
+              {versionList.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.version_number}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
 
       <div className="my-4"><button onClick={() => setShowAdvancedFilters(p => !p)} className="flex items-center px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-md text-sm font-medium">{showAdvancedFilters ? (<><ChevronUp size={18} className="mr-2" />Hide</>) : (<><Filter size={18} className="mr-2" />Show</>)} Advanced Filters</button></div>
       {showAdvancedFilters && (

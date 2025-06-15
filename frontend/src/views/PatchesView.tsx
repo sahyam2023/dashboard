@@ -90,7 +90,7 @@ const PatchesView: React.FC = () => {
   const [selectedPatchForComments, setSelectedPatchForComments] = useState<PatchType | null>(null);
   const commentSectionRef = useRef<HTMLDivElement>(null);
   const location = useLocation(); // Added useLocation
-  const [searchParams] = useSearchParams(); // Added for page/highlight
+  const [searchParams, setSearchParams] = useSearchParams(); // Added for page/highlight
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null); // Added for highlight
 
   const filtersAreActive = useMemo(() => {
@@ -303,6 +303,11 @@ const PatchesView: React.FC = () => {
   const handlePageChange = (newPage: number) => {
     setHighlightedItemId(null); // Clear highlight
     fetchAndSetPatches(newPage, true);
+    // Update URL search params
+    const newSearchParams = new URLSearchParams(searchParams);
+    newSearchParams.set('page', newPage.toString());
+    newSearchParams.delete('highlight');
+    setSearchParams(newSearchParams);
   };
 
   const handleOperationSuccess = (message: string) => {

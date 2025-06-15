@@ -86,7 +86,7 @@ const role = user?.role; // Access role safely, as user can be null
   const [selectedDocumentForComments, setSelectedDocumentForComments] = useState<DocumentType | null>(null);
   const commentSectionRef = useRef<HTMLDivElement>(null);
   const location = useLocation(); // Added useLocation
-  const [searchParams] = useSearchParams(); // Added for page/highlight
+  const [searchParams, setSearchParams] = useSearchParams(); // Added for page/highlight
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null); // Added for highlight
 
   const filtersAreActive = useMemo(() => {
@@ -337,9 +337,14 @@ useEffect(() => {
   };
   const handlePageChange = useCallback((newPage: number) => {
     setHighlightedItemId(null); // Clear highlight
-    fetchAndSetDocuments(newPage, true); 
-    setSelectedDocumentIds(new Set()); 
-  }, [fetchAndSetDocuments, setHighlightedItemId]); // Added setHighlightedItemId to dependencies
+    fetchAndSetDocuments(newPage, true);
+    setSelectedDocumentIds(new Set());
+    // Update URL search params
+    const newSearchParams = new URLSearchParams(searchParams);
+    newSearchParams.set('page', newPage.toString());
+    newSearchParams.delete('highlight');
+    setSearchParams(newSearchParams);
+  }, [fetchAndSetDocuments, setHighlightedItemId, searchParams, setSearchParams]);
 
   const handleDocumentAdded = (newDocument: DocumentType) => {
     setShowAddDocumentForm(false);

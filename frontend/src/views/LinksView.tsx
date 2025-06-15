@@ -81,7 +81,7 @@ const LinksView: React.FC = () => {
   const [selectedLinkForComments, setSelectedLinkForComments] = useState<LinkType | null>(null);
   const commentSectionRef = useRef<HTMLDivElement>(null);
   const location = useLocation(); // Added useLocation
-  const [searchParams] = useSearchParams(); // Added for page/highlight
+  const [searchParams, setSearchParams] = useSearchParams(); // Added for page/highlight
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null); // Added for highlight
 
   const filtersAreActive = useMemo(() => {
@@ -220,12 +220,17 @@ const LinksView: React.FC = () => {
     setActiveVersionId(e.target.value ? parseInt(e.target.value) : null); 
     setCurrentPage(1); 
   };
-  const handlePageChange = (newPage: number) => { 
+  const handlePageChange = (newPage: number) => {
     setHighlightedItemId(null); // Clear highlight
-    setCurrentPage(newPage); 
-    fetchAndSetLinks(newPage, true); 
+    setCurrentPage(newPage);
+    fetchAndSetLinks(newPage, true);
+    // Update URL search params
+    const newSearchParams = new URLSearchParams(searchParams);
+    newSearchParams.set('page', newPage.toString());
+    newSearchParams.delete('highlight');
+    setSearchParams(newSearchParams);
   }; // isNewQuery = true for page changes
-  const handleSort = (key: string) => { 
+  const handleSort = (key: string) => {
     setHighlightedItemId(null); // Clear highlight
     setSortBy(key); 
     setSortOrder(prev => (sortBy === key && prev === 'asc' ? 'desc' : 'asc')); 

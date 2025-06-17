@@ -439,3 +439,4 @@ CREATE INDEX IF NOT EXISTS idx_conversations_user2_id ON conversations (user2_id
 CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages (conversation_id);
 CREATE INDEX IF NOT EXISTS idx_messages_sender_id ON messages (sender_id);
 CREATE INDEX IF NOT EXISTS idx_messages_recipient_id ON messages (recipient_id);
+CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages (created_at);

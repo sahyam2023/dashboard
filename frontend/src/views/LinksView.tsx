@@ -1,6 +1,6 @@
 // src/views/LinksView.tsx
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useOutletContext, useLocation } from 'react-router-dom';
+import { useOutletContext, useLocation, useSearchParams } from 'react-router-dom'; // Added useSearchParams
 import {
   fetchLinks, fetchSoftware, fetchVersionsForSoftware, deleteAdminLink,
   PaginatedLinksResponse, addFavoriteApi, removeFavoriteApi, FavoriteItemType,
@@ -17,7 +17,7 @@ import { useAuth } from '../context/AuthContext';
 import AdminLinkEntryForm from '../components/admin/AdminLinkEntryForm';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
 import Modal from '../components/shared/Modal';
-import { PlusCircle, MinusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Link as LinkIconLucide, Download, Move, AlertTriangle, MessageSquare } from 'lucide-react'; // Added MessageSquare
+import { PlusCircle, MinusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Link as LinkIconLucide, Download, Move, AlertTriangle, MessageSquare, ExternalLink } from 'lucide-react'; // Added MessageSquare
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils';
 
 interface OutletContextType {
@@ -81,18 +81,21 @@ const LinksView: React.FC = () => {
   const [selectedLinkForComments, setSelectedLinkForComments] = useState<LinkType | null>(null);
   const commentSectionRef = useRef<HTMLDivElement>(null);
   const location = useLocation(); // Added useLocation
+  const [searchParams, setSearchParams] = useSearchParams(); // Added for page/highlight
+  const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null); // Added for highlight
 
   const filtersAreActive = useMemo(() => {
     return activeSoftwareId !== null || activeVersionId !== null || linkTypeFilter !== '' || createdFromFilter !== '' || createdToFilter !== '' || searchTerm !== '';
   }, [activeSoftwareId, activeVersionId, linkTypeFilter, createdFromFilter, createdToFilter, searchTerm]);
 
   const handleClearAllFiltersAndSearch = useCallback(() => {
+    setHighlightedItemId(null); // Clear highlight
     setActiveSoftwareId(null); setActiveVersionId(null);
     setLinkTypeFilter(''); setCreatedFromFilter(''); setCreatedToFilter('');
     if (setSearchTerm) setSearchTerm('');
     setCurrentPage(1); // Reset to page 1
     // fetchAndSetLinks(1, true) will be called by useEffect
-  }, [setSearchTerm]);
+  }, [setSearchTerm, setHighlightedItemId]);
 
   const fetchAndSetLinks = useCallback(async (pageToLoad: number, isNewQuery: boolean = false) => {
     if (isNewQuery) setIsLoadingInitial(true);
@@ -137,9 +140,12 @@ const LinksView: React.FC = () => {
   useEffect(() => { if (isAuthenticated) fetchSoftware().then(setSoftwareList).catch(err => showErrorToast("Failed to load software list.")); else setSoftwareList([]); }, [isAuthenticated]);
 
   useEffect(() => {
+    // This effect handles fetching data when primary filters or searchTerm change.
+    // Clearing highlight here is important if searchTerm from OutletContext changes.
+    setHighlightedItemId(null); 
     if (isAuthenticated) fetchAndSetLinks(1, true);
     else { setLinks([]); setIsLoadingInitial(false); }
-  }, [isAuthenticated, activeSoftwareId, activeVersionId, sortBy, sortOrder, linkTypeFilter, debouncedCreatedFromFilter, debouncedCreatedToFilter, searchTerm, fetchAndSetLinks]); // Added searchTerm
+  }, [isAuthenticated, activeSoftwareId, activeVersionId, sortBy, sortOrder, linkTypeFilter, debouncedCreatedFromFilter, debouncedCreatedToFilter, searchTerm, fetchAndSetLinks, setHighlightedItemId]); 
 
   useEffect(() => { setSelectedLinkIds(new Set()); }, [activeSoftwareId, activeVersionId, sortBy, sortOrder, linkTypeFilter, debouncedCreatedFromFilter, debouncedCreatedToFilter, searchTerm, currentPage]);
 
@@ -147,6 +153,28 @@ const LinksView: React.FC = () => {
     if (activeSoftwareId) fetchVersionsForSoftware(activeSoftwareId).then(setVersionList).catch(() => { showErrorToast("Failed to load versions for filter."); setVersionList([]); });
     else setVersionList([]);
   }, [activeSoftwareId]);
+  
+  useEffect(() => {
+    // This effect specifically handles URL parameters `page` and `highlight`.
+    // It should NOT clear the highlight if it's being set by the URL.
+    // The clearing of highlight should happen on user-initiated actions (filters, pagination).
+    const pageFromUrlStr = searchParams.get('page');
+    const highlightIdFromUrl = searchParams.get('highlight');
+
+    if (pageFromUrlStr) {
+      const pageNumber = parseInt(pageFromUrlStr, 10);
+      if (!isNaN(pageNumber) && pageNumber > 0 && pageNumber !== currentPage) {
+        setCurrentPage(pageNumber); 
+        fetchAndSetLinks(pageNumber, true); 
+      }
+    }
+
+    if (highlightIdFromUrl) {
+      setHighlightedItemId(highlightIdFromUrl);
+    } else {
+      setHighlightedItemId(null); 
+    }
+  }, [searchParams, currentPage, setCurrentPage, fetchAndSetLinks]);
 
   // Effect to handle focusing on a comment if item_id and comment_id are in URL
   useEffect(() => {
@@ -181,11 +209,38 @@ const LinksView: React.FC = () => {
     } else setModalVersionsList([]);
   }, [modalSelectedSoftwareId]);
 
-  const handleSoftwareFilterChange = (id: number | null) => { setActiveSoftwareId(id); setActiveVersionId(null); setCurrentPage(1); };
-  const handleVersionFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => { setActiveVersionId(e.target.value ? parseInt(e.target.value) : null); setCurrentPage(1); };
-  const handlePageChange = (newPage: number) => { setCurrentPage(newPage); fetchAndSetLinks(newPage, true); }; // isNewQuery = true for page changes
-  const handleSort = (key: string) => { setSortBy(key); setSortOrder(prev => (sortBy === key && prev === 'asc' ? 'desc' : 'asc')); setCurrentPage(1); };
-  const handleApplyAdvancedFilters = () => { setCurrentPage(1); fetchAndSetLinks(1, true); };
+  const handleSoftwareFilterChange = (id: number | null) => { 
+    setHighlightedItemId(null); // Clear highlight
+    setActiveSoftwareId(id); 
+    setActiveVersionId(null); 
+    setCurrentPage(1); 
+  };
+  const handleVersionFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => { 
+    setHighlightedItemId(null); // Clear highlight
+    setActiveVersionId(e.target.value ? parseInt(e.target.value) : null); 
+    setCurrentPage(1); 
+  };
+  const handlePageChange = (newPage: number) => {
+    setHighlightedItemId(null); // Clear highlight
+    setCurrentPage(newPage);
+    fetchAndSetLinks(newPage, true);
+    // Update URL search params
+    const newSearchParams = new URLSearchParams(searchParams);
+    newSearchParams.set('page', newPage.toString());
+    newSearchParams.delete('highlight');
+    setSearchParams(newSearchParams);
+  }; // isNewQuery = true for page changes
+  const handleSort = (key: string) => {
+    setHighlightedItemId(null); // Clear highlight
+    setSortBy(key); 
+    setSortOrder(prev => (sortBy === key && prev === 'asc' ? 'desc' : 'asc')); 
+    setCurrentPage(1); 
+  };
+  const handleApplyAdvancedFilters = () => { 
+    setHighlightedItemId(null); // Clear highlight
+    setCurrentPage(1); 
+    fetchAndSetLinks(1, true); 
+  };
 
   const handleOperationSuccess = async (message: string) => { // Made async
     setShowAddOrEditForm(false);
@@ -347,7 +402,7 @@ const LinksView: React.FC = () => {
         const displayText = 'Link';
 
         // The icon will now always be Download, just like in PatchesView
-        const IconComponent = Download;
+        const IconComponent = l.is_external_link ? ExternalLink : Download;
 
         if (!isEffectivelyDownloadable && !l.is_external_link) { // Uploaded file, not downloadable
           return (
@@ -563,7 +618,7 @@ const LinksView: React.FC = () => {
           {filtersAreActive && (<button onClick={handleClearAllFiltersAndSearch} className="mt-6 btn-primary text-sm">Clear All Filters & Search</button>)}
         </div>
       ) : (
-        <DataTable columns={columns} data={links} rowClassName="group" isLoading={isLoadingInitial || isProcessingSingleItem} currentPage={currentPage} totalPages={totalPages} onPageChange={handlePageChange} itemsPerPage={itemsPerPage} totalItems={totalLinks} sortColumn={sortBy} sortOrder={sortOrder} onSort={handleSort} isSelectionEnabled={true} selectedItemIds={selectedLinkIds} onSelectItem={handleSelectItem} onSelectAllItems={handleSelectAllItems} />
+        <DataTable columns={columns} data={links} highlightedRowId={highlightedItemId} rowClassName="group" isLoading={isLoadingInitial || isProcessingSingleItem} currentPage={currentPage} totalPages={totalPages} onPageChange={handlePageChange} itemsPerPage={itemsPerPage} totalItems={totalLinks} sortColumn={sortBy} sortOrder={sortOrder} onSort={handleSort} isSelectionEnabled={true} selectedItemIds={selectedLinkIds} onSelectItem={handleSelectItem} onSelectAllItems={handleSelectAllItems} />
       )}
 
       {showDeleteConfirm && linkToDelete && (<ConfirmationModal isOpen={showDeleteConfirm} title="Delete Link" message={`Delete "${linkToDelete.title}"?`} onConfirm={handleDeleteLinkConfirm} onCancel={closeDeleteConfirm} isConfirming={isProcessingSingleItem} confirmButtonText="Delete" confirmButtonVariant="danger" />)}

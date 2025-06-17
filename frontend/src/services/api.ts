@@ -1476,6 +1476,66 @@ export async function fetchDocuments(
 
 export async function fetchPatches(
   softwareId?: number,
+  versionId?: number, // Added versionId parameter
+  page: number = 1,
+  limit: number = 15, // Renamed perPage to limit for consistency with other similar functions
+  sortBy: string = 'patch_name',
+  sortOrder: 'asc' | 'desc' = 'asc',
+  releaseDateFrom?: string, // Renamed releaseFrom to releaseDateFrom
+  releaseDateTo?: string, // Renamed releaseTo to releaseDateTo
+  patchedByDeveloper?: string,
+  searchTerm?: string // Renamed search to searchTerm
+): Promise<PaginatedPatchesResponse> {
+  try {
+    const params: any = { // Changed to allow flexible property addition
+      page,
+      limit,
+      sort_by: sortBy,
+      sort_order: sortOrder,
+    };
+    if (softwareId) params.software_id = softwareId;
+    if (versionId) params.version_id = versionId; // Add versionId to params
+    if (releaseDateFrom) params.release_date_from = releaseDateFrom;
+    if (releaseDateTo) params.release_date_to = releaseDateTo;
+    if (patchedByDeveloper) params.patched_by_developer = patchedByDeveloper;
+    if (searchTerm) params.search = searchTerm;
+
+    // Construct URLSearchParams from the params object
+    const queryParams = new URLSearchParams(
+      Object.entries(params)
+        .filter(([_, value]) => value !== undefined && value !== null) // Filter out undefined/null values
+        .reduce((obj, [key, value]) => { // Ensure values are strings for URLSearchParams
+          obj[key] = String(value);
+          return obj;
+        }, {} as Record<string, string>)
+    );
+
+    const queryString = queryParams.toString();
+    const url = `${API_BASE_URL}/api/patches${queryString ? `?${queryString}` : ''}`;
+        
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        ...getAuthHeader(),
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
+    });
+    return handleApiError(response, 'Failed to fetch patches');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error fetching patches:', error);
+    throw error;
+  }
+}
+
+// The old implementation for reference, to be removed after confirming the new one works.
+/*
+export async function fetchPatches(
+  softwareId?: number,
   page?: number,
   perPage?: number,
   sortBy?: string,
@@ -1519,6 +1579,7 @@ export async function fetchPatches(
     throw error;
   }
 }
+*/
 
 export async function searchData(query: string): Promise<any[]> {
   try {

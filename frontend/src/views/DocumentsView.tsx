@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useOutletContext, useLocation } from 'react-router-dom';
+import { useOutletContext, useLocation, useSearchParams } from 'react-router-dom'; // Added useSearchParams
 import { ExternalLink, PlusCircle, MinusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Download, Move, AlertTriangle, FileText, MessageSquare } from 'lucide-react';
 import { 
   fetchDocuments, 
@@ -86,6 +86,8 @@ const role = user?.role; // Access role safely, as user can be null
   const [selectedDocumentForComments, setSelectedDocumentForComments] = useState<DocumentType | null>(null);
   const commentSectionRef = useRef<HTMLDivElement>(null);
   const location = useLocation(); // Added useLocation
+  const [searchParams, setSearchParams] = useSearchParams(); // Added for page/highlight
+  const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null); // Added for highlight
 
   const filtersAreActive = useMemo(() => {
     return (
@@ -100,6 +102,7 @@ const role = user?.role; // Access role safely, as user can be null
   }, [selectedSoftwareId, docTypeFilter, createdFromFilter, createdToFilter, updatedFromFilter, updatedToFilter, searchTerm]);
 
   const handleClearAllFiltersAndSearch = useCallback(() => {
+    setHighlightedItemId(null); // Clear highlight
     setSelectedSoftwareId(null);
     setDocTypeFilter('');
     setCreatedFromFilter('');
@@ -110,7 +113,7 @@ const role = user?.role; // Access role safely, as user can be null
       setSearchTerm(''); 
     }
     // fetchAndSetDocuments(1, true); // Main useEffect will handle this
-  }, [setSearchTerm]);
+  }, [setSearchTerm, setHighlightedItemId]);
 
 const fetchAndSetDocuments = useCallback(async (pageToLoad: number, isNewQuery: boolean = false) => {
   if (isNewQuery) {
@@ -179,31 +182,38 @@ const fetchAndSetDocuments = useCallback(async (pageToLoad: number, isNewQuery: 
 
 // Debounce effects for each filter input
 useEffect(() => {
+    setHighlightedItemId(null); // Clear highlight when this filter input changes
   const handler = setTimeout(() => setDebouncedDocTypeFilter(docTypeFilter), 500);
   return () => clearTimeout(handler);
-}, [docTypeFilter]);
+  }, [docTypeFilter, setHighlightedItemId]);
 
 useEffect(() => {
+    setHighlightedItemId(null); // Clear highlight
   const handler = setTimeout(() => setDebouncedCreatedFromFilter(createdFromFilter), 500);
   return () => clearTimeout(handler);
-}, [createdFromFilter]);
+  }, [createdFromFilter, setHighlightedItemId]);
 
 useEffect(() => {
+    setHighlightedItemId(null); // Clear highlight
   const handler = setTimeout(() => setDebouncedCreatedToFilter(createdToFilter), 500);
   return () => clearTimeout(handler);
-}, [createdToFilter]);
+  }, [createdToFilter, setHighlightedItemId]);
 
 useEffect(() => {
+    setHighlightedItemId(null); // Clear highlight
   const handler = setTimeout(() => setDebouncedUpdatedFromFilter(updatedFromFilter), 500);
   return () => clearTimeout(handler);
-}, [updatedFromFilter]);
+  }, [updatedFromFilter, setHighlightedItemId]);
 
 useEffect(() => {
+    setHighlightedItemId(null); // Clear highlight
   const handler = setTimeout(() => setDebouncedUpdatedToFilter(updatedToFilter), 500);
   return () => clearTimeout(handler);
-}, [updatedToFilter]);
+  }, [updatedToFilter, setHighlightedItemId]);
   
 useEffect(() => {
+  // This effect handles fetching data when primary filters or searchTerm change.
+  setHighlightedItemId(null); // Clear highlight when these filters change
   if (!isAuthenticated) {
     setDocuments([]); setFavoritedItems(new Map()); setCurrentPage(1);
     setHasMore(false); setIsLoadingInitial(false); return;
@@ -214,7 +224,7 @@ useEffect(() => {
   isAuthenticated, selectedSoftwareId, sortBy, sortOrder, 
   debouncedDocTypeFilter, debouncedCreatedFromFilter, debouncedCreatedToFilter, 
   debouncedUpdatedFromFilter, debouncedUpdatedToFilter, searchTerm, // Added searchTerm here
-  fetchAndSetDocuments // fetchAndSetDocuments itself depends on these debounced values
+  fetchAndSetDocuments, setHighlightedItemId // Added setHighlightedItemId
 ]);
 
 useEffect(() => {
@@ -277,12 +287,37 @@ useEffect(() => {
   // selectedDocumentForComments is not included to prevent loops if it's set within this effect.
   }, [location.search, documents]);
 
+  useEffect(() => {
+    const pageFromUrlStr = searchParams.get('page');
+    const highlightIdFromUrl = searchParams.get('highlight');
+
+    if (pageFromUrlStr) {
+      const pageNumber = parseInt(pageFromUrlStr, 10);
+      // In DocumentsView, currentPage is the state for page number
+      if (!isNaN(pageNumber) && pageNumber > 0 && pageNumber !== currentPage) {
+        setCurrentPage(pageNumber); // Update the view's current page state
+        // Call the view's data fetching function for the new page.
+        fetchAndSetDocuments(pageNumber, true); 
+      }
+    }
+
+    if (highlightIdFromUrl) {
+      setHighlightedItemId(highlightIdFromUrl);
+    } else {
+      setHighlightedItemId(null); // Clear highlight if not in URL
+    }
+  }, [searchParams, currentPage, setCurrentPage, fetchAndSetDocuments]);
+
 const handleFilterChange = (softwareId: number | null) => {
+    setHighlightedItemId(null); // Clear highlight
     setSelectedSoftwareId(softwareId);
+    // setCurrentPage(1) is implicitly handled by the main useEffect re-fetching with page 1
 };
 
 // This useEffect is where the actual fetch happens
+// Already modified to include setHighlightedItemId(null)
 useEffect(() => {
+    setHighlightedItemId(null); 
     if (!isAuthenticated) {
         setDocuments([]); setFavoritedItems(new Map()); setCurrentPage(1);
         setHasMore(false); setIsLoadingInitial(false); return;
@@ -292,15 +327,24 @@ useEffect(() => {
     isAuthenticated, selectedSoftwareId, sortBy, sortOrder,
     debouncedDocTypeFilter, debouncedCreatedFromFilter, debouncedCreatedToFilter,
     debouncedUpdatedFromFilter, debouncedUpdatedToFilter, searchTerm,
-    fetchAndSetDocuments
+    fetchAndSetDocuments, setHighlightedItemId
 ]);
   const handleSort = (columnKey: string) => {
+    setHighlightedItemId(null); // Clear highlight
     const newSortOrder = sortBy === columnKey && sortOrder === 'asc' ? 'desc' : 'asc';
     setSortBy(columnKey); setSortOrder(newSortOrder);
+    // setCurrentPage(1) is implicitly handled by the main useEffect re-fetching with page 1
   };
   const handlePageChange = useCallback((newPage: number) => {
-    fetchAndSetDocuments(newPage, true); setSelectedDocumentIds(new Set()); 
-  }, [fetchAndSetDocuments]);
+    setHighlightedItemId(null); // Clear highlight
+    fetchAndSetDocuments(newPage, true);
+    setSelectedDocumentIds(new Set());
+    // Update URL search params
+    const newSearchParams = new URLSearchParams(searchParams);
+    newSearchParams.set('page', newPage.toString());
+    newSearchParams.delete('highlight');
+    setSearchParams(newSearchParams);
+  }, [fetchAndSetDocuments, setHighlightedItemId, searchParams, setSearchParams]);
 
   const handleDocumentAdded = (newDocument: DocumentType) => {
     setShowAddDocumentForm(false);
@@ -469,7 +513,7 @@ useEffect(() => {
             }}
             title={canDirectlyDownload ? (d.is_external_link ? "Open external link" : "Download file") : "Download not permitted"}
           >
-            <Download size={14} className="mr-1"/>Link
+            {d.is_external_link ? <ExternalLink size={14} className="mr-1"/> : <Download size={14} className="mr-1"/>}Link
           </a>
         );
       } 
@@ -620,7 +664,7 @@ useEffect(() => {
           {filtersAreActive && (<button onClick={handleClearAllFiltersAndSearch} className="mt-6 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 text-sm font-medium">Clear All Filters & Search</button>)}
         </div>
       ) : (
-        <DataTable columns={columns} data={filteredDocumentsBySearch} rowClassName="group" isLoading={isLoadingInitial||isLoadingMore} currentPage={currentPage} totalPages={totalPagesComputed} onPageChange={handlePageChange} itemsPerPage={ITEMS_PER_PAGE} totalItems={totalDocuments} sortColumn={sortBy} sortOrder={sortOrder} onSort={handleSort} isSelectionEnabled={true} selectedItemIds={selectedDocumentIds} onSelectItem={handleSelectItem} onSelectAllItems={handleSelectAllItems} />
+        <DataTable columns={columns} data={filteredDocumentsBySearch} highlightedRowId={highlightedItemId} rowClassName="group" isLoading={isLoadingInitial||isLoadingMore} currentPage={currentPage} totalPages={totalPagesComputed} onPageChange={handlePageChange} itemsPerPage={ITEMS_PER_PAGE} totalItems={totalDocuments} sortColumn={sortBy} sortOrder={sortOrder} onSort={handleSort} isSelectionEnabled={true} selectedItemIds={selectedDocumentIds} onSelectItem={handleSelectItem} onSelectAllItems={handleSelectAllItems} />
       )}
       {showDeleteConfirm && documentToDelete && (<ConfirmationModal isOpen={showDeleteConfirm} title="Delete Document" message={`Delete "${documentToDelete.doc_name}"?`} onConfirm={handleDeleteConfirm} onCancel={closeDeleteConfirm} isConfirming={isDeleting} confirmButtonText="Delete" confirmButtonVariant="danger"/>)}
       {showBulkDeleteConfirmModal && (<ConfirmationModal isOpen={showBulkDeleteConfirmModal} title={`Delete ${selectedDocumentIds.size} Document(s)`} message={`Delete ${selectedDocumentIds.size} selected items?`} onConfirm={confirmBulkDelete} onCancel={()=>setShowBulkDeleteConfirmModal(false)} isConfirming={isDeletingSelected} confirmButtonText="Delete Selected" confirmButtonVariant="danger"/>)}

@@ -25,6 +25,7 @@ interface DataTableProps<T> {
   sortOrder: 'asc' | 'desc' | null;
   onSort: (columnKey: string) => void;
   rowClassName?: string | ((item: T, index: number) => string); // New prop
+  highlightedRowId?: string | number | null; // Added for highlighting
   // Selection Props
   isSelectionEnabled?: boolean;
   selectedItemIds?: Set<number>;
@@ -51,6 +52,7 @@ const DataTable = <T extends { id: number }>({
   selectedItemIds = new Set(), // Default to an empty set
   onSelectItem,
   onSelectAllItems,
+  highlightedRowId = null, // Added prop with default
 }: DataTableProps<T>) => {
   const selectAllCheckboxRef = React.useRef<HTMLInputElement>(null);
 
@@ -153,7 +155,8 @@ const DataTable = <T extends { id: number }>({
                 key={item.id || index} 
                 className={`transition-colors 
                             ${customRowClass || ''} 
-                            ${isSelected ? 'bg-sky-100 dark:bg-sky-800 hover:bg-sky-200 dark:hover:bg-sky-700' : 'hover:bg-gray-50 dark:hover:bg-gray-700'}`}
+                            ${isSelected ? 'bg-sky-100 dark:bg-sky-800 hover:bg-sky-200 dark:hover:bg-sky-700' : 'hover:bg-gray-50 dark:hover:bg-gray-700'}
+                            ${highlightedRowId !== null && String(item.id) === String(highlightedRowId) ? 'bg-yellow-200 dark:bg-yellow-700 ring-2 ring-yellow-500 ring-offset-1 dark:ring-offset-gray-800' : ''}`}
               >
                 {isSelectionEnabled && (
                   <td className="px-4 py-4 whitespace-nowrap">

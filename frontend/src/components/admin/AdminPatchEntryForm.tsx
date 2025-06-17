@@ -66,7 +66,7 @@ const patchValidationSchema = yup.object().shape({
     then: schema => schema.required("New Version String is required when 'Enter New Version' is selected.").min(1),
     otherwise: schema => schema.transform(value => value === '' ? undefined : value).optional().nullable(),
   }),
-  patchName: yup.string().required("Patch Name is required.").max(255, "Patch Name cannot exceed 255 characters."),
+  patchName: yup.string().trim().min(1, 'Patch Name cannot be empty and must contain non-space characters.').max(255, "Patch Name cannot exceed 255 characters."),
   releaseDate: yup.string().transform(value => value === '' ? undefined : value).optional().nullable(),
   inputMode: yup.string().oneOf(['url', 'upload']).required("Input mode must be selected."),
   externalUrl: yup.string().when('inputMode', (inputModeValues: any, schema: any) => {

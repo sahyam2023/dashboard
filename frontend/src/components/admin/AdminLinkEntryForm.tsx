@@ -49,7 +49,7 @@ interface LinkFormData {
 // Create a Yup validation schema
 const validationSchema = yup.object().shape({
   selectedSoftwareId: yup.string().required('Software Product must be selected.'),
-  title: yup.string().required('Link Title is required.').max(255, 'Title cannot exceed 255 characters.'),
+  title: yup.string().trim().min(1, 'Link Title cannot be empty and must contain non-space characters.').max(255, 'Title cannot exceed 255 characters.'),
   selectedVersionId: yup.string().required('Version must be selected or a new one entered.'),
   typedVersionString: yup.string().when('selectedVersionId', {
     is: CREATE_NEW_VERSION_SENTINEL,
@@ -413,6 +413,7 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
               ...(finalVersionId && { version_id: finalVersionId.toString() }),
               ...(finalTypedVersionString && { typed_version_string: finalTypedVersionString }),
               title: data.title.trim(), // Ensure 'title' is used if uploadFileInChunks expects it, or 'link_title'
+              link_title: data.title.trim(),
               description: data.description?.trim() || '',
               ...(isVmsOrVaSoftware && data.compatibleVmsVersionIds && data.compatibleVmsVersionIds.length > 0 &&
                 { compatible_vms_version_ids_json: JSON.stringify(data.compatibleVmsVersionIds) }),
@@ -623,7 +624,7 @@ const AdminLinkEntryForm: React.FC<AdminLinkEntryFormProps> = ({
         <div>
           <label htmlFor="externalUrl" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Link URL*</label>
           <input
-            type="url"
+            type="text"
             id="externalUrl"
             {...register("externalUrl")} // RHF register
             placeholder="https://example.com/resource"

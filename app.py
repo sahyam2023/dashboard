@@ -59,6 +59,7 @@ from urllib.parse import urljoin # Added for chat file_url modification
 
 from scheduler import init_scheduler as initialize_app_scheduler
 from scheduler import scheduler as app_scheduler # For shutdown
+from scheduler import run_delete_old_messages_periodically, run_cleanup_files_periodically # Added for Eventlet scheduling
 import atexit
 # import os # For database path # os is already imported
 
@@ -189,19 +190,19 @@ def create_socketio_instance(flask_app):
     ]
     
     if is_frozen:
-        print("PyInstaller detected - forcing eventlet async_mode")
+        # print("PyInstaller detected - forcing eventlet async_mode") # Removed
         # Explicitly set async_mode for PyInstaller
         socketio_instance = SocketIO(
             flask_app, 
             cors_allowed_origins=socketio_cors_origins, 
             async_mode='eventlet',  # CRITICAL: Explicitly set for PyInstaller
-            logger=True,
+            logger=False,
             engineio_logger=False,  # Reduce log noise
             ping_timeout=20,
             ping_interval=25
         )
     else:
-        print("Development mode - auto-detecting async_mode")
+        # print("Development mode - auto-detecting async_mode") # Removed
         # Let it auto-detect in development (your original code)
         socketio_instance = SocketIO(
             flask_app, 
@@ -211,11 +212,30 @@ def create_socketio_instance(flask_app):
             ping_interval=25
         )
     
-    print(f"SocketIO initialized with async_mode: {socketio_instance.async_mode}, ping_timeout=20, ping_interval=25 (as passed to constructor)")
+    # print(f"SocketIO initialized with async_mode: {socketio_instance.async_mode}, ping_timeout=20, ping_interval=25 (as passed to constructor)") # Removed
     return socketio_instance
 
 # Create SocketIO instance using the helper function
 socketio = create_socketio_instance(app)
+
+# Ensure Flask app's logger outputs INFO and DEBUG to console
+# import logging # Already imported sys at the top
+# if not any(isinstance(handler, logging.StreamHandler) and handler.stream == sys.stdout for handler in app.logger.handlers):
+#     stream_handler = logging.StreamHandler(sys.stdout)
+#     stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+#     # Only add the handler if no stdout handler is already present
+#     # This check is important to avoid duplicate log messages if a handler for stdout
+#     # is already configured (e.g., by default in some Flask versions or other extensions).
+#     # However, Flask's default logger might not be configured for INFO/DEBUG to stdout by default.
+#     # Let's refine the condition to check if ANY StreamHandler to sys.stdout with at least INFO level exists.
+#     # For simplicity, the original check is fine, as adding it again if one exists but with a different formatter/level
+#     # might be acceptable or even desired for specific formatting.
+#     # A more robust check might be:
+#     # if not any(isinstance(h, logging.StreamHandler) and h.stream == sys.stdout and h.level <= logging.INFO for h in app.logger.handlers):
+#     # For now, the provided check is sufficient.
+#     app.logger.addHandler(stream_handler)
+# app.logger.setLevel(logging.INFO) # Or logging.DEBUG for more verbosity
+# app.logger.info("Flask app logger configured to output INFO+ to console.")
 
 # App Configuration
 app.config['DATABASE'] = os.path.join(INSTANCE_FOLDER_PATH, 'software_dashboard.db') # DB in instance folder
@@ -268,7 +288,7 @@ app.config['MESSAGE_RETENTION_DAYS'] = 180 # Default retention period in days
 # It's best if this is already properly configured elsewhere.
 if 'DATABASE_PATH' not in app.config:
     app.config['DATABASE_PATH'] = os.path.join(app.instance_path, 'software_dashboard.db')
-    print(f"DATABASE_PATH not set, defaulted to: {app.config['DATABASE_PATH']}")
+    # print(f"DATABASE_PATH not set, defaulted to: {app.config['DATABASE_PATH']}") # Removed
 
 # Initialize and start the scheduler
 initialize_app_scheduler(app)
@@ -276,9 +296,9 @@ initialize_app_scheduler(app)
 # --- Graceful Scheduler Shutdown ---
 def shutdown_scheduler():
     if app_scheduler.running:
-        print("Shutting down scheduler...")
+        # print("Shutting down scheduler...") # Removed
         app_scheduler.shutdown()
-        print("Scheduler shut down.")
+        # print("Scheduler shut down.") # Removed
 
 atexit.register(shutdown_scheduler)
 
@@ -2757,6 +2777,7 @@ def get_all_patches_api():
 
     # Get existing filter parameters
     software_id_filter = request.args.get('software_id', type=int)
+    version_id_filter = request.args.get('version_id', type=int)
 
     # Get new filter parameters
     release_from_filter = request.args.get('release_from', type=str)
@@ -2857,6 +2878,9 @@ def get_all_patches_api():
     if software_id_filter:
         filter_conditions.append("s.id = ?") 
         params.append(software_id_filter)
+    if version_id_filter is not None:
+        filter_conditions.append("p.version_id = ?")
+        params.append(version_id_filter)
     if release_from_filter:
         filter_conditions.append("date(p.release_date) >= date(?)")
         params.append(release_from_filter)
@@ -7342,6 +7366,7 @@ def serve_misc_file(filename):
 @app.route('/api/search', methods=['GET'])
 @jwt_required(optional=True)
 def search_api():
+    ITEMS_PER_PAGE = 10
     query_term = request.args.get('q', '').strip()
     results = []
     db = get_db()
@@ -7514,7 +7539,100 @@ def search_api():
         
     results.extend([dict(row) for row in db.execute(sql_versions_query, tuple(final_version_params)).fetchall()])
 
-    return jsonify(results)
+  # Calculate page_number for relevant items
+    for item in results:
+        item['page_number'] = 1 # Default page number
+        current_item_id = item.get('id')
+        # current_item_name is specific to each type and fetched within the if block
+
+        if not current_item_id: # Name can sometimes be None (e.g. misc_file user_provided_title)
+            app.logger.debug(f"Search result item ID {current_item_id} is missing, skipping page_number calculation.")
+            continue
+
+        rank_query = None
+        rank_params = []
+
+        if item.get('type') == 'document':
+            current_item_name = item.get('name') # doc_name for documents
+            if not current_item_name:
+                app.logger.debug(f"Document item ID {current_item_id} missing name, skipping page_number.")
+                continue
+            rank_query = """
+                SELECT COUNT(d_rank.id) FROM documents d_rank
+                LEFT JOIN file_permissions fp_rank ON d_rank.id = fp_rank.file_id AND fp_rank.file_type = 'document' AND fp_rank.user_id = ?
+                WHERE (fp_rank.id IS NULL OR fp_rank.can_view IS NOT FALSE)
+                AND (LOWER(d_rank.doc_name) < LOWER(?) OR (LOWER(d_rank.doc_name) = LOWER(?) AND d_rank.id < ?))
+            """
+            rank_params = (logged_in_user_id, current_item_name, current_item_name, current_item_id)
+        
+        elif item.get('type') == 'patch':
+            current_item_name = item.get('name') # patch_name for patches
+            if not current_item_name:
+                app.logger.debug(f"Patch item ID {current_item_id} missing name, skipping page_number.")
+                continue
+            rank_query = """
+                SELECT COUNT(p_rank.id) FROM patches p_rank
+                LEFT JOIN file_permissions fp_rank ON p_rank.id = fp_rank.file_id AND fp_rank.file_type = 'patch' AND fp_rank.user_id = ?
+                WHERE (fp_rank.id IS NULL OR fp_rank.can_view IS NOT FALSE)
+                AND (LOWER(p_rank.patch_name) < LOWER(?) OR (LOWER(p_rank.patch_name) = LOWER(?) AND p_rank.id < ?))
+            """
+            rank_params = (logged_in_user_id, current_item_name, current_item_name, current_item_id)
+
+        elif item.get('type') == 'link':
+            current_item_name = item.get('name') # title for links
+            if not current_item_name:
+                app.logger.debug(f"Link item ID {current_item_id} missing name, skipping page_number.")
+                continue
+            rank_query = """
+                SELECT COUNT(l_rank.id) FROM links l_rank
+                LEFT JOIN file_permissions fp_rank ON l_rank.id = fp_rank.file_id AND fp_rank.file_type = 'link' AND fp_rank.user_id = ?
+                WHERE (fp_rank.id IS NULL OR fp_rank.can_view IS NOT FALSE)
+                AND (LOWER(l_rank.title) < LOWER(?) OR (LOWER(l_rank.title) = LOWER(?) AND l_rank.id < ?))
+            """
+            rank_params = (logged_in_user_id, current_item_name, current_item_name, current_item_id)
+
+        elif item.get('type') == 'misc_file':
+            # For misc_file, 'name' in search result is user_provided_title.
+            # 'original_filename' is also available in the search result dict.
+            current_item_user_title = item.get('name') 
+            current_item_orig_name = item.get('original_filename')
+            # COALESCE in query handles if user_provided_title is NULL
+            if not current_item_user_title and not current_item_orig_name:
+                app.logger.debug(f"Misc_file item ID {current_item_id} missing both user_provided_title and original_filename, skipping page_number.")
+                continue
+
+            rank_query = """
+                SELECT COUNT(mf_rank.id) FROM misc_files mf_rank
+                LEFT JOIN file_permissions fp_rank ON mf_rank.id = fp_rank.file_id AND fp_rank.file_type = 'misc_file' AND fp_rank.user_id = ?
+                WHERE (fp_rank.id IS NULL OR fp_rank.can_view IS NOT FALSE)
+                AND (
+                    (LOWER(COALESCE(mf_rank.user_provided_title, mf_rank.original_filename)) < LOWER(COALESCE(?, ?))) OR
+                    (
+                        LOWER(COALESCE(mf_rank.user_provided_title, mf_rank.original_filename)) = LOWER(COALESCE(?, ?)) AND
+                        mf_rank.id < ?
+                    )
+                )
+            """
+            # Pass both, COALESCE in SQL will pick the non-null one or the first if both exist.
+            # For the < and = comparisons, it's crucial that the COALESCE logic matches how the search results are ordered.
+            # The search results themselves sort by COALESCE(user_provided_title, original_filename).
+            rank_params = (logged_in_user_id, 
+                        current_item_user_title, current_item_orig_name, # For first COALESCE in <
+                        current_item_user_title, current_item_orig_name, # For second COALESCE in =
+                        current_item_id)
+
+        if rank_query:
+            try:
+                rank_cursor = db.execute(rank_query, rank_params)
+                rank_result = rank_cursor.fetchone()
+                if rank_result and rank_result[0] is not None:
+                    rank = rank_result[0]
+                    item['page_number'] = (rank // ITEMS_PER_PAGE) + 1
+            except Exception as e:
+                app.logger.error(f"Error calculating rank for item ID {current_item_id}, type {item.get('type')}: {e}")
+                item['page_number'] = 1 # Default to 1 on error
+
+        return jsonify(results)
 
 # --- CLI Command ---
 @app.cli.command('init-db')
@@ -11776,11 +11894,21 @@ if __name__ == '__main__':
         if is_frozen:
             # FOR PYINSTALLER: Use the direct eventlet server with your silent logger.
             app.logger.info(f"Starting server in PyInstaller mode on port {flask_port}")
+            # app.logger.info("Eventlet WSGI server will use its default logger.") # This message is already present below
+
+            # Start periodic task for deleting old messages using Eventlet
+            app.logger.info("Starting periodic deletion of old messages using Eventlet green threads.")
+            eventlet.spawn(run_delete_old_messages_periodically)
+
+            # Start periodic task for cleaning up temporary files using Eventlet
+            app.logger.info("Starting periodic cleanup of temporary files using Eventlet green threads.")
+            eventlet.spawn(run_cleanup_files_periodically)
 
             # 1. Instantiate your logger
-            silent_logger = SilentLogger()
+            silent_logger = SilentLogger() # Removed SilentLogger
 
             # 2. Pass the instance to the server's 'log' parameter
+            app.logger.info("Eventlet WSGI server is using SilentLogger for production build.") 
             eventlet.wsgi.server(eventlet.listen(('0.0.0.0', flask_port)), app, log=silent_logger, socket_timeout=600)
 
         else:

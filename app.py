@@ -59,6 +59,7 @@ from urllib.parse import urljoin # Added for chat file_url modification
 
 from scheduler import init_scheduler as initialize_app_scheduler
 from scheduler import scheduler as app_scheduler # For shutdown
+from scheduler import run_delete_old_messages_periodically, run_cleanup_files_periodically # Added for Eventlet scheduling
 import atexit
 # import os # For database path # os is already imported
 
@@ -189,19 +190,19 @@ def create_socketio_instance(flask_app):
     ]
     
     if is_frozen:
-        print("PyInstaller detected - forcing eventlet async_mode")
+        # print("PyInstaller detected - forcing eventlet async_mode") # Removed
         # Explicitly set async_mode for PyInstaller
         socketio_instance = SocketIO(
             flask_app, 
             cors_allowed_origins=socketio_cors_origins, 
             async_mode='eventlet',  # CRITICAL: Explicitly set for PyInstaller
-            logger=True,
+            logger=False,
             engineio_logger=False,  # Reduce log noise
             ping_timeout=20,
             ping_interval=25
         )
     else:
-        print("Development mode - auto-detecting async_mode")
+        # print("Development mode - auto-detecting async_mode") # Removed
         # Let it auto-detect in development (your original code)
         socketio_instance = SocketIO(
             flask_app, 
@@ -211,11 +212,30 @@ def create_socketio_instance(flask_app):
             ping_interval=25
         )
     
-    print(f"SocketIO initialized with async_mode: {socketio_instance.async_mode}, ping_timeout=20, ping_interval=25 (as passed to constructor)")
+    # print(f"SocketIO initialized with async_mode: {socketio_instance.async_mode}, ping_timeout=20, ping_interval=25 (as passed to constructor)") # Removed
     return socketio_instance
 
 # Create SocketIO instance using the helper function
 socketio = create_socketio_instance(app)
+
+# Ensure Flask app's logger outputs INFO and DEBUG to console
+# import logging # Already imported sys at the top
+# if not any(isinstance(handler, logging.StreamHandler) and handler.stream == sys.stdout for handler in app.logger.handlers):
+#     stream_handler = logging.StreamHandler(sys.stdout)
+#     stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+#     # Only add the handler if no stdout handler is already present
+#     # This check is important to avoid duplicate log messages if a handler for stdout
+#     # is already configured (e.g., by default in some Flask versions or other extensions).
+#     # However, Flask's default logger might not be configured for INFO/DEBUG to stdout by default.
+#     # Let's refine the condition to check if ANY StreamHandler to sys.stdout with at least INFO level exists.
+#     # For simplicity, the original check is fine, as adding it again if one exists but with a different formatter/level
+#     # might be acceptable or even desired for specific formatting.
+#     # A more robust check might be:
+#     # if not any(isinstance(h, logging.StreamHandler) and h.stream == sys.stdout and h.level <= logging.INFO for h in app.logger.handlers):
+#     # For now, the provided check is sufficient.
+#     app.logger.addHandler(stream_handler)
+# app.logger.setLevel(logging.INFO) # Or logging.DEBUG for more verbosity
+# app.logger.info("Flask app logger configured to output INFO+ to console.")
 
 # App Configuration
 app.config['DATABASE'] = os.path.join(INSTANCE_FOLDER_PATH, 'software_dashboard.db') # DB in instance folder
@@ -268,7 +288,7 @@ app.config['MESSAGE_RETENTION_DAYS'] = 180 # Default retention period in days
 # It's best if this is already properly configured elsewhere.
 if 'DATABASE_PATH' not in app.config:
     app.config['DATABASE_PATH'] = os.path.join(app.instance_path, 'software_dashboard.db')
-    print(f"DATABASE_PATH not set, defaulted to: {app.config['DATABASE_PATH']}")
+    # print(f"DATABASE_PATH not set, defaulted to: {app.config['DATABASE_PATH']}") # Removed
 
 # Initialize and start the scheduler
 initialize_app_scheduler(app)
@@ -276,9 +296,9 @@ initialize_app_scheduler(app)
 # --- Graceful Scheduler Shutdown ---
 def shutdown_scheduler():
     if app_scheduler.running:
-        print("Shutting down scheduler...")
+        # print("Shutting down scheduler...") # Removed
         app_scheduler.shutdown()
-        print("Scheduler shut down.")
+        # print("Scheduler shut down.") # Removed
 
 atexit.register(shutdown_scheduler)
 
@@ -11874,11 +11894,21 @@ if __name__ == '__main__':
         if is_frozen:
             # FOR PYINSTALLER: Use the direct eventlet server with your silent logger.
             app.logger.info(f"Starting server in PyInstaller mode on port {flask_port}")
+            # app.logger.info("Eventlet WSGI server will use its default logger.") # This message is already present below
+
+            # Start periodic task for deleting old messages using Eventlet
+            app.logger.info("Starting periodic deletion of old messages using Eventlet green threads.")
+            eventlet.spawn(run_delete_old_messages_periodically)
+
+            # Start periodic task for cleaning up temporary files using Eventlet
+            app.logger.info("Starting periodic cleanup of temporary files using Eventlet green threads.")
+            eventlet.spawn(run_cleanup_files_periodically)
 
             # 1. Instantiate your logger
-            silent_logger = SilentLogger()
+            silent_logger = SilentLogger() # Removed SilentLogger
 
             # 2. Pass the instance to the server's 'log' parameter
+            app.logger.info("Eventlet WSGI server is using SilentLogger for production build.") 
             eventlet.wsgi.server(eventlet.listen(('0.0.0.0', flask_port)), app, log=silent_logger, socket_timeout=600)
 
         else:

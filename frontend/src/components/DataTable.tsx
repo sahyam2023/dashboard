@@ -1,12 +1,17 @@
-import React from 'react';
-import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
 import LoadingState from './LoadingState';
+import Modal from './shared/Modal'; // Assuming a Modal component exists
 
 // 1. Define/Update Props
+export interface ModalControlSetters {
+  showModal: (description: string) => void;
+}
+
 export interface ColumnDef<T> {
   key: keyof T | string; // Accessor key for the data
   header: string;        // Column header text
-  render?: (item: T) => React.ReactNode; // Custom render function
+  render?: (item: T, modalControls: ModalControlSetters) => React.ReactNode; // Updated signature
   sortable?: boolean;     // Is the column sortable?
 }
 
@@ -54,7 +59,16 @@ const DataTable = <T extends { id: number }>({
   onSelectAllItems,
   highlightedRowId = null, // Added prop with default
 }: DataTableProps<T>) => {
+  const [showFullDescriptionModal, setShowFullDescriptionModal] = useState(false);
+  const [fullDescription, setFullDescription] = useState('');
   const selectAllCheckboxRef = React.useRef<HTMLInputElement>(null);
+
+  const modalControls: ModalControlSetters = {
+    showModal: (description: string) => {
+      setFullDescription(description);
+      setShowFullDescriptionModal(true);
+    }
+  };
 
   React.useEffect(() => {
     if (isSelectionEnabled && selectAllCheckboxRef.current) {
@@ -173,17 +187,91 @@ const DataTable = <T extends { id: number }>({
                     />
                   </td>
                 )}
-                {columns.map((column) => (
-                  <td key={column.key as string} className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
-                    {column.render ? column.render(item) : String(item[column.key as keyof T] ?? '')}
-                  </td>
-                ))}
+                {columns.map((column) => {
+                  // Branch 1: This is a 'description' column AND no custom column.render is provided.
+                  // Apply special line-clamping and "Read More" button with correct truncation logic.
+                  if (column.key === 'description' && !column.render) {
+                    const descriptionRef = React.useRef<HTMLSpanElement>(null);
+                    const [isTruncated, setIsTruncated] = React.useState(false);
+                    const descriptionText = String(item[column.key as keyof T] ?? ''); 
+
+                    useEffect(() => {
+                      if (descriptionRef.current) {
+                        // Corrected: For line-clamp, truncation occurs if scrollHeight > clientHeight
+                        const { scrollHeight, clientHeight } = descriptionRef.current;
+                        if (scrollHeight > clientHeight) {
+                          setIsTruncated(true);
+                        } else {
+                          setIsTruncated(false);
+                        }
+                      }
+                      // Dependencies: descriptionText ensures this runs if the text changes.
+                      // data is included because table re-renders might require re-evaluation.
+                      // item.id (or a unique key for the row) ensures the effect is specific to this row's content.
+                    }, [descriptionText, data, item.id]); 
+
+                    return (
+                      <td key={`${column.key as string}-desc`} className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300"> {/* Removed whitespace-nowrap for description column */}
+                        <div className="flex items-center justify-between">
+                          <span
+                            ref={descriptionRef}
+                            className="block line-clamp-3" 
+                          >
+                            {descriptionText}
+                          </span>
+                          {isTruncated && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setFullDescription(descriptionText); 
+                                setShowFullDescriptionModal(true);
+                              }}
+                              className="ml-2 p-1 text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 flex-shrink-0"
+                              title="Read More"
+                            >
+                              <Eye size={16} />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    );
+                  }
+                  
+                  // Branch 2: All other cases:
+                  // - Not a 'description' column.
+                  // - Is a 'description' column BUT a custom column.render IS provided.
+                  // In these cases, use the standard rendering path.
+                  const cellContent = column.render 
+                    ? column.render(item, modalControls) 
+                    : String(item[column.key as keyof T] ?? '');
+                  
+                  let tdClassName = "px-6 py-4 text-sm text-gray-700 dark:text-gray-300";
+                  if (column.key !== 'description') {
+                    tdClassName += " whitespace-nowrap";
+                  }
+
+                  return (
+                    <td key={column.key as string} className={tdClassName}>
+                      {cellContent}
+                    </td>
+                  );
+                })}
               </tr>
               );
             })}
           </tbody>
         </table>
       </div>
+
+      <Modal
+        isOpen={showFullDescriptionModal}
+        onClose={() => setShowFullDescriptionModal(false)}
+        title="Full Description"
+      >
+        <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+          {fullDescription}
+        </p>
+      </Modal>
 
       {/* Pagination UI and Logic */}
       {totalPages > 0 && (

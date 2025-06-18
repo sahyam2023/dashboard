@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useOutletContext, useLocation, useSearchParams } from 'react-router-dom'; // Added useSearchParams
-import { ExternalLink, PlusCircle, MinusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Download, Move, AlertTriangle, FileText, MessageSquare } from 'lucide-react';
 import { 
   fetchDocuments, 
   fetchSoftware, 
@@ -15,7 +14,7 @@ import {
   BulkItemType,
 } from '../services/api'; 
 import { Document as DocumentType, Software } from '../types'; 
-import DataTable, { ColumnDef } from '../components/DataTable';
+import DataTable, { ColumnDef, ModalControlSetters } from '../components/DataTable'; // Added ModalControlSetters
 import { formatToISTLocaleString } from '../utils'; // Updated import
 import FilterTabs from '../components/FilterTabs';
 import LoadingState from '../components/LoadingState'; 
@@ -25,6 +24,8 @@ import AdminDocumentEntryForm from '../components/admin/AdminDocumentEntryForm';
 import Fuse from 'fuse.js';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
 import Modal from '../components/shared/Modal';
+// Added Eye to lucide-react imports
+import { ExternalLink, PlusCircle, MinusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Download, Move, AlertTriangle, FileText, MessageSquare, Eye } from 'lucide-react';
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils';
 import CommentSection from '../components/comments/CommentSection';
 
@@ -482,7 +483,46 @@ useEffect(() => {
   const columns: ColumnDef<DocumentType>[] = [
     { key: 'doc_name', header: 'Name', sortable: true }, { key: 'doc_type', header: 'Type', sortable: true },
     { key: 'software_name', header: 'Software', sortable: true },
-    { key: 'description', header: 'Description', render: (d: DocumentType) => <span className="text-sm block max-w-xs truncate" title={d.description||''}>{d.description||'-'}</span> },
+    {
+      key: 'description',
+      header: 'Description',
+      render: (d: DocumentType, modalControls: ModalControlSetters) => {
+        const descriptionRef = React.useRef<HTMLSpanElement>(null);
+        const [isTruncated, setIsTruncated] = React.useState(false);
+        const descriptionText = d.description || '-';
+
+        React.useEffect(() => {
+          if (descriptionRef.current) {
+            setIsTruncated(descriptionRef.current.scrollHeight > descriptionRef.current.clientHeight);
+          }
+        }, [d.description]);
+
+        return (
+          // Added w-72 here to constrain the width of the cell's content
+          <div className="flex items-center justify-between w-72">
+            <span
+              ref={descriptionRef}
+              className="block line-clamp-3 text-sm w-full" // Added w-full
+              title={d.description || ''}
+            >
+              {descriptionText}
+            </span>
+            {isTruncated && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  modalControls.showModal(d.description || '-');
+                }}
+                className="ml-2 p-1 text-blue-600 hover:text-blue-800 flex-shrink-0"
+                title="Read More"
+              >
+                <Eye size={16} />
+              </button>
+            )}
+          </div>
+        );
+      }
+    },
     { 
       key: 'download_link', 
       header: 'Download', 

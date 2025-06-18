@@ -1627,6 +1627,31 @@ export async function fetchVersionsForSoftware(softwareId: number): Promise<Soft
 
 // --- Authentication Functions ---
 
+export async function refreshTokenApi(): Promise<{ access_token: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeader(),
+      },
+      body: JSON.stringify({}),
+    });
+    // handleApiError will parse JSON and return it, or throw an error.
+    // Expected successful JSON: { access_token: "new_token_here" }
+    return handleApiError(response, 'Failed to refresh token');
+  } catch (error: any) {
+    // handleApiError already logs and can dispatch 'tokenInvalidated' for 401s.
+    // Specific check for network errors to set offline status.
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error in refreshTokenApi:', error); // Additional logging specific to this function
+    throw error; // Re-throw to be handled by the caller (e.g., AuthContext)
+  }
+}
+
 export async function registerUser(data: RegisterRequest): Promise<RegisterResponse> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/auth/register`, {

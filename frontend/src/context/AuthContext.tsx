@@ -1,7 +1,7 @@
 // src/context/AuthContext.tsx
 import React, { createContext, useState, useContext, useEffect, ReactNode, useCallback, useRef } from 'react'; // Added useRef
 import { showErrorToast } from '../utils/toastUtils'; // Added for direct toast call
-import api from '../services/api'; // Ensure api is imported
+import { refreshTokenApi } from '../services/api'; // Updated import
 
 interface TokenData {
   token: string;
@@ -120,59 +120,45 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   const refreshToken = useCallback(async () => {
     console.log('Attempting to refresh token...');
     try {
-      const response = await api.post('/auth/refresh', {});
-      if (response.data && response.data.access_token) {
-        const new_access_token = response.data.access_token;
-        // Update token in localStorage and context state
-        // Need to update full tokenData, not just the token string, to keep expiry and user info consistent
-        // For simplicity here, assuming the new token comes with its own new expiry implicitly handled by backend
-        // Or, if backend only sends token, we'd need to parse it to get new expiry if it changes
-        // For now, let's update the token string and assume its expiry is managed by the new value.
-        // A more robust solution would involve the backend sending new expiry time or parsing the new token.
+      const response = await refreshTokenApi(); // Use the imported refreshTokenApi
+      if (response && response.access_token) { // Check response and response.access_token
+        const new_access_token = response.access_token; // Get token directly from response
 
-        // Get existing token data to update it, or handle if it's null
         const storedTokenDataString = localStorage.getItem('tokenData');
         if (storedTokenDataString) {
           const existingTokenData: TokenData = JSON.parse(storedTokenDataString);
           const newTokenData: TokenData = {
             ...existingTokenData,
             token: new_access_token,
-            // Assuming the new token has the same expiry duration from its issuance time.
-            // This needs to be confirmed with backend. If backend refreshes expiry, this is fine.
-            // If backend only extends, then this calculation is fine.
-            // If backend sends new absolute expiry, use that.
-            // For now, we'll update token and rely on the existing expiry logic or assume new token has new default expiry.
-            // Let's assume the new token has a new default expiry from its creation (30 mins)
-            // We need to calculate this new expiresAt if not sent by backend.
-            // For now, let's assume the context's `login` function's way of setting expiry is what we need.
-            // This is a simplification: ideally, backend sends new expiresAt or token includes it.
-            // Let's assume for now the refresh endpoint gives a token that's valid for REFRESH_INTERVAL_MINUTES + buffer
-            // We'll just update the token string. The main useEffect will still track its original expiry.
-            // This means the *displayed* expiry in UI might not update, but the token *is* new.
-            // A better approach: server sends new `expires_in_seconds` or absolute `expires_at`.
-            // For this implementation, we will update the token and re-schedule.
-            // The existing session expiry check will still use the original `tokenData.expiresAt`.
-            // This is NOT ideal. The tokenData in localStorage and state should reflect the NEW token's true expiry.
-            // Let's refine this:
-            // For now, to keep it simple and avoid parsing token on client:
-            // Assume the new token is valid for another full default period from NOW.
-            // This is a common strategy if backend doesn't send explicit new expiry.
-             expiresAt: Date.now() + (30 * 60 * 1000), // Assuming new token is valid for 30 mins from now
+            // Assuming new token is valid for another 30 mins from now.
+            // This matches the previous logic after the `api.post` call.
+            expiresAt: Date.now() + (30 * 60 * 1000),
           };
           localStorage.setItem('tokenData', JSON.stringify(newTokenData));
-          setTokenData(newTokenData); // Update the full tokenData
+          setTokenData(newTokenData);
         }
 
-        // setToken(new_access_token); // This would be if setToken just took the string. We use setTokenData.
         console.log('Token refreshed successfully.');
-        // scheduleNextRefresh(); // This will be called by refreshToken's caller or effect
       } else {
-        throw new Error('No access token in refresh response');
+        // refreshTokenApi should throw an error if the response is not OK or token is missing,
+        // so this path might only be hit if it resolves with a falsy value unexpectedly.
+        throw new Error('No access token in refresh API response');
       }
     } catch (error) {
-      console.error('Failed to refresh token:', error);
-      logout(true); // Pass true to indicate potential session expiry
-      // No need to call scheduleNextRefresh here, as logout clears timers.
+      // refreshTokenApi's internal handleApiError would have already logged,
+      // and potentially dispatched 'tokenInvalidated' event which AuthContext listens to.
+      // If 'tokenInvalidated' is dispatched, logout(true) will be called by that listener.
+      // If it's another type of error (e.g., network 'failed to fetch' handled by refreshTokenApi's catch),
+      // then we explicitly call logout here as a fallback.
+      console.error('Failed to refresh token (AuthContext catch block):', error);
+      // Check if the error is one that implies the user should be logged out.
+      // The 'tokenInvalidated' event listener should handle logout for 401s.
+      // For other errors (like network error where API is unreachable), explicit logout here is good.
+      // The `logout(true)` in the previous version of this catch block is still relevant.
+      const errorAsAny = error as any;
+      if (!errorAsAny.isTokenExpirationError && !errorAsAny.isMaintenanceModeError) { // Avoid double logout if already handled by event
+        logout(true);
+      }
     }
   }, [logout, setTokenData]); // setTokenData is from useState, stable.
 

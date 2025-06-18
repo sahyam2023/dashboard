@@ -1,6 +1,7 @@
 // src/context/AuthContext.tsx
 import React, { createContext, useState, useContext, useEffect, ReactNode, useCallback, useRef } from 'react'; // Added useRef
 import { showErrorToast } from '../utils/toastUtils'; // Added for direct toast call
+import api from '../services/api'; // Ensure api is imported
 
 interface TokenData {
   token: string;
@@ -75,6 +76,16 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   const [isPasswordResetRequired, setIsPasswordResetRequired] = useState<boolean>(false);
   const sessionExpiredToastShownRef = useRef(false); // Added ref
 
+  // Activity detection and token refresh state and refs
+  const [lastActivity, setLastActivity] = useState<number>(Date.now());
+  const tokenRefreshTimer = useRef<NodeJS.Timeout | null>(null);
+  const activityDebounceTimer = useRef<NodeJS.Timeout | null>(null); // For handleActivity debounce
+
+  // Constants for timing
+  const REFRESH_INTERVAL_MINUTES = 15; // Refresh before 30 min expiry
+  const ACTIVITY_DEBOUNCE_MS = 500;
+
+
   // Define logout function using useCallback to ensure stable reference
   const logout = useCallback((sessionExpiredDueToTimeout: boolean = false) => {
     localStorage.removeItem('tokenData');
@@ -83,6 +94,13 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     setIsPasswordResetRequired(false);
     // setSessionWarningModalOpen(false); // REMOVED: Close warning modal on logout
     
+    // Clear activity and refresh timers on logout
+    if (tokenRefreshTimer.current) clearTimeout(tokenRefreshTimer.current);
+    if (activityDebounceTimer.current) clearTimeout(activityDebounceTimer.current);
+    tokenRefreshTimer.current = null;
+    activityDebounceTimer.current = null;
+    console.log('AuthContext: Timers cleared on logout.');
+
     if (sessionExpiredDueToTimeout) {
       if (!sessionExpiredToastShownRef.current) {
         showErrorToast("Your session has expired. Please login again.");
@@ -94,12 +112,105 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     }
   }, []);
 
+  // refreshToken, scheduleNextRefresh, and handleActivity functions
+  // Note: scheduleNextRefresh is defined before refreshToken in the instructions, but it depends on refreshToken.
+  // So, refreshToken must be defined first or hoisted/passed correctly.
+  // To adhere to useCallback dependencies, we define them in order: refreshToken -> scheduleNextRefresh -> handleActivity
+
+  const refreshToken = useCallback(async () => {
+    console.log('Attempting to refresh token...');
+    try {
+      const response = await api.post('/auth/refresh', {});
+      if (response.data && response.data.access_token) {
+        const new_access_token = response.data.access_token;
+        // Update token in localStorage and context state
+        // Need to update full tokenData, not just the token string, to keep expiry and user info consistent
+        // For simplicity here, assuming the new token comes with its own new expiry implicitly handled by backend
+        // Or, if backend only sends token, we'd need to parse it to get new expiry if it changes
+        // For now, let's update the token string and assume its expiry is managed by the new value.
+        // A more robust solution would involve the backend sending new expiry time or parsing the new token.
+
+        // Get existing token data to update it, or handle if it's null
+        const storedTokenDataString = localStorage.getItem('tokenData');
+        if (storedTokenDataString) {
+          const existingTokenData: TokenData = JSON.parse(storedTokenDataString);
+          const newTokenData: TokenData = {
+            ...existingTokenData,
+            token: new_access_token,
+            // Assuming the new token has the same expiry duration from its issuance time.
+            // This needs to be confirmed with backend. If backend refreshes expiry, this is fine.
+            // If backend only extends, then this calculation is fine.
+            // If backend sends new absolute expiry, use that.
+            // For now, we'll update token and rely on the existing expiry logic or assume new token has new default expiry.
+            // Let's assume the new token has a new default expiry from its creation (30 mins)
+            // We need to calculate this new expiresAt if not sent by backend.
+            // For now, let's assume the context's `login` function's way of setting expiry is what we need.
+            // This is a simplification: ideally, backend sends new expiresAt or token includes it.
+            // Let's assume for now the refresh endpoint gives a token that's valid for REFRESH_INTERVAL_MINUTES + buffer
+            // We'll just update the token string. The main useEffect will still track its original expiry.
+            // This means the *displayed* expiry in UI might not update, but the token *is* new.
+            // A better approach: server sends new `expires_in_seconds` or absolute `expires_at`.
+            // For this implementation, we will update the token and re-schedule.
+            // The existing session expiry check will still use the original `tokenData.expiresAt`.
+            // This is NOT ideal. The tokenData in localStorage and state should reflect the NEW token's true expiry.
+            // Let's refine this:
+            // For now, to keep it simple and avoid parsing token on client:
+            // Assume the new token is valid for another full default period from NOW.
+            // This is a common strategy if backend doesn't send explicit new expiry.
+             expiresAt: Date.now() + (30 * 60 * 1000), // Assuming new token is valid for 30 mins from now
+          };
+          localStorage.setItem('tokenData', JSON.stringify(newTokenData));
+          setTokenData(newTokenData); // Update the full tokenData
+        }
+
+        // setToken(new_access_token); // This would be if setToken just took the string. We use setTokenData.
+        console.log('Token refreshed successfully.');
+        // scheduleNextRefresh(); // This will be called by refreshToken's caller or effect
+      } else {
+        throw new Error('No access token in refresh response');
+      }
+    } catch (error) {
+      console.error('Failed to refresh token:', error);
+      logout(true); // Pass true to indicate potential session expiry
+      // No need to call scheduleNextRefresh here, as logout clears timers.
+    }
+  }, [logout, setTokenData]); // setTokenData is from useState, stable.
+
+
+  const scheduleNextRefresh = useCallback(() => {
+    if (tokenRefreshTimer.current) {
+      clearTimeout(tokenRefreshTimer.current);
+    }
+    tokenRefreshTimer.current = setTimeout(async () => {
+      await refreshToken(); // Call refresh token
+      // After refreshing, schedule the next one IF refreshToken was successful (i.e., no logout)
+      // Check tokenData because refreshToken might have logged out
+      if (localStorage.getItem('tokenData')) { // Check if session still exists
+         scheduleNextRefresh(); // Re-schedule the next refresh
+      }
+    }, REFRESH_INTERVAL_MINUTES * 60 * 1000);
+    setLastActivity(Date.now()); // Update last activity time whenever a refresh is scheduled
+    console.log(`Next token refresh scheduled in ${REFRESH_INTERVAL_MINUTES} minutes.`);
+  }, [refreshToken]); // refreshToken is a dependency
+
+
+  const handleActivity = useCallback(() => {
+    if (activityDebounceTimer.current) {
+      clearTimeout(activityDebounceTimer.current);
+    }
+    activityDebounceTimer.current = setTimeout(() => {
+      // console.log('User activity detected, re-scheduling next refresh.'); // Log moved to useEffect initial call
+      scheduleNextRefresh();
+    }, ACTIVITY_DEBOUNCE_MS);
+  }, [scheduleNextRefresh]);
+
+
   useEffect(() => {
     const handleApiTokenExpired = () => {
       // Check if user is currently authenticated to prevent multiple logout calls
       // if tokenData exists (which means logout hasn't fully processed yet from another trigger)
       if (tokenData) { 
-        console.log('[AuthContext] Received tokenInvalidated event from API, initiating logout.');
+        console.warn('Token invalidated event received, logging out.'); // Changed to console.warn and updated message
         logout(true); // Call logout with the flag to indicate it's a session expiry
       }
     };
@@ -130,6 +241,7 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
             profile_picture_url: parsedTokenData.profile_picture_url || null // Load profile picture URL
           });
         } else {
+          // Token expired or invalid structure
           localStorage.removeItem('tokenData'); 
           setUser(null); 
         }
@@ -139,8 +251,35 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
         setUser(null);
       }
     }
-    setIsLoading(false);
-  }, []);
+    setIsLoading(false); // Finished initial loading
+  }, []); // Runs once on mount
+
+
+  // Effect for managing activity listeners and initial refresh scheduling
+  useEffect(() => {
+    // Use !isLoading as a proxy for isInitialized, and tokenData for token presence
+    if (!isLoading && tokenData) {
+      const activityEvents = ['mousemove', 'keydown', 'mousedown', 'scroll', 'click', 'keypress'];
+      activityEvents.forEach(event => window.addEventListener(event, handleActivity));
+      console.log('Activity listeners added. Initial refresh schedule.');
+
+      scheduleNextRefresh(); // Initial call to start the timer
+
+      return () => {
+        activityEvents.forEach(event => window.removeEventListener(event, handleActivity));
+        if (tokenRefreshTimer.current) clearTimeout(tokenRefreshTimer.current);
+        if (activityDebounceTimer.current) clearTimeout(activityDebounceTimer.current); // Clear debounce timer too
+        console.log('Activity listeners and refresh timer removed.');
+      };
+    } else {
+      // No token or still loading, ensure timers are clear and no listeners are added/remain
+      if (tokenRefreshTimer.current) clearTimeout(tokenRefreshTimer.current);
+      if (activityDebounceTimer.current) clearTimeout(activityDebounceTimer.current);
+      console.log('AuthContext: No token or not initialized, ensuring timers are clear and listeners not added.');
+      return () => {}; // No listeners to remove if not added
+    }
+  }, [tokenData, isLoading, handleActivity, scheduleNextRefresh]);
+
 
   // Listen for maintenance mode forced logout event
   useEffect(() => {
@@ -209,6 +348,11 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     });
     setIsPasswordResetRequired(passwordResetRequired);
     sessionExpiredToastShownRef.current = false; 
+
+    // Schedule first refresh after login
+    console.log('Login successful, scheduling initial token refresh.');
+    scheduleNextRefresh();
+
     return passwordResetRequired;
   };
   

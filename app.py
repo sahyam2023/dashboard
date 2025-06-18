@@ -243,7 +243,7 @@ app.config['SECRET_KEY'] = '161549f75b4148cd529620b59c4fd706b40ae5805912a513811e
 app.config['JWT_SECRET_KEY'] = '991ca90ca06a362033f84c9a295a7c0f880caac7a74aefcf23df09f3b783c8e5a9bb0d8c1fcacf614d78cc3b580540419f55e08a29802eb9ea5e83a16eac641c0c028c814267dc94b261aa6a209462ea052773739f1429b7333185bf2b8bf8ba7ac19bccf691f4eece8d47174b6b3e191766d6a1a5c9a3ad21fd672f864e8a357d3c4b3fb838312a047156965a5756d73504db10b3920a3e6bfba5288443be112953e6b46132f6022280b192087384d6f8e91094bb5bbf21deac4bff2aaeda3f607db786b4847096f6112bad168e5223638c47146c74a9da65a54a86060c5298238169e1f2646f670c5f8014fe4997f9a2d8964e52938b627e31f58a70ece4d7'
 app.config['ENCRYPTION_KEY'] = b'OFXkV-MIeqKWmHp3mVNRhv2nCWTNSStK9XFV6RsfqAk=' # Added Fernet encryption key
 app.config['BCRYPT_LOG_ROUNDS'] = 12
-app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=4)
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(minutes=30)
 app.config['JWT_BLOCKLIST_ENABLED'] = True
 app.config['JWT_BLOCKLIST_TOKEN_CHECKS'] = ['access'] # Check only access tokens
 
@@ -6880,6 +6880,24 @@ def logout():
     # Emit online users count after successful logout and status update
     emit_online_users_count()
     return jsonify(msg="Logout successful, token revoked."), 200
+
+@app.route('/api/auth/refresh', methods=['POST'])
+@jwt_required()
+def refresh_token():
+    current_user_id_str = get_jwt_identity()
+    # The identity is already a string as per create_access_token(identity=str(user_id))
+    # No need to convert to int and back to str if the identity in the token is already a string.
+    # If it were an int in the token, then int(current_user_id_str) would be needed if create_access_token expected int.
+    # Assuming current_user_id_str is directly usable as identity for create_access_token.
+    new_access_token = create_access_token(identity=current_user_id_str)
+    log_audit_action(
+        action_type='TOKEN_REFRESHED',
+        target_table='users', # Or 'auth_tokens' if relevant
+        target_id=int(current_user_id_str) if current_user_id_str.isdigit() else None, # Log int ID if possible
+        username=find_user_by_id(int(current_user_id_str))['username'] if current_user_id_str.isdigit() and find_user_by_id(int(current_user_id_str)) else "Unknown",
+        details={'message': 'User refreshed their access token.'}
+    )
+    return jsonify(access_token=new_access_token), 200
     
 @app.route('/api/admin/versions/<int:version_id>', methods=['GET'])
 @jwt_required()

@@ -8,7 +8,7 @@ import {
 } from '../services/api';
 import { Link as LinkType, Software, SoftwareVersion } from '../types'; // LinkType is already here
 import CommentSection from '../components/comments/CommentSection'; // Added CommentSection
-import DataTable, { ColumnDef, ModalControlSetters } from '../components/DataTable'; // Added ModalControlSetters
+import DataTable, { ColumnDef } from '../components/DataTable'; // Added ModalControlSetters
 import { formatToISTLocaleString } from '../utils'; // Updated import
 import FilterTabs from '../components/FilterTabs';
 import LoadingState from '../components/LoadingState';
@@ -17,7 +17,7 @@ import { useAuth } from '../context/AuthContext';
 import AdminLinkEntryForm from '../components/admin/AdminLinkEntryForm';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
 import Modal from '../components/shared/Modal';
-import { PlusCircle, MinusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Link as LinkIconLucide, Download, Move, AlertTriangle, MessageSquare, ExternalLink, Eye } from 'lucide-react'; // Added Eye, MessageSquare
+import { PlusCircle, MinusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Link as LinkIconLucide, Download, Move, MessageSquare, ExternalLink } from 'lucide-react'; // Added Eye, MessageSquare
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils';
 
 interface OutletContextType {
@@ -394,42 +394,7 @@ const LinksView: React.FC = () => {
     {
       key: 'description',
       header: 'Description',
-      render: (l: LinkType, modalControls: ModalControlSetters) => {
-        const descriptionRef = React.useRef<HTMLSpanElement>(null);
-        const [isTruncated, setIsTruncated] = React.useState(false);
-        const descriptionText = l.description || '-';
-
-        React.useEffect(() => {
-          if (descriptionRef.current) {
-            setIsTruncated(descriptionRef.current.scrollHeight > descriptionRef.current.clientHeight);
-          }
-        }, [l.description]);
-
-        return (
-          // Added w-72 here to constrain the width of the cell's content
-          <div className="flex items-center justify-between w-72">
-            <span
-              ref={descriptionRef}
-              className="block line-clamp-3 text-sm w-full" // Added w-full
-              title={l.description || ''}
-            >
-              {descriptionText}
-            </span>
-            {isTruncated && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  modalControls.showModal(l.description || '-');
-                }}
-                className="ml-2 p-1 text-blue-600 hover:text-blue-800 flex-shrink-0"
-                title="Read More"
-              >
-                <Eye size={16} />
-              </button>
-            )}
-          </div>
-        );
-      }
+      // render function removed
     },
     {
       key: 'url',

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState } from 'react';
 import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
 import LoadingState from './LoadingState';
 import Modal from './shared/Modal'; // Assuming a Modal component exists
@@ -46,8 +46,8 @@ const DataTable = <T extends { id: number }>({
   currentPage,
   totalPages,
   onPageChange,
-  itemsPerPage, 
-  totalItems,   
+  itemsPerPage,
+  totalItems,
   sortColumn,
   sortOrder,
   onSort,
@@ -74,7 +74,7 @@ const DataTable = <T extends { id: number }>({
     if (isSelectionEnabled && selectAllCheckboxRef.current) {
       const visibleItemIds = data.map(item => item.id);
       const numSelected = visibleItemIds.filter(id => selectedItemIds.has(id)).length;
-      
+
       if (numSelected === 0) {
         selectAllCheckboxRef.current.checked = false;
         selectAllCheckboxRef.current.indeterminate = false;
@@ -99,7 +99,7 @@ const DataTable = <T extends { id: number }>({
   if (!data && !isLoading) {
     return (
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6 text-center">
-        <p className="text-gray-500 dark:text-gray-400">No data available (data is undefined)</p> 
+        <p className="text-gray-500 dark:text-gray-400">No data available (data is undefined)</p>
       </div>
     );
   }
@@ -115,7 +115,7 @@ const DataTable = <T extends { id: number }>({
   return (
     <div className="flex flex-col">
       <div className="overflow-x-auto">
-        <table className="min-w-full bg-white dark:bg-gray-800 rounded-lg shadow-sm">
+        <table className="min-w-full bg-white dark:bg-gray-800 rounded-lg shadow-sm table-fixed">
           <thead>
             <tr className="bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600">
               {isSelectionEnabled && (
@@ -131,7 +131,7 @@ const DataTable = <T extends { id: number }>({
                         onSelectAllItems(e.target.checked);
                       }
                     }}
-                    // Checked state is handled by useEffect and indeterminate logic
+                  // Checked state is handled by useEffect and indeterminate logic
                   />
                 </th>
               )}
@@ -159,104 +159,96 @@ const DataTable = <T extends { id: number }>({
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
             {data.map((item, index) => {
-              const customRowClass = typeof rowClassName === 'function' 
-                ? rowClassName(item, index) 
+              const customRowClass = typeof rowClassName === 'function'
+                ? rowClassName(item, index)
                 : rowClassName;
               const isSelected = selectedItemIds.has(item.id);
-              
+
               return (
-              <tr 
-                key={item.id || index} 
-                className={`transition-colors 
+                <tr
+                  key={item.id || index}
+                  className={`transition-colors 
                             ${customRowClass || ''} 
                             ${isSelected ? 'bg-sky-100 dark:bg-sky-800 hover:bg-sky-200 dark:hover:bg-sky-700' : 'hover:bg-gray-50 dark:hover:bg-gray-700'}
                             ${highlightedRowId !== null && String(item.id) === String(highlightedRowId) ? 'bg-yellow-200 dark:bg-yellow-700 ring-2 ring-yellow-500 ring-offset-1 dark:ring-offset-gray-800' : ''}`}
-              >
-                {isSelectionEnabled && (
-                  <td className="px-4 py-4 whitespace-nowrap">
-                    <input
-                      type="checkbox"
-                      className="form-checkbox h-4 w-4 text-blue-600 border-gray-300 dark:border-gray-600 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:checked:bg-blue-600 dark:checked:border-transparent"
-                      checked={isSelected}
-                      onChange={(e) => {
-                        if (onSelectItem) {
-                          onSelectItem(item.id, e.target.checked);
-                        }
-                      }}
-                      onClick={(e) => e.stopPropagation()} // Prevent row click if any defined by parent
-                    />
-                  </td>
-                )}
-                {columns.map((column) => {
-                  // Branch 1: This is a 'description' column AND no custom column.render is provided.
-                  // Apply special line-clamping and "Read More" button with correct truncation logic.
-                  if (column.key === 'description' && !column.render) {
-                    const descriptionRef = React.useRef<HTMLSpanElement>(null);
-                    const [isTruncated, setIsTruncated] = React.useState(false);
-                    const descriptionText = String(item[column.key as keyof T] ?? ''); 
+                >
+                  {isSelectionEnabled && (
+                    <td className="px-4 py-4 whitespace-nowrap">
+                      <input
+                        type="checkbox"
+                        className="form-checkbox h-4 w-4 text-blue-600 border-gray-300 dark:border-gray-600 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:checked:bg-blue-600 dark:checked:border-transparent"
+                        checked={isSelected}
+                        onChange={(e) => {
+                          if (onSelectItem) {
+                            onSelectItem(item.id, e.target.checked);
+                          }
+                        }}
+                        onClick={(e) => e.stopPropagation()} // Prevent row click if any defined by parent
+                      />
+                    </td>
+                  )}
+                  {columns.map((column) => {
+                    // Branch 1: This is a 'description' column AND no custom column.render is provided.
+                    // Apply special line-clamping and "Read More" button with correct truncation logic.
+                    if (column.key === 'description' && !column.render) {
+                      const descriptionRef = React.useRef<HTMLSpanElement>(null);
+                      const [isTruncated, setIsTruncated] = React.useState(false);
+                      const descriptionText = String(item[column.key as keyof T] ?? '');
 
-                    useEffect(() => {
-                      if (descriptionRef.current) {
-                        // Corrected: For line-clamp, truncation occurs if scrollHeight > clientHeight
-                        const { scrollHeight, clientHeight } = descriptionRef.current;
-                        if (scrollHeight > clientHeight) {
-                          setIsTruncated(true);
-                        } else {
-                          setIsTruncated(false);
+                      React.useLayoutEffect(() => {
+                        if (descriptionRef.current) {
+                          const hasOverflow = descriptionRef.current.scrollHeight > descriptionRef.current.clientHeight;
+                          setIsTruncated(hasOverflow);
                         }
-                      }
-                      // Dependencies: descriptionText ensures this runs if the text changes.
-                      // data is included because table re-renders might require re-evaluation.
-                      // item.id (or a unique key for the row) ensures the effect is specific to this row's content.
-                    }, [descriptionText, data, item.id]); 
+                      }, [descriptionText, item.id]);
+
+                      return (
+                        <td key={`${column.key as string}-desc`} className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300 max-w-md break-words">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <span
+                                ref={descriptionRef}
+                                className="line-clamp-3"
+                                title={descriptionText}
+                              >
+                                {descriptionText}
+                              </span>
+                            </div>
+
+                            {isTruncated && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); modalControls.showModal(descriptionText); }}
+                                className="p-1 text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 flex-shrink-0"
+                                title="Read More"
+                              >
+                                <Eye size={16} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      );
+                    }
+
+                    // Branch 2: All other cases:
+                    // - Not a 'description' column.
+                    // - Is a 'description' column BUT a custom column.render IS provided.
+                    // In these cases, use the standard rendering path.
+                    const cellContent = column.render
+                      ? column.render(item, modalControls)
+                      : String(item[column.key as keyof T] ?? '');
+
+                    let tdClassName = "px-6 py-4 text-sm text-gray-700 dark:text-gray-300";
+                    if (column.key !== 'description') {
+                      tdClassName += " whitespace-nowrap";
+                    }
 
                     return (
-                      <td key={`${column.key as string}-desc`} className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300"> {/* Removed whitespace-nowrap for description column */}
-                        <div className="flex items-center justify-between">
-                          <span
-                            ref={descriptionRef}
-                            className="block line-clamp-3" 
-                          >
-                            {descriptionText}
-                          </span>
-                          {isTruncated && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setFullDescription(descriptionText); 
-                                setShowFullDescriptionModal(true);
-                              }}
-                              className="ml-2 p-1 text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 flex-shrink-0"
-                              title="Read More"
-                            >
-                              <Eye size={16} />
-                            </button>
-                          )}
-                        </div>
+                      <td key={column.key as string} className={tdClassName}>
+                        {cellContent}
                       </td>
                     );
-                  }
-                  
-                  // Branch 2: All other cases:
-                  // - Not a 'description' column.
-                  // - Is a 'description' column BUT a custom column.render IS provided.
-                  // In these cases, use the standard rendering path.
-                  const cellContent = column.render 
-                    ? column.render(item, modalControls) 
-                    : String(item[column.key as keyof T] ?? '');
-                  
-                  let tdClassName = "px-6 py-4 text-sm text-gray-700 dark:text-gray-300";
-                  if (column.key !== 'description') {
-                    tdClassName += " whitespace-nowrap";
-                  }
-
-                  return (
-                    <td key={column.key as string} className={tdClassName}>
-                      {cellContent}
-                    </td>
-                  );
-                })}
-              </tr>
+                  })}
+                </tr>
               );
             })}
           </tbody>
@@ -297,10 +289,10 @@ const DataTable = <T extends { id: number }>({
               <p className="text-sm text-gray-700 dark:text-gray-300">
                 Page <span className="font-medium">{currentPage}</span> of <span className="font-medium">{totalPages}</span>
                 {totalItems && itemsPerPage && (
-                     <span className="ml-2">
-                        (Showing {Math.min((currentPage - 1) * itemsPerPage + 1, totalItems)}
-                        - {Math.min(currentPage * itemsPerPage, totalItems)} of {totalItems} items)
-                     </span>
+                  <span className="ml-2">
+                    (Showing {Math.min((currentPage - 1) * itemsPerPage + 1, totalItems)}
+                    - {Math.min(currentPage * itemsPerPage, totalItems)} of {totalItems} items)
+                  </span>
                 )}
               </p>
             </div>
@@ -316,27 +308,27 @@ const DataTable = <T extends { id: number }>({
                 </button>
                 {/* Basic Page Numbers - could be expanded */}
                 {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                    let pageNum = i + 1;
-                    if (totalPages > 5 && currentPage > 3) {
-                        pageNum = currentPage - 2 + i;
-                        if (pageNum > totalPages - 2 && totalPages > 5) pageNum = totalPages - 4 + i; // ensure last 5 pages are shown
-                    }
-                    if (pageNum < 1 || pageNum > totalPages) return null; // Don't render invalid page numbers
+                  let pageNum = i + 1;
+                  if (totalPages > 5 && currentPage > 3) {
+                    pageNum = currentPage - 2 + i;
+                    if (pageNum > totalPages - 2 && totalPages > 5) pageNum = totalPages - 4 + i; // ensure last 5 pages are shown
+                  }
+                  if (pageNum < 1 || pageNum > totalPages) return null; // Don't render invalid page numbers
 
-                    return (
-                         <button
-                            key={pageNum}
-                            onClick={() => onPageChange(pageNum)}
-                            aria-current={currentPage === pageNum ? 'page' : undefined}
-                            className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium
-                                ${currentPage === pageNum 
-                                    ? 'z-10 bg-blue-50 dark:bg-blue-800 border-blue-500 dark:border-blue-700 text-blue-600 dark:text-blue-300' 
-                                    : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'
-                                }`}
-                         >
-                            {pageNum}
-                         </button>
-                    );
+                  return (
+                    <button
+                      key={pageNum}
+                      onClick={() => onPageChange(pageNum)}
+                      aria-current={currentPage === pageNum ? 'page' : undefined}
+                      className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium
+                                ${currentPage === pageNum
+                          ? 'z-10 bg-blue-50 dark:bg-blue-800 border-blue-500 dark:border-blue-700 text-blue-600 dark:text-blue-300'
+                          : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'
+                        }`}
+                    >
+                      {pageNum}
+                    </button>
+                  );
                 })}
                 <button
                   onClick={() => onPageChange(currentPage + 1)}

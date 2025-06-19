@@ -1,7 +1,7 @@
 // src/views/PatchesView.tsx
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useOutletContext, useLocation, useSearchParams } from 'react-router-dom'; // Added useSearchParams
-import { ExternalLink, PlusCircle, MinusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Download, Move, AlertTriangle, Package as PackageIcon, MessageSquare, Eye } from 'lucide-react'; // Added Eye
+import { ExternalLink, PlusCircle, MinusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Download, Move, Package as PackageIcon, MessageSquare } from 'lucide-react'; // Added Eye
 import {
   fetchPatches,
   fetchSoftware,
@@ -18,7 +18,7 @@ import {
 } from '../services/api';
 import { Patch as PatchType, Software, SoftwareVersion } from '../types';
 import CommentSection from '../components/comments/CommentSection'; // Added CommentSection
-import DataTable, { ColumnDef, ModalControlSetters } from '../components/DataTable'; // Added ModalControlSetters
+import DataTable, { ColumnDef } from '../components/DataTable'; // Added ModalControlSetters
 import { formatToISTLocaleString, formatDateDisplay } from '../utils'; // Updated import
 import FilterTabs from '../components/FilterTabs';
 import LoadingState from '../components/LoadingState';
@@ -492,42 +492,7 @@ const PatchesView: React.FC = () => {
     {
       key: 'description',
       header: 'Description',
-      render: (p: PatchType, modalControls: ModalControlSetters) => {
-        const descriptionRef = React.useRef<HTMLSpanElement>(null);
-        const [isTruncated, setIsTruncated] = React.useState(false);
-        const descriptionText = p.description || '-';
-
-        React.useEffect(() => {
-          if (descriptionRef.current) {
-            setIsTruncated(descriptionRef.current.scrollHeight > descriptionRef.current.clientHeight);
-          }
-        }, [p.description]); // Re-check if description changes
-
-        return (
-          // Added w-72 here to constrain the width of the cell's content
-          <div className="flex items-center justify-between w-72"> 
-            <span
-              ref={descriptionRef}
-              className="block line-clamp-3 text-sm w-full" // Added w-full
-              title={p.description || ''} // Keep original title attribute
-            >
-              {descriptionText}
-            </span>
-            {isTruncated && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  modalControls.showModal(p.description || '-');
-                }}
-                className="ml-2 p-1 text-blue-600 hover:text-blue-800 flex-shrink-0"
-                title="Read More"
-              >
-                <Eye size={16} />
-              </button>
-            )}
-          </div>
-        );
-      }
+      // render function removed
     },
     { key: 'release_date', header: 'Release Date', sortable: true, render: (item: PatchType) => formatDateDisplay(item.release_date) }, // Stays the same
     {

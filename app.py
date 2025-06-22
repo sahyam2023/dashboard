@@ -51,16 +51,14 @@ from flask import current_app # For JWT_IDENTITY_CLAIM
 from werkzeug.utils import secure_filename
 from tempfile import NamedTemporaryFile
 import database # Your database.py helper
-from apscheduler.schedulers.background import BackgroundScheduler
-import atexit
+import atexit # Still needed for other schedulers potentially
 # from waitress import serve # Removed Waitress
 from flask_socketio import SocketIO, join_room, leave_room, emit, disconnect
 from urllib.parse import urljoin # Added for chat file_url modification
 
-from scheduler import init_scheduler as initialize_app_scheduler
-from scheduler import scheduler as app_scheduler # For shutdown
+# Removed APScheduler related imports from scheduler
 from scheduler import run_delete_old_messages_periodically, run_cleanup_files_periodically # Added for Eventlet scheduling
-import atexit
+import atexit # Still needed for the backup scheduler
 # import os # For database path # os is already imported
 
 # --- Helper function for PyInstaller ---
@@ -290,17 +288,8 @@ if 'DATABASE_PATH' not in app.config:
     app.config['DATABASE_PATH'] = os.path.join(app.instance_path, 'software_dashboard.db')
     # print(f"DATABASE_PATH not set, defaulted to: {app.config['DATABASE_PATH']}") # Removed
 
-# Initialize and start the scheduler
-initialize_app_scheduler(app)
-
-# --- Graceful Scheduler Shutdown ---
-def shutdown_scheduler():
-    if app_scheduler.running:
-        # print("Shutting down scheduler...") # Removed
-        app_scheduler.shutdown()
-        # print("Scheduler shut down.") # Removed
-
-atexit.register(shutdown_scheduler)
+# Removed APScheduler initialization and shutdown
+# The Eventlet tasks are spawned in the `if __name__ == '__main__':` block.
 
 bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
@@ -11891,30 +11880,23 @@ if __name__ == '__main__':
         flask_port = int(os.environ.get('FLASK_RUN_PORT', 7000))
         is_frozen = getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
 
+        # Start periodic tasks using Eventlet green threads for all modes
+        app.logger.info("Starting periodic deletion of old messages using Eventlet green threads.")
+        eventlet.spawn(run_delete_old_messages_periodically, app) # Pass the app instance
+
+        app.logger.info("Starting periodic cleanup of temporary files using Eventlet green threads.")
+        eventlet.spawn(run_cleanup_files_periodically, app) # Pass the app instance
+
         if is_frozen:
             # FOR PYINSTALLER: Use the direct eventlet server with your silent logger.
             app.logger.info(f"Starting server in PyInstaller mode on port {flask_port}")
-            # app.logger.info("Eventlet WSGI server will use its default logger.") # This message is already present below
 
-            # Start periodic task for deleting old messages using Eventlet
-            app.logger.info("Starting periodic deletion of old messages using Eventlet green threads.")
-            eventlet.spawn(run_delete_old_messages_periodically)
-
-            # Start periodic task for cleaning up temporary files using Eventlet
-            app.logger.info("Starting periodic cleanup of temporary files using Eventlet green threads.")
-            eventlet.spawn(run_cleanup_files_periodically)
-
-            # 1. Instantiate your logger
-            silent_logger = SilentLogger() # Removed SilentLogger
-
-            # 2. Pass the instance to the server's 'log' parameter
+            silent_logger = SilentLogger()
             app.logger.info("Eventlet WSGI server is using SilentLogger for production build.") 
             eventlet.wsgi.server(eventlet.listen(('0.0.0.0', flask_port)), app, log=silent_logger, socket_timeout=600)
 
         else:
             # FOR DEVELOPMENT: Use socketio.run() which has its own logging controls.
-            # socketio.run() does not directly expose eventlet's socket_timeout.
-            # The ping_timeout and ping_interval for SocketIO itself are more relevant here.
             app.logger.info(f"Starting server in development mode on port {flask_port}")
             socketio.run(app, host='0.0.0.0', port=flask_port, debug=False)
 

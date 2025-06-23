@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS users (
     is_active BOOLEAN DEFAULT TRUE NOT NULL,
     password_reset_required BOOLEAN DEFAULT FALSE NOT NULL,
     dashboard_layout_prefs TEXT DEFAULT NULL,
+    column_visibility_prefs TEXT DEFAULT NULL, -- Added for user-specific column visibility
     profile_picture_filename TEXT, 
     created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
     last_seen TIMESTAMP,

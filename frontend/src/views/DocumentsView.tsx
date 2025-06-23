@@ -37,8 +37,8 @@ interface OutletContextType {
 const DocumentsView: React.FC = () => {
   const ITEMS_PER_PAGE = 10;
   const { searchTerm, setSearchTerm } = useOutletContext<OutletContextType>(); 
-const { isAuthenticated, user } = useAuth();
-const role = user?.role; // Access role safely, as user can be null
+  const { isAuthenticated, user, columnVisibilityPrefs } = useAuth(); // Added columnVisibilityPrefs
+  const role = user?.role; // Access role safely, as user can be null
   const [showAddDocumentForm, setShowAddDocumentForm] = useState(false);
   const [editingDocument, setEditingDocument] = useState<DocumentType | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -478,53 +478,47 @@ useEffect(() => {
     finally { setIsMovingSelected(false); setTargetSoftwareForMove(null); }
   };
 
-  const columns: ColumnDef<DocumentType>[] = [
-    { key: 'doc_name', header: 'Name', sortable: true }, { key: 'doc_type', header: 'Type', sortable: true },
+  // Define base columns
+  const baseColumns: ColumnDef<DocumentType>[] = [
+    { key: 'doc_name', header: 'Name', sortable: true },
+    { key: 'doc_type', header: 'Type', sortable: true },
     { key: 'software_name', header: 'Software', sortable: true },
-    {
-      key: 'description',
-      header: 'Description',
-      // render function removed
-    },
+    { key: 'description', header: 'Description' },
     { 
       key: 'download_link', 
       header: 'Download', 
       render: (d: DocumentType) => {
-        // Check if the document is an external link or an uploaded file that is downloadable
-        const canDirectlyDownload = d.is_external_link || d.is_downloadable;
-        // For uploaded files, if is_downloadable is explicitly false, it's not downloadable.
-        // If is_downloadable is undefined (for older data or if backend missed it), default to allowing download for non-external links.
         const isEffectivelyDownloadable = d.is_external_link || d.is_downloadable !== false;
-
-        if (!isEffectivelyDownloadable && !d.is_external_link) { // It's an uploaded file and not downloadable
+        if (!isEffectivelyDownloadable && !d.is_external_link) {
           return (
             <span className="flex items-center text-gray-400 cursor-not-allowed" title="Download not permitted">
               <Download size={14} className="mr-1"/>Link
             </span>
           );
         }
-        // For external links or downloadable files
         return (
           <a 
             href={d.download_link} 
             target={d.is_external_link || !d.download_link?.startsWith('/') ? "_blank" : "_self"} 
             rel="noopener noreferrer" 
-            className={`flex items-center ${canDirectlyDownload ? 'text-blue-600 hover:text-blue-800' : 'text-gray-400 cursor-not-allowed'}`} 
+            className={`flex items-center ${isEffectivelyDownloadable ? 'text-blue-600 hover:text-blue-800' : 'text-gray-400 cursor-not-allowed'}`}
             onClick={(e) => {
-              if (!canDirectlyDownload) e.preventDefault(); // Prevent action if not downloadable
+              if (!isEffectivelyDownloadable) e.preventDefault();
               e.stopPropagation();
             }}
-            title={canDirectlyDownload ? (d.is_external_link ? "Open external link" : "Download file") : "Download not permitted"}
+            title={isEffectivelyDownloadable ? (d.is_external_link ? "Open external link" : "Download file") : "Download not permitted"}
           >
             {d.is_external_link ? <ExternalLink size={14} className="mr-1"/> : <Download size={14} className="mr-1"/>}Link
           </a>
         );
       } 
     },
+    // These columns will be conditionally added based on preferences
     { key: 'uploaded_by_username', header: 'Uploaded By', sortable: true, render: (d: DocumentType) => d.uploaded_by_username||'N/A' },
     { key: 'updated_by_username', header: 'Updated By', sortable: false, render: (d: DocumentType) => d.updated_by_username||'N/A' },
     { key: 'created_at', header: 'Created At', sortable: true, render: (item: DocumentType) => formatToISTLocaleString(item.created_at ?? '') },
     { key: 'updated_at', header: 'Updated At', sortable: true, render: (item: DocumentType) => formatToISTLocaleString(item.updated_at ?? '') },
+    // Actions column is always present
     { key: 'actions' as any, header: 'Actions', render: (d: DocumentType) => (
       <div className="flex space-x-1 items-center">
         {isAuthenticated && (
@@ -557,6 +551,22 @@ useEffect(() => {
       </div>
     )},
   ];
+
+  const columns = useMemo(() => {
+    const userDocumentPrefs = columnVisibilityPrefs?.documents || {};
+    // Columns to be hidden by default if no preference is set or if preference is false
+    const defaultHiddenColumnKeys = ['uploaded_by_username', 'updated_by_username', 'created_at', 'updated_at'];
+
+    return baseColumns.filter(col => {
+      const colKey = col.key as string;
+      if (defaultHiddenColumnKeys.includes(colKey)) {
+        // If it's a default hidden column, it's visible only if the preference is explicitly true
+        return userDocumentPrefs[colKey] === true;
+      }
+      // For other columns, they are visible unless explicitly set to false
+      return userDocumentPrefs[colKey] !== false;
+    });
+  }, [columnVisibilityPrefs, baseColumns]); // Recompute when preferences change or baseColumns definition changes (though baseColumns is static here)
   
   const totalPagesComputed = Math.ceil(totalDocuments / ITEMS_PER_PAGE);
   const loadDocumentsCallback = useCallback(() => { fetchAndSetDocuments(1, true); }, [fetchAndSetDocuments]);

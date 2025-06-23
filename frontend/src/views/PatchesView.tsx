@@ -37,7 +37,7 @@ interface OutletContextType {
 
 const PatchesView: React.FC = () => {
   const { searchTerm, setSearchTerm } = useOutletContext<OutletContextType>();
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, columnVisibilityPrefs } = useAuth(); // Added columnVisibilityPrefs
   const role = user?.role; // Access role safely, as user can be null
   const [patches, setPatches] = useState<PatchType[]>([]);
   const [softwareList, setSoftwareList] = useState<Software[]>([]);
@@ -450,57 +450,37 @@ const PatchesView: React.FC = () => {
   };
 
   // const formatDate helper is no longer needed as we use specific utility functions now.
-  const columns: ColumnDef<PatchType>[] = [
-    { key: 'patch_name', header: 'Patch Name', sortable: true }, { key: 'software_name', header: 'Software', sortable: true },
+  const baseColumns: ColumnDef<PatchType>[] = [
+    { key: 'patch_name', header: 'Patch Name', sortable: true },
+    { key: 'software_name', header: 'Software', sortable: true },
     { key: 'version_number', header: 'Version', sortable: true },
     { key: 'patch_by_developer', header: 'Developer', sortable: true, render: p => p.patch_by_developer || '-' },
     {
       key: 'compatible_vms_versions',
       header: 'VMS Compatibility',
-      sortable: true, // Backend supports sorting by this string
+      sortable: true,
       render: (patch: PatchType) => {
-        // software_name is directly available on the PatchType from the backend join
         const isRelevantSoftware = patch.software_name === 'VMS' || patch.software_name === 'VA';
-        let content: React.ReactNode = '-'; // Default content
-
+        let content: React.ReactNode = '-';
         if (isRelevantSoftware) {
           if (patch.compatible_vms_versions && patch.compatible_vms_versions.length > 0) {
-            // If it's an array of strings (version numbers)
-            if (Array.isArray(patch.compatible_vms_versions)) {
-              content = patch.compatible_vms_versions.join(', ');
-            }
-            // If it's a single string (comma-separated, as GROUP_CONCAT produces)
-            // This check might be redundant if frontend type enforces array, but good for safety
-            else if (typeof patch.compatible_vms_versions === 'string') {
-              content = patch.compatible_vms_versions;
-            } else {
-              content = 'N/A'; // VMS/VA but data is in unexpected format or empty
-            }
-          } else {
-            content = 'N/A'; // VMS/VA but no compatibility versions set
-          }
+            if (Array.isArray(patch.compatible_vms_versions)) content = patch.compatible_vms_versions.join(', ');
+            else if (typeof patch.compatible_vms_versions === 'string') content = patch.compatible_vms_versions;
+            else content = 'N/A';
+          } else content = 'N/A';
         }
-        // Wrap the content in a div with text-center for alignment
         return <div className="text-center">{content}</div>;
       }
     },
-    {
-      key: 'description',
-      header: 'Description',
-      // render function removed
-    },
-    { key: 'release_date', header: 'Release Date', sortable: true, render: (item: PatchType) => formatDateDisplay(item.release_date) }, // Stays the same
+    { key: 'description', header: 'Description' },
+    { key: 'release_date', header: 'Release Date', sortable: true, render: (item: PatchType) => formatDateDisplay(item.release_date) },
     {
       key: 'download_link',
       header: 'Link',
       render: (p: PatchType) => {
         const isEffectivelyDownloadable = p.is_external_link || p.is_downloadable !== false;
         if (!isEffectivelyDownloadable && !p.is_external_link) {
-          return (
-            <span className="flex items-center text-gray-400 cursor-not-allowed" title="Download not permitted">
-              <Download size={14} className="mr-1" />Link
-            </span>
-          );
+          return (<span className="flex items-center text-gray-400 cursor-not-allowed" title="Download not permitted"><Download size={14} className="mr-1" />Link</span>);
         }
         return (
           <a
@@ -508,10 +488,7 @@ const PatchesView: React.FC = () => {
             target={p.is_external_link || !p.download_link?.startsWith('/') ? "_blank" : "_self"}
             rel="noopener noreferrer"
             className={`flex items-center ${isEffectivelyDownloadable ? 'text-blue-600 hover:text-blue-800' : 'text-gray-400 cursor-not-allowed'}`}
-            onClick={(e) => {
-              if (!isEffectivelyDownloadable) e.preventDefault();
-              e.stopPropagation();
-            }}
+            onClick={(e) => { if (!isEffectivelyDownloadable) e.preventDefault(); e.stopPropagation(); }}
             title={isEffectivelyDownloadable ? (p.is_external_link ? "Open external link" : "Download patch") : "Download not permitted"}
           >
             {p.is_external_link ? <ExternalLink size={14} className="mr-1" /> : <Download size={14} className="mr-1" />}Link
@@ -572,6 +549,19 @@ const PatchesView: React.FC = () => {
       )
     },
   ];
+
+  const columns = useMemo(() => {
+    const userPatchesPrefs = columnVisibilityPrefs?.patches || {};
+    const defaultHiddenColumnKeys = ['uploaded_by_username', 'updated_by_username', 'created_at', 'updated_at'];
+
+    return baseColumns.filter(col => {
+      const colKey = col.key as string;
+      if (defaultHiddenColumnKeys.includes(colKey)) {
+        return userPatchesPrefs[colKey] === true;
+      }
+      return userPatchesPrefs[colKey] !== false;
+    });
+  }, [columnVisibilityPrefs, baseColumns]);
 
   const loadPatchesCallback = useCallback(() => { fetchAndSetPatches(1, true); }, [fetchAndSetPatches]);
 

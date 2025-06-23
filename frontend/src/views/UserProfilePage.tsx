@@ -14,9 +14,12 @@ const UserProfilePage: React.FC = () => {
   const { 
     watchPreferences: contextWatchPreferences,
     isLoading: isLoadingContextWatchPreferences,
-    updatePreference, 
+    updatePreference: updateWatchPreference, // Renamed to avoid conflict
     isWatching 
   } = useWatch();
+  // Column Visibility Preferences from AuthContext
+  const { columnVisibilityPrefs, updateColumnVisibilityPrefs } = useAuth();
+
 
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7000';
   // State for Profile Picture
@@ -69,13 +72,58 @@ const UserProfilePage: React.FC = () => {
   };
   type ContentTypeKey = keyof typeof CONTENT_WATCH_CONFIG;
 
+  // Config for toggleable columns
+  const COLUMN_VISIBILITY_CONFIG = {
+    documents: {
+      displayName: 'Documents',
+      columns: {
+        uploaded_by_username: 'Uploaded By',
+        updated_by_username: 'Updated By',
+        created_at: 'Created At',
+        updated_at: 'Updated At',
+      }
+    },
+    patches: {
+      displayName: 'Patches',
+      columns: {
+        uploaded_by_username: 'Uploaded By',
+        updated_by_username: 'Updated By',
+        created_at: 'Created At',
+        updated_at: 'Updated At',
+      }
+    },
+    links: {
+      displayName: 'Links',
+      columns: {
+        // Assuming 'uploaded_by_username' maps to 'Added By' and 'created_at' to 'Created' based on typical table views
+        uploaded_by_username: 'Added By',
+        updated_by_username: 'Updated By',
+        created_at: 'Created',
+        updated_at: 'Updated',
+      }
+    }
+  };
+  type TableKeyForColumnPrefs = keyof typeof COLUMN_VISIBILITY_CONFIG;
+
+
   const handleWatchToggle = async (contentType: ContentTypeKey, category: string | undefined, currentlyWatching: boolean) => {
-    // isSavingWatchPreferences is now isLoadingContextWatchPreferences from context
-    // No need to manually set it here as updatePreference in context will handle its loading state.
-    await updatePreference(contentType, category ?? null, !currentlyWatching);
-    // The context will handle updating its own watchPreferences state,
-    // which will cause this component to re-render with the new state.
-    // Toasts for success/failure are handled by updatePreference in context or can be added here if specific messages are needed.
+    await updateWatchPreference(contentType, category ?? null, !currentlyWatching);
+  };
+
+  const handleColumnVisibilityToggle = async (tableKey: TableKeyForColumnPrefs, columnKey: string, currentVisibility: boolean) => {
+    const newPrefs = JSON.parse(JSON.stringify(columnVisibilityPrefs)); // Deep copy
+    if (!newPrefs[tableKey]) {
+      newPrefs[tableKey] = {};
+    }
+    newPrefs[tableKey][columnKey] = !currentVisibility;
+    try {
+      await updateColumnVisibilityPrefs(newPrefs);
+      // Success toast is optional here as AuthContext might handle it or it might not be desired
+      // showSuccessToast(`Visibility for ${COLUMN_VISIBILITY_CONFIG[tableKey].columns[columnKey]} in ${COLUMN_VISIBILITY_CONFIG[tableKey].displayName} updated.`);
+    } catch (error) {
+      // Error toast is handled by updateColumnVisibilityPrefs in AuthContext
+      // No need to show another one here unless more specific message is needed.
+    }
   };
 
   const handleUsernameChangeSubmit = async (e: React.FormEvent) => {
@@ -344,6 +392,49 @@ const UserProfilePage: React.FC = () => {
         </button>
         {/* Toggle rendering logic is now moved to the modal */}
       </div>
+
+      {/* Column Visibility Preferences Section */}
+      <div className="mb-8 p-6 bg-white dark:bg-gray-800 rounded-lg shadow">
+        <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-gray-100">Table Column Display Preferences</h2>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          Toggle visibility for certain columns in table views. Changes are saved automatically.
+        </p>
+        <div className="space-y-6">
+          {Object.entries(COLUMN_VISIBILITY_CONFIG).map(([tableKey, config]) => (
+            <div key={tableKey}>
+              <h3 className="text-lg font-medium text-gray-900 dark:text-gray-200 mb-2">{config.displayName}</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                {Object.entries(config.columns).map(([colKey, colDisplayName]) => {
+                  // Determine current visibility: default to true if not specified in prefs (user explicitly hides)
+                  // However, for the columns specified in the requirement, they should default to hidden.
+                  // The requirement is to hide:
+                  // Docs: Uploaded By, Updated By, Created At, Updated At
+                  // Patches: Uploaded By, Updated By, Created At, Updated At
+                  // Links: Added By, Updated By, Created, Updated
+                  // These map to: uploaded_by_username, updated_by_username, created_at, updated_at
+                  const isVisible = columnVisibilityPrefs[tableKey as TableKeyForColumnPrefs]?.[colKey] ?? false;
+
+                  return (
+                    <div key={colKey} className="flex items-center">
+                      <input
+                        type="checkbox"
+                        id={`${tableKey}-${colKey}-visibility`}
+                        checked={isVisible}
+                        onChange={() => handleColumnVisibilityToggle(tableKey as TableKeyForColumnPrefs, colKey, isVisible)}
+                        className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-offset-gray-800 dark:bg-gray-700 dark:border-gray-600"
+                      />
+                      <label htmlFor={`${tableKey}-${colKey}-visibility`} className="ml-2 block text-sm text-gray-900 dark:text-gray-300">
+                        Show {colDisplayName}
+                      </label>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
 
       {/* Feedback Section */}
       <div className="mb-8 p-6 bg-white dark:bg-gray-800 rounded-lg shadow">

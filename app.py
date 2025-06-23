@@ -11723,6 +11723,65 @@ def user_submit_feedback():
         app.logger.error(f"Error submitting user feedback: {e}", exc_info=True)
         return jsonify(msg="An unexpected server error occurred while submitting feedback."), 500
 
+@app.route('/api/user/profile/column-prefs', methods=['GET'])
+@active_user_required
+def get_user_column_prefs():
+    user_id = int(get_jwt_identity())
+    db = get_db()
+    user_prefs_row = db.execute("SELECT column_visibility_prefs FROM users WHERE id = ?", (user_id,)).fetchone()
+
+    if user_prefs_row and user_prefs_row['column_visibility_prefs']:
+        try:
+            prefs = json.loads(user_prefs_row['column_visibility_prefs'])
+            return jsonify(prefs), 200
+        except json.JSONDecodeError:
+            app.logger.error(f"Failed to parse column_visibility_prefs for user {user_id}. Data: {user_prefs_row['column_visibility_prefs']}")
+            return jsonify({}), 200 # Return empty dict if parsing fails or no prefs
+    else:
+        return jsonify({}), 200 # No preferences set, return empty dict
+
+@app.route('/api/user/profile/column-prefs', methods=['PUT'])
+@active_user_required
+def update_user_column_prefs():
+    user_id = int(get_jwt_identity())
+    new_prefs_payload = request.get_json()
+
+    if new_prefs_payload is None or not isinstance(new_prefs_payload, dict):
+        return jsonify(msg="Invalid or missing JSON data in request body. Expected an object."), 400
+
+    # Basic validation of the payload structure (can be enhanced)
+    allowed_tables = ["documents", "patches", "links"]
+    for table_key, column_prefs in new_prefs_payload.items():
+        if table_key not in allowed_tables:
+            return jsonify(msg=f"Invalid table key '{table_key}' in preferences."), 400
+        if not isinstance(column_prefs, dict):
+            return jsonify(msg=f"Column preferences for '{table_key}' must be an object."), 400
+        for column_name, is_visible in column_prefs.items():
+            if not isinstance(column_name, str) or not isinstance(is_visible, bool):
+                return jsonify(msg=f"Invalid preference for '{table_key}': column '{column_name}' must have a boolean visibility value."), 400
+
+    prefs_json_string = json.dumps(new_prefs_payload)
+    db = get_db()
+    try:
+        db.execute("UPDATE users SET column_visibility_prefs = ? WHERE id = ?", (prefs_json_string, user_id))
+        log_audit_action(
+            action_type='UPDATE_COLUMN_VISIBILITY_PREFS',
+            target_table='users',
+            target_id=user_id,
+            details={'message': 'User column visibility preferences updated.'}
+            # Not logging the full prefs JSON in audit for brevity.
+        )
+        db.commit()
+        return jsonify(msg="Column visibility preferences updated successfully."), 200
+    except sqlite3.Error as e:
+        db.rollback()
+        app.logger.error(f"Database error updating column_visibility_prefs for user {user_id}: {e}")
+        return jsonify(msg="Failed to update column visibility preferences due to a database error."), 500
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"Unexpected error updating column_visibility_prefs for user {user_id}: {e}")
+        return jsonify(msg="An unexpected server error occurred."), 500
+
 @app.route('/api/admin/feedback', methods=['GET'])
 @admin_required
 def admin_get_feedback():

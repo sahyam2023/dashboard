@@ -1,7 +1,7 @@
 // src/views/PatchesView.tsx
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useOutletContext, useLocation, useSearchParams } from 'react-router-dom'; // Added useSearchParams
-import { ExternalLink, PlusCircle, MinusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Download, Move, AlertTriangle, Package as PackageIcon, MessageSquare } from 'lucide-react';
+import { ExternalLink, PlusCircle, MinusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Download, Move, Package as PackageIcon, MessageSquare } from 'lucide-react'; // Added Eye
 import {
   fetchPatches,
   fetchSoftware,
@@ -18,7 +18,7 @@ import {
 } from '../services/api';
 import { Patch as PatchType, Software, SoftwareVersion } from '../types';
 import CommentSection from '../components/comments/CommentSection'; // Added CommentSection
-import DataTable, { ColumnDef } from '../components/DataTable';
+import DataTable, { ColumnDef } from '../components/DataTable'; // Added ModalControlSetters
 import { formatToISTLocaleString, formatDateDisplay } from '../utils'; // Updated import
 import FilterTabs from '../components/FilterTabs';
 import LoadingState from '../components/LoadingState';
@@ -55,7 +55,7 @@ const PatchesView: React.FC = () => {
   const [debouncedPatchedByDeveloperFilter, setDebouncedPatchedByDeveloperFilter] = useState<string>('');
 
   const [currentPage, setCurrentPage] = useState<number>(1);
-  const [itemsPerPage, setItemsPerPage] = useState<number>(15); // Default items per page
+  const [itemsPerPage, setItemsPerPage] = useState<number>(10); // Default items per page
   const [totalPages, setTotalPages] = useState<number>(0);
   const [totalPatches, setTotalPatches] = useState<number>(0);
 
@@ -489,7 +489,11 @@ const PatchesView: React.FC = () => {
         return <div className="text-center">{content}</div>;
       }
     },
-    { key: 'description', header: 'Description', render: p => <span className="text-sm block max-w-xs truncate" title={p.description || ''}>{p.description || '-'}</span> },
+    {
+      key: 'description',
+      header: 'Description',
+      // render function removed
+    },
     { key: 'release_date', header: 'Release Date', sortable: true, render: (item: PatchType) => formatDateDisplay(item.release_date) }, // Stays the same
     {
       key: 'download_link',

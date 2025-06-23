@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useOutletContext, useLocation, useSearchParams } from 'react-router-dom'; // Added useSearchParams
-import { ExternalLink, PlusCircle, MinusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Download, Move, AlertTriangle, FileText, MessageSquare } from 'lucide-react';
 import { 
   fetchDocuments, 
   fetchSoftware, 
@@ -15,7 +14,7 @@ import {
   BulkItemType,
 } from '../services/api'; 
 import { Document as DocumentType, Software } from '../types'; 
-import DataTable, { ColumnDef } from '../components/DataTable';
+import DataTable, { ColumnDef } from '../components/DataTable'; // Added ModalControlSetters
 import { formatToISTLocaleString } from '../utils'; // Updated import
 import FilterTabs from '../components/FilterTabs';
 import LoadingState from '../components/LoadingState'; 
@@ -25,6 +24,8 @@ import AdminDocumentEntryForm from '../components/admin/AdminDocumentEntryForm';
 import Fuse from 'fuse.js';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
 import Modal from '../components/shared/Modal';
+// Added Eye to lucide-react imports
+import { ExternalLink, PlusCircle, MinusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Download, Move, FileText, MessageSquare } from 'lucide-react';
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils';
 import CommentSection from '../components/comments/CommentSection';
 
@@ -34,7 +35,7 @@ interface OutletContextType {
 }
 
 const DocumentsView: React.FC = () => {
-  const ITEMS_PER_PAGE = 15;
+  const ITEMS_PER_PAGE = 10;
   const { searchTerm, setSearchTerm } = useOutletContext<OutletContextType>(); 
 const { isAuthenticated, user } = useAuth();
 const role = user?.role; // Access role safely, as user can be null
@@ -482,7 +483,11 @@ useEffect(() => {
   const columns: ColumnDef<DocumentType>[] = [
     { key: 'doc_name', header: 'Name', sortable: true }, { key: 'doc_type', header: 'Type', sortable: true },
     { key: 'software_name', header: 'Software', sortable: true },
-    { key: 'description', header: 'Description', render: (d: DocumentType) => <span className="text-sm block max-w-xs truncate" title={d.description||''}>{d.description||'-'}</span> },
+    {
+      key: 'description',
+      header: 'Description',
+      // render function removed
+    },
     { 
       key: 'download_link', 
       header: 'Download', 

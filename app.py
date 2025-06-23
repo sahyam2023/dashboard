@@ -51,16 +51,15 @@ from flask import current_app # For JWT_IDENTITY_CLAIM
 from werkzeug.utils import secure_filename
 from tempfile import NamedTemporaryFile
 import database # Your database.py helper
-from apscheduler.schedulers.background import BackgroundScheduler
-import atexit
+# Removed BackgroundScheduler import as APScheduler is being fully replaced
+import atexit # Still needed for other schedulers potentially (though not APScheduler based ones)
 # from waitress import serve # Removed Waitress
 from flask_socketio import SocketIO, join_room, leave_room, emit, disconnect
 from urllib.parse import urljoin # Added for chat file_url modification
 
-from scheduler import init_scheduler as initialize_app_scheduler
-from scheduler import scheduler as app_scheduler # For shutdown
+# Removed APScheduler related imports from scheduler
 from scheduler import run_delete_old_messages_periodically, run_cleanup_files_periodically # Added for Eventlet scheduling
-import atexit
+import atexit # Still needed for the backup scheduler
 # import os # For database path # os is already imported
 
 # --- Helper function for PyInstaller ---
@@ -290,17 +289,8 @@ if 'DATABASE_PATH' not in app.config:
     app.config['DATABASE_PATH'] = os.path.join(app.instance_path, 'software_dashboard.db')
     # print(f"DATABASE_PATH not set, defaulted to: {app.config['DATABASE_PATH']}") # Removed
 
-# Initialize and start the scheduler
-initialize_app_scheduler(app)
-
-# --- Graceful Scheduler Shutdown ---
-def shutdown_scheduler():
-    if app_scheduler.running:
-        # print("Shutting down scheduler...") # Removed
-        app_scheduler.shutdown()
-        # print("Scheduler shut down.") # Removed
-
-atexit.register(shutdown_scheduler)
+# Removed APScheduler initialization and shutdown
+# The Eventlet tasks are spawned in the `if __name__ == '__main__':` block.
 
 bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
@@ -607,27 +597,30 @@ def check_and_perform_missed_backup():
         else:
             app.logger.info(f"Latest backup at {latest_backup_time} is recent enough. No missed backup to perform.")
 
-# --- Initialize Scheduler and Backups ---
-def initialize_scheduler_and_backups(current_app):
-    current_app.logger.info("Initializing scheduler and performing startup backup checks...")
-    # Ensure BACKUP_DIR exists (it should be defined globally or passed)
-    # BACKUP_DIR is already defined globally using INSTANCE_FOLDER_PATH
-    if not os.path.exists(BACKUP_DIR):
-        os.makedirs(BACKUP_DIR, exist_ok=True)
-        current_app.logger.info(f"Created backup directory at {BACKUP_DIR}")
+# --- Backup Related Functions (will be called by Eventlet) ---
+# initialize_scheduler_and_backups function removed.
+# perform_daily_backup_job and related helpers (delete_old_backups, check_and_perform_missed_backup, get_latest_backup_time) remain.
+# These will be orchestrated by a new Eventlet-based periodic runner.
 
-    check_and_perform_missed_backup() # This function uses app.logger internally
+DAILY_BACKUP_INTERVAL_SECONDS = 24 * 60 * 60  # Daily
 
-    scheduler = BackgroundScheduler(timezone='Asia/Kolkata') # Changed to Asia/Kolkata
-    scheduler.add_job(perform_daily_backup_job, 'cron', hour=12, minute=0)
+def run_daily_backup_job_periodically(app_instance):
+    """
+    Periodically runs the perform_daily_backup_job.
+    :param app_instance: The Flask application instance, to ensure context.
+    """
+    # The perform_daily_backup_job itself uses 'with app.app_context():'
+    # which should work correctly if app_instance is the one eventlet runs the green thread with.
+    app_instance.logger.info(f"Eventlet scheduling: Starting perform_daily_backup_job. Next run in approx {DAILY_BACKUP_INTERVAL_SECONDS / 3600} hours.")
     try:
-        scheduler.start()
-        current_app.logger.info("Background scheduler started. Daily backup job scheduled for 12:00 PM UTC.")
-        # Register scheduler shutdown
-        atexit.register(lambda: scheduler.shutdown())
-        current_app.logger.info("Scheduler shutdown registered with atexit.")
+        # No need to explicitly pass app_instance to perform_daily_backup_job if it uses current_app within its app.app_context()
+        perform_daily_backup_job() 
     except Exception as e:
-        current_app.logger.error(f"Error starting background scheduler: {e}", exc_info=True)
+        app_instance.logger.error(f"Error in run_daily_backup_job_periodically: {e}", exc_info=True)
+    
+    eventlet.spawn_after(DAILY_BACKUP_INTERVAL_SECONDS, run_daily_backup_job_periodically, app_instance)
+    app_instance.logger.info(f"Eventlet scheduling: perform_daily_backup_job finished. Rescheduled for {DAILY_BACKUP_INTERVAL_SECONDS / 3600} hours.")
+
 
 # Helper function to convert specific timestamp fields in a dictionary to IST ISO format
 def convert_timestamps_to_ist_iso(row_dict, timestamp_keys):
@@ -11875,11 +11868,13 @@ if __name__ == '__main__':
         else: 
             app.logger.warning(f"Skipping global password initialization as database file {db_path} was not successfully created/initialized.")
 
-    # Initialize scheduler and backups AFTER DB setup
-    initialize_scheduler_and_backups(app)
+    # Call check_and_perform_missed_backup once at startup
+    # This needs an app context.
+    with app.app_context():
+        check_and_perform_missed_backup() # This function logs internally
 
-    # Note: Scheduler and backup checks are now initialized by initialize_scheduler_and_backups(app)
-    # called after app creation and configuration.
+    # Note: initialize_scheduler_and_backups(app) was removed.
+    # Eventlet tasks for scheduler.py and backup are spawned below.
 
     # --- Replicate default files if running as a bundle ---
     # This needs to be called after INSTANCE_FOLDER_PATH and DEFAULT_PROFILE_PICTURES_FOLDER are defined.
@@ -11891,30 +11886,26 @@ if __name__ == '__main__':
         flask_port = int(os.environ.get('FLASK_RUN_PORT', 7000))
         is_frozen = getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
 
+        # Start periodic tasks using Eventlet green threads for all modes
+        app.logger.info("Starting periodic task for deleting old messages (scheduler.py).")
+        eventlet.spawn(run_delete_old_messages_periodically, app)
+
+        app.logger.info("Starting periodic task for cleaning up temporary files (scheduler.py).")
+        eventlet.spawn(run_cleanup_files_periodically, app)
+
+        app.logger.info("Starting periodic task for daily database backups (app.py).")
+        eventlet.spawn(run_daily_backup_job_periodically, app) # Spawn the new backup runner
+
         if is_frozen:
             # FOR PYINSTALLER: Use the direct eventlet server with your silent logger.
             app.logger.info(f"Starting server in PyInstaller mode on port {flask_port}")
-            # app.logger.info("Eventlet WSGI server will use its default logger.") # This message is already present below
-
-            # Start periodic task for deleting old messages using Eventlet
-            app.logger.info("Starting periodic deletion of old messages using Eventlet green threads.")
-            eventlet.spawn(run_delete_old_messages_periodically)
-
-            # Start periodic task for cleaning up temporary files using Eventlet
-            app.logger.info("Starting periodic cleanup of temporary files using Eventlet green threads.")
-            eventlet.spawn(run_cleanup_files_periodically)
-
-            # 1. Instantiate your logger
-            silent_logger = SilentLogger() # Removed SilentLogger
-
-            # 2. Pass the instance to the server's 'log' parameter
+            
+            silent_logger = SilentLogger() 
             app.logger.info("Eventlet WSGI server is using SilentLogger for production build.") 
             eventlet.wsgi.server(eventlet.listen(('0.0.0.0', flask_port)), app, log=silent_logger, socket_timeout=600)
 
         else:
             # FOR DEVELOPMENT: Use socketio.run() which has its own logging controls.
-            # socketio.run() does not directly expose eventlet's socket_timeout.
-            # The ping_timeout and ping_interval for SocketIO itself are more relevant here.
             app.logger.info(f"Starting server in development mode on port {flask_port}")
             socketio.run(app, host='0.0.0.0', port=flask_port, debug=False)
 

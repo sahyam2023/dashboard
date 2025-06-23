@@ -1,4 +1,3 @@
-from flask_apscheduler import APScheduler
 import sqlite3
 import os
 from datetime import datetime, timedelta
@@ -7,50 +6,32 @@ import logging # For logging within scheduler tasks
 import sys # Added for console handler
 import eventlet # Added for eventlet.sleep
 
-# Initialize scheduler
-scheduler = APScheduler()
-logger = logging.getLogger(__name__) # Standard Python logger for scheduler
+# Removed APScheduler initialization
+logger = logging.getLogger(__name__) # Standard Python logger for scheduler tasks
 
-# Configure 'scheduler' logger for direct console output
+# Configure 'scheduler' logger for direct console output (can be kept for task logging)
 if not logger.handlers: # Add handler only if no handlers are already configured for this logger
     scheduler_console_handler = logging.StreamHandler(sys.stdout)
-    scheduler_console_handler.setFormatter(logging.Formatter('%(asctime)s - SCHEDULER - %(levelname)s - %(message)s'))
+    scheduler_console_handler.setFormatter(logging.Formatter('%(asctime)s - SCHEDULER_TASKS - %(levelname)s - %(message)s'))
     logger.addHandler(scheduler_console_handler)
     logger.setLevel(logging.WARNING) # Or logging.DEBUG for more verbosity
-    logger.propagate = False # Optional: Prevents messages from being passed to the root logger if Flask's logger is also printing them
-    logger.info("Scheduler logger configured for console output. Level set to WARNING for production.")
+    logger.propagate = False
+    logger.info("Scheduler tasks logger configured for console output. Level set to WARNING for production.")
 
-def init_scheduler(app):
-    """Initialize and start the scheduler."""
-    # print("SCHEDULER_PY: init_scheduler function called") # Removed
-    scheduler.init_app(app)
-    scheduler.start()
-    # print("Scheduler initialized and started.") # Removed
+# Removed init_scheduler function
 
-    # Ensure delete_old_messages_task is defined or imported before this line
-    if not scheduler.get_job('Delete Old Messages'):
-        # scheduler.add_job(id='Delete Old Messages', func=delete_old_messages_task, trigger='interval', minutes=1)
-        # logger.info("Scheduled 'Delete Old Messages' job to run every minute.")
-        logger.info("'Delete Old Messages' job is currently disabled by commenting out its scheduling line.")
-    else:
-        logger.info("'Delete Old Messages' job was previously scheduled but might be disabled if the add_job line is commented out.")
+def cleanup_old_temporary_files_task(app_context_source=None):
+    """
+    Cleans up old temporary files.
+    :param app_context_source: Can be a Flask app instance or None.
+                               If None, current_app will be used within a new app context.
+    """
+    effective_app = app_context_source if app_context_source else current_app
 
-    if not scheduler.get_job('Cleanup Old Temporary Files'):
-        # Schedule to run daily at 3 AM
-        # scheduler.add_job(id='Cleanup Old Temporary Files', func=cleanup_old_temporary_files_task, trigger='interval', minutes=1)
-        # logger.info("Scheduled 'Cleanup Old Temporary Files' job to run every minute.")
-        logger.info("'Cleanup Old Temporary Files' job is currently disabled by commenting out its scheduling line.") # Added a log for clarity
-    else:
-        logger.info("'Cleanup Old Temporary Files' job was previously scheduled but might be disabled if the add_job line is commented out.")
-    
-    logger.info("All frequent (1-minute interval) tasks are currently disabled for testing.")
-
-def cleanup_old_temporary_files_task():
-    # print("SCHEDULER_PY_TASK: cleanup_old_temporary_files_task function starting") # Removed
-    with scheduler.app.app_context():
+    with effective_app.app_context():
         logger.info("cleanup_old_temporary_files_task started.")
         try:
-            instance_path = current_app.config.get('INSTANCE_FOLDER_PATH')
+            instance_path = effective_app.config.get('INSTANCE_FOLDER_PATH')
             if not instance_path or not os.path.isdir(instance_path):
                 logger.error(f"INSTANCE_FOLDER_PATH '{instance_path}' is not defined or not a directory. Skipping cleanup.")
                 return
@@ -77,7 +58,7 @@ def cleanup_old_temporary_files_task():
                 logger.info(f"Directory {tmp_standard_uploads_dir} does not exist. Skipping cleanup for it.")
 
             # 2. Cleanup TMP_LARGE_UPLOADS_FOLDER (for .part files)
-            tmp_large_uploads_dir = current_app.config.get('TMP_LARGE_UPLOADS_FOLDER') # This is already an absolute path
+            tmp_large_uploads_dir = effective_app.config.get('TMP_LARGE_UPLOADS_FOLDER') # Use effective_app
             if tmp_large_uploads_dir and os.path.exists(tmp_large_uploads_dir):
                 logger.info(f"Scanning {tmp_large_uploads_dir} for old .part files...")
                 cutoff_time_large = datetime.now() - timedelta(hours=24) # Can use the same or different cutoff
@@ -104,22 +85,28 @@ def cleanup_old_temporary_files_task():
             logger.info("cleanup_old_temporary_files_task finished.")
 
 
-def delete_old_messages_task():
-    # print("SCHEDULER_PY_TASK: delete_old_messages_task function starting") # Removed
-    with scheduler.app.app_context():
+def delete_old_messages_task(app_context_source=None):
+    """
+    Deletes old messages from the database.
+    :param app_context_source: Can be a Flask app instance or None.
+                               If None, current_app will be used within a new app context.
+    """
+    effective_app = app_context_source if app_context_source else current_app
+
+    with effective_app.app_context():
         logger.info("delete_old_messages_task started.")
         try:
-            db_path = current_app.config['DATABASE_PATH']
+            db_path = effective_app.config['DATABASE_PATH']
             
             if not os.path.isabs(db_path):
-                db_path = os.path.join(current_app.root_path, db_path)
+                db_path = os.path.join(effective_app.root_path, db_path)
 
-            logger.info(f"Connecting to database at: {db_path}") # Changed print to logger.info
+            logger.info(f"Connecting to database at: {db_path}")
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
 
-            retention_days = current_app.config.get('MESSAGE_RETENTION_DAYS', 180)
-            logger.info(f"Using message retention period of {retention_days} days.") # Changed print to logger.info
+            retention_days = effective_app.config.get('MESSAGE_RETENTION_DAYS', 180)
+            logger.info(f"Using message retention period of {retention_days} days.")
             cutoff_date = datetime.now() - timedelta(days=int(retention_days))
             cutoff_timestamp = cutoff_date.strftime('%Y-%m-%d %H:%M:%S')
 
@@ -178,28 +165,37 @@ def delete_old_messages_task():
                 conn.close()
             logger.info("delete_old_messages_task finished.") # Changed print to logger.info
 
-DELETE_INTERVAL_SECONDS = 24 * 60 * 60 # Changed to 24 hours
+DELETE_INTERVAL_SECONDS = 24 * 60 * 60 # Changed to 24 hours (daily)
 
-def run_delete_old_messages_periodically():
-    # Ensure this function can access the Flask app context if needed by the task
-    # The task itself already uses 'with scheduler.app.app_context():'
-    # which should work if 'scheduler.app' is set during init_scheduler.
+def run_delete_old_messages_periodically(app_instance):
+    """
+    Periodically runs the delete_old_messages_task.
+    :param app_instance: The Flask application instance.
+    """
+    logger.info(f"Eventlet scheduling: Starting delete_old_messages_task. Next run in approx {DELETE_INTERVAL_SECONDS / 3600} hours.")
+    try:
+        delete_old_messages_task(app_context_source=app_instance)
+    except Exception as e:
+        logger.error(f"Error in run_delete_old_messages_periodically: {e}", exc_info=True)
     
-    # Call the actual task logic
-    logger.info(f"Eventlet scheduling: Starting delete_old_messages_task. Next run in approx 24 hours.")
-    delete_old_messages_task() # This function contains all the print and logging statements
-    
-    # Reschedule a new green thread
-    eventlet.spawn_after(DELETE_INTERVAL_SECONDS, run_delete_old_messages_periodically)
-    logger.info(f"Eventlet scheduling: delete_old_messages_task finished. Rescheduled for 24 hours.")
+    # Reschedule a new green thread, passing the app_instance
+    eventlet.spawn_after(DELETE_INTERVAL_SECONDS, run_delete_old_messages_periodically, app_instance)
+    logger.info(f"Eventlet scheduling: delete_old_messages_task finished. Rescheduled for {DELETE_INTERVAL_SECONDS / 3600} hours.")
 
-CLEANUP_INTERVAL_SECONDS = 24 * 60 * 60 # Changed to 24 hours
+CLEANUP_INTERVAL_SECONDS = 24 * 60 * 60 # Daily
+# DELETE_INTERVAL_SECONDS is already set to daily above the previous change. This line is redundant.
 
-def run_cleanup_files_periodically():
-    # The cleanup_old_temporary_files_task already uses 'with scheduler.app.app_context():'
-    logger.info(f"Eventlet scheduling: Starting cleanup_old_temporary_files_task. Next run in approx 24 hours.")
-    cleanup_old_temporary_files_task() # This function contains its own print and logging
-    
-    # Reschedule
-    eventlet.spawn_after(CLEANUP_INTERVAL_SECONDS, run_cleanup_files_periodically)
-    logger.info(f"Eventlet scheduling: cleanup_old_temporary_files_task finished. Rescheduled for 24 hours.")
+def run_cleanup_files_periodically(app_instance):
+    """
+    Periodically runs the cleanup_old_temporary_files_task.
+    :param app_instance: The Flask application instance.
+    """
+    logger.info(f"Eventlet scheduling: Starting cleanup_old_temporary_files_task. Next run in approx {CLEANUP_INTERVAL_SECONDS / 3600} hours.")
+    try:
+        cleanup_old_temporary_files_task(app_context_source=app_instance)
+    except Exception as e:
+        logger.error(f"Error in run_cleanup_files_periodically: {e}", exc_info=True)
+
+    # Reschedule, passing the app_instance
+    eventlet.spawn_after(CLEANUP_INTERVAL_SECONDS, run_cleanup_files_periodically, app_instance)
+    logger.info(f"Eventlet scheduling: cleanup_old_temporary_files_task finished. Rescheduled for {CLEANUP_INTERVAL_SECONDS / 3600} hours.")

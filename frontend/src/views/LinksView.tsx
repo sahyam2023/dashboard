@@ -8,7 +8,7 @@ import {
 } from '../services/api';
 import { Link as LinkType, Software, SoftwareVersion } from '../types'; // LinkType is already here
 import CommentSection from '../components/comments/CommentSection'; // Added CommentSection
-import DataTable, { ColumnDef } from '../components/DataTable';
+import DataTable, { ColumnDef } from '../components/DataTable'; // Added ModalControlSetters
 import { formatToISTLocaleString } from '../utils'; // Updated import
 import FilterTabs from '../components/FilterTabs';
 import LoadingState from '../components/LoadingState';
@@ -17,7 +17,7 @@ import { useAuth } from '../context/AuthContext';
 import AdminLinkEntryForm from '../components/admin/AdminLinkEntryForm';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
 import Modal from '../components/shared/Modal';
-import { PlusCircle, MinusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Link as LinkIconLucide, Download, Move, AlertTriangle, MessageSquare, ExternalLink } from 'lucide-react'; // Added MessageSquare
+import { PlusCircle, MinusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Link as LinkIconLucide, Download, Move, MessageSquare, ExternalLink } from 'lucide-react'; // Added Eye, MessageSquare
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils';
 
 interface OutletContextType {
@@ -45,7 +45,7 @@ const LinksView: React.FC = () => {
   const [debouncedCreatedToFilter, setDebouncedCreatedToFilter] = useState<string>('');
 
   const [currentPage, setCurrentPage] = useState<number>(1);
-  const [itemsPerPage, setItemsPerPage] = useState<number>(15); // Default
+  const [itemsPerPage, setItemsPerPage] = useState<number>(10); // Default
   const [totalPages, setTotalPages] = useState<number>(0);
   const [totalLinks, setTotalLinks] = useState<number>(0);
 
@@ -391,7 +391,11 @@ const LinksView: React.FC = () => {
         return <div className="text-center">{content}</div>;
       }
     },
-    { key: 'description', header: 'Description', render: l => <span className="text-sm block max-w-xs truncate" title={l.description || ''}>{l.description || '-'}</span> },
+    {
+      key: 'description',
+      header: 'Description',
+      // render function removed
+    },
     {
       key: 'url',
       header: 'Link',

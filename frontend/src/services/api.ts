@@ -723,51 +723,56 @@ export async function findConversationByUserId(otherUserId: number): Promise<Cha
 // --- End Chat API Functions ---
 
 // --- Chat File Download Function ---
-export async function downloadChatFile(fileUrl: string, originalFilename: string): Promise<void> {
-  const fullUrl = `${API_BASE_URL}${fileUrl}`;
-  let objectUrl: string | null = null;
+export function downloadChatFile(fileUrl: string, originalFilename: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('../downloadWorker.ts', import.meta.url), { type: 'module' });
+    const fullUrl = `${API_BASE_URL}${fileUrl}`;
+    const headers = { ...getAuthHeader() };
 
-  try {
-    const response = await fetch(fullUrl, {
-      method: 'GET',
-      headers: { ...getAuthHeader() },
-    });
+    worker.onmessage = (event) => {
+      const { objectUrl, error, receivedOriginalFilename } = event.data;
+      if (error) {
+        console.error(`Error from worker for ${receivedOriginalFilename}:`, error);
+        showErrorToast(error); // Show error from worker
+        setGlobalOfflineStatus(true); // Assume offline on error
+        reject(new Error(error));
+      } else if (objectUrl && receivedOriginalFilename === originalFilename) {
+        try {
+          const a = document.createElement('a');
+          a.href = objectUrl;
+          a.download = originalFilename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(objectUrl); // Clean up
+          setGlobalOfflineStatus(false);
+          resolve();
+        } catch (e: any) {
+          console.error(`Error processing worker response for ${originalFilename}:`, e);
+          showErrorToast(e.message || `Failed to trigger download for ${originalFilename}`);
+          reject(e);
+        }
+      }
+      worker.terminate();
+    };
 
-    if (!response.ok) {
-      // Use handleApiError to parse a potential JSON error response and throw an error.
-      // handleApiError is expected to throw an error here.
-      await handleApiError(response, `Failed to download file ${originalFilename}`);
-      // As a fallback, if handleApiError doesn't throw for some reason (e.g. future modification)
-      // ensure an error is thrown.
-      throw new Error(`Download failed for ${originalFilename} with status ${response.status}`);
-    }
-
-    // If response.ok, connection is fine.
-    setGlobalOfflineStatus(false);
-    const blob = await response.blob();
-
-    objectUrl = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = objectUrl;
-    a.download = originalFilename;
-    document.body.appendChild(a); // Append to body to ensure clickability in some browsers
-    a.click();
-    document.body.removeChild(a); // Clean up by removing the element
-
-  } catch (error: any) {
-    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+    worker.onerror = (error) => {
+      console.error(`Worker error for ${originalFilename}:`, error);
+      showErrorToast(`Worker error processing ${originalFilename}: ${error.message}`);
       setGlobalOfflineStatus(true);
-      showErrorToast(OFFLINE_MESSAGE);
-    }
-    // Log the error, as it might be an error from handleApiError or a network error.
-    console.error(`Error downloading file ${originalFilename} from ${fileUrl}:`, error);
-    // Re-throw the error so the calling component can handle it (e.g., show a specific UI message)
-    throw error;
-  } finally {
-    if (objectUrl) {
-      URL.revokeObjectURL(objectUrl);
-    }
-  }
+      reject(error);
+      worker.terminate();
+    };
+
+    // Send necessary data to the worker
+    worker.postMessage({
+      url: fullUrl,
+      method: 'GET',
+      headers: headers,
+      originalFilename: originalFilename,
+      isBulkDownload: false,
+    });
+  });
 }
 // --- End Chat File Download Function ---
 
@@ -876,26 +881,84 @@ export async function bulkDeleteItems(itemIds: number[], itemType: BulkItemType)
  * @returns A promise that resolves to a Blob (the zip file).
  */
 export async function bulkDownloadItems(itemIds: number[], itemType: BulkItemType): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('../downloadWorker.ts', import.meta.url), { type: 'module' });
+    const url = `${API_BASE_URL}/api/bulk/download`;
+    const headers = { 'Content-Type': 'application/json', ...getAuthHeader() };
+    const body = JSON.stringify({ item_ids: itemIds, item_type: itemType });
+    // Generate a filename for the download
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const originalFilename = `bulk_download_${itemType}s_${ts}.zip`;
+
+    worker.onmessage = (event) => {
+      const { objectUrl, error, receivedOriginalFilename, blob } = event.data; // Worker now sends blob too
+      if (error) {
+        console.error(`Error from worker for bulk download ${itemType}:`, error);
+        showErrorToast(error);
+        setGlobalOfflineStatus(true);
+        reject(new Error(error));
+      } else if (objectUrl && receivedOriginalFilename === originalFilename) {
+        try {
+          const a = document.createElement('a');
+          a.href = objectUrl;
+          a.download = originalFilename; // Use the generated filename
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(objectUrl);
+          setGlobalOfflineStatus(false);
+          resolve(); // Resolve with void as the download is triggered
+        } catch (e: any) {
+          console.error(`Error processing worker response for bulk download ${itemType}:`, e);
+          showErrorToast(e.message || `Failed to trigger bulk download for ${itemType}`);
+          reject(e);
+        }
+      }
+      worker.terminate();
+    };
+
+    worker.onerror = (error) => {
+      console.error(`Worker error for bulk download ${itemType}:`, error);
+      showErrorToast(`Worker error processing bulk download for ${itemType}: ${error.message}`);
+      setGlobalOfflineStatus(true);
+      reject(error);
+      worker.terminate();
+    };
+
+    worker.postMessage({
+      url: url,
+      method: 'POST',
+      headers: headers,
+      body: body,
+      originalFilename: originalFilename, // Send the generated filename to worker for context
+      isBulkDownload: true,
+    });
+  });
+}
+
+/**
+ * Performs a bulk move operation on specified items.
+ * @param itemIds - An array of item IDs to move.
+ * @param itemType - The type of items to move.
+ * @param targetMetadata - An object containing the target foreign key IDs (e.g., { target_software_id: 123 }).
+ * @returns A promise that resolves to the backend's response.
+ */
+export async function bulkMoveItems(
+  itemIds: number[],
+  itemType: BulkItemType,
+  targetMetadata: Record<string, any>
+): Promise<BulkMoveResponse> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/bulk/download`, {
+    const response = await fetch(`${API_BASE_URL}/api/bulk/move`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify({ item_ids: itemIds, item_type: itemType }),
+      body: JSON.stringify({
+        item_ids: itemIds,
+        item_type: itemType,
+        target_metadata: targetMetadata
+      }),
     });
-
-    if (!response.ok) {
-      // If response is not OK, backend should send a JSON error message
-      // Use handleApiError to parse it and throw an error
-      // Note: handleApiError throws, so we don't need to return its result here.
-      // We await it to ensure the error is processed before any further (unlikely) execution.
-      await handleApiError(response, `Failed to initiate bulk download for ${itemType} items`);
-      // The line above will throw, so the code below this won't execute on error.
-      // Adding a fallback throw just in case handleApiError's behavior changes or is misinterp.
-      throw new Error(`Bulk download initiation failed with status ${response.status}`);
-    }
-    setGlobalOfflineStatus(false); // Successful response implies connection is fine
-    // If response is OK, expect a blob (zip file)
-    return response.blob();
+    return handleApiError(response, `Failed to bulk move ${itemType} items`);
   } catch (error: any) {
     if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
       setGlobalOfflineStatus(true);

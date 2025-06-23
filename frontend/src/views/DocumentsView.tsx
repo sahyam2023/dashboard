@@ -430,28 +430,26 @@ useEffect(() => {
 
     const downloadableDocIds = downloadableDocs.map(doc => doc.id);
 
-    setIsDownloadingSelected(true); 
+    setIsDownloadingSelected(true);
     try {
-      const blob = await bulkDownloadItems(downloadableDocIds, 'document' as BulkItemType);
-      const url = URL.createObjectURL(blob); 
-      const a = document.createElement('a'); 
-      a.href = url;
-      const ts = new Date().toISOString().replace(/:/g, '-'); 
-      a.download = `bulk_download_documents_${ts}.zip`; // Corrected filename
-      document.body.appendChild(a); 
-      a.click(); 
-      document.body.removeChild(a); 
-      URL.revokeObjectURL(url);
+      // bulkDownloadItems now returns Promise<void> and handles the download triggering and filename generation internally.
+      await bulkDownloadItems(downloadableDocIds, 'document' as BulkItemType);
 
+      // The success toast logic can remain, as it provides context specific to this view.
+      // The API service (and worker) will handle their own toasts for lower-level success/error.
       if (downloadableDocIds.length === selectedDocumentIds.size) {
-        showSuccessToast('Download started for all selected downloadable documents.');
+        showSuccessToast('Bulk download initiated for all selected downloadable documents.');
       } else {
-        showSuccessToast(`Starting download for ${downloadableDocIds.length} file(s). External links or non-downloadable items were excluded.`);
+        showSuccessToast(`Bulk download initiated for ${downloadableDocIds.length} document file(s). External links or non-downloadable items were excluded.`);
       }
-    } catch (e: any) { 
-      showErrorToast(e.message || "Bulk download failed."); 
-    } finally { 
-      setIsDownloadingSelected(false); 
+    } catch (e: any) {
+      console.error("DocumentsView: Bulk download error:", e);
+      // showErrorToast is likely called within bulkDownloadItems on error.
+      // This catch block is a fallback or for errors not originating from the API call itself.
+      // No need to call showErrorToast here if bulkDownloadItems guarantees it.
+      // However, keeping a log is good.
+    } finally {
+      setIsDownloadingSelected(false);
     }
   };
   

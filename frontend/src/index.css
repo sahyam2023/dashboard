@@ -88,3 +88,32 @@ html.dark .Toastify__toast--warning .Toastify__toast-icon > svg:not(.Toastify__s
 html.dark .Toastify__progress-bar--warning {
   background: #FBBF24 !important; /* tailwind amber-400 */
 }
+
+/* Table scroll fade styles */
+.table-scroll-fade-container {
+  position: relative;
+}
+
+.table-scroll-fade-container::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0; /* Adjust if pagination is outside this container and should not be faded */
+  width: 50px; /* Width of the fade */
+  background: linear-gradient(to left, theme('colors.white'), transparent);
+  pointer-events: none; /* Allows clicking through the gradient */
+  opacity: 0; /* Initially hidden, controlled by JS */
+  transition: opacity 0.3s ease-in-out;
+  border-top-right-radius: theme('borderRadius.lg'); /* Match table's border radius */
+  border-bottom-right-radius: theme('borderRadius.lg'); /* Match table's border radius */
+}
+
+html.dark .table-scroll-fade-container::after {
+  background: linear-gradient(to left, theme('colors.gray.800'), transparent);
+}
+
+/* Class to make the gradient visible when scrolling is possible */
+.table-scroll-fade-container.is-horizontally-scrollable::after {
+  opacity: 1;
+}

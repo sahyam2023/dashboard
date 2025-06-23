@@ -15,11 +15,11 @@ const Layout: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   // const [isChatOpen, setIsChatOpen] = useState(false); // Removed local state
   const { user, tokenData } = useAuth(); // Get user and tokenData from AuthContext
-  const { 
-    isChatModalOpen, 
-    openChatWithUser, 
-    closeChatModal, 
-    targetUser 
+  const {
+    isChatModalOpen,
+    openChatWithUser,
+    closeChatModal,
+    targetUser
   } = useChatActions(); // Get values from ChatActionContext
 
   const [socket, setSocket] = useState<Socket | null>(null); // Socket state
@@ -83,19 +83,18 @@ const Layout: React.FC = () => {
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
-      <Header 
-        toggleSidebar={toggleSidebar} 
+      <Header
+        toggleSidebar={toggleSidebar}
         isCollapsed={sidebarCollapsed}
         onSearch={handleSearch}
-        // Consider adding a chat toggle button to Header as well or instead of Sidebar
+      // Consider adding a chat toggle button to Header as well or instead of Sidebar
       />
       <div className="flex flex-1 overflow-hidden relative"> {/* Added relative for modal positioning context */}
         {/* Updated onToggleChat to use openChatWithUser(null) for generic open */}
         <Sidebar collapsed={sidebarCollapsed} onToggleChat={() => openChatWithUser(null)} socket={socket} socketConnected={socketConnected} />
-        <main 
-          className={`flex-1 p-6 overflow-auto transition-all duration-300 ease-in-out ${
-            sidebarCollapsed ? 'ml-20' : 'ml-64' // Adjust based on actual sidebar width
-          }`}
+        <main
+          className={`flex-1 min-w-0 p-6 overflow-auto transition-all duration-300 ease-in-out ${sidebarCollapsed ? 'ml-20' : 'ml-64'
+            }`}
         >
           <div className="container mx-auto">
             <Breadcrumbs />
@@ -105,7 +104,7 @@ const Layout: React.FC = () => {
 
         {/* Chat Modal/Overlay */}
         {/* Updated rendering condition to use isChatModalOpen */}
-        {isChatModalOpen && user && ( 
+        {isChatModalOpen && user && (
           <div
             className="fixed inset-0 bg-black bg-opacity-30 backdrop-blur-sm flex items-center justify-center z-40"
             onClick={closeChatModal} // Close on overlay click using context function
@@ -128,9 +127,9 @@ const Layout: React.FC = () => {
               </div>
               <div className="flex-1 overflow-hidden"> {/* Added this wrapper */}
                 {/* Pass targetUser and other necessary props to ChatMain */}
-                <ChatMain 
-                  socket={socket} 
-                  socketConnected={socketConnected} 
+                <ChatMain
+                  socket={socket}
+                  socketConnected={socketConnected}
                   targetUser={targetUser} // Pass targetUser from context
                 />
               </div>

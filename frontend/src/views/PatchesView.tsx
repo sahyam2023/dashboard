@@ -55,7 +55,7 @@ const PatchesView: React.FC = () => {
   const [debouncedPatchedByDeveloperFilter, setDebouncedPatchedByDeveloperFilter] = useState<string>('');
 
   const [currentPage, setCurrentPage] = useState<number>(1);
-  const [itemsPerPage, setItemsPerPage] = useState<number>(15); // Default items per page
+  const [itemsPerPage, setItemsPerPage] = useState<number>(10); // Default items per page
   const [totalPages, setTotalPages] = useState<number>(0);
   const [totalPatches, setTotalPatches] = useState<number>(0);
 

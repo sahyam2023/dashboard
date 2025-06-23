@@ -45,7 +45,7 @@ const LinksView: React.FC = () => {
   const [debouncedCreatedToFilter, setDebouncedCreatedToFilter] = useState<string>('');
 
   const [currentPage, setCurrentPage] = useState<number>(1);
-  const [itemsPerPage, setItemsPerPage] = useState<number>(15); // Default
+  const [itemsPerPage, setItemsPerPage] = useState<number>(10); // Default
   const [totalPages, setTotalPages] = useState<number>(0);
   const [totalLinks, setTotalLinks] = useState<number>(0);
 

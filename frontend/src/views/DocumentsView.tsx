@@ -35,7 +35,7 @@ interface OutletContextType {
 }
 
 const DocumentsView: React.FC = () => {
-  const ITEMS_PER_PAGE = 15;
+  const ITEMS_PER_PAGE = 10;
   const { searchTerm, setSearchTerm } = useOutletContext<OutletContextType>(); 
 const { isAuthenticated, user } = useAuth();
 const role = user?.role; // Access role safely, as user can be null

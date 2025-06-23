@@ -29,22 +29,17 @@ interface AuthContextType {
   revokeGlobalAccess: () => void; 
   isPasswordResetRequired: boolean;
   clearPasswordResetRequiredFlag: () => void;
-  // Session Timeout Warning - REMOVED
-  // isSessionWarningModalOpen: boolean;
-  // setSessionWarningModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  // sessionWarningCountdown: number;
-  // refreshSession: () => Promise<void>;
+  columnVisibilityPrefs: Record<string, Record<string, boolean>>;
+  updateColumnVisibilityPrefs: (newPrefs: Record<string, Record<string, boolean>>) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// REMOVED const PLACEHOLDER_SESSION_DURATION_SECONDS = 15 * 60; // 15 minutes
-// REMOVED const WARNING_THRESHOLD_SECONDS = 2 * 60; // Show warning 2 minutes before expiry
-
 export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   const [tokenData, setTokenData] = useState<TokenData | null>(null);
   const [user, setUser] = useState<{ id: number; username: string; role: string; profile_picture_url?: string | null; } | null>(null); // Added profile_picture_url
-  const [isLoading, setIsLoading] = useState<boolean>(true); 
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [columnVisibilityPrefs, setColumnVisibilityPrefs] = useState<Record<string, Record<string, boolean>>>({});
   
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [authModalView, setAuthModalView] = useState<'login' | 'register'>('login');
@@ -75,13 +70,29 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   const [isPasswordResetRequired, setIsPasswordResetRequired] = useState<boolean>(false);
   const sessionExpiredToastShownRef = useRef(false); // Added ref
 
+  const fetchColumnVisibilityPrefs = useCallback(async (token: string) => {
+    try {
+      const response = await fetch('/api/user/profile/column-prefs', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!response.ok) {
+        throw new Error('Failed to fetch column preferences');
+      }
+      const prefs = await response.json();
+      setColumnVisibilityPrefs(prefs || {});
+    } catch (error) {
+      console.error("Error fetching column visibility preferences:", error);
+      setColumnVisibilityPrefs({}); // Default to empty if error
+    }
+  }, []);
+
   // Define logout function using useCallback to ensure stable reference
   const logout = useCallback((sessionExpiredDueToTimeout: boolean = false) => {
     localStorage.removeItem('tokenData');
     setUser(null); // Added
     setTokenData(null);
+    setColumnVisibilityPrefs({}); // Clear prefs on logout
     setIsPasswordResetRequired(false);
-    // setSessionWarningModalOpen(false); // REMOVED: Close warning modal on logout
     
     if (sessionExpiredDueToTimeout) {
       if (!sessionExpiredToastShownRef.current) {
@@ -129,18 +140,21 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
             role: parsedTokenData.role,
             profile_picture_url: parsedTokenData.profile_picture_url || null // Load profile picture URL
           });
+          fetchColumnVisibilityPrefs(parsedTokenData.token); // Fetch prefs on initial load
         } else {
           localStorage.removeItem('tokenData'); 
-          setUser(null); 
+          setUser(null);
+          setColumnVisibilityPrefs({});
         }
       } catch (error) {
         console.error("Failed to parse tokenData from localStorage or tokenData invalid:", error);
         localStorage.removeItem('tokenData');
         setUser(null);
+        setColumnVisibilityPrefs({});
       }
     }
     setIsLoading(false);
-  }, []);
+  }, [fetchColumnVisibilityPrefs]);
 
   // Listen for maintenance mode forced logout event
   useEffect(() => {
@@ -207,12 +221,38 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
       role: newRole,
       profile_picture_url: profile_picture_url || null // Set profile picture URL in user state
     });
+    fetchColumnVisibilityPrefs(newToken); // Fetch prefs on login
     setIsPasswordResetRequired(passwordResetRequired);
     sessionExpiredToastShownRef.current = false; 
     return passwordResetRequired;
   };
   
-  // REMOVED refreshSession function
+  const updateColumnVisibilityPrefs = async (newPrefs: Record<string, Record<string, boolean>>) => {
+    if (!tokenData) {
+      showErrorToast("You must be logged in to update preferences.");
+      throw new Error("User not authenticated");
+    }
+    try {
+      const response = await fetch('/api/user/profile/column-prefs', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${tokenData.token}`,
+        },
+        body: JSON.stringify(newPrefs),
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.msg || 'Failed to update column preferences');
+      }
+      setColumnVisibilityPrefs(newPrefs); // Update local state on success
+      // showSuccessToast("Column visibility preferences updated!"); // Optional: toast on success
+    } catch (error) {
+      console.error("Error updating column visibility preferences:", error);
+      showErrorToast((error as Error).message || "Failed to update preferences.");
+      throw error; // Re-throw to be handled by caller if needed
+    }
+  };
   // const refreshSession = async () => { ... };
 
   const clearPasswordResetRequiredFlag = () => {
@@ -300,6 +340,8 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
       revokeGlobalAccess,
       isPasswordResetRequired,
       clearPasswordResetRequiredFlag,
+      columnVisibilityPrefs,
+      updateColumnVisibilityPrefs,
     }}>
       {children}
     </AuthContext.Provider>

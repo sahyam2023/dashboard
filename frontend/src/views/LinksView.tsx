@@ -27,7 +27,7 @@ interface OutletContextType {
 
 const LinksView: React.FC = () => {
   const { searchTerm, setSearchTerm } = useOutletContext<OutletContextType>();
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, columnVisibilityPrefs } = useAuth(); // Added columnVisibilityPrefs
   const role = user?.role; // Access role safely, as user can be null
   const [links, setLinks] = useState<LinkType[]>([]);
   const [softwareList, setSoftwareList] = useState<Software[]>([]);
@@ -380,8 +380,9 @@ const LinksView: React.FC = () => {
     finally { setIsMovingSelected(false); setModalSelectedSoftwareId(null); setModalSelectedVersionId(undefined); }
   };
 
-  const columns: ColumnDef<LinkType>[] = [
-    { key: 'title', header: 'Title', sortable: true }, { key: 'software_name', header: 'Software', sortable: true },
+  const baseColumns: ColumnDef<LinkType>[] = [
+    { key: 'title', header: 'Title', sortable: true },
+    { key: 'software_name', header: 'Software', sortable: true },
     { key: 'version_name', header: 'Version', sortable: true, render: l => l.version_name || 'N/A' },
     {
       key: 'compatible_vms_versions',
@@ -389,48 +390,29 @@ const LinksView: React.FC = () => {
       sortable: true,
       render: (link: LinkType) => {
         const isRelevantSoftware = link.software_name === 'VMS' || link.software_name === 'VA';
-        let content: React.ReactNode = '-'; // Default content
-
+        let content: React.ReactNode = '-';
         if (isRelevantSoftware) {
           if (link.compatible_vms_versions && link.compatible_vms_versions.length > 0) {
-            if (Array.isArray(link.compatible_vms_versions)) {
-              content = link.compatible_vms_versions.join(', ');
-            } else if (typeof link.compatible_vms_versions === 'string') {
-              content = link.compatible_vms_versions;
-            } else {
-              content = 'N/A';
-            }
-          } else {
-            content = 'N/A';
-          }
+            if (Array.isArray(link.compatible_vms_versions)) content = link.compatible_vms_versions.join(', ');
+            else if (typeof link.compatible_vms_versions === 'string') content = link.compatible_vms_versions;
+            else content = 'N/A';
+          } else content = 'N/A';
         }
-        // Wrap the content in a div with text-center
-        // This div will take up the full width of the cell, and its content will be centered.
         return <div className="text-center">{content}</div>;
       }
     },
-    {
-      key: 'description',
-      header: 'Description',
-      // render function removed
-    },
+    { key: 'description', header: 'Description' },
     {
       key: 'url',
       header: 'Link',
       render: (l: LinkType) => {
         const isEffectivelyDownloadable = l.is_external_link || l.is_downloadable !== false;
-
-        // The text will now always be "Link"
         const displayText = 'Link';
-
-        // The icon will now always be Download, just like in PatchesView
         const IconComponent = l.is_external_link ? ExternalLink : Download;
-
-        if (!isEffectivelyDownloadable && !l.is_external_link) { // Uploaded file, not downloadable
+        if (!isEffectivelyDownloadable && !l.is_external_link) {
           return (
             <span className="flex items-center text-gray-400 cursor-not-allowed" title="Download not permitted">
-              <IconComponent size={14} className="mr-1 flex-shrink-0" />
-              {displayText}
+              <IconComponent size={14} className="mr-1 flex-shrink-0" />{displayText}
             </span>
           );
         }
@@ -440,15 +422,10 @@ const LinksView: React.FC = () => {
             target={l.is_external_link || !l.url?.startsWith('/') ? "_blank" : "_self"}
             rel="noopener noreferrer"
             className={`flex items-center ${isEffectivelyDownloadable ? 'text-blue-600 hover:text-blue-800' : 'text-gray-400 cursor-not-allowed'}`}
-            onClick={(e) => {
-              if (!isEffectivelyDownloadable) e.preventDefault();
-              e.stopPropagation();
-            }}
-            // Update the title attribute to be more specific to links context, matching PatchesView's logic
+            onClick={(e) => { if (!isEffectivelyDownloadable) e.preventDefault(); e.stopPropagation(); }}
             title={isEffectivelyDownloadable ? (l.is_external_link ? "Open external link" : "Download file") : "Download not permitted"}
           >
-            <IconComponent size={14} className="mr-1 flex-shrink-0" />
-            {displayText}
+            <IconComponent size={14} className="mr-1 flex-shrink-0" />{displayText}
           </a>
         );
       }
@@ -506,6 +483,19 @@ const LinksView: React.FC = () => {
       )
     },
   ];
+
+  const columns = useMemo(() => {
+    const userLinksPrefs = columnVisibilityPrefs?.links || {};
+    const defaultHiddenColumnKeys = ['uploaded_by_username', 'updated_by_username', 'created_at', 'updated_at'];
+
+    return baseColumns.filter(col => {
+      const colKey = col.key as string;
+      if (defaultHiddenColumnKeys.includes(colKey)) {
+        return userLinksPrefs[colKey] === true;
+      }
+      return userLinksPrefs[colKey] !== false;
+    });
+  }, [columnVisibilityPrefs, baseColumns]);
 
   const loadLinksCallback = useCallback(() => { fetchAndSetLinks(1, true); }, [fetchAndSetLinks]);
 

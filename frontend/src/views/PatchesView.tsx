@@ -552,7 +552,8 @@ const PatchesView: React.FC = () => {
 
   const columns = useMemo(() => {
     const userPatchesPrefs = columnVisibilityPrefs?.patches || {};
-    const defaultHiddenColumnKeys = ['uploaded_by_username', 'updated_by_username', 'created_at', 'updated_at'];
+    // Add 'release_date' and 'compatible_vms_versions' to the list of columns hidden by default for Patches
+    const defaultHiddenColumnKeys = ['uploaded_by_username', 'updated_by_username', 'created_at', 'updated_at', 'release_date', 'compatible_vms_versions'];
 
     return baseColumns.filter(col => {
       const colKey = col.key as string;

@@ -14,7 +14,7 @@ const UserProfilePage: React.FC = () => {
   const { 
     watchPreferences: contextWatchPreferences,
     isLoading: isLoadingContextWatchPreferences,
-    updatePreference: updateWatchPreference, // Renamed to avoid conflict
+    updatePreference: updateWatchPreference, // Renamed to avoid conflict 
     isWatching 
   } = useWatch();
   // Column Visibility Preferences from AuthContext
@@ -58,6 +58,9 @@ const UserProfilePage: React.FC = () => {
   const [feedbackMessage, setFeedbackMessage] = useState('');
   const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
 
+  // State for Column Preferences Modal
+  const [isColumnPrefsModalOpen, setIsColumnPrefsModalOpen] = useState(false);
+
   // State for Watch Preferences
   // Using imported types
   // type WatchPreferenceFromType = import('../types').WatchPreference;
@@ -90,13 +93,15 @@ const UserProfilePage: React.FC = () => {
         updated_by_username: 'Updated By',
         created_at: 'Created At',
         updated_at: 'Updated At',
+        release_date: 'Release Date', 
+        compatible_vms_versions: 'VMS Compatibility', // Added VMS Compatibility here
       }
     },
     links: {
       displayName: 'Links',
       columns: {
         // Assuming 'uploaded_by_username' maps to 'Added By' and 'created_at' to 'Created' based on typical table views
-        uploaded_by_username: 'Added By',
+        uploaded_by_username: 'Added By', 
         updated_by_username: 'Updated By',
         created_at: 'Created',
         updated_at: 'Updated',
@@ -392,49 +397,17 @@ const UserProfilePage: React.FC = () => {
         </button>
         {/* Toggle rendering logic is now moved to the modal */}
       </div>
-
-      {/* Column Visibility Preferences Section */}
+      
+      {/* Column Visibility Preferences Section - Button to open Modal */}
       <div className="mb-8 p-6 bg-white dark:bg-gray-800 rounded-lg shadow">
         <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-gray-100">Table Column Display Preferences</h2>
-        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-          Toggle visibility for certain columns in table views. Changes are saved automatically.
-        </p>
-        <div className="space-y-6">
-          {Object.entries(COLUMN_VISIBILITY_CONFIG).map(([tableKey, config]) => (
-            <div key={tableKey}>
-              <h3 className="text-lg font-medium text-gray-900 dark:text-gray-200 mb-2">{config.displayName}</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                {Object.entries(config.columns).map(([colKey, colDisplayName]) => {
-                  // Determine current visibility: default to true if not specified in prefs (user explicitly hides)
-                  // However, for the columns specified in the requirement, they should default to hidden.
-                  // The requirement is to hide:
-                  // Docs: Uploaded By, Updated By, Created At, Updated At
-                  // Patches: Uploaded By, Updated By, Created At, Updated At
-                  // Links: Added By, Updated By, Created, Updated
-                  // These map to: uploaded_by_username, updated_by_username, created_at, updated_at
-                  const isVisible = columnVisibilityPrefs[tableKey as TableKeyForColumnPrefs]?.[colKey] ?? false;
-
-                  return (
-                    <div key={colKey} className="flex items-center">
-                      <input
-                        type="checkbox"
-                        id={`${tableKey}-${colKey}-visibility`}
-                        checked={isVisible}
-                        onChange={() => handleColumnVisibilityToggle(tableKey as TableKeyForColumnPrefs, colKey, isVisible)}
-                        className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-offset-gray-800 dark:bg-gray-700 dark:border-gray-600"
-                      />
-                      <label htmlFor={`${tableKey}-${colKey}-visibility`} className="ml-2 block text-sm text-gray-900 dark:text-gray-300">
-                        Show {colDisplayName}
-                      </label>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
+        <button
+          onClick={() => setIsColumnPrefsModalOpen(true)}
+          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+        >
+          Manage Table Column Preferences
+        </button>
       </div>
-
 
       {/* Feedback Section */}
       <div className="mb-8 p-6 bg-white dark:bg-gray-800 rounded-lg shadow">
@@ -576,6 +549,47 @@ const UserProfilePage: React.FC = () => {
               </button>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {/* Column Preferences Modal */}
+      {isColumnPrefsModalOpen && (
+        <Modal
+          isOpen={isColumnPrefsModalOpen}
+          onClose={() => setIsColumnPrefsModalOpen(false)}
+          title="Table Column Display Preferences"
+        >
+          <div className="p-1"> {/* Reduced padding if modal has its own internal padding */}
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+              Toggle visibility for certain columns in table views. Changes are saved automatically.
+            </p>
+            <div className="space-y-6">
+              {Object.entries(COLUMN_VISIBILITY_CONFIG).map(([tableKey, config]) => (
+                <div key={tableKey}>
+                  <h3 className="text-lg font-medium text-gray-900 dark:text-gray-200 mb-3">{config.displayName}</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+                    {Object.entries(config.columns).map(([colKey, colDisplayName]) => {
+                      const isVisible = columnVisibilityPrefs[tableKey as TableKeyForColumnPrefs]?.[colKey] ?? false;
+                      return (
+                        <div key={colKey} className="flex items-center">
+                          <input
+                            type="checkbox"
+                            id={`${tableKey}-${colKey}-visibility`}
+                            checked={isVisible}
+                            onChange={() => handleColumnVisibilityToggle(tableKey as TableKeyForColumnPrefs, colKey, isVisible)}
+                            className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-offset-gray-800 dark:bg-gray-700 dark:border-gray-600"
+                          />
+                          <label htmlFor={`${tableKey}-${colKey}-visibility`} className="ml-3 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Show {colDisplayName}
+                          </label>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </Modal>
       )}
 

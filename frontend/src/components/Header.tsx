@@ -1,13 +1,14 @@
 // src/components/Header.tsx
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Menu, Search, X, LogOut, User, LogIn } from 'lucide-react';
+import { Menu, Search, X, LogOut, User, LogIn, Sun, Moon } from 'lucide-react'; // Added Sun and Moon
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext'; // Import useTheme
 import NotificationBell from './notifications/NotificationBell'; // Added NotificationBell import
-import { IconButton } from '@mui/material'; // Import IconButton
-import Brightness4Icon from '@mui/icons-material/Brightness4'; // Dark mode icon
-import Brightness7Icon from '@mui/icons-material/Brightness7'; // Light mode icon
+// IconButton and Material Icons are no longer needed for the theme toggle
+// import { IconButton } from '@mui/material'; 
+// import Brightness4Icon from '@mui/icons-material/Brightness4'; 
+// import Brightness7Icon from '@mui/icons-material/Brightness7';
 
 interface HeaderProps {
   toggleSidebar: () => void;
@@ -95,15 +96,16 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
         </div>
 
         {/* Right Section: Auth Controls & Theme Toggle */}
-        <div className="flex items-center space-x-2 sm:space-x-3"> {/* Adjusted space-x for new icon button */}
-          <NotificationBell /> {/* Added NotificationBell component here */}
-          <IconButton 
-            sx={{ ml: 1, color: 'text.primary' }} // Use theme text color
-            onClick={toggleThemeMode} 
-            aria-label={themeMode === 'dark' ? 'Activate light mode' : 'Activate dark mode'}
+        <div className="flex items-center space-x-2 sm:space-x-3">
+          <NotificationBell />
+          <button
+            onClick={toggleThemeMode}
+            className="p-2 rounded-md text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-500 dark:focus:ring-offset-gray-800 transition-colors"
+            title={themeMode === 'dark' ? "Switch to Light Mode" : "Switch to Dark Mode"}
+            aria-label={themeMode === 'dark' ? "Switch to Light Mode" : "Switch to Dark Mode"}
           >
-            {themeMode === 'dark' ? <Brightness7Icon /> : <Brightness4Icon />}
-          </IconButton>
+            {themeMode === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+          </button>
           {isAuthenticated ? (
             <>
               <span className="hidden sm:inline text-gray-700 dark:text-gray-300 font-medium">

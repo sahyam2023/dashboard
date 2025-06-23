@@ -3592,10 +3592,13 @@ def _admin_handle_file_upload_and_db_insert(
                 app.logger.info(f"_admin_helper: Successfully fetched back item from {table_name} ID {new_id}.")
                 try:
                     new_item_dict = dict(new_item_row)
-                    # Common timestamp keys for most items created/updated this way
-                    timestamp_keys_to_convert = ['created_at', 'updated_at', 'release_date'] # release_date might be None or not applicable
+                    # Adjust timestamp_keys_to_convert based on table_name
+                    timestamp_keys_to_convert = ['created_at', 'updated_at']
+                    if table_name not in ['patches', 'versions']:  # Add other tables if they also have a DATE release_date
+                        timestamp_keys_to_convert.append('release_date')
+
                     processed_item = convert_timestamps_to_ist_iso(new_item_dict, timestamp_keys_to_convert)
-                    app.logger.debug(f"_admin_helper: Converted fetched row to dict and processed timestamps: {processed_item}")
+                    app.logger.debug(f"_admin_helper: Converted fetched row to dict and processed timestamps for table {table_name}: {processed_item}")
                     return jsonify(processed_item), 201
                 except Exception as e_dict:
                     app.logger.error(f"_admin_helper: EXCEPTION converting sqlite3.Row to dict or processing timestamps for {table_name} ID {new_id}: {e_dict}. Row data: {new_item_row}")
@@ -3784,9 +3787,13 @@ def _admin_add_item_with_external_link(
         
         if new_item_row:
             new_item_dict = dict(new_item_row)
-            timestamp_keys_to_convert = ['created_at', 'updated_at', 'release_date'] # release_date might be None or not applicable
+            # Adjust timestamp_keys_to_convert based on table_name
+            timestamp_keys_to_convert = ['created_at', 'updated_at']
+            if table_name not in ['patches', 'versions']: # Add other tables if they also have a DATE release_date
+                timestamp_keys_to_convert.append('release_date')
+            
             processed_item = convert_timestamps_to_ist_iso(new_item_dict, timestamp_keys_to_convert)
-            app.logger.info(f"ADMIN_HELPER_LINK: Successfully fetched back and processed new item from {table_name}: {processed_item}")
+            app.logger.info(f"ADMIN_HELPER_LINK: Successfully fetched back and processed new item from {table_name} (keys: {timestamp_keys_to_convert}): {processed_item}")
             return jsonify(processed_item), 201
         else:
             app.logger.error(f"ADMIN_HELPER_LINK: CRITICAL - Failed to fetch newly added item from {table_name} with ID: {new_id} immediately after commit using query: {fetch_back_query}")
@@ -11759,7 +11766,7 @@ def update_user_column_prefs():
         for column_name, is_visible in column_prefs.items():
             if not isinstance(column_name, str) or not isinstance(is_visible, bool):
                 return jsonify(msg=f"Invalid preference for '{table_key}': column '{column_name}' must have a boolean visibility value."), 400
-
+    
     prefs_json_string = json.dumps(new_prefs_payload)
     db = get_db()
     try:

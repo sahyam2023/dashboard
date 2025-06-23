@@ -62,6 +62,8 @@ const DataTable = <T extends { id: number }>({
   const [showFullDescriptionModal, setShowFullDescriptionModal] = useState(false);
   const [fullDescription, setFullDescription] = useState('');
   const selectAllCheckboxRef = React.useRef<HTMLInputElement>(null);
+  const scrollableContainerRef = React.useRef<HTMLDivElement>(null); // Ref for the scrollable div
+  const [isHorizontallyScrollable, setIsHorizontallyScrollable] = useState(false);
 
   const modalControls: ModalControlSetters = {
     showModal: (description: string) => {
@@ -88,6 +90,44 @@ const DataTable = <T extends { id: number }>({
     }
   }, [isSelectionEnabled, selectedItemIds, data]);
 
+  React.useEffect(() => {
+    const checkScrollable = () => {
+      if (scrollableContainerRef.current) {
+        const { scrollWidth, clientWidth, scrollLeft } = scrollableContainerRef.current;
+        // Check if scrollable and not scrolled to the very end
+        const canScroll = scrollWidth > clientWidth;
+        // Check if scrolled to the end, consider a small tolerance for precision issues
+        const isScrolledToEnd = scrollLeft >= scrollWidth - clientWidth - 1; 
+        setIsHorizontallyScrollable(canScroll && !isScrolledToEnd);
+      }
+    };
+
+    // Initial check
+    checkScrollable();
+
+    // Observe for resizes
+    const resizeObserver = new ResizeObserver(checkScrollable);
+    if (scrollableContainerRef.current) {
+      resizeObserver.observe(scrollableContainerRef.current);
+      // Also listen to scroll events on the scrollable container
+      scrollableContainerRef.current.addEventListener('scroll', checkScrollable);
+    }
+
+    // Re-check when data or columns change as this can affect scrollWidth
+    // This also implicitly covers initial load after data is fetched.
+    checkScrollable();
+
+
+    return () => {
+      if (scrollableContainerRef.current) {
+        resizeObserver.unobserve(scrollableContainerRef.current);
+        // Make sure to remove the event listener
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        scrollableContainerRef.current?.removeEventListener('scroll', checkScrollable);
+      }
+    };
+  }, [data, columns]); // Dependencies: data and columns that might change table width
+
 
   if (isLoading) {
     return (
@@ -113,9 +153,9 @@ const DataTable = <T extends { id: number }>({
   }
 
   return (
-    <div className="flex flex-col">
-      <div className="overflow-x-auto">
-        <table className="min-w-full bg-white dark:bg-gray-800 rounded-lg shadow-sm table-fixed">
+    <div className={`flex flex-col table-scroll-fade-container ${isHorizontallyScrollable ? 'is-horizontally-scrollable' : ''}`}>
+      <div ref={scrollableContainerRef} className="overflow-x-auto min-w-0">
+        <table className="min-w-full bg-white dark:bg-gray-800 rounded-lg shadow-sm">
           <thead>
             <tr className="bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600">
               {isSelectionEnabled && (

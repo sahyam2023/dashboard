@@ -384,24 +384,19 @@ const PatchesView: React.FC = () => {
 
     setIsDownloadingSelected(true);
     try {
-      const blob = await bulkDownloadItems(downloadablePatchIds, 'patch' as BulkItemType);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const ts = new Date().toISOString().replace(/:/g, '-');
-      a.download = `bulk_download_patches_${ts}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      // bulkDownloadItems now returns Promise<void> and handles the download triggering and filename generation.
+      await bulkDownloadItems(downloadablePatchIds, 'patch' as BulkItemType);
 
+      // The success toast logic can remain, as it provides context specific to this view.
+      // The API service (and worker) will handle their own toasts for lower-level success/error.
       if (downloadablePatchIds.length === selectedPatchIds.size) {
-        showSuccessToast('Download started for all selected downloadable patches.');
+        showSuccessToast('Bulk download initiated for all selected downloadable patches.');
       } else {
-        showSuccessToast(`Starting download for ${downloadablePatchIds.length} patch file(s). External links or non-downloadable items were excluded.`);
+        showSuccessToast(`Bulk download initiated for ${downloadablePatchIds.length} patch file(s). External links or non-downloadable items were excluded.`);
       }
     } catch (e: any) {
-      showErrorToast(e.message || "Bulk download failed.");
+      console.error("PatchesView: Bulk download error:", e);
+      // showErrorToast is likely called within bulkDownloadItems on error.
     } finally {
       setIsDownloadingSelected(false);
     }

@@ -5,19 +5,19 @@ interface DownloadWorkerData {
   method: 'GET' | 'POST';
   headers: Record<string, string>;
   body?: string | null; // Body for POST requests, stringified JSON
-  originalFilename: string;
+  originalFilename: string; 
   isBulkDownload?: boolean; // To know if the final result in main thread is a direct blob or needs objectURL
 }
 
 self.onmessage = async (event: MessageEvent<DownloadWorkerData>) => {
-  const { url, method, headers, body, originalFilename, isBulkDownload } = event.data;
+  const { url, method, headers, body, originalFilename } = event.data; // Removed isBulkDownload
 
   try {
     // Re-fetch the data within the worker
     const response = await fetch(url, {
       method: method,
       headers: headers,
-      body: body,
+      body: body, 
     });
 
     if (!response.ok) {

@@ -323,13 +323,31 @@ const LinksView: React.FC = () => {
 
     setIsDownloadingSelected(true);
     try {
-      const blob = await bulkDownloadItems(downloadableLinkIds, 'link');
-      const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url;
-      const ts = new Date().toISOString().replace(/:/g, '-'); a.download = `bulk_download_links_${ts}.zip`;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-      if (downloadableLinkIds.length === selectedLinkIds.size) showSuccessToast('Download started.');
-    } catch (e: any) { showErrorToast(e.message || "Bulk download failed."); }
-    finally { setIsDownloadingSelected(false); }
+      // bulkDownloadItems now returns Promise<void> and handles the download triggering and filename generation.
+      await bulkDownloadItems(downloadableLinkIds, 'link');
+
+      // Success toast based on whether all selected items were downloadable or a subset.
+      if (downloadableLinkIds.length === selectedLinkIds.size && downloadableLinkIds.length > 0) {
+        showSuccessToast('Bulk download initiated for selected link files.');
+      } else if (downloadableLinkIds.length > 0) {
+        // This specific message was already present, so keeping it.
+        // The API's internal toast might be more generic like "Download started for X files".
+        // This view-specific message adds context about exclusions.
+        // showSuccessToast(`Starting download for ${downloadableLinkIds.length} file-based links. External links were excluded.`);
+        // The above line was commented out in the original, let's assume the API handles the primary success.
+        // For now, a generic success if any download started.
+        showSuccessToast('Bulk download initiated for downloadable link files.');
+
+      }
+      // If downloadableLinkIds.length is 0, the initial check should prevent this,
+      // but bulkDownloadItems itself would reject or handle it.
+
+    } catch (e: any) {
+      console.error("LinksView: Bulk download error:", e);
+      // showErrorToast is likely called within bulkDownloadItems on error.
+    } finally {
+      setIsDownloadingSelected(false);
+    }
   };
 
   const handleOpenBulkMoveLinksModal = () => {

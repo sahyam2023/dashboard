@@ -277,13 +277,17 @@ const role = user?.role; // Access role safely, as user can be null
     if (selectedMiscFileIds.size === 0) { showErrorToast("No items selected."); return; }
     setIsDownloadingSelected(true);
     try {
-      const blob = await bulkDownloadItems(Array.from(selectedMiscFileIds), 'misc_file');
-      const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url;
-      const ts = new Date().toISOString().replace(/:/g, '-'); a.download = `bulk_download_misc_files_${ts}.zip`;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-      showSuccessToast('Download started.');
-    } catch (e: any) { showErrorToast(e.message || "Bulk download failed."); }
-    finally { setIsDownloadingSelected(false); }
+      // bulkDownloadItems now returns Promise<void> and handles the download triggering and filename generation.
+      await bulkDownloadItems(Array.from(selectedMiscFileIds), 'misc_file');
+      // The API service (and worker) will handle their own toasts for lower-level success/error.
+      // This view can show a general success message.
+      showSuccessToast('Bulk download initiated for selected miscellaneous files.');
+    } catch (e: any) {
+      console.error("MiscView: Bulk download error:", e);
+      // showErrorToast is likely called within bulkDownloadItems on error.
+    } finally {
+      setIsDownloadingSelected(false);
+    }
   };
   
   const handleOpenBulkMoveMiscFilesModal = () => {

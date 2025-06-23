@@ -15,12 +15,14 @@ import {
   getUserFilePermissions,
   updateUserFilePermissions,
   fetchDocuments, // To get list of documents
-  PaginatedDocumentsResponse,
+  fetchPatches, // Added
+  fetchLinks,   // Added
+  fetchMiscFiles, // Added
   startDatabaseReset,
   confirmDatabaseReset,
   createAnnouncement // Import the new function
 } from '../services/api';
-import { FilePermission, FilePermissionUpdatePayload, UpdateUserFilePermissionsResponse, Document as DocumentType } from '../types';
+import { FilePermission, FilePermissionUpdatePayload, Document as DocumentType, PermissibleFileType, Patch as PatchType, Link as LinkType, MiscFile as MiscFileType } from '../types';
 
 
 import DataTable, { ColumnDef } from '../components/DataTable';
@@ -32,7 +34,7 @@ import SuperAdminCreateUserForm from '../components/admin/SuperAdminCreateUserFo
 interface PermissibleFile {
   id: number;
   name: string;
-  type: 'document'; // Initially only documents
+  type: PermissibleFileType;
 }
 
 const SuperAdminDashboard: React.FC = () => {
@@ -123,7 +125,7 @@ const SuperAdminDashboard: React.FC = () => {
   const [permissionSearchTerm, setPermissionSearchTerm] = useState<string>(''); // State for search term
   // --- End State for File Permissions Management ---
 
-  const handlePermissionChange = (fileId: number, fileType: 'document', permissionType: 'can_view' | 'can_download', value: boolean) => {
+  const handlePermissionChange = (fileId: number, fileType: PermissibleFileType, permissionType: 'can_view' | 'can_download', value: boolean) => {
     setPermissionsToUpdate(prev => {
       let updatedItem;
       const existingIndex = prev.findIndex(p => p.file_id === fileId && p.file_type === fileType);
@@ -142,7 +144,7 @@ const SuperAdminDashboard: React.FC = () => {
         if (fileInfo) {
             updatedItem = {
                 file_id: fileInfo.id,
-                file_type: fileInfo.type as 'document',
+                file_type: fileInfo.type as PermissibleFileType,
                 can_view: true, 
                 can_download: true,
             };
@@ -188,7 +190,7 @@ const SuperAdminDashboard: React.FC = () => {
         const savedPerm = backendPermissions.find(p => p.file_id === file.id && p.file_type === file.type);
         const newPermEntry = {
           file_id: file.id,
-          file_type: file.type as 'document', 
+          file_type: file.type as PermissibleFileType, 
           can_view: savedPerm ? Boolean(savedPerm.can_view) : true, 
           can_download: savedPerm ? Boolean(savedPerm.can_download) : true,
         };
@@ -299,24 +301,56 @@ const SuperAdminDashboard: React.FC = () => {
         setPermissionsToUpdate([]);
 
         try {
-          const docsResponse: PaginatedDocumentsResponse = await fetchDocuments(undefined, 1, 100); 
-          const documentsAsPermissibleFiles: PermissibleFile[] = docsResponse.documents.map(doc => ({
+          // Fetch all types of permissible files
+          const [docsResponse, patchesResponse, linksResponse, miscFilesResponse] = await Promise.all([
+            fetchDocuments(undefined, 1, 1000), // Assuming 1000 is enough to get all, adjust if pagination needed
+            fetchPatches(undefined, undefined, 1, 1000), // softwareId, versionId, page, limit
+            fetchLinks(undefined, undefined, 1, 1000),   // softwareId, versionId, page, perPage
+            fetchMiscFiles(undefined, 1, 1000) // categoryId, page, perPage
+          ]);
+
+          const documentsAsPermissibleFiles: PermissibleFile[] = docsResponse.documents.map((doc: DocumentType) => ({
             id: doc.id,
             name: doc.doc_name,
             type: 'document',
           }));
-          setAllFilesForPermissions(documentsAsPermissibleFiles);
+
+          const patchesAsPermissibleFiles: PermissibleFile[] = patchesResponse.patches.map((patch: PatchType) => ({
+            id: patch.id,
+            name: patch.patch_name,
+            type: 'patch',
+          }));
+
+          const linksAsPermissibleFiles: PermissibleFile[] = linksResponse.links.map((link: LinkType) => ({
+            id: link.id,
+            name: link.title,
+            type: 'link',
+          }));
+
+          const miscFilesAsPermissibleFiles: PermissibleFile[] = miscFilesResponse.misc_files.map((miscFile: MiscFileType) => ({
+            id: miscFile.id,
+            name: miscFile.user_provided_title || miscFile.original_filename,
+            type: 'misc_file',
+          }));
+
+          const allPermissibleFiles = [
+            ...documentsAsPermissibleFiles,
+            ...patchesAsPermissibleFiles,
+            ...linksAsPermissibleFiles,
+            ...miscFilesAsPermissibleFiles,
+          ];
+          setAllFilesForPermissions(allPermissibleFiles);
 
           const fetchedPermissions = await getUserFilePermissions(selectedUserForPermissions.id);
           setUserFilePermissions(fetchedPermissions);
           
-          const initialUpdates: FilePermissionUpdatePayload[] = documentsAsPermissibleFiles.map(file => {
+          const initialUpdates: FilePermissionUpdatePayload[] = allPermissibleFiles.map(file => {
             const existingPerm = fetchedPermissions.find(p => p.file_id === file.id && p.file_type === file.type);
             const canView = existingPerm ? Boolean(existingPerm.can_view) : true; // Default to true (permissive)
             const canDownload = existingPerm ? Boolean(existingPerm.can_download) : true; // Default to true
             return {
               file_id: file.id,
-              file_type: file.type,
+              file_type: file.type, // This now correctly uses PermissibleFileType
               can_view: canView,
               can_download: canDownload,
             };

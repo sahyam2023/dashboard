@@ -42,13 +42,46 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
   };
 
   const handleSuggestionClick = (suggestion: Suggestion) => {
-    setSearchValue(suggestion.name);
+    // Clear search input and hide suggestions immediately
+    setSearchValue('');
     setSuggestions([]);
     setShowSuggestions(false);
-    // Navigate to a generic search results page with the suggestion name as query
-    // A more advanced implementation could navigate directly to the item if type and ID are known
-    // e.g., if (suggestion.type === 'document') navigate(`/documents/${suggestion.id}`);
-    handleSubmit(undefined, suggestion.name);
+
+    const { id, type, software_id, name } = suggestion;
+
+    switch (type) {
+      case 'document':
+        navigate(`/documents?highlight=${id}`);
+        break;
+      case 'patch':
+        navigate(`/patches?highlight=${id}`);
+        break;
+      case 'link':
+        navigate(`/links?highlight=${id}`);
+        break;
+      case 'misc_file':
+        navigate(`/misc?highlight=${id}`);
+        break;
+      case 'software':
+        // Assuming software suggestions should link to a page listing its documents or a general software view
+        navigate(`/documents?software_id=${id}`);
+        break;
+      case 'version':
+        // Versions are often associated with a specific software's patches or documents
+        // Using software_id from the suggestion is crucial here.
+        if (software_id) {
+          navigate(`/patches?software_id=${software_id}&version_id=${id}`);
+        } else {
+          // Fallback if software_id is somehow missing for a version suggestion, though backend should provide it.
+          console.warn(`Software ID missing for version suggestion: ${name}`);
+          navigate(`/search?q=${encodeURIComponent(name)}`);
+        }
+        break;
+      default:
+        // Fallback for unknown types: perform a general search
+        navigate(`/search?q=${encodeURIComponent(name)}`);
+        break;
+    }
   };
 
   // Debounced fetch function
@@ -59,18 +92,21 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
     debounceTimeoutRef.current = setTimeout(async () => {
       if (term.trim().length >= 2) {
         setIsSuggestionsLoading(true);
+        console.log(`[Autocomplete] Debounced: Fetching suggestions for term: "${term}"`); // DEBUG
         try {
           const fetchedSuggestions = await fetchSearchSuggestions(term);
+          console.log("[Autocomplete] Fetched suggestions:", fetchedSuggestions); // DEBUG
           setSuggestions(fetchedSuggestions);
           setShowSuggestions(true); // Show suggestions when they are fetched
         } catch (error) {
-          console.error("Failed to fetch search suggestions:", error);
+          console.error("[Autocomplete] Failed to fetch search suggestions:", error); // DEBUG
           setSuggestions([]);
           setShowSuggestions(false); // Hide on error
         } finally {
           setIsSuggestionsLoading(false);
         }
       } else {
+        console.log(`[Autocomplete] Debounced: Term "${term}" too short, clearing suggestions.`); // DEBUG
         setSuggestions([]);
         setShowSuggestions(false); // Hide if term is too short
       }

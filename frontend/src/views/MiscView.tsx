@@ -166,10 +166,17 @@ const role = user?.role; // Access role safely, as user can be null
 
     if (highlightIdFromUrl) {
       setHighlightedItemId(highlightIdFromUrl);
+      // Scroll to highlighted item
+      setTimeout(() => {
+        const element = document.querySelector(`[data-item-id="misc_file-${highlightIdFromUrl}"]`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 150);
     } else {
       setHighlightedItemId(null);
     }
-  }, [searchParams, currentPage, setCurrentPage, fetchAndSetMiscFiles]);
+  }, [searchParams, miscFiles, fetchAndSetMiscFiles]); // Added miscFiles and fetchAndSetMiscFiles
 
   // Effect to handle focusing on a comment if item_id and comment_id are in URL
   useEffect(() => {
@@ -566,7 +573,26 @@ const role = user?.role; // Access role safely, as user can be null
             {filtersAreActive && (<button onClick={handleClearAllFiltersAndSearch} className="mt-6 btn-primary text-sm">Clear All Filters & Search</button>)}
           </div>
         ) : (
-        <DataTable columns={columns} data={miscFiles} highlightedRowId={highlightedItemId} rowClassName="group" isLoading={isLoadingInitial || isProcessingSingleItem} currentPage={currentPage} totalPages={totalPages} onPageChange={handlePageChange} itemsPerPage={itemsPerPage} totalItems={totalMiscFiles} sortColumn={sortBy} sortOrder={sortOrder} onSort={handleSort} isSelectionEnabled={true} selectedItemIds={selectedMiscFileIds} onSelectItem={handleSelectItem} onSelectAllItems={handleSelectAllItems} />
+        <DataTable
+          itemTypePrefix="misc_file" // Added prefix for misc files
+          columns={columns}
+          data={miscFiles}
+          highlightedRowId={highlightedItemId}
+          rowClassName="group"
+          isLoading={isLoadingInitial || isProcessingSingleItem}
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onPageChange={handlePageChange}
+          itemsPerPage={itemsPerPage}
+          totalItems={totalMiscFiles}
+          sortColumn={sortBy}
+          sortOrder={sortOrder}
+          onSort={handleSort}
+          isSelectionEnabled={true}
+          selectedItemIds={selectedMiscFileIds}
+          onSelectItem={handleSelectItem}
+          onSelectAllItems={handleSelectAllItems}
+        />
       )}
 
       {showDeleteCategoryConfirm && categoryToDelete && (<ConfirmationModal isOpen={showDeleteCategoryConfirm} title="Delete Category" message={`Delete category "${categoryToDelete.name}"? Files in it won't be deleted but will become uncategorized.`} onConfirm={handleDeleteCategoryConfirm} onCancel={closeDeleteCategoryConfirm} isConfirming={isProcessingCategory} confirmButtonText="Delete" confirmButtonVariant="danger"/>)}

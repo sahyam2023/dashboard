@@ -61,6 +61,7 @@ from urllib.parse import urljoin # Added for chat file_url modification
 from scheduler import run_delete_old_messages_periodically, run_cleanup_files_periodically # Added for Eventlet scheduling
 import atexit # Still needed for the backup scheduler
 # import os # For database path # os is already imported
+import mimetypes # Added for MIME type guessing
 
 # --- Helper function for PyInstaller ---
 def get_application_path():
@@ -153,21 +154,21 @@ CORS(app, resources={
     r"/api/*": {
         "origins": [
             "http://localhost:5173",
-            "http://localhost:7000",
-            "http://127.0.0.1:7000",
-            "http://192.168.3.40:7000",
-            "http://192.168.3.129:7000",
-            "http://192.168.1.116:7000" # Example: Added another common private IP
+            "http://localhost:7005",
+            "http://127.0.0.1:7005",
+            "http://192.168.3.40:7005",
+            "http://192.168.3.129:7005",
+            "http://192.168.1.116:7005" # Example: Added another common private IP
         ]
     },
     r"/socket.io/*": { # Socket.IO also needs CORS configuration
         "origins": [
             "http://localhost:5173",
-            "http://localhost:7000",
-            "http://127.0.0.1:7000",
-            "http://192.168.3.40:7000",
-            "http://192.168.3.129:7000",
-            "http://192.168.1.116:7000" # Ensure frontend URL is listed
+            "http://localhost:7005",
+            "http://127.0.0.1:7005",
+            "http://192.168.3.40:7005",
+            "http://192.168.3.129:7005",
+            "http://192.168.1.116:7005" # Ensure frontend URL is listed
         ]
     }
 },
@@ -184,8 +185,8 @@ def create_socketio_instance(flask_app):
     
     # Define CORS origins
     socketio_cors_origins = [
-        "http://localhost:5173", "http://localhost:7000", "http://127.0.0.1:7000",
-        "http://192.168.3.40:7000", "http://192.168.3.129:7000", "http://192.168.1.116:7000"
+        "http://localhost:5173", "http://localhost:7005", "http://127.0.0.1:7005",
+        "http://192.168.3.40:7005", "http://192.168.3.129:7005", "http://192.168.1.116:7005"
     ]
     
     if is_frozen:
@@ -3493,7 +3494,18 @@ def _admin_handle_file_upload_and_db_insert(
                 elif param_name_in_tuple == 'original_filename_ref' or param_name_in_tuple == 'original_filename': 
                     final_sql_params.append(original_filename)
                 elif param_name_in_tuple == 'file_size': final_sql_params.append(file_size)
-                elif param_name_in_tuple == 'file_type': final_sql_params.append(uploaded_file_obj.mimetype)
+                elif param_name_in_tuple == 'file_type':
+                    # Improved MIME type detection
+                    guessed_type, _ = mimetypes.guess_type(original_filename)
+                    if guessed_type:
+                        final_sql_params.append(guessed_type)
+                        app.logger.info(f"_admin_helper: Guessed MIME type for {original_filename}: {guessed_type}")
+                    elif uploaded_file_obj.mimetype and uploaded_file_obj.mimetype != 'application/octet-stream':
+                        final_sql_params.append(uploaded_file_obj.mimetype)
+                        app.logger.info(f"_admin_helper: Using browser-provided MIME type for {original_filename}: {uploaded_file_obj.mimetype}")
+                    else:
+                        final_sql_params.append('application/octet-stream') # Fallback
+                        app.logger.info(f"_admin_helper: Falling back to application/octet-stream for {original_filename}")
                 elif param_name_in_tuple == 'created_by_user_id': final_sql_params.append(current_user_id)
                 elif param_name_in_tuple == 'updated_by_user_id': final_sql_params.append(current_user_id)
                 elif param_name_in_tuple == 'user_id' and table_name == 'misc_files': # For misc_files.user_id
@@ -9079,37 +9091,35 @@ def admin_upload_large_file():
 
             file_size = os.path.getsize(final_filepath) # final_filepath is defined in this scope
             
-            # Infer MIME type (basic) - can be enhanced
-            # original_ext is defined above from secured_original_filename
-            mime_type = file_chunk.mimetype if file_chunk and file_chunk.mimetype and file_chunk.mimetype != 'application/octet-stream' else None
-            app.logger.info(f"Large file upload: MIME type from chunk: {mime_type if mime_type else 'N/A or octet-stream'}")
+            # Improved MIME type detection for large files
+            guessed_type, _ = mimetypes.guess_type(original_filename) # Guess based on original filename first
+            app.logger.info(f"Large file upload: Guessed MIME type for '{original_filename}': {guessed_type}")
 
-            if not mime_type: # If chunk's mime_type is generic or missing
-                app.logger.info(f"Large file upload: Inferring MIME type from original_ext: '{original_ext}'")
-                # Basic inference from extension (original_ext is defined above)
-                if original_ext == 'pdf': mime_type = 'application/pdf'
-                elif original_ext in ['png', 'jpg', 'jpeg', 'gif']: mime_type = f'image/{original_ext}'
-                # Add more inferences based on COMMON_MIME_TO_EXT keys or other known extensions
-                elif original_ext == 'mkv': mime_type = 'video/x-matroska'
-                elif original_ext == 'ts': mime_type = 'video/mp2t'
-                elif original_ext == 'iso': mime_type = 'application/x-iso9660-image'
-                elif original_ext == 'zip': mime_type = 'application/zip'
-                else: mime_type = 'application/octet-stream' # Default
-                app.logger.info(f"Large file upload: Inferred MIME type as: '{mime_type}'")
-            
-            # Use the captured chunk_mime_type for DB insertion.
-            # The _admin_handle_large_file_db_insert helper will use this as the 'file_type' in the DB.
-            db_mime_type_for_insert = mime_type # This line was from a previous incorrect diff, it should be chunk_mime_type that is refined and then used.
-                                                 # The mime_type variable itself is what gets refined here.
+            if guessed_type:
+                mime_type_for_db = guessed_type
+            elif file_chunk and file_chunk.mimetype and file_chunk.mimetype != 'application/octet-stream':
+                mime_type_for_db = file_chunk.mimetype
+                app.logger.info(f"Large file upload: Using browser-provided MIME type from chunk for '{original_filename}': {mime_type_for_db}")
+            else:
+                # Fallback if mimetypes.guess_type is None and browser-provided is generic/None
+                original_ext_for_fallback = original_filename.rsplit('.', 1)[-1].lower() if '.' in original_filename else ''
+                if original_ext_for_fallback == 'pdf': mime_type_for_db = 'application/pdf'
+                elif original_ext_for_fallback in ['png', 'jpg', 'jpeg', 'gif']: mime_type_for_db = f'image/{original_ext_for_fallback}'
+                elif original_ext_for_fallback == 'mkv': mime_type_for_db = 'video/x-matroska'
+                elif original_ext_for_fallback == 'ts': mime_type_for_db = 'video/mp2t'
+                elif original_ext_for_fallback == 'iso': mime_type_for_db = 'application/x-iso9660-image'
+                elif original_ext_for_fallback == 'zip': mime_type_for_db = 'application/zip'
+                else: mime_type_for_db = 'application/octet-stream'
+                app.logger.info(f"Large file upload: Inferred/Fallback MIME type for '{original_filename}': {mime_type_for_db}")
 
-            app.logger.info(f"Large file upload: Passing to DB helper: stored_filename='{final_stored_filename}', original_filename='{original_filename}', file_size={file_size}, mime_type_for_db='{mime_type}'") # Use refined mime_type
+            app.logger.info(f"Large file upload: Passing to DB helper: stored_filename='{final_stored_filename}', original_filename='{original_filename}', file_size={file_size}, mime_type_for_db='{mime_type_for_db}'")
             # --- Database Insertion ---
             new_item, error_response, status_code = _admin_handle_large_file_db_insert(
                 item_type=item_type,
                 stored_filename=final_stored_filename,
-                original_filename=original_filename, # secured_original_filename is not the true original
+                original_filename=original_filename, 
                 file_size=file_size,
-                mime_type=mime_type,
+                mime_type=mime_type_for_db, # Pass the determined MIME type
                 current_user_id=current_user_id,
                 metadata={
                     **metadata_payload,
@@ -11949,7 +11959,7 @@ if __name__ == '__main__':
 
     # IMPROVED SERVER STARTUP WITH BETTER PYINSTALLER SUPPORT
     try:
-        flask_port = int(os.environ.get('FLASK_RUN_PORT', 7000))
+        flask_port = int(os.environ.get('FLASK_RUN_PORT', 7005))
         is_frozen = getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
 
         # Start periodic tasks using Eventlet green threads for all modes

@@ -6,6 +6,7 @@ interface ModalProps {
   title?: string;
   children: React.ReactNode;
   showCloseButton?: boolean; // Added this prop
+  className?: string; // Added className prop
 }
 
 const Modal: React.FC<ModalProps> = ({
@@ -13,13 +14,17 @@ const Modal: React.FC<ModalProps> = ({
   onClose,
   title,
   children,
-  showCloseButton = true // Default to true
+  showCloseButton = true, // Default to true
+  className = "" // Default to empty string
 }) => {
   if (!isOpen) return null;
 
+  // Default classes for the modal content area
+  const defaultModalContentClasses = "relative mx-auto p-4 sm:p-5 border w-full max-w-2xl shadow-lg rounded-md bg-white dark:bg-gray-800 overflow-y-auto max-h-[calc(90vh-3rem)]";
+  
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 overflow-y-auto h-full w-full z-50 flex justify-center items-start px-4 pt-12"> {/* Changed items-center to items-start, added pt-12 */}
-      <div className="relative mx-auto p-4 sm:p-5 border w-full max-w-2xl shadow-lg rounded-md bg-white dark:bg-gray-800 overflow-y-auto max-h-[calc(90vh-3rem)]"> {/* Adjusted max-h to account for pt-12. 3rem is 48px. */}
+      <div className={`${defaultModalContentClasses} ${className}`}> {/* Adjusted max-h to account for pt-12. 3rem is 48px. Applied className */}
         <div className="text-center"> {/* Removed mt-3 */}
           {title && (
             <h3 className="text-lg leading-6 font-medium text-gray-900 dark:text-gray-100 mb-4">{title}</h3>

@@ -27,7 +27,7 @@ const Layout: React.FC = () => {
 
   useEffect(() => {
     if (user && tokenData?.token) {
-      const newSocket = io(import.meta.env.VITE_API_BASE_URL || 'http://localhost:7000', {
+      const newSocket = io(import.meta.env.VITE_API_BASE_URL || 'http://localhost:7005', {
         auth: { token: tokenData.token }
       });
       setSocket(newSocket);

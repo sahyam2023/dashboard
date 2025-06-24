@@ -17,10 +17,26 @@ import AdminUploadToMiscForm from '../components/admin/AdminUploadToMiscForm'; /
 import AdminMiscCategoryForm from '../components/admin/AdminMiscCategoryForm';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
 import Modal from '../components/shared/Modal';
-import { Download, FileText as FileIconLucide, PlusCircle, MinusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Archive as ArchiveIcon, Move, AlertTriangle, MessageSquare } from 'lucide-react'; // Added MessageSquare
-import { showErrorToast, showSuccessToast } from '../utils/toastUtils'; 
+import { Download, FileText as FileIconLucide, PlusCircle, MinusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Archive as ArchiveIcon, Move, AlertTriangle, MessageSquare, PlayCircle } from 'lucide-react'; // Added MessageSquare and PlayCircle
+import { showErrorToast, showSuccessToast } from '../utils/toastUtils';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7000'; // Not actively used for constructing URLs here
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7005'; 
+
+// Define supported video MIME types
+const PLAYABLE_VIDEO_TYPES = new Set([
+  'video/mp4',
+  'video/webm',
+  'video/ogg',
+  'video/x-matroska', // MKV
+  'video/mp2t',       // TS
+  'video/quicktime',  // MOV
+]);
+
+// Helper function to check if a file type is a playable video
+const isPlayableVideo = (fileType?: string | null): boolean => {
+  if (!fileType) return false;
+  return PLAYABLE_VIDEO_TYPES.has(fileType.toLowerCase());
+};
 
 interface OutletContextType {
   searchTerm: string;
@@ -48,6 +64,13 @@ const role = user?.role; // Access role safely, as user can be null
 
   const [sortBy, setSortBy] = useState<string>('user_provided_title');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+
+  // Video Player Modal State
+  const [showVideoModal, setShowVideoModal] = useState(false);
+  const [videoModalUrl, setVideoModalUrl] = useState<string | null>(null);
+  const [videoModalTitle, setVideoModalTitle] = useState<string | null>(null);
+  const [videoModalFileType, setVideoModalFileType] = useState<string | null>(null);
+
 
   const [showCategoryForm, setShowCategoryForm] = useState(false);
   const [editingCategory, setEditingCategory] = useState<MiscCategory | null>(null);
@@ -351,18 +374,50 @@ const role = user?.role; // Access role safely, as user can be null
             </span>
           );
         }
-        return (
-          <a 
-            href={`${API_BASE_URL}${f.file_path}`} 
-            target="_blank" // Misc files are always served, so target _blank is fine
-            rel="noopener noreferrer" 
-            className="flex items-center text-blue-600 hover:text-blue-800"
-            onClick={(e) => e.stopPropagation()}
-            title="Download file"
-          >
-            <Download size={14}className="mr-1"/>Download
-          </a>
-        );
+        // If it's a playable video, show Play button, otherwise just Download
+        if (isPlayableVideo(f.file_type)) {
+          return (
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setVideoModalUrl(`${API_BASE_URL}${f.file_path}`);
+                  setVideoModalTitle(f.user_provided_title || f.original_filename);
+                  setVideoModalFileType(f.file_type);
+                  setShowVideoModal(true);
+                }}
+                className="flex items-center text-green-600 hover:text-green-800"
+                title="Play video"
+              >
+                <PlayCircle size={14} className="mr-1" /> Play
+              </button>
+              <span className="text-gray-300 dark:text-gray-600">|</span>
+              <a 
+                href={`${API_BASE_URL}${f.file_path}`} 
+                target="_blank"
+                rel="noopener noreferrer" 
+                className="flex items-center text-blue-600 hover:text-blue-800"
+                onClick={(e) => e.stopPropagation()}
+                title="Download file"
+              >
+                <Download size={14}className="mr-1"/>Download
+              </a>
+            </div>
+          );
+        } else {
+          return (
+            <a 
+              href={`${API_BASE_URL}${f.file_path}`} 
+              target="_blank"
+              rel="noopener noreferrer" 
+              className="flex items-center text-blue-600 hover:text-blue-800"
+              onClick={(e) => e.stopPropagation()}
+              title="Download file"
+            >
+              <Download size={14}className="mr-1"/>Download
+            </a>
+          );
+        }
       }
     },
     { 
@@ -534,6 +589,41 @@ const role = user?.role; // Access role safely, as user can be null
               <button type="button" onClick={()=>setShowBulkMoveModal(false)} className="px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500" disabled={isMovingSelected}>Cancel</button>
               <button type="button" onClick={handleConfirmBulkMoveMiscFiles} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500" disabled={isMovingSelected||!modalSelectedCategoryId}>{isMovingSelected?'Moving...':'Confirm Move'}</button>
             </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Video Player Modal */}
+      {showVideoModal && videoModalUrl && (
+        <Modal 
+          isOpen={showVideoModal} 
+          onClose={() => {
+            setShowVideoModal(false);
+            setVideoModalUrl(null);
+            setVideoModalTitle(null);
+            setVideoModalFileType(null);
+          }} 
+          title={`Playing: ${videoModalTitle || 'Video'}`}
+          className="max-w-4xl" // Replaced size="large" with className
+        >
+          <div className="p-1 bg-black rounded aspect-video"> {/* Maintain aspect ratio, padding for visual separation */}
+            <video 
+              key={videoModalUrl} // Force re-render if URL changes, helps with some browsers
+              width="100%" 
+              height="100%" // Fill the container, aspect ratio handled by parent
+              controls 
+              autoPlay
+              className="rounded" // Optional: if you want rounded corners on the video element itself
+              onEnded={() => { // Optional: Close modal when video ends
+                setShowVideoModal(false);
+                setVideoModalUrl(null);
+                setVideoModalTitle(null);
+                setVideoModalFileType(null);
+              }}
+            >
+              <source src={videoModalUrl} type={videoModalFileType || 'video/mp4'} />
+              Your browser does not support the video tag. Consider downloading the file.
+            </video>
           </div>
         </Modal>
       )}

@@ -171,10 +171,17 @@ const LinksView: React.FC = () => {
 
     if (highlightIdFromUrl) {
       setHighlightedItemId(highlightIdFromUrl);
+      // Scroll to highlighted item
+      setTimeout(() => {
+        const element = document.querySelector(`[data-item-id="link-${highlightIdFromUrl}"]`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 150);
     } else {
       setHighlightedItemId(null); 
     }
-  }, [searchParams, currentPage, setCurrentPage, fetchAndSetLinks]);
+  }, [searchParams, links, fetchAndSetLinks]); // Added links and fetchAndSetLinks
 
   // Effect to handle focusing on a comment if item_id and comment_id are in URL
   useEffect(() => {
@@ -630,7 +637,26 @@ const LinksView: React.FC = () => {
           {filtersAreActive && (<button onClick={handleClearAllFiltersAndSearch} className="mt-6 btn-primary text-sm">Clear All Filters & Search</button>)}
         </div>
       ) : (
-        <DataTable columns={columns} data={links} highlightedRowId={highlightedItemId} rowClassName="group" isLoading={isLoadingInitial || isProcessingSingleItem} currentPage={currentPage} totalPages={totalPages} onPageChange={handlePageChange} itemsPerPage={itemsPerPage} totalItems={totalLinks} sortColumn={sortBy} sortOrder={sortOrder} onSort={handleSort} isSelectionEnabled={true} selectedItemIds={selectedLinkIds} onSelectItem={handleSelectItem} onSelectAllItems={handleSelectAllItems} />
+        <DataTable
+          itemTypePrefix="link" // Added prefix for links
+          columns={columns}
+          data={links}
+          highlightedRowId={highlightedItemId}
+          rowClassName="group"
+          isLoading={isLoadingInitial || isProcessingSingleItem}
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onPageChange={handlePageChange}
+          itemsPerPage={itemsPerPage}
+          totalItems={totalLinks}
+          sortColumn={sortBy}
+          sortOrder={sortOrder}
+          onSort={handleSort}
+          isSelectionEnabled={true}
+          selectedItemIds={selectedLinkIds}
+          onSelectItem={handleSelectItem}
+          onSelectAllItems={handleSelectAllItems}
+        />
       )}
 
       {showDeleteConfirm && linkToDelete && (<ConfirmationModal isOpen={showDeleteConfirm} title="Delete Link" message={`Delete "${linkToDelete.title}"?`} onConfirm={handleDeleteLinkConfirm} onCancel={closeDeleteConfirm} isConfirming={isProcessingSingleItem} confirmButtonText="Delete" confirmButtonVariant="danger" />)}

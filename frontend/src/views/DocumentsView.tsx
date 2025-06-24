@@ -304,10 +304,23 @@ useEffect(() => {
 
     if (highlightIdFromUrl) {
       setHighlightedItemId(highlightIdFromUrl);
+      // Scroll to highlighted item after data is potentially loaded/updated
+      setTimeout(() => {
+        // Use the correct prefix for documents
+        const element = document.querySelector(`[data-item-id="document-${highlightIdFromUrl}"]`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          // Optional: Add a class for a temporary visual cue, then remove it
+          // element.classList.add('ring-2', 'ring-offset-2', 'ring-indigo-500');
+          // setTimeout(() => element.classList.remove('ring-2', 'ring-offset-2', 'ring-indigo-500'), 2000);
+        } else {
+          // console.warn(`DocumentsView: Element with data-item-id="document-${highlightIdFromUrl}" not found for scrolling.`);
+        }
+      }, 150); // Increased delay slightly
     } else {
       setHighlightedItemId(null); // Clear highlight if not in URL
     }
-  }, [searchParams, currentPage, setCurrentPage, fetchAndSetDocuments]);
+  }, [searchParams, documents, fetchAndSetDocuments]); // Ensure fetchAndSetDocuments is here if page change triggers re-fetch
 
 const handleFilterChange = (softwareId: number | null) => {
     setHighlightedItemId(null); // Clear highlight
@@ -318,17 +331,22 @@ const handleFilterChange = (softwareId: number | null) => {
 // This useEffect is where the actual fetch happens
 // Already modified to include setHighlightedItemId(null)
 useEffect(() => {
-    setHighlightedItemId(null); 
+    // setHighlightedItemId(null); // This was moved to individual filter/sort handlers
     if (!isAuthenticated) {
         setDocuments([]); setFavoritedItems(new Map()); setCurrentPage(1);
         setHasMore(false); setIsLoadingInitial(false); return;
     }
-    fetchAndSetDocuments(1, true);
+    // Check if page is being set by URL param, if so, fetchAndSetDocuments will be called by that effect.
+    // This prevents double fetching if both page and other filters change.
+    const pageFromUrlStr = searchParams.get('page');
+    if (!pageFromUrlStr) { // Only fetch if page is not being driven by URL param initially
+        fetchAndSetDocuments(1, true);
+    }
 }, [
     isAuthenticated, selectedSoftwareId, sortBy, sortOrder,
     debouncedDocTypeFilter, debouncedCreatedFromFilter, debouncedCreatedToFilter,
     debouncedUpdatedFromFilter, debouncedUpdatedToFilter, searchTerm,
-    fetchAndSetDocuments, setHighlightedItemId
+    fetchAndSetDocuments, searchParams // Added searchParams here
 ]);
   const handleSort = (columnKey: string) => {
     setHighlightedItemId(null); // Clear highlight
@@ -677,7 +695,26 @@ useEffect(() => {
           {filtersAreActive && (<button onClick={handleClearAllFiltersAndSearch} className="mt-6 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 text-sm font-medium">Clear All Filters & Search</button>)}
         </div>
       ) : (
-        <DataTable columns={columns} data={filteredDocumentsBySearch} highlightedRowId={highlightedItemId} rowClassName="group" isLoading={isLoadingInitial||isLoadingMore} currentPage={currentPage} totalPages={totalPagesComputed} onPageChange={handlePageChange} itemsPerPage={ITEMS_PER_PAGE} totalItems={totalDocuments} sortColumn={sortBy} sortOrder={sortOrder} onSort={handleSort} isSelectionEnabled={true} selectedItemIds={selectedDocumentIds} onSelectItem={handleSelectItem} onSelectAllItems={handleSelectAllItems} />
+        <DataTable
+          itemTypePrefix="document" // Added prefix for documents
+          columns={columns}
+          data={filteredDocumentsBySearch}
+          highlightedRowId={highlightedItemId}
+          rowClassName="group"
+          isLoading={isLoadingInitial||isLoadingMore}
+          currentPage={currentPage}
+          totalPages={totalPagesComputed}
+          onPageChange={handlePageChange}
+          itemsPerPage={ITEMS_PER_PAGE}
+          totalItems={totalDocuments}
+          sortColumn={sortBy}
+          sortOrder={sortOrder}
+          onSort={handleSort}
+          isSelectionEnabled={true}
+          selectedItemIds={selectedDocumentIds}
+          onSelectItem={handleSelectItem}
+          onSelectAllItems={handleSelectAllItems}
+        />
       )}
       {showDeleteConfirm && documentToDelete && (<ConfirmationModal isOpen={showDeleteConfirm} title="Delete Document" message={`Delete "${documentToDelete.doc_name}"?`} onConfirm={handleDeleteConfirm} onCancel={closeDeleteConfirm} isConfirming={isDeleting} confirmButtonText="Delete" confirmButtonVariant="danger"/>)}
       {showBulkDeleteConfirmModal && (<ConfirmationModal isOpen={showBulkDeleteConfirmModal} title={`Delete ${selectedDocumentIds.size} Document(s)`} message={`Delete ${selectedDocumentIds.size} selected items?`} onConfirm={confirmBulkDelete} onCancel={()=>setShowBulkDeleteConfirmModal(false)} isConfirming={isDeletingSelected} confirmButtonText="Delete Selected" confirmButtonVariant="danger"/>)}

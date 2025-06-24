@@ -36,6 +36,7 @@ interface DataTableProps<T> {
   selectedItemIds?: Set<number>;
   onSelectItem?: (itemId: number, isSelected: boolean) => void;
   onSelectAllItems?: (isSelected: boolean) => void;
+  itemTypePrefix?: string; // New prop for data-item-id prefix
 }
 
 // Ensure T has an 'id' property of type number for selection logic
@@ -58,6 +59,7 @@ const DataTable = <T extends { id: number }>({
   onSelectItem,
   onSelectAllItems,
   highlightedRowId = null, // Added prop with default
+  itemTypePrefix = 'item', // Default prefix if not provided
 }: DataTableProps<T>) => {
   const [showFullDescriptionModal, setShowFullDescriptionModal] = useState(false);
   const [fullDescription, setFullDescription] = useState('');
@@ -207,6 +209,7 @@ const DataTable = <T extends { id: number }>({
               return (
                 <tr
                   key={item.id || index}
+                  data-item-id={`${itemTypePrefix}-${item.id}`} // Use the new prop
                   className={`transition-colors 
                             ${customRowClass || ''} 
                             ${isSelected ? 'bg-sky-100 dark:bg-sky-800 hover:bg-sky-200 dark:hover:bg-sky-700' : 'hover:bg-gray-50 dark:hover:bg-gray-700'}

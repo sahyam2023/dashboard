@@ -6,9 +6,12 @@ import os
 if not os.environ.get('EVENTLET_PATCHED'):
     eventlet.monkey_patch()
 
+import eventlet.debug
+eventlet.debug.hub_exceptions(False) # Attempt to suppress hub exceptions like ConnectionAbortedError
+
 import eventlet.wsgi
 #app.py
-
+from werkzeug.middleware.proxy_fix import ProxyFix
 import uuid
 import sqlite3
 import json # Added for audit logging
@@ -150,6 +153,9 @@ app = Flask(__name__,
             instance_relative_config=True,
             static_folder=STATIC_FOLDER)
 
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
+
+
 CORS(app, resources={
     r"/api/*": {
         "origins": [
@@ -158,7 +164,10 @@ CORS(app, resources={
             "http://127.0.0.1:7005",
             "http://192.168.3.40:7005",
             "http://192.168.3.129:7005",
-            "http://192.168.1.116:7005" # Example: Added another common private IP
+            "http://192.168.1.116:7005", 
+            "http://localhost:7000",
+            "http://127.0.0.1:7000",
+            "http://192.168.3.129:7000"# Example: Added another common private IP
         ]
     },
     r"/socket.io/*": { # Socket.IO also needs CORS configuration
@@ -168,7 +177,10 @@ CORS(app, resources={
             "http://127.0.0.1:7005",
             "http://192.168.3.40:7005",
             "http://192.168.3.129:7005",
-            "http://192.168.1.116:7005" # Ensure frontend URL is listed
+            "http://192.168.1.116:7005",
+            "http://localhost:7000",
+            "http://127.0.0.1:7000",
+            "http://192.168.3.129:7000"# Ensure frontend URL is listed
         ]
     }
 },
@@ -186,7 +198,8 @@ def create_socketio_instance(flask_app):
     # Define CORS origins
     socketio_cors_origins = [
         "http://localhost:5173", "http://localhost:7005", "http://127.0.0.1:7005",
-        "http://192.168.3.40:7005", "http://192.168.3.129:7005", "http://192.168.1.116:7005"
+        "http://192.168.3.40:7005", "http://192.168.3.129:7005", "http://192.168.1.116:7005", "http://localhost:7000",
+        "http://127.0.0.1:7000", "http://192.168.3.129:7000"
     ]
     
     if is_frozen:
@@ -7646,6 +7659,15 @@ def search_api():
 
         return jsonify(results)
 
+# --- Global Error Handler for ConnectionAbortedError ---
+@app.errorhandler(ConnectionAbortedError)
+def handle_connection_aborted_error(e):
+    app.logger.debug(f"ConnectionAbortedError caught by global handler: {e}. Client likely disconnected.")
+    # Return a simple response. The actual content doesn't matter much
+    # as the client has already disconnected. Status code 200 or 204 might be appropriate.
+    # An empty response body is fine.
+    return '', 204 # No Content
+
 # --- CLI Command ---
 @app.cli.command('init-db')
 def init_db_command():
@@ -11889,7 +11911,36 @@ class SilentLogger:
     def write(self, *args, **kwargs):
         # Log to Flask's logger if needed, or do nothing
         # app.logger.debug(f"Eventlet log: {args}") # Optional: for debugging eventlet output
-        pass
+        
+        # --- Temporary inspection code ---
+        log_message = ""
+        if args:
+            log_message = str(args[0])
+            
+        # print(f"SilentLogger received - Type: {type(args[0])}, Content: {log_message}", file=sys.stderr)
+        # print(f"SilentLogger ARGS: {args}", file=sys.stderr)
+        # print(f"SilentLogger KWARGS: {kwargs}", file=sys.stderr)
+        # --- End temporary inspection code ---
+
+        if args and isinstance(args[0], str):
+            log_message = args[0]
+            if "ConnectionAbortedError" in log_message and "[WinError 10053]" in log_message:
+                # This is the specific error we want to suppress from Eventlet's default logging
+                app.logger.debug("Suppressed ConnectionAbortedError traceback from Eventlet logger.") # Log that we suppressed it
+                pass # Suppress by doing nothing
+            else:
+                # For other messages that Eventlet's server might try to log,
+                # let them pass through if we want to see them.
+                # If the goal was a truly silent logger for everything else, this print would be removed.
+                # However, since we are targeting a specific error, let other logs pass.
+                # This assumes eventlet.wsgi.server's default behavior is to print to stdout/stderr.
+                # If app.logger was used here, it might duplicate Flask's own request logging.
+                # For now, let's print to stderr for non-suppressed Eventlet messages.
+                print(*args, **kwargs, file=sys.stderr)
+        else:
+            # If not a string or no args, let it pass through (or print if that's desired default)
+            print(*args, **kwargs, file=sys.stderr)
+
 
     def flush(self):
         # No-op
@@ -11966,7 +12017,7 @@ if __name__ == '__main__':
 
     # IMPROVED SERVER STARTUP WITH BETTER PYINSTALLER SUPPORT
     try:
-        flask_port = int(os.environ.get('FLASK_RUN_PORT', 7005))
+        flask_port = int(os.environ.get('FLASK_RUN_PORT', 7006))
         is_frozen = getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
 
         # Start periodic tasks using Eventlet green threads for all modes

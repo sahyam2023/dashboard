@@ -1,35 +1,110 @@
 // src/components/Header.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Menu, Search, X, LogOut, User, LogIn, Sun, Moon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import NotificationBell from './notifications/NotificationBell';
+import { fetchSearchSuggestions, Suggestion } from '../services/api'; // Added
 
 interface HeaderProps {
   toggleSidebar: () => void;
   isCollapsed: boolean;
-  onSearch: (term: string) => void; // Assuming onSearch might still be used elsewhere or for other purposes
+  onSearch: (term: string) => void;
 }
 
 const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch }) => {
   const [searchValue, setSearchValue] = useState('');
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [isSuggestionsLoading, setIsSuggestionsLoading] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const searchContainerRef = useRef<HTMLDivElement>(null); // Ref for the search container
+
   const { user, isAuthenticated, logout, openAuthModal } = useAuth();
   const navigate = useNavigate();
   const { themeMode, toggleThemeMode } = useTheme();
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (searchValue.trim()) {
-      navigate(`/search?q=${encodeURIComponent(searchValue.trim())}`);
+  const handleSubmit = (e?: React.FormEvent, navigationValue?: string) => {
+    if (e) e.preventDefault();
+    const termToSearch = navigationValue || searchValue;
+    if (termToSearch.trim()) {
+      navigate(`/search?q=${encodeURIComponent(termToSearch.trim())}`);
+      setSuggestions([]);
+      setShowSuggestions(false);
     }
   };
 
   const clearSearch = () => {
     setSearchValue('');
-    // Optional: if onSearch was used to clear results, ensure that's handled
-    // if (location.pathname.startsWith('/search')) navigate('/documents'); // Example
+    setSuggestions([]);
+    setShowSuggestions(false);
   };
+
+  const handleSuggestionClick = (suggestion: Suggestion) => {
+    setSearchValue(suggestion.name);
+    setSuggestions([]);
+    setShowSuggestions(false);
+    // Navigate to a generic search results page with the suggestion name as query
+    // A more advanced implementation could navigate directly to the item if type and ID are known
+    // e.g., if (suggestion.type === 'document') navigate(`/documents/${suggestion.id}`);
+    handleSubmit(undefined, suggestion.name);
+  };
+
+  // Debounced fetch function
+  const debouncedFetchSuggestions = useCallback((term: string) => {
+    if (debounceTimeoutRef.current) {
+      clearTimeout(debounceTimeoutRef.current);
+    }
+    debounceTimeoutRef.current = setTimeout(async () => {
+      if (term.trim().length >= 2) {
+        setIsSuggestionsLoading(true);
+        try {
+          const fetchedSuggestions = await fetchSearchSuggestions(term);
+          setSuggestions(fetchedSuggestions);
+          setShowSuggestions(true); // Show suggestions when they are fetched
+        } catch (error) {
+          console.error("Failed to fetch search suggestions:", error);
+          setSuggestions([]);
+          setShowSuggestions(false); // Hide on error
+        } finally {
+          setIsSuggestionsLoading(false);
+        }
+      } else {
+        setSuggestions([]);
+        setShowSuggestions(false); // Hide if term is too short
+      }
+    }, 300); // 300ms debounce delay
+  }, []); // Empty dependency array means this function is created once
+
+  const handleSearchInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const term = e.target.value;
+    setSearchValue(term);
+    if (term.trim().length >= 2) {
+      debouncedFetchSuggestions(term);
+    } else {
+      if (debounceTimeoutRef.current) clearTimeout(debounceTimeoutRef.current);
+      setSuggestions([]);
+      setShowSuggestions(false);
+    }
+  };
+
+  // Effect to handle clicks outside the search suggestions dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      if (debounceTimeoutRef.current) { // Clear timeout on unmount
+        clearTimeout(debounceTimeoutRef.current);
+      }
+    };
+  }, []);
+
 
   const handleLogout = () => {
     logout();
@@ -54,7 +129,7 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
         </div>
 
         {/* Center Section: Search Bar */}
-        <div className="flex-1 flex justify-center px-4">
+        <div className="flex-1 flex justify-center px-4" ref={searchContainerRef}>
           <form
             onSubmit={handleSubmit}
             className="relative w-full max-w-lg"
@@ -67,7 +142,9 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
                 type="text"
                 placeholder="Search..."
                 value={searchValue}
-                onChange={(e) => setSearchValue(e.target.value)}
+                onChange={handleSearchInputChange}
+                onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true);}}
+                // onBlur={() => setTimeout(() => setShowSuggestions(false), 100)} // Delay to allow click on suggestion
                 className="block w-full pl-10 pr-10 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
               />
               {searchValue && (
@@ -81,6 +158,32 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
                 </button>
               )}
             </div>
+            {showSuggestions && suggestions.length > 0 && (
+              <ul className="absolute z-10 w-full bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md mt-1 shadow-lg max-h-60 overflow-auto">
+                {isSuggestionsLoading ? (
+                  <li className="px-4 py-2 text-gray-500 dark:text-gray-400">Loading...</li>
+                ) : (
+                  suggestions.map((suggestion, index) => (
+                    <li
+                      key={`${suggestion.id}-${index}`}
+                      onMouseDown={(e) => { // Use onMouseDown to fire before onBlur on input
+                        e.preventDefault(); // Prevent input from losing focus immediately
+                        handleSuggestionClick(suggestion);
+                      }}
+                      className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer text-sm text-gray-700 dark:text-gray-200"
+                    >
+                      {suggestion.name}
+                      <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">({suggestion.type})</span>
+                    </li>
+                  ))
+                )}
+              </ul>
+            )}
+             {showSuggestions && !isSuggestionsLoading && suggestions.length === 0 && searchValue.length >= 2 && (
+                <div className="absolute z-10 w-full bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md mt-1 shadow-lg p-4 text-center">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">No suggestions found.</p>
+                </div>
+            )}
           </form>
         </div>
 

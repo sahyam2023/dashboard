@@ -933,6 +933,41 @@ export function bulkDownloadItems(itemIds: number[], itemType: BulkItemType): Pr
   });
 }
 
+// --- Search Suggestions ---
+export interface Suggestion {
+  id: number | string;
+  name: string;
+  type: string;
+  software_id?: number; // Optional: For version suggestions
+  software_name?: string; // Optional: For version suggestions
+}
+
+export async function fetchSearchSuggestions(query: string): Promise<Suggestion[]> {
+  if (!query || query.trim().length < 2) {
+    return Promise.resolve([]); // Don't call API for very short queries
+  }
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/search/suggestions?q=${encodeURIComponent(query)}`, {
+      method: 'GET',
+      headers: {
+        ...getAuthHeader(), // Include auth header if available, for permissioned suggestions
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
+    });
+    // Using handleApiError for consistent processing
+    return handleApiError(response, 'Failed to fetch search suggestions');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error fetching search suggestions:', error);
+    throw error; // Re-throw to be handled by the calling component
+  }
+}
+// --- End Search Suggestions ---
+
 /**
  * Performs a bulk move operation on specified items.
  * @param itemIds - An array of item IDs to move.

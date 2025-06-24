@@ -7657,7 +7657,141 @@ def search_api():
                 app.logger.error(f"Error calculating rank for item ID {current_item_id}, type {item.get('type')}: {e}")
                 item['page_number'] = 1 # Default to 1 on error
 
-        return jsonify(results)
+    return jsonify(results)
+
+
+@app.route('/api/search/suggestions', methods=['GET'])
+@jwt_required(optional=True)
+def search_suggestions_api():
+    SUGGESTIONS_LIMIT = 15 # Max number of suggestions to return
+    query_term = request.args.get('q', '').strip()
+    suggestions = []
+    db = get_db()
+
+    logged_in_user_id = None
+    try:
+        current_user_identity = get_jwt_identity()
+        if current_user_identity:
+            logged_in_user_id = int(current_user_identity)
+    except Exception as e:
+        app.logger.error(f"Error getting user_id in search_suggestions_api: {e}")
+
+    if not query_term or len(query_term) < 2: # Require at least 2 characters for suggestions
+        return jsonify(suggestions)
+
+    # Use a prefix search pattern (term%)
+    search_pattern = f"{query_term.lower()}%"
+
+    # Base permission check clause to be appended in WHERE
+    # Using fp_sugg alias for file_permissions table in suggestions context
+    permission_check_clause = "(fp_sugg.id IS NULL OR fp_sugg.can_view IS NOT FALSE)"
+
+    # Documents
+    # Select id, doc_name as name, 'document' as type
+    # Join with file_permissions as fp_sugg
+    # WHERE (permission_check_clause) AND LOWER(d.doc_name) LIKE ?
+    # ORDER BY d.doc_name LIMIT SUGGESTIONS_LIMIT
+    doc_query = f"""
+        SELECT d.id, d.doc_name AS name, 'document' AS type
+        FROM documents d
+        LEFT JOIN file_permissions fp_sugg ON d.id = fp_sugg.file_id AND fp_sugg.file_type = 'document' AND fp_sugg.user_id = ?
+        WHERE {permission_check_clause} AND LOWER(d.doc_name) LIKE ?
+        ORDER BY LOWER(d.doc_name) ASC
+        LIMIT {SUGGESTIONS_LIMIT}
+    """
+    suggestions.extend([dict(row) for row in db.execute(doc_query, (logged_in_user_id, search_pattern)).fetchall()])
+
+    # Patches
+    patch_query = f"""
+        SELECT p.id, p.patch_name AS name, 'patch' AS type
+        FROM patches p
+        LEFT JOIN file_permissions fp_sugg ON p.id = fp_sugg.file_id AND fp_sugg.file_type = 'patch' AND fp_sugg.user_id = ?
+        WHERE {permission_check_clause} AND LOWER(p.patch_name) LIKE ?
+        ORDER BY LOWER(p.patch_name) ASC
+        LIMIT {SUGGESTIONS_LIMIT}
+    """
+    suggestions.extend([dict(row) for row in db.execute(patch_query, (logged_in_user_id, search_pattern)).fetchall()])
+
+    # Links (only titles)
+    link_query = f"""
+        SELECT l.id, l.title AS name, 'link' AS type
+        FROM links l
+        LEFT JOIN file_permissions fp_sugg ON l.id = fp_sugg.file_id AND fp_sugg.file_type = 'link' AND fp_sugg.user_id = ?
+        WHERE {permission_check_clause} AND LOWER(l.title) LIKE ?
+        ORDER BY LOWER(l.title) ASC
+        LIMIT {SUGGESTIONS_LIMIT}
+    """
+    suggestions.extend([dict(row) for row in db.execute(link_query, (logged_in_user_id, search_pattern)).fetchall()])
+
+    # Misc Files (user_provided_title or original_filename)
+    misc_query = f"""
+        SELECT
+            mf.id,
+            COALESCE(mf.user_provided_title, mf.original_filename) AS name,
+            'misc_file' AS type
+        FROM misc_files mf
+        LEFT JOIN file_permissions fp_sugg ON mf.id = fp_sugg.file_id AND fp_sugg.file_type = 'misc_file' AND fp_sugg.user_id = ?
+        WHERE {permission_check_clause} AND (
+            (mf.user_provided_title IS NOT NULL AND LOWER(mf.user_provided_title) LIKE ?) OR
+            (mf.user_provided_title IS NULL AND LOWER(mf.original_filename) LIKE ?)
+        )
+        ORDER BY LOWER(COALESCE(mf.user_provided_title, mf.original_filename)) ASC
+        LIMIT {SUGGESTIONS_LIMIT}
+    """
+    # For misc_files, the search_pattern needs to be applied twice if COALESCE is split.
+    # If COALESCE is used directly in WHERE, then only one search_pattern.
+    # Example with direct COALESCE in WHERE:
+    misc_query_alt = f"""
+        SELECT
+            mf.id,
+            COALESCE(mf.user_provided_title, mf.original_filename) AS name,
+            'misc_file' AS type
+        FROM misc_files mf
+        LEFT JOIN file_permissions fp_sugg ON mf.id = fp_sugg.file_id AND fp_sugg.file_type = 'misc_file' AND fp_sugg.user_id = ?
+        WHERE {permission_check_clause} AND LOWER(COALESCE(mf.user_provided_title, mf.original_filename)) LIKE ?
+        ORDER BY LOWER(COALESCE(mf.user_provided_title, mf.original_filename)) ASC
+        LIMIT {SUGGESTIONS_LIMIT}
+    """
+    suggestions.extend([dict(row) for row in db.execute(misc_query_alt, (logged_in_user_id, search_pattern)).fetchall()])
+
+    # Software titles
+    software_query = f"""
+        SELECT s.id, s.name, 'software' AS type
+        FROM software s
+        WHERE LOWER(s.name) LIKE ?
+        ORDER BY LOWER(s.name) ASC
+        LIMIT {SUGGESTIONS_LIMIT}
+    """
+    # No file_permissions for software titles themselves, they are metadata.
+    suggestions.extend([dict(row) for row in db.execute(software_query, (search_pattern,)).fetchall()])
+
+    # Versions (version_number)
+    version_query = f"""
+        SELECT v.id, v.version_number AS name, 'version' AS type, v.software_id, s.name as software_name
+        FROM versions v
+        JOIN software s ON v.software_id = s.id
+        WHERE LOWER(v.version_number) LIKE ?
+        ORDER BY LOWER(v.version_number) ASC
+        LIMIT {SUGGESTIONS_LIMIT}
+    """
+    # No file_permissions for version numbers themselves.
+    suggestions.extend([dict(row) for row in db.execute(version_query, (search_pattern,)).fetchall()])
+
+    # Sort all suggestions by name (case-insensitive) and then limit
+    # This is important because we are combining results from multiple queries.
+    # Each query already has a LIMIT, but the combined list might exceed the overall desired limit.
+    # Also, to ensure a consistent order across types.
+
+    # Make sure 'name' key exists and is string for sorting
+    valid_suggestions_for_sort = [s for s in suggestions if isinstance(s.get('name'), str)]
+
+    # Sort by name (case-insensitive)
+    valid_suggestions_for_sort.sort(key=lambda x: x['name'].lower())
+
+    # Limit the final list
+    final_suggestions = valid_suggestions_for_sort[:SUGGESTIONS_LIMIT]
+
+    return jsonify(final_suggestions)
 
 # --- Global Error Handler for ConnectionAbortedError ---
 @app.errorhandler(ConnectionAbortedError)

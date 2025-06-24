@@ -172,11 +172,15 @@ const role = user?.role; // Access role safely, as user can be null
         if (element) {
           element.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
+        // Always remove the highlight param after attempting to scroll or if not found
+        const newSearchParams = new URLSearchParams(searchParams);
+        newSearchParams.delete('highlight');
+        setSearchParams(newSearchParams, { replace: true });
       }, 150);
     } else {
       setHighlightedItemId(null);
     }
-  }, [searchParams, miscFiles, fetchAndSetMiscFiles]); // Added miscFiles and fetchAndSetMiscFiles
+  }, [searchParams, miscFiles, fetchAndSetMiscFiles, setSearchParams]);
 
   // Effect to handle focusing on a comment if item_id and comment_id are in URL
   useEffect(() => {
@@ -574,7 +578,7 @@ const role = user?.role; // Access role safely, as user can be null
           </div>
         ) : (
         <DataTable
-          itemTypePrefix="misc_file" // Added prefix for misc files
+          itemTypePrefix="misc_file"
           columns={columns}
           data={miscFiles}
           highlightedRowId={highlightedItemId}

@@ -310,17 +310,22 @@ useEffect(() => {
         const element = document.querySelector(`[data-item-id="document-${highlightIdFromUrl}"]`);
         if (element) {
           element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          // Optional: Add a class for a temporary visual cue, then remove it
-          // element.classList.add('ring-2', 'ring-offset-2', 'ring-indigo-500');
-          // setTimeout(() => element.classList.remove('ring-2', 'ring-offset-2', 'ring-indigo-500'), 2000);
+          // Remove highlight from URL after scrolling
+          const newSearchParams = new URLSearchParams(searchParams);
+          newSearchParams.delete('highlight');
+          setSearchParams(newSearchParams, { replace: true });
         } else {
           // console.warn(`DocumentsView: Element with data-item-id="document-${highlightIdFromUrl}" not found for scrolling.`);
+          // If element not found, still remove the highlight param as it's not useful
+          const newSearchParams = new URLSearchParams(searchParams);
+          newSearchParams.delete('highlight');
+          setSearchParams(newSearchParams, { replace: true });
         }
-      }, 150); // Increased delay slightly
+      }, 150);
     } else {
-      setHighlightedItemId(null); // Clear highlight if not in URL
+      setHighlightedItemId(null);
     }
-  }, [searchParams, documents, fetchAndSetDocuments]); // Ensure fetchAndSetDocuments is here if page change triggers re-fetch
+  }, [searchParams, documents, fetchAndSetDocuments, setSearchParams]);
 
 const handleFilterChange = (softwareId: number | null) => {
     setHighlightedItemId(null); // Clear highlight

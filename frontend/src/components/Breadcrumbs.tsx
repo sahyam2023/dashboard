@@ -38,11 +38,17 @@ const Breadcrumbs: React.FC = () => {
         </MuiLink>
         {pathnames.map((value, index) => {
           const last = index === pathnames.length - 1;
-          const to = `/${pathnames.slice(0, index + 1).join('/')}`;
+          let to = `/${pathnames.slice(0, index + 1).join('/')}`;
           const formattedName = formatSegment(value);
 
+          // If the current segment is 'admin' and it's not the last segment,
+          // make its link point to '/admin/dashboard'.
+          if (value === 'admin' && !last) {
+            to = '/admin/dashboard';
+          }
+
           return last ? (
-            <Typography color="text.primary" key={to}>
+            <Typography color="text.primary" key={to}> {/* Key might need adjustment if 'to' changes for 'admin' */}
               {formattedName}
             </Typography>
           ) : (

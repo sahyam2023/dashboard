@@ -177,11 +177,15 @@ const LinksView: React.FC = () => {
         if (element) {
           element.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
+        // Always remove the highlight param after attempting to scroll or if not found
+        const newSearchParams = new URLSearchParams(searchParams);
+        newSearchParams.delete('highlight');
+        setSearchParams(newSearchParams, { replace: true });
       }, 150);
     } else {
       setHighlightedItemId(null); 
     }
-  }, [searchParams, links, fetchAndSetLinks]); // Added links and fetchAndSetLinks
+  }, [searchParams, links, fetchAndSetLinks, setSearchParams]);
 
   // Effect to handle focusing on a comment if item_id and comment_id are in URL
   useEffect(() => {

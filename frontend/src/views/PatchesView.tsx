@@ -216,11 +216,15 @@ const PatchesView: React.FC = () => {
         if (element) {
           element.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
+        // Always remove the highlight param after attempting to scroll or if not found
+        const newSearchParams = new URLSearchParams(searchParams);
+        newSearchParams.delete('highlight');
+        setSearchParams(newSearchParams, { replace: true });
       }, 150);
     } else {
       setHighlightedItemId(null);
     }
-  }, [searchParams, patches, fetchAndSetPatches]); // Added patches and fetchAndSetPatches
+  }, [searchParams, patches, fetchAndSetPatches, setSearchParams]);
 
   useEffect(() => {
     const queryParams = new URLSearchParams(location.search);

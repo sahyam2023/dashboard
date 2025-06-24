@@ -16,7 +16,7 @@ import {
   uploadFileInChunks // New chunked upload service
 } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
-import { UploadCloud, Link as LinkIconLucide, FileText as FileIconLucide, X, MinusCircle } from 'lucide-react'; // File to FileText
+import { UploadCloud, Link as LinkIconLucide, FileText as FileIconLucide, X, MinusCircle, CheckCircle2 } from 'lucide-react'; // File to FileText, Added CheckCircle2
 
 interface AdminDocumentEntryFormProps {
   documentToEdit?: DocumentType | null;
@@ -108,6 +108,7 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
   const role = user?.role; // Access role safely, as user can be null
   const watchedInputMode = watch('inputMode');
   const watchedSelectedFile = watch('selectedFile');
+  const [isDraggingOver, setIsDraggingOver] = useState(false); // Added for drag-drop UI
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -197,6 +198,39 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
       setExistingFileName(null);
     } else {
       setValue('selectedFile', null, { shouldValidate: true, shouldDirty: true });
+    }
+  };
+
+  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!isLoading) {
+        setIsDraggingOver(true);
+    }
+  };
+
+  const handleDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDraggingOver(false);
+  };
+
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDraggingOver(false);
+    if (isLoading) return;
+
+    if (event.dataTransfer.files && event.dataTransfer.files[0]) {
+      const droppedFile = event.dataTransfer.files[0];
+      setValue('selectedFile', droppedFile, { shouldValidate: true, shouldDirty: true });
+      setExistingFileName(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.files = event.dataTransfer.files;
+      }
+      // showSuccessToast(`File "${droppedFile.name}" selected by drop.`); // Toast can be added if desired
+    } else {
+      // showWarningToast("No file was dropped or file could not be accessed."); // Toast can be added
     }
   };
 
@@ -420,7 +454,12 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
             {isEditMode && existingFileName && !watchedSelectedFile ? 'Replace File (Optional)' : 'Select File to Upload*'}
           </label>
-          <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md hover:border-blue-500 dark:border-gray-600 dark:hover:border-blue-400 transition-colors">
+          <div
+            className={`mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md ${isDraggingOver ? 'border-blue-500 bg-blue-50 dark:bg-gray-700' : 'hover:border-blue-500 dark:hover:border-blue-400'} dark:border-gray-600 transition-colors`}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
             <div className="space-y-1 text-center">
               <FileIconLucide className="mx-auto h-12 w-12 text-gray-400 dark:text-gray-500" />
               <div className="flex text-sm text-gray-600 dark:text-gray-400">
@@ -444,7 +483,11 @@ const AdminDocumentEntryForm: React.FC<AdminDocumentEntryFormProps> = ({
           {(watchedSelectedFile || existingFileName) && (
             <div className="mt-3 flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md">
               <div className='flex items-center space-x-2 overflow-hidden'>
-                <FileIconLucide size={18} className="text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                {watchedSelectedFile ? (
+                  <CheckCircle2 size={18} className="text-green-500 flex-shrink-0" />
+                ) : (
+                  <FileIconLucide size={18} className="text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                )}
                 <span className="text-sm text-gray-700 dark:text-gray-300 truncate">
                   {watchedSelectedFile ? (watchedSelectedFile as File).name : existingFileName}
                 </span>

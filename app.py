@@ -12017,7 +12017,7 @@ if __name__ == '__main__':
 
     # IMPROVED SERVER STARTUP WITH BETTER PYINSTALLER SUPPORT
     try:
-        flask_port = int(os.environ.get('FLASK_RUN_PORT', 7006))
+        flask_port = int(os.environ.get('FLASK_RUN_PORT', 7005))
         is_frozen = getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
 
         # Start periodic tasks using Eventlet green threads for all modes

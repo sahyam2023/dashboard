@@ -11198,7 +11198,14 @@ def serve_chat_file(conversation_id, filename):
                     chunk_gen = f_gen.read(bytes_to_send_this_chunk_gen)
                     if not chunk_gen:
                         break
-                    yield chunk_gen
+                    try:
+                        yield chunk_gen
+                    except ConnectionAbortedError:
+                        app.logger.debug(f"Connection aborted by client while streaming {file_path_gen}")
+                        break # Stop sending data
+                    except Exception as e_yield:
+                        app.logger.error(f"Error yielding chunk for {file_path_gen}: {e_yield}")
+                        break # Stop on other errors too
                     bytes_sent_gen += len(chunk_gen)
 
         bytes_to_read = end_byte - start_byte + 1

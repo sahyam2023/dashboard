@@ -1,31 +1,25 @@
 // src/components/Header.tsx
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Menu, Search, X, LogOut, User, LogIn, Sun, Moon } from 'lucide-react'; // Added Sun and Moon
+import { Menu, Search, X, LogOut, User, LogIn, Sun, Moon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { useTheme } from '../context/ThemeContext'; // Import useTheme
-import NotificationBell from './notifications/NotificationBell'; // Added NotificationBell import
-// IconButton and Material Icons are no longer needed for the theme toggle
-// import { IconButton } from '@mui/material'; 
-// import Brightness4Icon from '@mui/icons-material/Brightness4'; 
-// import Brightness7Icon from '@mui/icons-material/Brightness7';
+import { useTheme } from '../context/ThemeContext';
+import NotificationBell from './notifications/NotificationBell';
 
 interface HeaderProps {
   toggleSidebar: () => void;
   isCollapsed: boolean;
-  onSearch: (term: string) => void;
+  onSearch: (term: string) => void; // Assuming onSearch might still be used elsewhere or for other purposes
 }
 
 const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch }) => {
   const [searchValue, setSearchValue] = useState('');
-  const [isFocused, setIsFocused] = useState(false);
-  const { user, isAuthenticated, logout, openAuthModal } = useAuth(); // Updated
+  const { user, isAuthenticated, logout, openAuthModal } = useAuth();
   const navigate = useNavigate();
-  const { themeMode, toggleThemeMode } = useTheme(); // Theme context
+  const { themeMode, toggleThemeMode } = useTheme();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // REMOVE: onSearch(searchValue); 
     if (searchValue.trim()) {
       navigate(`/search?q=${encodeURIComponent(searchValue.trim())}`);
     }
@@ -33,16 +27,13 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
 
   const clearSearch = () => {
     setSearchValue('');
-    // REMOVE: onSearch('');
-    // Optional: Navigate away from search results if currently there
-    // This depends on desired UX, for now, just clear the input.
-    // if (location.pathname === '/search') navigate('/documents'); 
+    // Optional: if onSearch was used to clear results, ensure that's handled
+    // if (location.pathname.startsWith('/search')) navigate('/documents'); // Example
   };
 
   const handleLogout = () => {
-    logout(); // Call logout from auth context
-    navigate('/'); // 
- // Redirect to login page after logout
+    logout();
+    navigate('/');
   };
 
   return (
@@ -52,12 +43,12 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
         <div className="flex items-center">
           <button
             onClick={toggleSidebar}
-            className="p-2 mr-2 md:mr-4 rounded-md text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
+            className="p-2 mr-2 md:mr-4 rounded-md text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none transition-colors"
             aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
             <Menu size={24} />
           </button>
-          <Link to="/" className="text-2xl font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors hidden sm:block focus:outline-none focus:none focus:ring-indigo-500 dark:focus:ring-indigo-400 rounded-sm">
+          <Link to="/" className="text-2xl font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors hidden sm:block focus:outline-none rounded-sm">
             CtrlDash
           </Link>
         </div>
@@ -77,8 +68,6 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
                 placeholder="Search..."
                 value={searchValue}
                 onChange={(e) => setSearchValue(e.target.value)}
-                onFocus={() => setIsFocused(true)}
-                onBlur={() => setIsFocused(false)}
                 className="block w-full pl-10 pr-10 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
               />
               {searchValue && (
@@ -114,7 +103,7 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
               {/* Profile link for larger screens */}
               <Link
                 to="/profile"
-                className="hidden sm:flex items-center focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 rounded-full"
+                className="group hidden sm:flex items-center justify-center rounded-full p-0.5 hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 dark:focus:ring-offset-gray-800 transition-colors"
                 title="User Profile"
                 aria-label="User Profile"
               >
@@ -122,32 +111,36 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
                   <img
                     src={user.profile_picture_url}
                     alt={`${user?.username || 'User'}'s profile picture`}
-                    className="h-8 w-8 rounded-full object-cover text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600"
+                    className="h-8 w-8 rounded-full object-cover border-2 border-gray-300 dark:border-gray-600 group-hover:border-indigo-500 dark:group-hover:border-indigo-400 transition-colors"
                   />
                 ) : (
-                  <User size={24} className="h-8 w-8 text-gray-500 dark:text-gray-400" />
+                  <div className="h-8 w-8 rounded-full flex items-center justify-center border-2 border-gray-300 dark:border-gray-600 group-hover:border-indigo-500 dark:group-hover:border-indigo-400 transition-colors">
+                    <User size={24} className="text-gray-500 dark:text-gray-400" />
+                  </div>
                 )}
               </Link>
               {/* Profile link for smaller screens */}
               <Link
                 to="/profile"
-                className="sm:hidden p-0.5 rounded-full text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500"
+                className="group sm:hidden flex items-center justify-center rounded-full p-0.5 hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500 dark:focus:ring-offset-gray-800 transition-colors"
                 aria-label="User Profile"
               >
                 {user?.profile_picture_url ? (
                   <img
                     src={user.profile_picture_url}
                     alt={`${user?.username || 'User'}'s profile picture`}
-                    className="h-7 w-7 rounded-full object-cover text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600"
+                    className="h-7 w-7 rounded-full object-cover border-2 border-gray-300 dark:border-gray-600 group-hover:border-indigo-500 dark:group-hover:border-indigo-400 transition-colors"
                   />
                 ) : (
-                  <User size={22} className="h-7 w-7" />
+                  <div className="h-7 w-7 rounded-full flex items-center justify-center border-2 border-gray-300 dark:border-gray-600 group-hover:border-indigo-500 dark:group-hover:border-indigo-400 transition-colors">
+                    <User size={20} className="text-gray-500 dark:text-gray-400" />
+                  </div>
                 )}
               </Link>
-              {user?.role === 'super_admin' && ( 
+              {user?.role === 'super_admin' && (
                 <Link
                   to="/superadmin"
-                  className="px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 hidden md:inline-flex items-center focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-red-500 dark:focus:ring-red-400" 
+                  className="px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 hidden md:inline-flex items-center focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-red-500 dark:focus:ring-offset-gray-800 dark:focus:ring-red-400"
                   title="Super Admin Dashboard"
                   aria-label="Super Admin Dashboard"
                 >
@@ -156,7 +149,7 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
               )}
               <button
                 onClick={handleLogout}
-                className="p-2 rounded-md text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-red-500 transition-colors"
+                className="p-2 rounded-md text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-offset-gray-800 transition-colors"
                 aria-label="Logout"
               >
                 <LogOut size={20} />
@@ -166,16 +159,16 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
             <>
               <button
                 onClick={() => openAuthModal('login')}
-                className="hidden sm:inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-500 dark:focus:ring-gray-400"
+                className="hidden sm:inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-500 dark:focus:ring-offset-gray-800 dark:focus:ring-gray-400"
                 aria-label="Login or Sign Up"
               >
-                 <LogIn size={16} className="mr-1.5" />
+                <LogIn size={16} className="mr-1.5" />
                 Login / Sign Up
               </button>
               <button
                 onClick={() => openAuthModal('login')}
-                className="sm:hidden p-2 rounded-md text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
-                aria-label="Login / Sign Up"
+                className="sm:hidden p-2 rounded-md text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-500 dark:focus:ring-offset-gray-800"
+                aria-label="Login or Sign Up"
               >
                 <LogIn size={20} />
               </button>

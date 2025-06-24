@@ -3,12 +3,12 @@
 
 ;--------------------------------
 ; Defines
-!define APPNAME "i2v dashboard"
-!define COMPANYNAME "I2V PVT limited"
+!define APPNAME "i2V dashboard"
+!define COMPANYNAME "i2V PVT limited"
 !define EXENAME "SoftwareDashboardApp.exe"
 !define SERVICENAME "i2v dashboard"
 !define DESCRIPTION "I2V Dashboard Application Service."
-!define VERSION "1.0"
+!define VERSION "1.2"
 !define INSTALLER_OUTPUT_FILENAME "i2vdashboard_installer.exe"
 !define MAIN_APP_EXE "$INSTDIR\${EXENAME}"
 !define NSSM_EXE "$INSTDIR\nssm.exe"
@@ -52,7 +52,7 @@ RequestExecutionLevel admin
 
 ;--------------------------------
 ; Version Information
-VIProductVersion "1.0.0.1"
+VIProductVersion "1.0.0.2"
 VIAddVersionKey "ProductName" "${APPNAME}"
 VIAddVersionKey "CompanyName" "${COMPANYNAME}"
 VIAddVersionKey "LegalCopyright" "Copyright (c) 2024 ${COMPANYNAME}"

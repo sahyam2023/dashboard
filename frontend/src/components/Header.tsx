@@ -47,38 +47,56 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
     setSuggestions([]);
     setShowSuggestions(false);
 
-    const { id, type, software_id, name } = suggestion;
+    const { id, type, software_id, name, page_number } = suggestion; // Added page_number
+    const pageQuery = page_number ? `page=${page_number}&` : '';
 
     switch (type) {
       case 'document':
-        navigate(`/documents?highlight=${id}`);
+        navigate(`/documents?${pageQuery}highlight=${id}`);
         break;
       case 'patch':
-        navigate(`/patches?highlight=${id}`);
+        navigate(`/patches?${pageQuery}highlight=${id}`);
         break;
       case 'link':
-        navigate(`/links?highlight=${id}`);
+        // For links, direct navigation to an external URL might not need pagination,
+        // but if it's an internal link displayed in LinksView, it might.
+        // The SearchResultsView logic for links is:
+        // linkTo = `/links?page=${result.page_number}&highlight=${result.id}`; (if page_number and id)
+        // For suggestions, we assume if page_number is present, it's for an internal view.
+        navigate(`/links?${pageQuery}highlight=${id}`);
         break;
       case 'misc_file':
-        navigate(`/misc?highlight=${id}`);
+        navigate(`/misc?${pageQuery}highlight=${id}`);
         break;
       case 'software':
-        // Assuming software suggestions should link to a page listing its documents or a general software view
-        navigate(`/documents?software_id=${id}`);
+        // Software details/listing pages usually don't have their own pagination based on search result rank.
+        // They might link to paginated lists of their documents/patches.
+        // The current behavior seems fine for software type.
+        navigate(`/documents?software_id=${id}`); // Or a dedicated /software/${id} page if it exists
         break;
       case 'version':
-        // Versions are often associated with a specific software's patches or documents
-        // Using software_id from the suggestion is crucial here.
+        // Versions are typically viewed in context of their software's patches or documents.
+        // These views (PatchesView, DocumentsView) handle their own pagination.
+        // The page_number from suggestion here might be for the PatchesView if the version primarily lists patches.
+        // If software_id is present, it's likely for a specific software's patches list.
         if (software_id) {
+          // Example: navigate to patches view, page_number could be for that view.
+          // However, PatchesView itself fetches based on software_id and version_id, then paginates.
+          // A page_number for a *version itself* as a suggestion might be less common unless it points
+          // to a specific page within a list of versions, which is not the current pattern.
+          // For now, let's assume page_number for a version suggestion might be intended for the patches list.
+          // If pageQuery is added here, it means `/patches?page=X&software_id=Y&version_id=Z`
+          // This might conflict if PatchesView doesn't expect page as an initial filter for version context.
+          // Let's stick to current version navigation for now, as it doesn't directly use highlight with page.
+          // The most common use case is to see all patches for that version.
           navigate(`/patches?software_id=${software_id}&version_id=${id}`);
         } else {
-          // Fallback if software_id is somehow missing for a version suggestion, though backend should provide it.
           console.warn(`Software ID missing for version suggestion: ${name}`);
           navigate(`/search?q=${encodeURIComponent(name)}`);
         }
         break;
       default:
-        // Fallback for unknown types: perform a general search
+        // Fallback for unknown types or types that don't use page_number (like software, version)
         navigate(`/search?q=${encodeURIComponent(name)}`);
         break;
     }
@@ -309,7 +327,7 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
                 className="sm:hidden p-2 rounded-md text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-500 dark:focus:ring-offset-gray-800"
                 aria-label="Login or Sign Up"
               >
-                <LogIn size={20} />
+              <LogIn size={20} />
               </button>
             </>
           )}

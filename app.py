@@ -7777,19 +7777,88 @@ def search_suggestions_api():
     # No file_permissions for version numbers themselves.
     suggestions.extend([dict(row) for row in db.execute(version_query, (search_pattern,)).fetchall()])
 
-    # Sort all suggestions by name (case-insensitive) and then limit
-    # This is important because we are combining results from multiple queries.
-    # Each query already has a LIMIT, but the combined list might exceed the overall desired limit.
-    # Also, to ensure a consistent order across types.
+    # Calculate page_number for relevant suggestion types
+    ITEMS_PER_PAGE_SUGGESTIONS = 10 # Align with ITEMS_PER_PAGE in search_api or define globally
 
-    # Make sure 'name' key exists and is string for sorting
-    valid_suggestions_for_sort = [s for s in suggestions if isinstance(s.get('name'), str)]
+    processed_suggestions = []
+    for sugg in suggestions:
+        item_id = sugg.get('id')
+        item_type = sugg.get('type')
+        item_name = sugg.get('name') # Name is used for rank calculation comparison
+        rank_query = None # Initialize rank_query to None
+        rank_params = []  # Initialize rank_params
 
-    # Sort by name (case-insensitive)
+        if item_type in ['document', 'patch', 'link', 'misc_file'] and item_id and item_name:
+            if item_type == 'document':
+                rank_query = """
+                    SELECT COUNT(d_rank.id) FROM documents d_rank
+                    LEFT JOIN file_permissions fp_sugg_rank_doc ON d_rank.id = fp_sugg_rank_doc.file_id AND fp_sugg_rank_doc.file_type = 'document' AND fp_sugg_rank_doc.user_id = ?
+                    WHERE (fp_sugg_rank_doc.id IS NULL OR fp_sugg_rank_doc.can_view IS NOT FALSE) 
+                    AND (LOWER(d_rank.doc_name) < LOWER(?) OR (LOWER(d_rank.doc_name) = LOWER(?) AND d_rank.id < ?))
+                """
+                rank_params = (logged_in_user_id, item_name, item_name, item_id)
+            elif item_type == 'patch':
+                rank_query = """
+                    SELECT COUNT(p_rank.id) FROM patches p_rank
+                    LEFT JOIN file_permissions fp_sugg_rank_patch ON p_rank.id = fp_sugg_rank_patch.file_id AND fp_sugg_rank_patch.file_type = 'patch' AND fp_sugg_rank_patch.user_id = ?
+                    WHERE (fp_sugg_rank_patch.id IS NULL OR fp_sugg_rank_patch.can_view IS NOT FALSE)
+                    AND (LOWER(p_rank.patch_name) < LOWER(?) OR (LOWER(p_rank.patch_name) = LOWER(?) AND p_rank.id < ?))
+                """
+                rank_params = (logged_in_user_id, item_name, item_name, item_id)
+            elif item_type == 'link':
+                rank_query = """
+                    SELECT COUNT(l_rank.id) FROM links l_rank
+                    LEFT JOIN file_permissions fp_sugg_rank_link ON l_rank.id = fp_sugg_rank_link.file_id AND fp_sugg_rank_link.file_type = 'link' AND fp_sugg_rank_link.user_id = ?
+                    WHERE (fp_sugg_rank_link.id IS NULL OR fp_sugg_rank_link.can_view IS NOT FALSE)
+                    AND (LOWER(l_rank.title) < LOWER(?) OR (LOWER(l_rank.title) = LOWER(?) AND l_rank.id < ?))
+                """
+                rank_params = (logged_in_user_id, item_name, item_name, item_id)
+            elif item_type == 'misc_file':
+                rank_query = """
+                    SELECT COUNT(mf_rank.id) FROM misc_files mf_rank
+                    LEFT JOIN file_permissions fp_sugg_rank_misc ON mf_rank.id = fp_sugg_rank_misc.file_id AND fp_sugg_rank_misc.file_type = 'misc_file' AND fp_sugg_rank_misc.user_id = ?
+                    WHERE (fp_sugg_rank_misc.id IS NULL OR fp_sugg_rank_misc.can_view IS NOT FALSE)
+                    AND (
+                        (LOWER(COALESCE(mf_rank.user_provided_title, mf_rank.original_filename)) < LOWER(?)) OR
+                        (
+                            LOWER(COALESCE(mf_rank.user_provided_title, mf_rank.original_filename)) = LOWER(?) AND
+                            mf_rank.id < ?
+                        )
+                    )
+                """
+                # For misc_file, item_name is already COALESCE(user_provided_title, original_filename) from the suggestion query
+                rank_params = (logged_in_user_id, item_name, item_name, item_id)
+
+            if rank_query: # Check if rank_query was set
+                try:
+                    rank_cursor = db.execute(rank_query, rank_params)
+                    rank_result = rank_cursor.fetchone()
+                    if rank_result and rank_result[0] is not None:
+                        rank = rank_result[0]
+                        sugg['page_number'] = (rank // ITEMS_PER_PAGE_SUGGESTIONS) + 1
+                    else:
+                        sugg['page_number'] = 1 # Default if rank not found or query returns no rows
+                except Exception as e_rank:
+                    app.logger.error(f"Error calculating rank for suggestion {item_type} ID {item_id}, Name {item_name}: {e_rank}")
+                    sugg['page_number'] = 1 # Default on error
+            else: # Should not be reached if item_type is one of the handled ones, but as a fallback
+                sugg['page_number'] = None 
+        else: # Item type not requiring page_number or missing id/name
+             sugg['page_number'] = None
+
+        processed_suggestions.append(sugg)
+    
+    # Sort all processed suggestions by name (case-insensitive) and then limit
+    # Ensure that suggestions without a 'name' (e.g., if some DB entries are malformed) are handled.
+    valid_suggestions_for_sort = [s for s in processed_suggestions if s.get('name') and isinstance(s.get('name'), str)]
     valid_suggestions_for_sort.sort(key=lambda x: x['name'].lower())
-
-    # Limit the final list
+    
+    # Also include suggestions that might not have a name but are valid otherwise, at the end.
+    # This part might be unnecessary if all suggestions are guaranteed to have names.
+    # suggestions_without_name = [s for s in processed_suggestions if not (s.get('name') and isinstance(s.get('name'), str))]
+    # final_suggestions = (valid_suggestions_for_sort + suggestions_without_name)[:SUGGESTIONS_LIMIT]
     final_suggestions = valid_suggestions_for_sort[:SUGGESTIONS_LIMIT]
+
 
     return jsonify(final_suggestions)
 
@@ -12151,7 +12220,7 @@ if __name__ == '__main__':
 
     # IMPROVED SERVER STARTUP WITH BETTER PYINSTALLER SUPPORT
     try:
-        flask_port = int(os.environ.get('FLASK_RUN_PORT', 7005))
+        flask_port = int(os.environ.get('FLASK_RUN_PORT', 7006))
         is_frozen = getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
 
         # Start periodic tasks using Eventlet green threads for all modes

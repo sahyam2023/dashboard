@@ -2051,8 +2051,26 @@ def register():
                 user_id=user_id, 
                 username=username
             )
+
+            # Maintenance mode check AFTER user creation but BEFORE token generation
+            if is_maintenance_mode_active():
+                # User is created, but cannot log in due to maintenance mode.
+                # Do not generate an access token.
+                # Frontend should handle this response to show the maintenance message.
+                app.logger.info(f"User {username} (ID: {user_id}) registered during maintenance mode. No token generated.")
+                profile_picture_url = f"/profile_pictures/{profile_picture_filename_to_assign}" if profile_picture_filename_to_assign else None
+                return jsonify(
+                    msg="User created successfully, but the system is in maintenance mode. Please try logging in later.",
+                    user_id=user_id,
+                    username=username,
+                    role=assigned_role, # Send role so frontend knows if it was a super_admin (though they can't login yet)
+                    profile_picture_url=profile_picture_url,
+                    maintenance_mode_active=True,
+                    access_token=None # Explicitly no token
+                ), 201 # Resource created, but different outcome
+
+            # If not in maintenance mode, proceed to generate token and return normal response
             access_token = create_access_token(identity=str(user_id))
-            # Update profile_picture_url construction
             profile_picture_url = f"/profile_pictures/{profile_picture_filename_to_assign}" if profile_picture_filename_to_assign else None
             
             return jsonify(

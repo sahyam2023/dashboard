@@ -155,13 +155,13 @@ export interface AuthResponse {
 
 export interface RegisterResponse {
   msg: string;
-  user_id: number; // Made non-optional as per backend successful response
-  role: string; // Added
-  access_token: string; // Added
-  username:string; // Added
-  // expires_in_seconds: number; // This was in the original type, but not in the backend response for register. Removing for now.
-  password_reset_required?: boolean; // Added
-  profile_picture_url?: string | null; // Added for register response
+  user_id: number; 
+  role: string; 
+  access_token?: string; // Made optional
+  username:string; 
+  password_reset_required?: boolean; 
+  profile_picture_url?: string | null; 
+  maintenance_mode_active?: boolean; // Added
 }
 
 // --- Admin Payload Base for Items with Flexible Version Handling ---

@@ -170,27 +170,32 @@ const RegisterForm: React.FC<RegisterFormProps> = ({ onAuthSuccess, onToggleView
     // Removed FormData creation and profile_picture appending
 
     try {
-      // registerUser now expects RegisterRequest object
       const regData: RegisterResponse = await registerUser(registrationData); 
-      
-      // The backend response now includes profile_picture_url
-      const requiresReset = auth.login(
-        regData.access_token, 
-        regData.username, 
-        regData.role, 
-        regData.user_id, 
-        900, // expires_in_seconds placeholder, as it was removed from RegisterResponse type
-        regData.password_reset_required || false,
-        regData.profile_picture_url // Pass to auth context
-      ); 
-      
-      // console.log('[RegisterForm] After auth.login - requiresReset:', requiresReset);
-      // console.log('[RegisterForm] Auth context state after login:', JSON.stringify(auth.user)); // Log updated user state
-      
-      showSuccessToast('Registration successful! Logging you in...');
-      
-      if (onAuthSuccess) {
-        onAuthSuccess(requiresReset);
+
+      if (regData.maintenance_mode_active) {
+        // Display maintenance message and do not attempt to log in
+        showInfoToast(regData.msg || 'Registration successful, but the system is in maintenance mode. Please try logging in later.');
+        // Optionally, clear form or redirect to a specific page if needed
+        // For now, just show info and leave user on register page.
+      } else if (regData.access_token) {
+        // Proceed with login as normal if not in maintenance mode and token is present
+        const requiresReset = auth.login(
+          regData.access_token, 
+          regData.username, 
+          regData.role, 
+          regData.user_id, 
+          900, // placeholder for expires_in_seconds
+          regData.password_reset_required || false,
+          regData.profile_picture_url
+        );
+        showSuccessToast('Registration successful! Logging you in...');
+        if (onAuthSuccess) {
+          onAuthSuccess(requiresReset);
+        }
+      } else {
+        // Fallback for unexpected response structure (e.g., no token and no maintenance_mode_active flag)
+        showErrorToast(regData.msg || 'Registration completed, but login could not be processed.');
+        console.error('Registration response missing access_token and maintenance_mode_active flag:', regData);
       }
     } catch (err: any) {
       if (err.response && err.response.data && err.response.data.msg) {

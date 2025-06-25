@@ -101,6 +101,8 @@ const role = user?.role; // Access role safely, as user can be null
   const location = useLocation(); // Added useLocation
   const [searchParams, setSearchParams] = useSearchParams(); // Added for page/highlight
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null); // Added for highlight
+  const initialUrlParamsProcessedRef = useRef(false); // Ref to track initial URL param processing
+  const isInitialMountMainFetchEffectRef = useRef(true); // Ref for main data fetching effect's first run
 
   const filtersAreActive = useMemo(() => {
     return activeCategoryId !== null || searchTerm !== '';
@@ -137,7 +139,8 @@ const role = user?.role; // Access role safely, as user can be null
     setHighlightedItemId(null); // Clear highlight
     setActiveCategoryId(null);
     if (setSearchTerm) setSearchTerm('');
-    setCurrentPage(1); 
+    setCurrentPage(1);
+    initialUrlParamsProcessedRef.current = false; // Reset for new direct navigations
   }, [setSearchTerm, setHighlightedItemId]);
 
   const loadMiscCategories = useCallback(async () => {
@@ -155,28 +158,39 @@ const role = user?.role; // Access role safely, as user can be null
   useEffect(() => {
     const pageFromUrlStr = searchParams.get('page');
     const highlightIdFromUrl = searchParams.get('highlight');
+    let paramsWereProcessed = false;
 
-    if (pageFromUrlStr) {
-      const pageNumber = parseInt(pageFromUrlStr, 10);
-      if (!isNaN(pageNumber) && pageNumber > 0 && pageNumber !== currentPage) {
-        setCurrentPage(pageNumber);
-        fetchAndSetMiscFiles(pageNumber, true);
+    if (!initialUrlParamsProcessedRef.current && (pageFromUrlStr || highlightIdFromUrl)) {
+      if (pageFromUrlStr) {
+        const pageNumber = parseInt(pageFromUrlStr, 10);
+        if (!isNaN(pageNumber) && pageNumber > 0) {
+          if (pageNumber !== currentPage) {
+            setCurrentPage(pageNumber);
+            fetchAndSetMiscFiles(pageNumber, true); // Fetch data for the new page
+          }
+          paramsWereProcessed = true;
+        }
+      }
+
+      if (highlightIdFromUrl) {
+        setHighlightedItemId(highlightIdFromUrl);
+        setTimeout(() => {
+          const element = document.querySelector(`[data-item-id="misc_file-${highlightIdFromUrl}"]`);
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 150);
+        paramsWereProcessed = true;
+      }
+
+      if (paramsWereProcessed) {
+        initialUrlParamsProcessedRef.current = true;
+        setSearchParams({}, { replace: true }); // Clean the URL
       }
     }
+    // highlightedItemId is preserved in state and cleared by other user actions.
+  }, [searchParams, miscFiles, fetchAndSetMiscFiles, currentPage, setSearchParams, setCurrentPage, setHighlightedItemId]);
 
-    if (highlightIdFromUrl) {
-      setHighlightedItemId(highlightIdFromUrl);
-      // Scroll to highlighted item
-      setTimeout(() => {
-        const element = document.querySelector(`[data-item-id="misc_file-${highlightIdFromUrl}"]`);
-        if (element) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      }, 150);
-    } else {
-      setHighlightedItemId(null);
-    }
-  }, [searchParams, miscFiles, fetchAndSetMiscFiles]); // Added miscFiles and fetchAndSetMiscFiles
 
   // Effect to handle focusing on a comment if item_id and comment_id are in URL
   useEffect(() => {
@@ -209,9 +223,19 @@ const role = user?.role; // Access role safely, as user can be null
 
   useEffect(() => {
     // This effect handles fetching data when primary filters or searchTerm change.
-    setHighlightedItemId(null); // Clear highlight
-    if (isAuthenticated) fetchAndSetMiscFiles(1, true);
-    else { setMiscFiles([]); setIsLoadingInitial(false); }
+    if (isInitialMountMainFetchEffectRef.current) {
+      isInitialMountMainFetchEffectRef.current = false;
+      // Do not clear highlight on the very first run, allow URL params to take precedence.
+    } else {
+      setHighlightedItemId(null); // Clear highlight on subsequent runs (filter/sort/search changes)
+    }
+
+    if (isAuthenticated) {
+      fetchAndSetMiscFiles(1, true);
+    } else {
+      setMiscFiles([]);
+      setIsLoadingInitial(false);
+    }
   }, [isAuthenticated, activeCategoryId, sortBy, sortOrder, searchTerm, fetchAndSetMiscFiles, setHighlightedItemId]); 
   
   useEffect(() => { setSelectedMiscFileIds(new Set()); }, [activeCategoryId, sortBy, sortOrder, searchTerm, currentPage]);
@@ -224,12 +248,8 @@ const role = user?.role; // Access role safely, as user can be null
   const handlePageChange = (newPage: number) => {
     setHighlightedItemId(null); // Clear highlight
     setCurrentPage(newPage);
-    fetchAndSetMiscFiles(newPage, true);
-    // Update URL search params
-    const newSearchParams = new URLSearchParams(searchParams);
-    newSearchParams.set('page', newPage.toString());
-    newSearchParams.delete('highlight');
-    setSearchParams(newSearchParams);
+    fetchAndSetMiscFiles(newPage, true); // Fetch data for the new page
+    // No longer setting searchParams here to keep URL clean.
   };
   const handleSort = (key: string) => {
     setHighlightedItemId(null); // Clear highlight

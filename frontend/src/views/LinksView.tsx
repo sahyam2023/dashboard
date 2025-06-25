@@ -83,6 +83,8 @@ const LinksView: React.FC = () => {
   const location = useLocation(); // Added useLocation
   const [searchParams, setSearchParams] = useSearchParams(); // Added for page/highlight
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null); // Added for highlight
+  const initialUrlParamsProcessedRef = useRef(false); // Ref to track initial URL param processing
+  const isInitialMountMainDataEffectRef = useRef(true); // Ref for main data fetching effect's first run
 
   const filtersAreActive = useMemo(() => {
     return activeSoftwareId !== null || activeVersionId !== null || linkTypeFilter !== '' || createdFromFilter !== '' || createdToFilter !== '' || searchTerm !== '';
@@ -94,6 +96,7 @@ const LinksView: React.FC = () => {
     setLinkTypeFilter(''); setCreatedFromFilter(''); setCreatedToFilter('');
     if (setSearchTerm) setSearchTerm('');
     setCurrentPage(1); // Reset to page 1
+    initialUrlParamsProcessedRef.current = false; // Reset for new direct navigations
     // fetchAndSetLinks(1, true) will be called by useEffect
   }, [setSearchTerm, setHighlightedItemId]);
 
@@ -141,8 +144,12 @@ const LinksView: React.FC = () => {
 
   useEffect(() => {
     // This effect handles fetching data when primary filters or searchTerm change.
-    // Clearing highlight here is important if searchTerm from OutletContext changes.
-    setHighlightedItemId(null); 
+    if (isInitialMountMainDataEffectRef.current) {
+      isInitialMountMainDataEffectRef.current = false;
+    } else {
+      // Clearing highlight here is important if searchTerm from OutletContext changes, or other filters.
+      setHighlightedItemId(null);
+    }
     if (isAuthenticated) fetchAndSetLinks(1, true);
     else { setLinks([]); setIsLoadingInitial(false); }
   }, [isAuthenticated, activeSoftwareId, activeVersionId, sortBy, sortOrder, linkTypeFilter, debouncedCreatedFromFilter, debouncedCreatedToFilter, searchTerm, fetchAndSetLinks, setHighlightedItemId]); 
@@ -160,28 +167,40 @@ const LinksView: React.FC = () => {
     // The clearing of highlight should happen on user-initiated actions (filters, pagination).
     const pageFromUrlStr = searchParams.get('page');
     const highlightIdFromUrl = searchParams.get('highlight');
+    let paramsWereProcessed = false;
 
-    if (pageFromUrlStr) {
-      const pageNumber = parseInt(pageFromUrlStr, 10);
-      if (!isNaN(pageNumber) && pageNumber > 0 && pageNumber !== currentPage) {
-        setCurrentPage(pageNumber); 
-        fetchAndSetLinks(pageNumber, true); 
+    if (!initialUrlParamsProcessedRef.current && (pageFromUrlStr || highlightIdFromUrl)) {
+      if (pageFromUrlStr) {
+        const pageNumber = parseInt(pageFromUrlStr, 10);
+        if (!isNaN(pageNumber) && pageNumber > 0 && pageNumber !== currentPage) {
+          setCurrentPage(pageNumber);
+          fetchAndSetLinks(pageNumber, true); // Fetch data for the new page
+          paramsWereProcessed = true;
+        } else if (!isNaN(pageNumber) && pageNumber > 0 && pageNumber === currentPage) {
+          // If page is same, but highlight might be present, still mark for URL cleaning
+          paramsWereProcessed = true;
+        }
+      }
+
+      if (highlightIdFromUrl) {
+        setHighlightedItemId(highlightIdFromUrl);
+        // Scroll to highlighted item
+        setTimeout(() => {
+          const element = document.querySelector(`[data-item-id="link-${highlightIdFromUrl}"]`);
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 150);
+        paramsWereProcessed = true;
+      }
+
+      if (paramsWereProcessed) {
+        initialUrlParamsProcessedRef.current = true;
+        setSearchParams({}, { replace: true }); // Clean the URL
       }
     }
-
-    if (highlightIdFromUrl) {
-      setHighlightedItemId(highlightIdFromUrl);
-      // Scroll to highlighted item
-      setTimeout(() => {
-        const element = document.querySelector(`[data-item-id="link-${highlightIdFromUrl}"]`);
-        if (element) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      }, 150);
-    } else {
-      setHighlightedItemId(null); 
-    }
-  }, [searchParams, links, fetchAndSetLinks]); // Added links and fetchAndSetLinks
+    // highlightedItemId is preserved in state and cleared by other user actions.
+  }, [searchParams, links, fetchAndSetLinks, currentPage, setSearchParams, setCurrentPage, setHighlightedItemId]);
 
   // Effect to handle focusing on a comment if item_id and comment_id are in URL
   useEffect(() => {
@@ -230,13 +249,9 @@ const LinksView: React.FC = () => {
   const handlePageChange = (newPage: number) => {
     setHighlightedItemId(null); // Clear highlight
     setCurrentPage(newPage);
-    fetchAndSetLinks(newPage, true);
-    // Update URL search params
-    const newSearchParams = new URLSearchParams(searchParams);
-    newSearchParams.set('page', newPage.toString());
-    newSearchParams.delete('highlight');
-    setSearchParams(newSearchParams);
-  }; // isNewQuery = true for page changes
+    fetchAndSetLinks(newPage, true); // Explicitly fetch data for the new page
+    // URL remains clean.
+  };
   const handleSort = (key: string) => {
     setHighlightedItemId(null); // Clear highlight
     setSortBy(key); 

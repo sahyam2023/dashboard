@@ -89,6 +89,8 @@ const DocumentsView: React.FC = () => {
   const location = useLocation(); // Added useLocation
   const [searchParams, setSearchParams] = useSearchParams(); // Added for page/highlight
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null); // Added for highlight
+  const initialUrlParamsProcessedRef = useRef(false); // Ref to track initial URL param processing
+  const isInitialMountMainDataEffectRef = useRef(true); // Ref for main data fetching effect's first run
 
   const filtersAreActive = useMemo(() => {
     return (
@@ -113,6 +115,7 @@ const DocumentsView: React.FC = () => {
     if (setSearchTerm) { 
       setSearchTerm(''); 
     }
+    initialUrlParamsProcessedRef.current = false; // Reset for new direct navigations
     // fetchAndSetDocuments(1, true); // Main useEffect will handle this
   }, [setSearchTerm, setHighlightedItemId]);
 
@@ -214,7 +217,12 @@ useEffect(() => {
   
 useEffect(() => {
   // This effect handles fetching data when primary filters or searchTerm change.
-  setHighlightedItemId(null); // Clear highlight when these filters change
+  if (isInitialMountMainDataEffectRef.current) {
+    isInitialMountMainDataEffectRef.current = false;
+  } else {
+    setHighlightedItemId(null); // Clear highlight when these filters change on subsequent runs
+  }
+
   if (!isAuthenticated) {
     setDocuments([]); setFavoritedItems(new Map()); setCurrentPage(1);
     setHasMore(false); setIsLoadingInitial(false); return;
@@ -291,36 +299,44 @@ useEffect(() => {
   useEffect(() => {
     const pageFromUrlStr = searchParams.get('page');
     const highlightIdFromUrl = searchParams.get('highlight');
+    let paramsWereProcessed = false;
 
-    if (pageFromUrlStr) {
-      const pageNumber = parseInt(pageFromUrlStr, 10);
-      // In DocumentsView, currentPage is the state for page number
-      if (!isNaN(pageNumber) && pageNumber > 0 && pageNumber !== currentPage) {
-        setCurrentPage(pageNumber); // Update the view's current page state
-        // Call the view's data fetching function for the new page.
-        fetchAndSetDocuments(pageNumber, true); 
+    if (!initialUrlParamsProcessedRef.current && (pageFromUrlStr || highlightIdFromUrl)) {
+      if (pageFromUrlStr) {
+        const pageNumber = parseInt(pageFromUrlStr, 10);
+        if (!isNaN(pageNumber) && pageNumber > 0) {
+          if (pageNumber !== currentPage) {
+            setCurrentPage(pageNumber);
+            fetchAndSetDocuments(pageNumber, true); // Fetch data for the new page
+          } else {
+            // If page is same, but highlight might be present, still mark for URL cleaning
+            // And potentially fetch if documents aren't loaded (though fetchAndSetDocuments has its own guards)
+            // This case might imply a refresh on a page that was already current.
+            // fetchAndSetDocuments(pageNumber, true); // Consider if this is needed if page didn't change
+          }
+          paramsWereProcessed = true;
+        }
+      }
+
+      if (highlightIdFromUrl) {
+        setHighlightedItemId(highlightIdFromUrl);
+        setTimeout(() => {
+          const element = document.querySelector(`[data-item-id="document-${highlightIdFromUrl}"]`);
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 150);
+        paramsWereProcessed = true;
+      }
+
+      if (paramsWereProcessed) {
+        initialUrlParamsProcessedRef.current = true;
+        setSearchParams({}, { replace: true }); // Clean the URL
       }
     }
+    // highlightedItemId is preserved in state and cleared by other user actions.
+  }, [searchParams, documents, fetchAndSetDocuments, currentPage, setSearchParams, setCurrentPage, setHighlightedItemId]);
 
-    if (highlightIdFromUrl) {
-      setHighlightedItemId(highlightIdFromUrl);
-      // Scroll to highlighted item after data is potentially loaded/updated
-      setTimeout(() => {
-        // Use the correct prefix for documents
-        const element = document.querySelector(`[data-item-id="document-${highlightIdFromUrl}"]`);
-        if (element) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          // Optional: Add a class for a temporary visual cue, then remove it
-          // element.classList.add('ring-2', 'ring-offset-2', 'ring-indigo-500');
-          // setTimeout(() => element.classList.remove('ring-2', 'ring-offset-2', 'ring-indigo-500'), 2000);
-        } else {
-          // console.warn(`DocumentsView: Element with data-item-id="document-${highlightIdFromUrl}" not found for scrolling.`);
-        }
-      }, 150); // Increased delay slightly
-    } else {
-      setHighlightedItemId(null); // Clear highlight if not in URL
-    }
-  }, [searchParams, documents, fetchAndSetDocuments]); // Ensure fetchAndSetDocuments is here if page change triggers re-fetch
 
 const handleFilterChange = (softwareId: number | null) => {
     setHighlightedItemId(null); // Clear highlight
@@ -356,14 +372,11 @@ useEffect(() => {
   };
   const handlePageChange = useCallback((newPage: number) => {
     setHighlightedItemId(null); // Clear highlight
-    fetchAndSetDocuments(newPage, true);
+    fetchAndSetDocuments(newPage, true); // Still fetch directly for pagination
     setSelectedDocumentIds(new Set());
-    // Update URL search params
-    const newSearchParams = new URLSearchParams(searchParams);
-    newSearchParams.set('page', newPage.toString());
-    newSearchParams.delete('highlight');
-    setSearchParams(newSearchParams);
-  }, [fetchAndSetDocuments, setHighlightedItemId, searchParams, setSearchParams]);
+    setCurrentPage(newPage); // Ensure currentPage state is updated
+    // No longer setting searchParams here to keep URL clean
+  }, [fetchAndSetDocuments, setHighlightedItemId, setCurrentPage]);
 
   const handleDocumentAdded = (newDocument: DocumentType) => {
     setShowAddDocumentForm(false);

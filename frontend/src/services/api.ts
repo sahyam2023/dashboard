@@ -940,6 +940,7 @@ export interface Suggestion {
   type: string;
   software_id?: number; // Optional: For version suggestions
   software_name?: string; // Optional: For version suggestions
+  page_number?: number; // Added to carry page info for the item
 }
 
 export async function fetchSearchSuggestions(query: string): Promise<Suggestion[]> {

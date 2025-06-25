@@ -92,6 +92,8 @@ const PatchesView: React.FC = () => {
   const location = useLocation(); // Added useLocation
   const [searchParams, setSearchParams] = useSearchParams(); // Added for page/highlight
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null); // Added for highlight
+  const initialUrlParamsProcessedRef = useRef(false); // Ref to track initial URL param processing
+  const isInitialMountMainDataEffectRef = useRef(true); // Ref for main data fetching effect's first run
 
   const filtersAreActive = useMemo(() => {
     return (
@@ -112,6 +114,9 @@ const PatchesView: React.FC = () => {
     setReleaseToFilter('');
     setPatchedByDeveloperFilter('');
     if (setSearchTerm) setSearchTerm('');
+    // Reset initial URL param processing state if filters are cleared,
+    // allowing new direct URL navigations with params to be processed again.
+    initialUrlParamsProcessedRef.current = false;
     // Note: fetchAndSetPatches(1, true) will be called by useEffect due to filter state changes.
   }, [setSearchTerm, setHighlightedItemId]);
 
@@ -190,7 +195,11 @@ const PatchesView: React.FC = () => {
 
   useEffect(() => {
     // This effect handles fetching data when primary filters or searchTerm change.
-    setHighlightedItemId(null); // Clear highlight
+    if (isInitialMountMainDataEffectRef.current) {
+      isInitialMountMainDataEffectRef.current = false;
+    } else {
+      setHighlightedItemId(null); // Clear highlight only on subsequent runs
+    }
     if (isAuthenticated) fetchAndSetPatches(1, true);
     else { setPatches([]); setIsLoadingInitial(false); }
   }, [isAuthenticated, selectedSoftwareId, activeVersionId, sortBy, sortOrder, debouncedReleaseFromFilter, debouncedReleaseToFilter, debouncedPatchedByDeveloperFilter, searchTerm, fetchAndSetPatches, setHighlightedItemId]); 
@@ -199,28 +208,46 @@ const PatchesView: React.FC = () => {
   useEffect(() => {
     const pageFromUrlStr = searchParams.get('page');
     const highlightIdFromUrl = searchParams.get('highlight');
+    let paramsWereProcessed = false;
 
-    if (pageFromUrlStr) {
-      const pageNumber = parseInt(pageFromUrlStr, 10);
-      if (!isNaN(pageNumber) && pageNumber > 0 && pageNumber !== currentPage) {
-        setCurrentPage(pageNumber);
-        fetchAndSetPatches(pageNumber, true);
+    // Only process URL params if we haven't done so already for this component instance
+    // and if there are relevant params in the URL
+    if (!initialUrlParamsProcessedRef.current && (pageFromUrlStr || highlightIdFromUrl)) {
+      if (pageFromUrlStr) {
+        const pageNumber = parseInt(pageFromUrlStr, 10);
+        if (!isNaN(pageNumber) && pageNumber > 0 && pageNumber !== currentPage) {
+          // setCurrentPage will trigger fetchAndSetPatches via its own useEffect if currentPage changes
+          // If it's the same as currentPage, we might need to trigger fetch manually if highlight is also present
+          // However, fetchAndSetPatches is in this effect's dep array, so it might be complex.
+          // For now, let's assume direct fetch is better if page is specified.
+          setCurrentPage(pageNumber);
+          fetchAndSetPatches(pageNumber, true);
+          paramsWereProcessed = true;
+        }
+      }
+
+      if (highlightIdFromUrl) {
+        setHighlightedItemId(highlightIdFromUrl);
+        // Scroll to highlighted item
+        setTimeout(() => {
+          const element = document.querySelector(`[data-item-id="patch-${highlightIdFromUrl}"]`);
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 150); // Keep a small delay for rendering
+        paramsWereProcessed = true;
+      }
+
+      if (paramsWereProcessed) {
+        initialUrlParamsProcessedRef.current = true;
+        // Clean the URL by removing all search parameters
+        setSearchParams({}, { replace: true });
       }
     }
+    // If initial params were already processed, this effect does nothing regarding URL cleaning or initial setup.
+    // The highlightedItemId state persists. It should be cleared by other actions like filter changes, search, pagination.
 
-    if (highlightIdFromUrl) {
-      setHighlightedItemId(highlightIdFromUrl);
-      // Scroll to highlighted item
-      setTimeout(() => {
-        const element = document.querySelector(`[data-item-id="patch-${highlightIdFromUrl}"]`);
-        if (element) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      }, 150);
-    } else {
-      setHighlightedItemId(null);
-    }
-  }, [searchParams, patches, fetchAndSetPatches]); // Added patches and fetchAndSetPatches
+  }, [searchParams, patches, fetchAndSetPatches, currentPage, setSearchParams, setCurrentPage, setHighlightedItemId]);
 
   useEffect(() => {
     const queryParams = new URLSearchParams(location.search);
@@ -309,12 +336,9 @@ const PatchesView: React.FC = () => {
   };
   const handlePageChange = (newPage: number) => {
     setHighlightedItemId(null); // Clear highlight
-    fetchAndSetPatches(newPage, true);
-    // Update URL search params
-    const newSearchParams = new URLSearchParams(searchParams);
-    newSearchParams.set('page', newPage.toString());
-    newSearchParams.delete('highlight');
-    setSearchParams(newSearchParams);
+    setCurrentPage(newPage);
+    fetchAndSetPatches(newPage, true); // Explicitly fetch data for the new page
+    // URL remains clean as setSearchParams is not called here.
   };
 
   const handleOperationSuccess = (message: string) => {

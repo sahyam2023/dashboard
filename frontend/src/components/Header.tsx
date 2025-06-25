@@ -47,38 +47,39 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, isCollapsed, onSearch })
     setSuggestions([]);
     setShowSuggestions(false);
 
-    const { id, type, software_id, name } = suggestion;
+    const { id, type, software_id, name, page_number } = suggestion; // Added page_number
+    const pageQuery = page_number ? `page=${page_number}&` : ''; // Construct page query part
 
     switch (type) {
       case 'document':
-        navigate(`/documents?highlight=${id}`);
+        navigate(`/documents?${pageQuery}highlight=${id}`);
         break;
       case 'patch':
-        navigate(`/patches?highlight=${id}`);
+        navigate(`/patches?${pageQuery}highlight=${id}`);
         break;
       case 'link':
-        navigate(`/links?highlight=${id}`);
+        navigate(`/links?${pageQuery}highlight=${id}`);
         break;
       case 'misc_file':
-        navigate(`/misc?highlight=${id}`);
+        navigate(`/misc?${pageQuery}highlight=${id}`);
         break;
       case 'software':
-        // Assuming software suggestions should link to a page listing its documents or a general software view
-        navigate(`/documents?software_id=${id}`);
+        // Software itself doesn't have a page_number in this context, link to its main view or documents
+        navigate(`/documents?software_id=${id}`); // Or a dedicated software page if exists
         break;
       case 'version':
-        // Versions are often associated with a specific software's patches or documents
-        // Using software_id from the suggestion is crucial here.
+        // Versions are context-dependent. Assuming patches view is primary for versions.
+        // Page number for a version itself might not be directly applicable unless it's about a specific patch for that version.
+        // If backend provides page_number for a specific item (like a patch) related to this version, use it.
+        // For now, keeping it simple, linking to patches for that software/version.
         if (software_id) {
           navigate(`/patches?software_id=${software_id}&version_id=${id}`);
         } else {
-          // Fallback if software_id is somehow missing for a version suggestion, though backend should provide it.
           console.warn(`Software ID missing for version suggestion: ${name}`);
           navigate(`/search?q=${encodeURIComponent(name)}`);
         }
         break;
       default:
-        // Fallback for unknown types: perform a general search
         navigate(`/search?q=${encodeURIComponent(name)}`);
         break;
     }

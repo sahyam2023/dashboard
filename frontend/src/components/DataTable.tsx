@@ -64,7 +64,7 @@ const DataTable = <T extends { id: number }>({
   const [showFullDescriptionModal, setShowFullDescriptionModal] = useState(false);
   const [fullDescription, setFullDescription] = useState('');
   const selectAllCheckboxRef = React.useRef<HTMLInputElement>(null);
-  const scrollableContainerRef = React.useRef<HTMLDivElement>(null); // Ref for the scrollable div
+  const scrollableContainerRef = React.useRef<HTMLDivElement>(null);
   const [isHorizontallyScrollable, setIsHorizontallyScrollable] = useState(false);
 
   const modalControls: ModalControlSetters = {
@@ -74,8 +74,45 @@ const DataTable = <T extends { id: number }>({
     }
   };
 
+  // Internal component for rendering description cells with truncation logic
+  const DescriptionCell: React.FC<{ descriptionText: string; modalControls: ModalControlSetters }> = ({ descriptionText, modalControls: cellModalControls }) => {
+    const descriptionRef = React.useRef<HTMLSpanElement>(null);
+    const [isTruncated, setIsTruncated] = React.useState(false);
+
+    React.useLayoutEffect(() => {
+      if (descriptionRef.current) {
+        const hasOverflow = descriptionRef.current.scrollHeight > descriptionRef.current.clientHeight;
+        setIsTruncated(hasOverflow);
+      }
+    }, [descriptionText]); // Rerun effect if descriptionText changes
+
+    return (
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <span
+            ref={descriptionRef}
+            className="line-clamp-3"
+            title={descriptionText}
+          >
+            {descriptionText}
+          </span>
+        </div>
+        {isTruncated && (
+          <button
+            onClick={(e) => { e.stopPropagation(); cellModalControls.showModal(descriptionText); }}
+            className="p-1 text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 flex-shrink-0"
+            title="Read More"
+          >
+            <Eye size={16} />
+          </button>
+        )}
+      </div>
+    );
+  };
+
+
   React.useEffect(() => {
-    if (isSelectionEnabled && selectAllCheckboxRef.current) {
+    if (isSelectionEnabled && selectAllCheckboxRef.current && data) {
       const visibleItemIds = data.map(item => item.id);
       const numSelected = visibleItemIds.filter(id => selectedItemIds.has(id)).length;
 
@@ -96,48 +133,32 @@ const DataTable = <T extends { id: number }>({
     const checkScrollable = () => {
       if (scrollableContainerRef.current) {
         const { scrollWidth, clientWidth, scrollLeft } = scrollableContainerRef.current;
-        // Check if scrollable and not scrolled to the very end
         const canScroll = scrollWidth > clientWidth;
-        // Check if scrolled to the end, consider a small tolerance for precision issues
-        const isScrolledToEnd = scrollLeft >= scrollWidth - clientWidth - 1; 
+        const isScrolledToEnd = scrollLeft >= scrollWidth - clientWidth - 1;
         setIsHorizontallyScrollable(canScroll && !isScrolledToEnd);
       }
     };
-
-    // Initial check
     checkScrollable();
-
-    // Observe for resizes
     const resizeObserver = new ResizeObserver(checkScrollable);
     if (scrollableContainerRef.current) {
       resizeObserver.observe(scrollableContainerRef.current);
-      // Also listen to scroll events on the scrollable container
       scrollableContainerRef.current.addEventListener('scroll', checkScrollable);
     }
-
-    // Re-check when data or columns change as this can affect scrollWidth
-    // This also implicitly covers initial load after data is fetched.
-    checkScrollable();
-
-
+    checkScrollable(); // Re-check after setup
     return () => {
       if (scrollableContainerRef.current) {
         resizeObserver.unobserve(scrollableContainerRef.current);
-        // Make sure to remove the event listener
         // eslint-disable-next-line react-hooks/exhaustive-deps
         scrollableContainerRef.current?.removeEventListener('scroll', checkScrollable);
       }
     };
-  }, [data, columns]); // Dependencies: data and columns that might change table width
+  }, [data, columns]);
 
 
   if (isLoading) {
-    return (
-      <LoadingState type="table" count={itemsPerPage || 5} message="Loading entries..." />
-    );
+    return <LoadingState type="table" count={itemsPerPage || 5} message="Loading entries..." />;
   }
 
-  // Add this check for undefined data
   if (!data && !isLoading) {
     return (
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6 text-center">
@@ -168,12 +189,9 @@ const DataTable = <T extends { id: number }>({
                     className="form-checkbox h-4 w-4 text-blue-600 border-gray-300 dark:border-gray-600 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:checked:bg-blue-600 dark:checked:border-transparent"
                     onChange={(e) => {
                       if (onSelectAllItems) {
-                        // If indeterminate or unchecked, next state is checked (select all)
-                        // If checked, next state is unchecked (deselect all)
                         onSelectAllItems(e.target.checked);
                       }
                     }}
-                  // Checked state is handled by useEffect and indeterminate logic
                   />
                 </th>
               )}
@@ -188,9 +206,7 @@ const DataTable = <T extends { id: number }>({
                       className="flex items-center space-x-1 hover:text-gray-700 dark:hover:text-gray-100 focus:outline-none"
                     >
                       <span>{column.header}</span>
-                      {sortColumn === column.key && (
-                        sortOrder === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />
-                      )}
+                      {sortColumn === column.key && (sortOrder === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
                     </button>
                   ) : (
                     column.header
@@ -201,19 +217,14 @@ const DataTable = <T extends { id: number }>({
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
             {data.map((item, index) => {
-              const customRowClass = typeof rowClassName === 'function'
-                ? rowClassName(item, index)
-                : rowClassName;
+              const customRowClass = typeof rowClassName === 'function' ? rowClassName(item, index) : rowClassName;
               const isSelected = selectedItemIds.has(item.id);
 
               return (
                 <tr
                   key={item.id || index}
-                  data-item-id={`${itemTypePrefix}-${item.id}`} // Use the new prop
-                  className={`transition-colors 
-                            ${customRowClass || ''} 
-                            ${isSelected ? 'bg-sky-100 dark:bg-sky-800 hover:bg-sky-200 dark:hover:bg-sky-700' : 'hover:bg-gray-50 dark:hover:bg-gray-700'}
-                            ${highlightedRowId !== null && String(item.id) === String(highlightedRowId) ? 'bg-yellow-200 dark:bg-yellow-700 ring-2 ring-yellow-500 ring-offset-1 dark:ring-offset-gray-800' : ''}`}
+                  data-item-id={`${itemTypePrefix}-${item.id}`}
+                  className={`transition-colors ${customRowClass || ''} ${isSelected ? 'bg-sky-100 dark:bg-sky-800 hover:bg-sky-200 dark:hover:bg-sky-700' : 'hover:bg-gray-50 dark:hover:bg-gray-700'} ${highlightedRowId !== null && String(item.id) === String(highlightedRowId) ? 'bg-yellow-200 dark:bg-yellow-700 ring-2 ring-yellow-500 ring-offset-1 dark:ring-offset-gray-800' : ''}`}
                 >
                   {isSelectionEnabled && (
                     <td className="px-4 py-4 whitespace-nowrap">
@@ -221,70 +232,27 @@ const DataTable = <T extends { id: number }>({
                         type="checkbox"
                         className="form-checkbox h-4 w-4 text-blue-600 border-gray-300 dark:border-gray-600 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:checked:bg-blue-600 dark:checked:border-transparent"
                         checked={isSelected}
-                        onChange={(e) => {
-                          if (onSelectItem) {
-                            onSelectItem(item.id, e.target.checked);
-                          }
-                        }}
-                        onClick={(e) => e.stopPropagation()} // Prevent row click if any defined by parent
+                        onChange={(e) => { if (onSelectItem) { onSelectItem(item.id, e.target.checked); } }}
+                        onClick={(e) => e.stopPropagation()}
                       />
                     </td>
                   )}
                   {columns.map((column) => {
-                    // Branch 1: This is a 'description' column AND no custom column.render is provided.
-                    // Apply special line-clamping and "Read More" button with correct truncation logic.
-                    if (column.key === 'description' && !column.render) {
-                      const descriptionRef = React.useRef<HTMLSpanElement>(null);
-                      const [isTruncated, setIsTruncated] = React.useState(false);
-                      const descriptionText = String(item[column.key as keyof T] ?? '');
-
-                      React.useLayoutEffect(() => {
-                        if (descriptionRef.current) {
-                          const hasOverflow = descriptionRef.current.scrollHeight > descriptionRef.current.clientHeight;
-                          setIsTruncated(hasOverflow);
-                        }
-                      }, [descriptionText, item.id]);
-
-                      return (
-                        <td key={`${column.key as string}-desc`} className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300 max-w-md break-words">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="min-w-0 flex-1">
-                              <span
-                                ref={descriptionRef}
-                                className="line-clamp-3"
-                                title={descriptionText}
-                              >
-                                {descriptionText}
-                              </span>
-                            </div>
-
-                            {isTruncated && (
-                              <button
-                                onClick={(e) => { e.stopPropagation(); modalControls.showModal(descriptionText); }}
-                                className="p-1 text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 flex-shrink-0"
-                                title="Read More"
-                              >
-                                <Eye size={16} />
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      );
-                    }
-
-                    // Branch 2: All other cases:
-                    // - Not a 'description' column.
-                    // - Is a 'description' column BUT a custom column.render IS provided.
-                    // In these cases, use the standard rendering path.
-                    const cellContent = column.render
-                      ? column.render(item, modalControls)
-                      : String(item[column.key as keyof T] ?? '');
-
+                    let cellContent: React.ReactNode;
                     let tdClassName = "px-6 py-4 text-sm text-gray-700 dark:text-gray-300";
-                    if (column.key !== 'description') {
-                      tdClassName += " whitespace-nowrap";
-                    }
 
+                    if (column.key === 'description' && !column.render) {
+                      const descriptionText = String(item[column.key as keyof T] ?? '');
+                      cellContent = <DescriptionCell descriptionText={descriptionText} modalControls={modalControls} />;
+                      tdClassName += " max-w-md break-words"; // Keep specific styling for description
+                    } else {
+                      cellContent = column.render
+                        ? column.render(item, modalControls)
+                        : String(item[column.key as keyof T] ?? '');
+                      if (column.key !== 'description') { // Apply whitespace-nowrap only if not description
+                        tdClassName += " whitespace-nowrap";
+                      }
+                    }
                     return (
                       <td key={column.key as string} className={tdClassName}>
                         {cellContent}

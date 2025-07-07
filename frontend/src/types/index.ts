@@ -244,6 +244,8 @@ export interface MiscFile {
   file_path: string; // Server path, e.g., /misc_uploads/unique_name.ext
   file_type: string | null;
   file_size: number | null;
+  is_external_link?: boolean; // Added
+  url?: string | null; // Added
   created_at?: string; // Assuming backend field is created_at
   updated_at?: string;
   uploaded_by_username?: string;

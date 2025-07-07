@@ -3252,7 +3252,7 @@ def get_all_misc_files_api():
         sort_order = 'asc'
 
     # Construct Base Query and Parameters for Filtering
-    base_query_select_fields = "mf.id, mf.misc_category_id, mf.user_id, mf.user_provided_title, mf.user_provided_description, mf.original_filename, mf.stored_filename, mf.file_path, mf.file_type, mf.file_size, mf.created_by_user_id, u.username as uploaded_by_username, mf.created_at, mf.updated_by_user_id, upd_u.username as updated_by_username, mf.updated_at, mc.name as category_name, (SELECT COUNT(*) FROM comments c WHERE c.item_id = mf.id AND c.item_type = 'misc_file' AND c.parent_comment_id IS NULL) as comment_count"
+    base_query_select_fields = "mf.id, mf.misc_category_id, mf.user_id, mf.user_provided_title, mf.user_provided_description, mf.original_filename, mf.stored_filename, mf.file_path, mf.file_type, mf.file_size, mf.is_external_link, mf.url, mf.created_by_user_id, u.username as uploaded_by_username, mf.created_at, mf.updated_by_user_id, upd_u.username as updated_by_username, mf.updated_at, mc.name as category_name, (SELECT COUNT(*) FROM comments c WHERE c.item_id = mf.id AND c.item_type = 'misc_file' AND c.parent_comment_id IS NULL) as comment_count"
     base_query_from = "FROM misc_files mf JOIN misc_categories mc ON mf.misc_category_id = mc.id LEFT JOIN users u ON mf.created_by_user_id = u.id LEFT JOIN users upd_u ON mf.updated_by_user_id = upd_u.id" # upd_u for updated_by_username
     
     # params = [] # Replaced by main_query_filter_params
@@ -6058,6 +6058,7 @@ def admin_edit_misc_file(file_id):
     misc_category_id_str = request.form.get('misc_category_id', str(misc_file_item['misc_category_id']))
     user_provided_title = request.form.get('user_provided_title', misc_file_item['user_provided_title'])
     user_provided_description = request.form.get('user_provided_description', misc_file_item['user_provided_description'])
+    url_from_form = request.form.get('url') # New: get URL from form
 
     if not misc_category_id_str: # Category is mandatory
         return jsonify(msg="Misc category ID is required"), 400
@@ -6067,23 +6068,58 @@ def admin_edit_misc_file(file_id):
     except ValueError:
         return jsonify(msg="Invalid misc_category_id format"), 400
 
-    # Initialize with old values, update if new physical file is processed
+    # Initialize with old values, update if new physical file is processed or URL is provided
     new_stored_filename = misc_file_item['stored_filename']
-    new_original_filename = misc_file_item['original_filename'] # In misc_files, original_filename is stored directly
+    new_original_filename = misc_file_item['original_filename']
     new_file_path = misc_file_item['file_path']
     new_file_size = misc_file_item['file_size']
     new_file_type = misc_file_item['file_type']
+    new_is_external_link = misc_file_item['is_external_link']
+    new_url = misc_file_item['url']
     
-    # Path for potentially newly saved file (for cleanup on error)
-    current_file_save_path = None 
+    current_file_save_path = None # Path for potentially newly saved file
 
-    if new_physical_file and new_physical_file.filename != '':
+    action_type_log = 'UPDATE_MISC_FILE_METADATA' # Default action type
+
+    if url_from_form and url_from_form.strip():
+        # User is providing/updating a URL
+        new_url = url_from_form.strip()
+        new_is_external_link = True
+        action_type_log = 'UPDATE_MISC_FILE_URL'
+
+        # If it was previously a file, delete the old physical file
+        if not misc_file_item['is_external_link'] and misc_file_item['stored_filename']:
+            old_physical_file_path = os.path.join(app.config['MISC_UPLOAD_FOLDER'], misc_file_item['stored_filename'])
+            _delete_file_if_exists(old_physical_file_path)
+
+        # Clear file-specific fields
+        new_stored_filename = None
+        new_original_filename = None # Or keep original if desired, for now clear
+        new_file_path = None
+        new_file_size = None
+        new_file_type = None
+
+        if new_physical_file and new_physical_file.filename != '':
+            # User provided both a URL and a file, which is ambiguous. Prioritize URL or return error.
+            # For now, let's assume URL takes precedence if provided, and ignore the file.
+            # Or, return an error:
+            # return jsonify(msg="Cannot provide both a URL and a file. Please choose one."), 400
+            app.logger.warning(f"Misc edit for ID {file_id}: Both URL and file provided. Prioritizing URL.")
+            # The file won't be processed if URL is set.
+
+    elif new_physical_file and new_physical_file.filename != '':
+        # User is uploading/replacing a file
         if not allowed_file(new_physical_file.filename):
             return jsonify(msg="New file type not allowed"), 400
 
-        # Delete old physical file
-        old_physical_file_path = os.path.join(app.config['MISC_UPLOAD_FOLDER'], misc_file_item['stored_filename'])
-        _delete_file_if_exists(old_physical_file_path)
+        action_type_log = 'UPDATE_MISC_FILE_UPLOAD'
+        new_is_external_link = False
+        new_url = None # Clear URL if switching to file
+
+        # Delete old physical file if it existed (and wasn't an external link before)
+        if not misc_file_item['is_external_link'] and misc_file_item['stored_filename']:
+            old_physical_file_path = os.path.join(app.config['MISC_UPLOAD_FOLDER'], misc_file_item['stored_filename'])
+            _delete_file_if_exists(old_physical_file_path)
         
         original_fn = secure_filename(new_physical_file.filename)
         ext = original_fn.rsplit('.', 1)[1].lower() if '.' in original_fn else ''
@@ -6095,63 +6131,65 @@ def admin_edit_misc_file(file_id):
             new_physical_file.save(current_file_save_path)
             new_file_size = os.path.getsize(current_file_save_path)
             new_file_type = new_physical_file.mimetype
-            new_original_filename = original_fn # Update original filename if new file
+            new_original_filename = original_fn
             new_file_path = f"/misc_uploads/{new_stored_filename}"
         except Exception as e:
             app.logger.error(f"Error saving new misc_file physical file during edit: {e}")
+            # Attempt cleanup of partially saved file
+            if current_file_save_path and os.path.exists(current_file_save_path):
+                _delete_file_if_exists(current_file_save_path)
             return jsonify(msg=f"Error saving new physical file: {e}"), 500
-    
-    # Ensure title defaults to original filename if not provided and new file is uploaded
-    # or if title was empty and original filename changed due to new upload.
-    if not user_provided_title and new_original_filename:
-        user_provided_title = new_original_filename
+    # else: No new file and no new URL, just metadata update for existing file/URL.
+    # new_is_external_link and new_url (or file details) remain as they were from misc_file_item.
+
+    if not user_provided_title: # Default title to original filename if title is empty
+        if new_original_filename: # If a file exists (new or old)
+            user_provided_title = new_original_filename
+        elif new_url: # If it's a URL, maybe derive from URL or leave as is if user cleared it
+            # For now, if title is cleared for a URL, it remains cleared.
+            pass
 
 
     try:
         changed_fields = []
-        log_details = {'changed_fields': changed_fields} 
+        log_details = {'changed_fields': changed_fields}
 
+        # Compare with misc_file_item for logging changes
         if misc_category_id != misc_file_item['misc_category_id']:
-            changed_fields.append('misc_category_id')
-            log_details['old_category_id'] = misc_file_item['misc_category_id']
-            log_details['new_category_id'] = misc_category_id
+            changed_fields.append('misc_category_id'); log_details['new_category_id'] = misc_category_id
         if user_provided_title != misc_file_item['user_provided_title']:
-            changed_fields.append('user_provided_title')
-            log_details['old_title'] = misc_file_item['user_provided_title']
-            log_details['new_title'] = user_provided_title
+            changed_fields.append('user_provided_title'); log_details['new_title'] = user_provided_title
         if user_provided_description != misc_file_item['user_provided_description']:
             changed_fields.append('user_provided_description')
-            log_details['description_changed'] = True 
+        if new_url != misc_file_item['url']:
+            changed_fields.append('url'); log_details['new_url'] = new_url
+        if new_is_external_link != misc_file_item['is_external_link']:
+            changed_fields.append('is_external_link'); log_details['is_external_link'] = new_is_external_link
+        if new_original_filename != misc_file_item['original_filename']: # This covers new file upload or clearing
+            changed_fields.append('original_filename'); log_details['new_original_filename'] = new_original_filename
         
-        action_type_log = 'UPDATE_MISC_FILE_METADATA'
-        if new_physical_file and new_physical_file.filename != '': 
-            action_type_log = 'UPDATE_MISC_FILE_UPLOAD' 
-            changed_fields.append('file_content') 
-            log_details['old_original_filename'] = misc_file_item['original_filename']
-            log_details['new_original_filename'] = new_original_filename
-        
-        # Log original filename change even if it's a metadata update but original_filename field changed
-        # This can happen if user_provided_title was empty and new_original_filename became the title
-        if not (new_physical_file and new_physical_file.filename != '') and \
-           new_original_filename != misc_file_item['original_filename']:
-            changed_fields.append('original_filename')
-            log_details['old_original_filename'] = misc_file_item['original_filename']
-            log_details['new_original_filename'] = new_original_filename
+        # Overwrite action_type_log if only metadata changed but type (file/URL) didn't
+        if action_type_log == 'UPDATE_MISC_FILE_UPLOAD' and not (new_physical_file and new_physical_file.filename != ''):
+            action_type_log = 'UPDATE_MISC_FILE_METADATA' # Reverted if no actual file was processed
+        if action_type_log == 'UPDATE_MISC_FILE_URL' and not (url_from_form and url_from_form.strip()):
+             action_type_log = 'UPDATE_MISC_FILE_METADATA'
 
 
         db.execute("""
             UPDATE misc_files
             SET misc_category_id = ?, user_provided_title = ?, user_provided_description = ?,
                 original_filename = ?, stored_filename = ?, file_path = ?,
-                file_type = ?, file_size = ?, updated_by_user_id = ?, updated_at = CURRENT_TIMESTAMP
+                file_type = ?, file_size = ?, is_external_link = ?, url = ?,
+                updated_by_user_id = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         """, (misc_category_id, user_provided_title, user_provided_description,
               new_original_filename, new_stored_filename, new_file_path,
-              new_file_type, new_file_size, current_user_id, file_id))
+              new_file_type, new_file_size, new_is_external_link, new_url,
+              current_user_id, file_id))
         
-        if changed_fields: 
+        if changed_fields or action_type_log != 'UPDATE_MISC_FILE_METADATA': # Log if fields changed or type of change implies it
             log_audit_action(
-                action_type=action_type_log,
+                action_type=action_type_log, # This reflects primary change (file upload, URL update, or just metadata)
                 target_table='misc_files',
                 target_id=file_id,
                 details=log_details
@@ -6222,6 +6260,85 @@ def admin_edit_misc_file(file_id):
         if current_file_save_path and os.path.exists(current_file_save_path): 
             _delete_file_if_exists(current_file_save_path)
         return jsonify(msg=f"Server error: {e}"), 500
+
+@app.route('/api/admin/misc_files/add_with_url', methods=['POST'])
+@jwt_required()
+@admin_required
+def admin_add_misc_file_with_url():
+    data = request.get_json()
+    # Ensure 'user_provided_title' from payload is mapped to 'title' for the helper if necessary,
+    # or adjust helper/payload keys. For misc_files, the table has 'user_provided_title'.
+    # The helper's sql_params_tuple uses 'user_provided_title'.
+
+    # _admin_add_item_with_external_link expects certain keys in `data` for `required_fields`
+    # and for populating `form_data` which is then used by `sql_params_tuple`.
+    # Ensure the payload keys match what the helper expects or map them.
+    # For misc_files, the required fields are misc_category_id, user_provided_title, url.
+    # The sql_params_tuple for misc_files (if we adapt one) would be:
+    # ('misc_category_id', 'user_id', 'user_provided_title', 'url', 'user_provided_description',
+    #  'created_by_user_id', 'updated_by_user_id')
+
+    response = _admin_add_item_with_external_link(
+        table_name='misc_files',
+        data=data, # Assumes data contains misc_category_id, user_provided_title, url, user_provided_description
+        required_fields=['misc_category_id', 'user_provided_title', 'url'],
+        sql_insert_query="""INSERT INTO misc_files (misc_category_id, user_id, user_provided_title, url, user_provided_description,
+                                               is_external_link, created_by_user_id, updated_by_user_id)
+                              VALUES (?, ?, ?, ?, ?, TRUE, ?, ?)""", # 8 placeholders
+        sql_params_tuple=(
+            'misc_category_id', 'user_id', 'user_provided_title', 'url', 'user_provided_description',
+            # is_external_link is hardcoded TRUE
+            'created_by_user_id', 'updated_by_user_id' # Handled by helper
+        ) # Tuple has 7 elements if user_id is separate, matches placeholders.
+          # User_id is the user creating it, not a specific user association like in some tables.
+          # For misc_files, user_id is the creator.
+    )
+
+    if response[1] == 201: # Check if creation was successful
+        new_misc_file_data = response[0].get_json()
+        log_audit_action(
+            action_type='CREATE_MISC_FILE_URL', # Differentiate from file upload
+            target_table='misc_files',
+            target_id=new_misc_file_data.get('id'),
+            details={
+                'title': new_misc_file_data.get('user_provided_title'),
+                'url': new_misc_file_data.get('url'),
+                'category_id': new_misc_file_data.get('misc_category_id')
+            }
+        )
+        # --- Notification Logic for admin_add_misc_file_with_url ---
+        if new_misc_file_data and new_misc_file_data.get('id'):
+            try:
+                acting_user_id = int(get_jwt_identity())
+                acting_user_details = find_user_by_id(acting_user_id)
+                actor_username = acting_user_details['username'] if acting_user_details else "System"
+
+                content_type = 'misc' # For watch preferences
+                category = None # Misc items generally don't have sub-categories for watching like documents
+                item_id = new_misc_file_data.get('id')
+
+                # Determine display name for notification
+                display_name = new_misc_file_data.get('user_provided_title', new_misc_file_data.get('original_filename', 'N/A'))
+
+                watchers = database.get_watching_users(get_db(), content_type, category) # Category is None for misc
+                app.logger.info(f"Watchers for {content_type} (Misc URL Add): {len(watchers)} users.")
+                for watcher in watchers:
+                    notification_message = f"New miscellaneous item (URL) '{display_name}' added by {actor_username}."
+                    database.create_notification(
+                        get_db(),
+                        user_id=watcher['id'],
+                        type='new_content_posted',
+                        message=notification_message,
+                        item_id=item_id,
+                        item_type='misc_file', # The item_type in notifications table
+                        content_type=content_type, # The content_type for watch preferences
+                        category=category # None for misc
+                    )
+                if watchers:
+                    get_db().commit()
+            except Exception as e_notify:
+                app.logger.error(f"Error creating notifications for new misc file (URL) ID {new_misc_file_data.get('id')}: {e_notify}")
+    return response
 
 @app.route('/api/admin/misc_files/<int:file_id>/delete', methods=['DELETE'])
 @jwt_required()

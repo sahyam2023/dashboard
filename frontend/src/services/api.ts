@@ -1939,6 +1939,32 @@ export async function addAdminMiscCategory(categoryData: AddCategoryPayload): Pr
 
 // --- Misc File API Functions ---
 
+// Payload for adding a misc file with URL
+export interface AddMiscFileUrlPayload {
+  misc_category_id: number;
+  user_provided_title?: string; // Optional, backend might default from URL or filename
+  url: string;
+  user_provided_description?: string;
+}
+
+export async function addAdminMiscFileWithUrl(payload: AddMiscFileUrlPayload): Promise<MiscFile> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/admin/misc_files/add_with_url`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify(payload),
+    });
+    return handleApiError(response, 'Failed to add misc file with URL');
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+      setGlobalOfflineStatus(true);
+      showErrorToast(OFFLINE_MESSAGE);
+    }
+    console.error('Error adding misc file with URL:', error);
+    throw error;
+  }
+}
+
 export async function uploadAdminMiscFile(formData: FormData): Promise<MiscFile> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/admin/misc_files/upload`, {

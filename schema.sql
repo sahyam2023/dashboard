@@ -231,6 +231,8 @@ CREATE TABLE IF NOT EXISTS misc_files (
     file_path TEXT NOT NULL,
     file_type TEXT,
     file_size INTEGER,
+    is_external_link BOOLEAN DEFAULT FALSE, -- True if this is an external URL
+    url TEXT, -- URL if it's an external link
     created_by_user_id INTEGER NOT NULL,
     created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', '+05:30')),
     updated_by_user_id INTEGER,

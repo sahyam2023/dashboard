@@ -305,16 +305,28 @@ const role = user?.role; // Access role safely, as user can be null
 
   const handleBulkDownloadMiscFiles = async () => {
     if (selectedMiscFileIds.size === 0) { showErrorToast("No items selected."); return; }
+
+    const downloadableFiles = miscFiles.filter(
+      mf => selectedMiscFileIds.has(mf.id) && !mf.is_external_link && mf.is_downloadable !== false
+    );
+
+    if (downloadableFiles.length === 0) {
+      showErrorToast("No downloadable files selected. External links or non-downloadable items cannot be bulk downloaded.");
+      return;
+    }
+    const downloadableFileIds = downloadableFiles.map(df => df.id);
+
     setIsDownloadingSelected(true);
     try {
-      // bulkDownloadItems now returns Promise<void> and handles the download triggering and filename generation.
-      await bulkDownloadItems(Array.from(selectedMiscFileIds), 'misc_file');
-      // The API service (and worker) will handle their own toasts for lower-level success/error.
-      // This view can show a general success message.
-      showSuccessToast('Bulk download initiated for selected miscellaneous files.');
+      await bulkDownloadItems(downloadableFileIds, 'misc_file');
+      if (downloadableFileIds.length === selectedMiscFileIds.size) {
+        showSuccessToast('Bulk download initiated for all selected miscellaneous files.');
+      } else {
+        showSuccessToast(`Bulk download initiated for ${downloadableFileIds.length} file(s). External links or non-downloadable items were excluded.`);
+      }
     } catch (e: any) {
       console.error("MiscView: Bulk download error:", e);
-      // showErrorToast is likely called within bulkDownloadItems on error.
+      // Error toast likely handled by bulkDownloadItems or its worker
     } finally {
       setIsDownloadingSelected(false);
     }
@@ -370,10 +382,26 @@ const role = user?.role; // Access role safely, as user can be null
     // Assuming there's an updated_at field that might be added later or is implicitly handled by a similar pattern.
     // For now, only created_at is explicitly in the provided column defs.
     { 
-      key: 'file_path', 
+      key: 'file_path', // Keep key as file_path for sorting if backend sorts on this, or change if sorting by URL
       header: 'Link', 
       render: (f: MiscFile) => {
         const isEffectivelyDownloadable = f.is_downloadable !== false; // Default to true if undefined
+
+        if (f.is_external_link && f.url) {
+          return (
+            <a
+              href={f.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center text-blue-600 hover:text-blue-800"
+              onClick={(e) => e.stopPropagation()}
+              title="Open external link"
+            >
+              <ExternalLink size={14} className="mr-1"/>Open Link
+            </a>
+          );
+        }
+        // Logic for uploaded files (including playable video check)
         if (!isEffectivelyDownloadable) {
           return (
             <span className="flex items-center text-gray-400 cursor-not-allowed" title="Download not permitted">
@@ -381,14 +409,13 @@ const role = user?.role; // Access role safely, as user can be null
             </span>
           );
         }
-        // If it's a playable video, show Play button, otherwise just Download
         if (isPlayableVideo(f.file_type)) {
           return (
             <div className="flex items-center space-x-2">
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  setVideoModalUrl(`${API_BASE_URL}${f.file_path}`);
+                  setVideoModalUrl(`${API_BASE_URL}${f.file_path}`); // file_path for uploaded videos
                   setVideoModalTitle(f.user_provided_title || f.original_filename);
                   setVideoModalFileType(f.file_type);
                   setShowVideoModal(true);
@@ -411,7 +438,7 @@ const role = user?.role; // Access role safely, as user can be null
               </a>
             </div>
           );
-        } else {
+        } else if (f.file_path) { // Ensure file_path exists for uploaded files
           return (
             <a 
               href={`${API_BASE_URL}${f.file_path}`} 
@@ -425,6 +452,8 @@ const role = user?.role; // Access role safely, as user can be null
             </a>
           );
         }
+        // Fallback if no URL and no file_path (should ideally not happen for valid entries)
+        return <span className="text-gray-400 italic">No link/file</span>;
       }
     },
     { 

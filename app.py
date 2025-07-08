@@ -167,7 +167,8 @@ CORS(app, resources={
             "http://192.168.1.116:7005", 
             "http://localhost:7000",
             "http://127.0.0.1:7000",
-            "http://192.168.3.129:7000"# Example: Added another common private IP
+            "http://192.168.3.129:7000",
+            "http://192.168.3.123:7000" # Ensure frontend URL is listed
         ]
     },
     r"/socket.io/*": { # Socket.IO also needs CORS configuration
@@ -180,7 +181,8 @@ CORS(app, resources={
             "http://192.168.1.116:7005",
             "http://localhost:7000",
             "http://127.0.0.1:7000",
-            "http://192.168.3.129:7000"# Ensure frontend URL is listed
+            "http://192.168.3.129:7000",
+            "http://192.168.3.123:7000"# Ensure frontend URL is listed
         ]
     }
 },
@@ -199,7 +201,7 @@ def create_socketio_instance(flask_app):
     socketio_cors_origins = [
         "http://localhost:5173", "http://localhost:7005", "http://127.0.0.1:7005",
         "http://192.168.3.40:7005", "http://192.168.3.129:7005", "http://192.168.1.116:7005", "http://localhost:7000",
-        "http://127.0.0.1:7000", "http://192.168.3.129:7000"
+        "http://127.0.0.1:7000", "http://192.168.3.129:7000", "http://192.168.3.123:7000"
     ]
     
     if is_frozen:
@@ -3269,7 +3271,8 @@ def get_all_misc_files_api():
         app.logger.error(f"Error getting user_id in get_all_misc_files_api: {e}")
 
     # Base query components
-    base_query_select_fields_with_aliases = "mf.id, mf.misc_category_id, mf.user_id, mf.user_provided_title, mf.user_provided_description, mf.original_filename, mf.stored_filename, mf.file_path, mf.file_type, mf.file_size, mf.created_by_user_id, u.username as uploaded_by_username, mf.created_at, mf.updated_by_user_id, upd_u.username as updated_by_username, mf.updated_at, mc.name as category_name, (SELECT COUNT(*) FROM comments c WHERE c.item_id = mf.id AND c.item_type = 'misc_file' AND c.parent_comment_id IS NULL) as comment_count"
+    # This variable must contain all fields including the new ones.
+    base_query_select_fields_with_aliases = "mf.id, mf.misc_category_id, mf.user_id, mf.user_provided_title, mf.user_provided_description, mf.original_filename, mf.stored_filename, mf.file_path, mf.file_type, mf.file_size, mf.is_external_link, mf.url, mf.created_by_user_id, u.username as uploaded_by_username, mf.created_at, mf.updated_by_user_id, upd_u.username as updated_by_username, mf.updated_at, mc.name as category_name, (SELECT COUNT(*) FROM comments c WHERE c.item_id = mf.id AND c.item_type = 'misc_file' AND c.parent_comment_id IS NULL) as comment_count"
 
     # --- PERMISSION MODEL CHANGE ---
     if logged_in_user_id:
@@ -3396,6 +3399,16 @@ def get_all_misc_files_api():
     try:
         misc_files_cursor = db.execute(final_query, tuple(final_main_query_params))
         misc_files_list_raw = [dict(row) for row in misc_files_cursor.fetchall()]
+        
+        # <<< --- DEBUG LOGGING START --- >>>
+        if misc_files_list_raw:
+            app.logger.info(f"DEBUG_MISC_GET_API: First raw row from DB: {misc_files_list_raw[0]}")
+            if len(misc_files_list_raw) > 1:
+                app.logger.info(f"DEBUG_MISC_GET_API: Last raw row from DB: {misc_files_list_raw[-1]}")
+        else:
+            app.logger.info("DEBUG_MISC_GET_API: No misc_files rows fetched from DB for this request.")
+        # <<< --- DEBUG LOGGING END --- >>>
+            
         ts_keys = ['created_at', 'updated_at']
         misc_files_list = [convert_timestamps_to_ist_iso(mf, ts_keys) for mf in misc_files_list_raw]
     except Exception as e:
@@ -3777,6 +3790,9 @@ def _admin_add_item_with_external_link(
             final_sql_params.append(current_user_id)
         elif param_name_in_tuple == 'updated_by_user_id': # Also set updated_by on creation
             final_sql_params.append(current_user_id)
+        # Special handling for misc_files.user_id, which is the uploader
+        elif table_name == 'misc_files' and param_name_in_tuple == 'user_id':
+            final_sql_params.append(current_user_id)
         elif param_name_in_tuple in form_data: # Check form_data which now contains relevant items from data
             final_sql_params.append(form_data[param_name_in_tuple])
         else:
@@ -3786,6 +3802,15 @@ def _admin_add_item_with_external_link(
 
     db = get_db()
     try:
+        # <<< --- DEBUG LOGGING START --- >>>
+        if table_name == 'misc_files' and data.get('url'): # Assuming 'url' in data signifies URL addition for misc_files
+            app.logger.info(f"DEBUG_MISC_URL_ADD: Attempting to insert misc_file URL.")
+            app.logger.info(f"DEBUG_MISC_URL_ADD: sql_insert_query = {sql_insert_query}")
+            app.logger.info(f"DEBUG_MISC_URL_ADD: sql_params_tuple = {sql_params_tuple}")
+            app.logger.info(f"DEBUG_MISC_URL_ADD: form_data received by helper = {form_data}")
+            app.logger.info(f"DEBUG_MISC_URL_ADD: final_sql_params before execute = {final_sql_params}")
+        # <<< --- DEBUG LOGGING END --- >>>
+        
         app.logger.info(f"ADMIN_HELPER_LINK: Attempting to insert into {table_name}. Params: {final_sql_params}")
         cursor = db.execute(sql_insert_query, tuple(final_sql_params))
         db.commit()
@@ -6091,14 +6116,14 @@ def admin_edit_misc_file(file_id):
         if not misc_file_item['is_external_link'] and misc_file_item['stored_filename']:
             old_physical_file_path = os.path.join(app.config['MISC_UPLOAD_FOLDER'], misc_file_item['stored_filename'])
             _delete_file_if_exists(old_physical_file_path)
-
+        
         # Clear file-specific fields
         new_stored_filename = None
         new_original_filename = None # Or keep original if desired, for now clear
         new_file_path = None
         new_file_size = None
         new_file_type = None
-
+        
         if new_physical_file and new_physical_file.filename != '':
             # User provided both a URL and a file, which is ambiguous. Prioritize URL or return error.
             # For now, let's assume URL takes precedence if provided, and ignore the file.
@@ -6269,13 +6294,13 @@ def admin_add_misc_file_with_url():
     # Ensure 'user_provided_title' from payload is mapped to 'title' for the helper if necessary,
     # or adjust helper/payload keys. For misc_files, the table has 'user_provided_title'.
     # The helper's sql_params_tuple uses 'user_provided_title'.
-
+    
     # _admin_add_item_with_external_link expects certain keys in `data` for `required_fields`
     # and for populating `form_data` which is then used by `sql_params_tuple`.
     # Ensure the payload keys match what the helper expects or map them.
     # For misc_files, the required fields are misc_category_id, user_provided_title, url.
     # The sql_params_tuple for misc_files (if we adapt one) would be:
-    # ('misc_category_id', 'user_id', 'user_provided_title', 'url', 'user_provided_description',
+    # ('misc_category_id', 'user_id', 'user_provided_title', 'url', 'user_provided_description', 
     #  'created_by_user_id', 'updated_by_user_id')
 
     response = _admin_add_item_with_external_link(
@@ -6293,7 +6318,7 @@ def admin_add_misc_file_with_url():
           # User_id is the user creating it, not a specific user association like in some tables.
           # For misc_files, user_id is the creator.
     )
-
+    
     if response[1] == 201: # Check if creation was successful
         new_misc_file_data = response[0].get_json()
         log_audit_action(
@@ -6301,8 +6326,8 @@ def admin_add_misc_file_with_url():
             target_table='misc_files',
             target_id=new_misc_file_data.get('id'),
             details={
-                'title': new_misc_file_data.get('user_provided_title'),
-                'url': new_misc_file_data.get('url'),
+                'title': new_misc_file_data.get('user_provided_title'), 
+                'url': new_misc_file_data.get('url'), 
                 'category_id': new_misc_file_data.get('misc_category_id')
             }
         )
@@ -6316,7 +6341,7 @@ def admin_add_misc_file_with_url():
                 content_type = 'misc' # For watch preferences
                 category = None # Misc items generally don't have sub-categories for watching like documents
                 item_id = new_misc_file_data.get('id')
-
+                
                 # Determine display name for notification
                 display_name = new_misc_file_data.get('user_provided_title', new_misc_file_data.get('original_filename', 'N/A'))
 

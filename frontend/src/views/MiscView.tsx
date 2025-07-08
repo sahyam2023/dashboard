@@ -17,7 +17,7 @@ import AdminUploadToMiscForm from '../components/admin/AdminUploadToMiscForm'; /
 import AdminMiscCategoryForm from '../components/admin/AdminMiscCategoryForm';
 import ConfirmationModal from '../components/shared/ConfirmationModal';
 import Modal from '../components/shared/Modal';
-import { Download, FileText as FileIconLucide, PlusCircle, MinusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Archive as ArchiveIcon, Move, AlertTriangle, MessageSquare, PlayCircle } from 'lucide-react'; // Added MessageSquare and PlayCircle
+import { Download, FileText as FileIconLucide, PlusCircle, MinusCircle, Edit3, Trash2, Star, Filter, ChevronUp, Archive as ArchiveIcon, Move, AlertTriangle, MessageSquare, PlayCircle, ExternalLink } from 'lucide-react'; // Added ExternalLink, MessageSquare and PlayCircle
 import { showErrorToast, showSuccessToast } from '../utils/toastUtils';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7005'; 
@@ -385,14 +385,15 @@ const role = user?.role; // Access role safely, as user can be null
       key: 'file_path', // Keep key as file_path for sorting if backend sorts on this, or change if sorting by URL
       header: 'Link', 
       render: (f: MiscFile) => {
+        // console.log("Rendering MiscFile Link:", f); // DEBUG LOGGING
         const isEffectivelyDownloadable = f.is_downloadable !== false; // Default to true if undefined
 
-        if (f.is_external_link && f.url) {
+        if (f.is_external_link && f.url) { 
           return (
-            <a
-              href={f.url}
-              target="_blank"
-              rel="noopener noreferrer"
+            <a 
+              href={f.url} 
+              target="_blank" 
+              rel="noopener noreferrer" 
               className="flex items-center text-blue-600 hover:text-blue-800"
               onClick={(e) => e.stopPropagation()}
               title="Open external link"

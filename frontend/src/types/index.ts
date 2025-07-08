@@ -239,9 +239,9 @@ export interface MiscFile {
   user_id: number; // User who uploaded/created
   user_provided_title: string | null;
   user_provided_description: string | null;
-  original_filename: string;
-  stored_filename: string;
-  file_path: string; // Server path, e.g., /misc_uploads/unique_name.ext
+  original_filename: string | null; // Updated to be nullable
+  stored_filename: string | null; // Updated to be nullable
+  file_path: string | null; // Updated to be nullable
   file_type: string | null;
   file_size: number | null;
   is_external_link?: boolean; // Added

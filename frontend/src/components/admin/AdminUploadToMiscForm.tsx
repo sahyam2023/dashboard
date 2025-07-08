@@ -6,13 +6,14 @@ import { yupResolver } from '@hookform/resolvers/yup';
 import {showErrorToast, showWarningToast } from '../../utils/toastUtils'; // Standardized toast
 import { useAuth } from '../../context/AuthContext';
 import {
-  // uploadAdminMiscFile, // To be replaced by chunked upload
+  // uploadAdminMiscFile, // Not used directly
   editAdminMiscFile,
   fetchMiscCategories,
-  uploadFileInChunks // New chunked upload service
+  addAdminMiscFileWithUrl, // Ensure this is imported
+  uploadFileInChunks
 } from '../../services/api';
 import { MiscCategory, MiscFile } from '../../types';
-import { UploadCloud, FileText as FileIconLucide, X, MinusCircle, CheckCircle2 } from 'lucide-react';
+import { UploadCloud, FileText as FileIconLucide, X, MinusCircle, CheckCircle2, Link2 } from 'lucide-react';
 
 interface AdminUploadToMiscFormProps {
   fileToEdit?: MiscFile | null;
@@ -42,11 +43,17 @@ const miscUploadValidationSchema = yup.object().shape({
     }),
   url: yup.string().url("Must be a valid URL (e.g., http://example.com)")
     .when(['$isEditMode', '$uploadType'], {
-      is: (isEditMode: boolean, uploadType: 'file' | 'url') => uploadType === 'url' && !isEditMode, // Required if new and type is URL
-      then: schema => schema.required("URL is required when upload type is URL."),
+      is: (isEditMode: boolean, uploadType: 'file' | 'url') => uploadType === 'url' && !isEditMode, 
+      then: schema => schema, // Modified message
       otherwise: schema => schema.optional().nullable(),
     }),
-  title: yup.string().transform(value => value === '' ? undefined : value).optional().max(255, "Title cannot exceed 255 characters.").nullable(),
+  title: yup.string()
+    .transform(value => value === '' ? undefined : value)
+    .when('$uploadType', {
+      is: 'url',
+      then: schema => schema.required("Item Title is required for URL entries.").max(255, "Title cannot exceed 255 characters."),
+      otherwise: schema => schema.optional().max(255, "Title cannot exceed 255 characters.").nullable(),
+    }),
   description: yup.string().transform(value => value === '' ? undefined : value).optional().max(1000, "Description cannot exceed 1000 characters.").nullable(),
 });
 
@@ -63,7 +70,7 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
 
   const { register, handleSubmit, formState: { errors }, watch, setValue, reset, trigger } = useForm<MiscUploadFormData>({
     resolver: yupResolver(miscUploadValidationSchema),
-    context: {
+    context: { 
         isEditMode: isEditMode,
         uploadType: uploadType, // Pass uploadType to context
     },
@@ -87,7 +94,7 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { isAuthenticated, user } = useAuth();
-  const role = user?.role;
+  const role = user?.role; 
   const watchedSelectedFile = watch('selectedFile');
   const watchedUrl = watch('url'); // Watch URL field
   const [isDraggingOver, setIsDraggingOver] = useState(false);
@@ -132,10 +139,11 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
         title: fileToEdit.user_provided_title || '',
         description: fileToEdit.user_provided_description || '',
         selectedFile: null,
-        url: currentUploadType === 'url' ? fileToEdit.url || '' : '',
+        url: currentUploadType === 'url' ? (fileToEdit.url ?? '') : '', // Ensure undefined becomes empty string for reset
       });
-      setExistingFileName(currentUploadType === 'file' ? fileToEdit.original_filename : null);
-      setExistingUrl(currentUploadType === 'url' ? fileToEdit.url : null);
+      // Explicitly handle undefined for state setters that expect string | null
+      setExistingFileName(currentUploadType === 'file' ? (fileToEdit.original_filename ?? null) : null);
+      setExistingUrl(currentUploadType === 'url' ? (fileToEdit.url ?? null) : null);
       if (fileInputRef.current) fileInputRef.current.value = "";
     } else {
       reset({
@@ -181,7 +189,7 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
       setValue('selectedFile', null, { shouldValidate: true, shouldDirty: true });
     }
   };
-
+  
   const handleUrlInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
       setValue('url', event.target.value, { shouldValidate: true, shouldDirty: true });
       setValue('selectedFile', null, { shouldDirty: true }); // Clear file if URL is being typed
@@ -197,7 +205,7 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
       setExistingFileName(fileToEdit.original_filename); // Restore display of current file if editing
     }
   };
-
+  
   const clearUrlInput = () => {
     setValue('url', '', { shouldValidate: true, shouldDirty: true });
     if (isEditMode && fileToEdit && fileToEdit.is_external_link) {
@@ -226,7 +234,7 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
       showErrorToast('Please enter a valid URL.');
       return;
     }
-
+    
     setIsLoading(true);
     if (uploadType === 'file' && data.selectedFile) {
       setIsUploading(true);
@@ -278,7 +286,7 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
           throw new Error("Invalid state for submission.");
         }
       }
-
+      
       // Reset form after successful submission only if NOT in edit mode
       if (!isEditMode) {
         reset({
@@ -320,7 +328,7 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
     if (uploadType === 'url' && formErrors.url) messages.push(formErrors.url.message || "URL error");
     if (formErrors.title) messages.push(formErrors.title.message || "Title error");
     if (formErrors.description) messages.push(formErrors.description.message || "Description error");
-
+    
     showErrorToast(errorMessages + messages.join('; '));
   };
 
@@ -365,7 +373,7 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
     <form onSubmit={handleSubmit(onSubmit, onFormError)} className="space-y-6 bg-white dark:bg-gray-800 dark:border-gray-700 p-6 rounded-lg shadow-lg border border-gray-200">
       <div className="flex justify-between items-center">
         <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-100">
-          {isEditMode ? 'Edit Miscellaneous Item' : 'Add Miscellaneous Item'}
+          {isEditMode ? 'Edit Miscellaneous Item' : 'Add New Miscellaneous Item'}
         </h3>
         {isEditMode && onCancelEdit && (
           <button
@@ -398,23 +406,26 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
         {errors.selectedCategoryId && <p className="mt-1 text-sm text-red-600">{errors.selectedCategoryId.message}</p>}
       </div>
 
-      {/* Upload Type Selection */}
-      <div className="mt-4">
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Upload Type</label>
-        <div className="mt-2 flex space-x-4">
+      {/* Upload Type Selection - Standardized Labels */}
+      <div className="my-4">
+        <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Item Source:</span>
+        <div className="flex items-center space-x-4">
           {(['file', 'url'] as const).map((type) => (
-            <label key={type} className="inline-flex items-center">
+            <label key={type} className="flex items-center space-x-2 cursor-pointer">
               <input
                 type="radio"
-                className="form-radio h-4 w-4 text-blue-600 border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:focus:ring-blue-500"
-                name="uploadType"
+                {...register("uploadType" as any)} // RHF doesn't directly manage this state, but good for consistency if needed
                 value={type}
                 checked={uploadType === type}
                 onChange={() => handleUploadTypeChange(type)}
+                className="form-radio h-4 w-4 text-blue-600 border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:focus:ring-blue-500"
                 disabled={isLoading}
               />
-              <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
-                {type === 'file' ? 'Upload File' : 'Provide URL'}
+              <span className="flex items-center dark:text-gray-300">
+                {type === 'file' ? 
+                  <><UploadCloud size={16} className="mr-1 text-gray-600 dark:text-gray-400" /> Upload File</> : 
+                  <><Link2 size={16} className="mr-1 text-gray-600 dark:text-gray-400" /> Provide External Link</>
+                }
               </span>
             </label>
           ))}
@@ -438,14 +449,14 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
               <div className="flex text-sm text-gray-600 dark:text-gray-400">
                 <label htmlFor="selectedFile" className="relative cursor-pointer bg-white dark:bg-gray-800 rounded-md font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 focus-within:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
                   <span>{watchedSelectedFile ? 'Change file' : 'Upload a file'}</span>
-                  <input
+                  <input 
                       id="selectedFile"
                       name="selectedFile-input"
-                      type="file"
+                      type="file" 
                       className="sr-only"
                       onChange={handleFileChange}
-                      ref={fileInputRef}
-                      disabled={isLoading}
+                      ref={fileInputRef} 
+                      disabled={isLoading} 
                   />
                 </label>
                 <p className="pl-1">or drag and drop</p>
@@ -481,23 +492,23 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
       {uploadType === 'url' && (
         <div>
           <label htmlFor="url" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-            URL*
+            External Link URL*
           </label>
           <div className="mt-1 relative rounded-md shadow-sm">
             <input
               type="text"
               id="url"
               {...register("url")}
-              placeholder="e.g., https://example.com/file.pdf"
+              placeholder="e.g., https://example.com/resource"
               disabled={isLoading}
               onChange={handleUrlInputChange}
               className={`block w-full pr-10 sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.url ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400`}
             />
             {(watchedUrl || (isEditMode && existingUrl)) && (
-                 <button
-                    type="button"
-                    onClick={clearUrlInput}
-                    disabled={isLoading}
+                 <button 
+                    type="button" 
+                    onClick={clearUrlInput} 
+                    disabled={isLoading} 
                     className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
                     aria-label="Clear URL"
                 >
@@ -512,13 +523,13 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
 
       <div>
         <label htmlFor="title" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-          {uploadType === 'file' ? 'File Title (Optional)' : 'Link Title (Optional)'}
+          Item Title
         </label>
         <input 
             type="text" 
             id="title" 
             {...register("title")}
-            placeholder={isEditMode && fileToEdit ? (fileToEdit.original_filename || fileToEdit.url) : (uploadType === 'file' ? "Defaults to filename if blank" : "Defaults to URL if blank")}
+            placeholder={isEditMode && fileToEdit ? (fileToEdit.original_filename || fileToEdit.url || undefined) : (uploadType === 'file' ? "Defaults to filename if blank" : "For URL entries, this is required")}
             disabled={isLoading}
             className={`mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500 ${errors.title ? 'border-red-500' : ''} dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-400`}
         />
@@ -527,7 +538,7 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
 
       <div>
         <label htmlFor="description" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-          {uploadType === 'file' ? 'File Description (Optional)' : 'Link Description (Optional)'}
+          Item Description (Optional)
         </label>
         <textarea 
             id="description" 
@@ -543,7 +554,8 @@ const AdminUploadToMiscForm: React.FC<AdminUploadToMiscFormProps> = ({
         <button type="submit" 
                 disabled={isLoading || isFetchingCategories || (!isEditMode && ((uploadType === 'file' && !watchedSelectedFile) || (uploadType === 'url' && !watchedUrl))) || !watch('selectedCategoryId')}
                 className="flex-1 inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50">
-          {isLoading ? (isEditMode ? 'Updating...' : (uploadType === 'file' ? 'Uploading...' : 'Adding URL...')) : (isEditMode ? 'Update Item' : (uploadType === 'file' ? 'Upload File' : 'Add URL'))}
+          {/* Standardized button text */}
+          {isLoading ? (isEditMode ? 'Updating...' : 'Adding...') : (isEditMode ? 'Update Item' : 'Add Item')}
         </button>
       </div>
 
